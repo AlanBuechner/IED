@@ -100,6 +100,23 @@ class IedSolutionTests(WorkspaceTest):
 			"presets": ["c4.nuke"], "language": "c4"}, project)
 		self.assertIn("1 project(s)", out)
 
+	def test_a_program_not_built_yet_has_language_server_options(self):
+		self.files({"nuke.toml": "[workspace]\nname = \"Game\"\ntoolchain = \"1.0.0\"\n", "Engine/nuke.toml": "[project]\nkind = \"module\"\n",
+			"Client/nuke.toml": "[project]\nkind = \"executable\"\n\n[dependencies]\nEngine = { source = \"Engine\" }\n"})
+		code, out = self.nuke("init", "--ied")
+		self.assertEqual(code, 0, out)
+		options = json.loads(read(self.path(".ied", "local", "lsp-options", "Client.json")))
+		self.assertTrue(os.path.isfile(options["projects"]), "the build description it names is written too")
+		self.assertFalse(os.path.exists(self.path(".ied", "local", "lsp-options", "Engine.json")), "a module is analyzed in its programs")
+
+	def test_language_server_options_a_build_wrote_are_left_alone(self):
+		self.files({"nuke.toml": "[workspace]\nname = \"Game\"\ntoolchain = \"1.0.0\"\n", "Client/nuke.toml": "[project]\nkind = \"executable\"\n"})
+		built = self.path(".ied", "local", "lsp-options", "Client.json")
+		self.files({".ied/local/lsp-options/Client.json": "{\"projects\": \"from a Debug build\"}"})
+		code, out = self.nuke("init", "--ied")
+		self.assertEqual(code, 0, out)
+		self.assertEqual("from a Debug build", json.loads(read(built))["projects"])
+
 	def test_a_project_in_another_language_gets_its_preset(self):
 		code, out = self.nuke("init", "Game", "--language", "cpp", "--ied")
 		self.assertEqual(code, 0, out)

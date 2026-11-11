@@ -6,6 +6,7 @@ import json
 import os
 
 from .. import fsutil
+from . import compile as c4compile
 
 OPTIONS_DIR = ".ied/local/lsp-options"
 
@@ -53,3 +54,18 @@ def write(workspace, name, job, toolchain, compiler_args):
 	path = options_path(workspace, name)
 	fsutil.write_if_changed(path, json.dumps(options(job, toolchain, compiler_args), indent=2) + "\n")
 	return path
+
+
+def write_unbuilt(session):
+	"""The options of every program of the workspace no build has written them for, with the description they name: a
+	workspace just made is analyzed as it will compile from the moment it is opened. Returns how many it wrote."""
+	written = 0
+	for project in session.workspace.projects.values():
+		unbuilt = project.package is None and project.is_c4 and project.kind == "executable"
+		if not unbuilt or os.path.isfile(options_path(session.workspace, project.name)):
+			continue
+		job = c4compile.plan(session, project)
+		fsutil.write_if_changed(job.description_path, job.description_text)
+		write(session.workspace, project.name, job, session.toolchain(), c4compile.compiler_args(project, session.configuration))
+		written += 1
+	return written

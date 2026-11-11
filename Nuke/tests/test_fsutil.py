@@ -4,6 +4,7 @@ fsutil.move_aside_if_running: a running program is renamed so a build can write 
 
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -55,6 +56,30 @@ class CopyIfNewerTests(unittest.TestCase):
 		with open(self.dest, "w") as f:
 			f.write("hand edit")
 		self.assertTrue(fsutil.copy_if_newer(self.source, self.dest), "not the copy it made: copied")
+
+	def test_a_read_only_source_gives_a_copy_that_can_be_replaced_and_cleaned(self):
+		os.chmod(self.source, stat.S_IREAD)
+		try:
+			self.assertTrue(fsutil.copy_if_newer(self.source, self.dest))
+			self.assertTrue(os.access(self.dest, os.W_OK), "the copy is writable")
+			stamp = time.time() + 5
+			os.utime(self.source, (stamp, stamp))
+			self.assertTrue(fsutil.copy_if_newer(self.source, self.dest), "copied again over the old copy")
+			self.assertTrue(fsutil.remove_tree(os.path.dirname(self.dest)), "and the folder is cleaned")
+			self.assertFalse(os.path.exists(self.dest))
+		finally:
+			os.chmod(self.source, stat.S_IREAD | stat.S_IWRITE)
+
+	def test_a_folder_holding_read_only_files_is_removed(self):
+		folder = os.path.join(self.root, "bin", "D3D12")
+		os.makedirs(folder)
+		locked = os.path.join(folder, "D3D12Core.dll")
+		with open(locked, "w") as f:
+			f.write("dll")
+		os.chmod(locked, stat.S_IREAD)
+		self.assertTrue(fsutil.remove_tree(os.path.join(self.root, "bin")))
+		self.assertFalse(os.path.exists(folder))
+		self.assertFalse(fsutil.remove_tree(os.path.join(self.root, "bin")), "nothing left to remove")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 """list and info: what the workspace contains, as text or --json (for IED and scripts)."""
 
 import json
+import os
 
 from ..errors import NukeError
 from . import base
@@ -46,6 +47,7 @@ def _summary(session, project, default):
 		"dir": project.dir,
 		"manifest": project.file,
 		"depends": list(project.depends),
+		"sources": [os.path.normpath(os.path.join(project.dir, source)).replace("\\", "/") for source in project.sources],
 		"tests": session.has_tests(project),
 		"default": default is not None and default.name == project.name,
 		"output": session.output(project) if project.kind != "module" else None,

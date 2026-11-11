@@ -86,6 +86,12 @@ class RealToolchainTests(unittest.TestCase):
 		code, out = self.nuke("test", "--filter", "math.add")
 		self.assertEqual(code, 0, out)
 		self.assertIn("1 of 1 test project(s) passed", out)
+		self.assertNotIn("no test case matches", out)
+		code, out = self.nuke("test", "--filter", "math")
+		self.assertEqual(code, 1, out)   # a group's name runs its cases, the broken one too
+		code, out = self.nuke("test", "--filter", "physics.*")
+		self.assertEqual(code, 0, out)
+		self.assertIn('no test case matches --filter "physics.*"', out)
 
 	@unittest.skipUnless(TOOLCHAIN and os.path.isfile(os.path.join(TOOLCHAIN.dir, "C4Api", "C4Api.dll")) and os.path.isfile(CLANG),
 		"needs a toolchain that ships C4Api and the checkout's LLVM release")

@@ -7,18 +7,23 @@ import re
 
 from .. import fsutil, ied_files
 from .. import workspace as workspaces
+from ..c4 import ide_bridge
 from ..errors import NukeError
 from ..manifest import KINDS, MANIFEST_NAME, PROJECT_NAME
+from ..session import Session
 from . import base
 
 LANGUAGE = re.compile(r"^[a-z][a-z0-9_+-]*$")
+DEFAULT_ARCH = "x64"
+DEFAULT_SYSTEM = "windows"
 TEMPLATES = fsutil.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "templates")
 USAGE = """nuke init [NAME] [--kind executable|module|library|custom] [--language ID] [--toolchain VERSION] [--ied]
   outside a workspace: make the current folder a new workspace with one project (NAME defaults to the folder)
   inside a workspace:  create the project NAME in ./NAME (or here with --here)
   --language:          the project's language (default c4); another one builds through its driver (section 9b)
                        and gets no sources: the template that asked for it brings them
-  --ied:               also write (or refresh) the IED solution <Workspace>.iedsln and build/ied/*.iedproj;
+  --ied:               also write (or refresh) the IED solution <Workspace>.iedsln and build/ied/*.iedproj, and the
+                       language server's options of the programs not built yet;
                        inside a workspace, `nuke init --ied` alone does only that"""
 
 
@@ -134,11 +139,19 @@ def ied_solution(cli, workspace):
 		cli.log.warn(f"no toolchain, so no C4 plugin in the solution: {error}")
 	changed = ied_files.generate(workspace, toolchain, cli.log)
 	_ensure_gitignore(workspace.dir)
+	if toolchain is not None and workspace.spec.ide:
+		ide_bridge.write_unbuilt(_session_for_options(cli, workspace, toolchain))
 	path = os.path.relpath(ied_files.solution_path(workspace), cli.cwd).replace("\\", "/")
 	plugins = len(ied_files.plugin_projects(workspace))
 	listed = f"{len(workspace.projects)} project(s)" + (f" and {plugins} IED plugin(s)" if plugins else "")
 	cli.log.note(f"IED solution {path}: {listed}, {changed} file(s) written or removed")
 	return 0
+
+
+def _session_for_options(cli, workspace, toolchain):
+	session = Session(workspace, workspace.default_configuration, DEFAULT_ARCH, DEFAULT_SYSTEM, cli.log, cli.store)
+	session.use_toolchain(toolchain)
+	return session
 
 
 def _default_toolchain(cli, required=True):

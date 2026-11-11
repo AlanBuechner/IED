@@ -71,7 +71,7 @@ a **project** of the workspace. Commands run in order and each (command, project
 | `-a, --arch NAME` / `-s, --system NAME` | `x64` / `windows` (the only ones today) |
 | `-w, --workspace DIR` | the workspace at DIR instead of searching up from the current folder |
 | `--all` | every project of the workspace |
-| `--filter GLOB` | test cases to run (`*` any run of characters, `?` one) |
+| `--filter GLOB` | test cases to run (`*` any run of characters, `?` one; without either, a case's or a group's name: `math.vector` runs `math.vector.*`); a filter no case matches is said so |
 | `-j, --jobs N` | how many compiles a language driver runs at once (C++, section 9c; default `NUKE_JOBS`, else one per processor) |
 | `--json` | machine-readable output for `list` and `info` (messages go to stderr) |
 | `-v, --verbose` | print every command Nuke runs |
@@ -147,6 +147,8 @@ compiler-args = ["-march=x86-64-v3"]
 subsystem = "console"              # a C4 executable: "console", or "windows" for a windowed program (no console window;
                                    # C4.exe --subsystem; test harnesses stay console)
 tests = "auto"                     # "auto": a tests/ folder with .cf/.ch under a source folder; or true/false
+test-filter = "anime.*"            # the cases `nuke test` runs without a --filter (a harness runs only its own project's tests
+                                   # already: those of what it depends on run in their own harnesses)
 working-dir = "."                  # where `nuke run` and the tests start, relative to the project
 scripts = ["nuke_ext.py"]          # extensions whose steps default to this project
 
@@ -328,13 +330,14 @@ program keeps running; a later build removes the `.old` copies nothing runs any 
 **Tests.** `nuke test` compiles each test-bearing C4 project separately with `-test -test-json
 <int>/tests/results.json` into `<bin>/<P>-tests.exe` (a plain build never includes the harness), runs it from
 the project folder (with `--filter`), runs every harness even when one fails, prints a summary and exits 1
-if any failed. Custom projects test with `phase = "test"` steps.
+if any failed. A harness runs the cases of its own project: its modules' are compiled into it and run in their own
+harnesses (C4/docs/language/15-projects.md rule 7), so each case runs once in a `nuke test`. Custom projects test with `phase = "test"` steps.
 
 **IDE bridge.** After each compile of a program (an executable's build, a module's test build), also one that
 fails, Nuke writes `<workspace>/.ied/local/lsp-options/<P>.json`: `includePaths`, `defines`, `c4Home` (the
 toolchain), `toolchain`, `projects` (the description) and `target` (the `-m...` compiler arguments) - the exact
 input the compiler saw, so the language server in IED agrees with the build. IED hands every one of them to one
-C4LSP for the workspace, which analyzes a module's files in a program that compiles them. `ide = false` in `[workspace]` turns it off. `.ied/local/` is machine-local; `nuke init` adds it to
+C4LSP for the workspace, which analyzes a module's files in a program that compiles them. `nuke init --ied` writes them for the workspace's programs not built yet, with the description they name, so a workspace just made is analyzed as it will compile from the moment it is opened. `ide = false` in `[workspace]` turns it off. `.ied/local/` is machine-local; `nuke init` adds it to
 `.gitignore`.
 
 **IED solution** (`nuke init --ied`, `nuke/ied_files.py`; IED `docs/03`). Writes `<Workspace>.iedsln` at the root
@@ -353,9 +356,11 @@ the solution's `generator` is `nuke init --ied` and the toolchain resolves - a p
 are rewritten, files of projects gone are removed, and a file it did not write, or one edited since, is left as it
 is with a warning (`.ied/local/generated.json` keeps the digest of each file it wrote). The files it wrote under the
 names before (`<Workspace>.ied.sln`, `build/ied/*.ied.proj`) go once the new ones are written. The projects' `group`s
-become the solution's `groups`, the Solution Explorer's folders (sorted by name, `"Engine/Tools"` nested); a language
-package's library outside the workspace builds with it but has no project file (the explorer lists only the
-workspace's files). It also adds `.ied/local/` to
+become the solution's `groups`, the Solution Explorer's folders (sorted by name, `"Engine/Tools"` nested). Every
+package's project is in the solution, in the "Packages" folder, wherever it is built from: one built from a checkout
+outside the workspace (`nuke package develop --at`, a workspace inside the package's repository) gets its absolute
+`root`, and IED reaches its files as a linked project, `@<project>/...` (IED docs/03 "Linked projects"). A language
+package's library outside the workspace builds with it but has no project file. It also adds `.ied/local/` to
 `.gitignore`, as `nuke init` does for a new workspace. The AI skills are not copied into the workspace: C4's come with the
 toolchain's IED plugin, Nuke's with IED's `ied.nuke` plugin (IED docs/26).
 

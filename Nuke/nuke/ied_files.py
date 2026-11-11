@@ -94,9 +94,18 @@ def pinned_plugins(workspace):
 
 
 def listed_projects(workspace):
-	"""The projects IED's solution shows: those inside the workspace (a language package's library outside it, among IED's
-	plugins, builds with the workspace but has no files the Solution Explorer could list)."""
-	return [spec for spec in workspace.projects.values() if _inside(spec.dir, workspace.dir)]
+	"""The projects IED's solution shows: those inside the workspace, and every package's wherever it is built from - a
+	checkout outside the workspace (`nuke package develop --at`, a workspace inside the repository), which IED shows as a
+	linked folder (IED docs/03 "Linked projects"). A language package's library outside it, among IED's plugins, builds
+	with the workspace but is no part of it to show."""
+	return [spec for spec in workspace.projects.values() if _inside(spec.dir, workspace.dir) or spec.package is not None]
+
+
+def project_root(spec, folder):
+	"""A project file's `root`: relative to the project files' folder inside the workspace, absolute outside it (a
+	package built from a checkout elsewhere, on another drive too)."""
+	workspace_dir = os.path.dirname(os.path.dirname(folder))
+	return _relative(spec.dir, folder) if _inside(spec.dir, workspace_dir) else spec.dir.replace("\\", "/")
 
 
 def _entry_plugin_folders(workspace, entry):
@@ -277,7 +286,7 @@ def project(workspace, spec):
 		origin = spec.package
 		build_system["package"] = {"source": origin.source, "path": origin.package, "version": origin.version,
 			"commit": origin.commit, "mode": "develop" if origin.develop else "locked"}
-	body = {"version": 1, "name": spec.name, "root": _relative(spec.dir, folder), "kind": KINDS.get(spec.kind, "other"),
+	body = {"version": 1, "name": spec.name, "root": project_root(spec, folder), "kind": KINDS.get(spec.kind, "other"),
 		"buildSystem": build_system, "presets": [preset(workspace, spec)]}
 	if spec.language:
 		body["language"] = spec.language

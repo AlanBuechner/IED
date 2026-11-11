@@ -5,6 +5,8 @@ import fnmatch
 import glob
 import os
 import shutil
+import stat
+import sys
 import time
 
 # NTFS keeps 1-2 s mtime granularity on some volumes: a copy is stamped older than its source so a
@@ -127,14 +129,29 @@ def read_text(path):
 		return None
 
 
+def _make_writable(path):
+	os.chmod(path, stat.S_IREAD | stat.S_IWRITE)
+
+
+def remove_file(path):
+	"""Remove a file, read-only or not: what a build wrote is the build's to replace."""
+	try:
+		os.remove(path)
+	except PermissionError:
+		_make_writable(path)
+		os.remove(path)
+
+
 def copy_if_newer(source, dest):
-	"""Copy one file when `dest` is missing or `source` changed since it was copied. True if copied."""
+	"""Copy one file when `dest` is missing or `source` changed since it was copied. True if copied. The copy is writable
+	even when the source is read-only (a package's files often are), so the next copy or a clean can remove it."""
 	if os.path.exists(dest) and _copy_of(source, dest):
 		return False
 	ensure_dir(os.path.dirname(dest))
 	if os.path.exists(dest):
-		os.remove(dest)
+		remove_file(dest)
 	shutil.copy2(source, dest)
+	_make_writable(dest)
 	stamp = mtime(source) - COPY_MTIME_NUDGE_SECONDS
 	os.utime(dest, (stamp, stamp))
 	return True
@@ -169,7 +186,7 @@ def mirror_tree(source, dest):
 	wanted = {os.path.normcase(os.path.relpath(p, source)) for p in files_under(source)}
 	for path in files_under(dest):
 		if os.path.normcase(os.path.relpath(path, dest)) not in wanted:
-			os.remove(path)
+			remove_file(path)
 	remove_empty_dirs(dest)
 	return copied
 
@@ -180,8 +197,18 @@ def remove_empty_dirs(folder):
 			os.rmdir(base)
 
 
+def _retry_writable(function, path, _error):
+	"""rmtree's handler: a read-only file or folder is made writable and removed again."""
+	_make_writable(path)
+	function(path)
+
+
 def remove_tree(path):
-	if os.path.isdir(path):
-		shutil.rmtree(path)
-		return True
-	return False
+	"""Remove a folder and everything in it, read-only files too. True when there was one."""
+	if not os.path.isdir(path):
+		return False
+	if sys.version_info >= (3, 12):
+		shutil.rmtree(path, onexc=_retry_writable)
+	else:
+		shutil.rmtree(path, onerror=_retry_writable)
+	return True

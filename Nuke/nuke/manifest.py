@@ -69,6 +69,7 @@ class ProjectSpec:
 	compiler_args: tuple = ()
 	subsystem: str = "console"      # a C4 executable's: "console", or "windows" for a windowed program (no console)
 	tests: object = "auto"          # "auto", True or False
+	test_filter: str = ""            # the cases `nuke test` runs of its harness without a --filter: its own, when a dependency brings many
 	output: str = None              # custom kind: the file `nuke run` starts
 	working_dir: str = "."
 	copies: tuple = ()
@@ -525,6 +526,7 @@ def _project(t, folder, path, dependencies=()):
 		compiler_args=t.strings("compiler-args"),
 		subsystem=t.string("subsystem", "console"),
 		tests=tests,
+		test_filter=t.string("test-filter", ""),
 		output=t.string("output"),
 		working_dir=t.string("working-dir", "."),
 		copies=tuple(_copy(c) for c in t.tables("copy")),

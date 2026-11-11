@@ -2,6 +2,8 @@
 tests through its driver (`cargo test`, `go test`), custom projects through their "test" steps. Every harness runs even
 when an earlier one fails; the exit code is 1 if any failed."""
 
+import json
+
 from .. import engine, fsutil, process
 from ..c4 import compile as c4compile
 from ..c4 import ide_bridge
@@ -37,7 +39,8 @@ class Test(base.Command):
 			if session.workspace.spec.ide and project.kind == "module":
 				ide_bridge.write(session.workspace, project.name, job, session.toolchain(), c4compile.compiler_args(project, session.configuration))
 		copy_files(session, project)    # beside the harness, as beside a program: DLLs, shaders, content its tests load
-		argv = [job.output] + (["--filter", session.test_filter] if session.test_filter else []) + session.args
+		cases = session.test_filter or project.test_filter
+		argv = [job.output] + (["--filter", cases] if cases else []) + session.args
 		session.log.header(f"tests: {project.name}")
 		code = process.run(argv, session.log, cwd=fsutil.join(project.dir, project.working_dir))
 		session.test_results.append((project.name, code, job.test_results))
@@ -53,5 +56,19 @@ class Test(base.Command):
 			session.log.line(f"  {'FAILED' if code else 'passed'}  {name}" + (f"  ({code} failed assertion(s))" if code > 0 else "")
 				+ (f"  results: {report}" if report else ""))
 		session.log.note(f"{len(results) - len(failed)} of {len(results)} test project(s) passed")
+		if session.test_filter and not any(ran_cases(report) for _, _, report in results):
+			session.log.note(f"no test case matches --filter \"{session.test_filter}\" (a case's or a group's name, or a glob: \"math.*\")")
 		return 1 if failed else 0
+
+
+def ran_cases(report):
+	"""Whether a C4 harness's results file counts any case. Without one (a driven project's tests, a harness that died before
+	writing it) nothing says no case ran."""
+	if not report:
+		return True
+	try:
+		with open(report, encoding="utf-8") as f:
+			return json.load(f).get("total", 0) > 0
+	except (OSError, ValueError):
+		return True
 

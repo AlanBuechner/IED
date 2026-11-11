@@ -36,8 +36,9 @@ def main(args):
 		return int(os.environ["FAKE_C4_FAIL"])
 	output = args[args.index("-o") + 1]
 	os.makedirs(os.path.dirname(output), exist_ok=True)
-	with open(output, "w") as f:
-		f.write("stub program\n")
+	# Empty: running it fails at once (WinError 193). Text with no PE header is taken for a 16-bit program, whose modal
+	# "Unsupported 16-Bit Application" dialog would hang the test that launches it.
+	open(output, "w").close()
 	return 0
 
 

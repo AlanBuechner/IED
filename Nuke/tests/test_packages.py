@@ -357,6 +357,23 @@ class ProjectDependencyTests(PackageTest):
 		self.assertNotEqual(code, 0)
 		self.assertIn("is the repository this workspace is in", out)
 
+	def test_the_checkouts_packages_are_projects_of_the_samples_solution(self):
+		self.sample()
+		code, out = self.nuke("init", "--ied")
+		self.assertEqual(code, 0, out)
+		work = self.engine.work.replace("\\", "/")
+		win32 = json.loads(read(self.path("build", "ied", "Win32.iedproj")))
+		self.assertEqual(win32["root"], work + "/Windowing/Win32", "outside the sample's folder: the checkout's own, absolute")
+		self.assertEqual(win32["buildSystem"]["package"]["mode"], "develop")
+		windowing = json.loads(read(self.path("build", "ied", "Windowing.iedproj")))
+		self.assertEqual(windowing["root"], work + "/Windowing", "and what it uses")
+		game = json.loads(read(self.path("build", "ied", "Game.iedproj")))
+		self.assertEqual(game["root"], "../../Game", "the sample's own stays relative")
+		solution = json.loads(read(self.path("Sample.iedsln")))
+		packages = next(g for g in solution["groups"] if g["name"] == "Packages")
+		engine = packages["groups"][0]
+		self.assertEqual((engine["name"], engine["projects"]), ("engine", ["Windowing"]), "in the Packages folder, as a locked install is")
+
 	def test_a_change_in_the_checkout_is_built_without_a_commit(self):
 		self.sample()
 		self.projects()
