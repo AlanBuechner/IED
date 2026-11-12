@@ -66,6 +66,7 @@ export class ListView {
 			h("div.sbx-row-main", null,
 				h("div.sbx-row-name", null, box.name, aiIn.has(box.name) ? h("span.sbx-ai-mark", { title: "The AI is running something in it" }, icon("sparkle"), "AI") : null),
 				h("div.sbx-row-desc.muted", null, (box.os || box.image) + " \u00b7 " + shortPlatform(box.platform) + (box.emulated ? " (emulated)" : ""))),
+			box.desktop ? h("button.ib.sbx-row-desk", { title: "Its desktop: watch the AI or take control", "aria-label": "Desktop", on: { click: (e) => { e.stopPropagation(); this.actions.openDesktop(box.name); } } }, icon("vm-connect")) : null,
 			h("div.sbx-row-side", null,
 				h("span.sbx-state." + TONE[state.tone], null, state.text),
 				result ? h("span.sbx-badge." + resultTone(result.result), { title: "Last validation: " + result.result }, result.result === "fail" ? "FAIL" : result.result) : null));

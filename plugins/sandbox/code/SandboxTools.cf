@@ -338,6 +338,13 @@ namespace Sandbox
 		definition.m_Cpus = args.Member("cpus").AsInt();
 		definition.m_MemoryGiB = args.Member("memory_gib").AsInt();
 		definition.m_Description = Core::String(args.Member("description").AsView());
+		Serialization::DomNode desktop = args.Member("desktop");
+		if (desktop.Kind() == Serialization::DomKind::Bool) definition.m_Desktop = desktop.AsBool();
+		else if (desktop.Kind() == Serialization::DomKind::Object) {
+			definition.m_Desktop = true;
+			definition.m_DesktopWidth = desktop.Member("width").AsInt();
+			definition.m_DesktopHeight = desktop.Member("height").AsInt();
+		}
 		if (!ValidName(definition.m_Name.View())) {
 			problem = Core::String("name: lowercase letters, digits and '-', at most 40 (ubuntu-arm64)");
 			return false;
@@ -407,6 +414,7 @@ namespace Sandbox
 		plan.m_Summary = (((Core::String("Create sandbox ") + definition.m_Name.View()) + " (") + (definition.m_Os.IsEmpty() ? definition.m_Image.View() : definition.m_Os.View()));
 		if (!definition.m_Platform.IsEmpty()) plan.m_Summary = (plan.m_Summary + ", ") + definition.m_Platform.View();
 		if (definition.m_Network == "full") plan.m_Summary = plan.m_Summary + ", network on";
+		if (definition.m_Desktop) plan.m_Summary = plan.m_Summary + ", desktop";
 		plan.m_Summary = plan.m_Summary + ")";
 		plan.m_Diff = FileDiff(path.View(), before.View(), DefinitionJson(definition).View(), plan.m_Plus, plan.m_Minus);
 		return plan;
@@ -548,6 +556,217 @@ namespace Sandbox
 		return IED::ToolText(out.View());
 	}
 
+	// --- desktops --------------------------------------------------------------------------------------------------------
+
+	// The screen (or a window, a region) as an image of `result`, and where it went; false with the reason added.
+	static bool AttachShot(const IED::ToolCall& call, Core::StringView name, Core::StringView window, const Serialization::DomNode& region, IED::ToolResult& result, Core::StringBuilder& out) {
+		Core::String path;
+		Core::String problem;
+		const int64 x = region.Count() == 4 ? region.At(0).AsInt() : 0;
+		const int64 y = region.Count() == 4 ? region.At(1).AsInt() : 0;
+		const int64 w = region.Count() == 4 ? region.At(2).AsInt() : 0;
+		const int64 h = region.Count() == 4 ? region.At(3).AsInt() : 0;
+		if (!s_Service->Screenshot(call.m_Workspace, name, window, x, y, w, h, path, problem)) {
+			out.Append("(No screenshot: ");
+			out.Append(problem.View());
+			out.Append(")\n");
+			return false;
+		}
+		IED::ToolImage image;
+		image.m_Mime = Core::String("image/png");
+		image.m_Path = path;
+		result.m_Images.Push(image);
+		out.Append("Screenshot: ");
+		out.Append(path.View());
+		out.Append("\n");
+		return true;
+	}
+
+	static void AppendWindows(const IED::ToolCall& call, Core::StringView name, Core::StringBuilder& out) {
+		DesktopState desktop;
+		Core::String problem;
+		if (!s_Service->Windows(call.m_Workspace, name, desktop, problem)) return;
+		out.Append("Windows:\n");
+		out.Append(WindowsText(desktop).View());
+	}
+
+	IED::ToolResult LaunchTool(const IED::ToolCall& call) {
+		if (s_Service == nullptr) return NotActive();
+		Core::String name = Core::String(call.m_Args.Member("name").AsView());
+		Core::String command = Core::String(call.m_Args.Member("command").AsView());
+		if (command.View().Trimmed().IsEmpty()) return Failure(Core::StringView("give a command: the program and its arguments, as a shell line"));
+		const bool debug = call.m_Args.Member("debug").AsBool();
+		int64 wait = call.m_Args.Member("wait_s").IsValid() ? call.m_Args.Member("wait_s").AsInt() : 15;
+		if (wait < 1) wait = 1;
+		if (wait > 120) wait = 120;
+		Core::Array<Core::String> env;
+		Serialization::DomNode vars = call.m_Args.Member("env");
+		if (vars.Kind() == Serialization::DomKind::Object)
+			for (int64 i = 0; i < vars.Count(); ++i) env.Push((Core::String(vars.KeyAt(i)) + "=") + vars.ValueAt(i).AsView());
+		DesktopState desktop;
+		Core::Array<DesktopWindow> opened;
+		RunOutcome outcome = s_Service->Launch(call.m_Workspace, name.View(), command.View(), call.m_Args.Member("cwd").AsView(), env, debug, wait, ByAi(call.m_ChatId.View()), call.m_Cancelled, desktop, opened);
+		if (!outcome.m_Ran) {
+			IED::ToolResult failed = Failure(outcome.m_Problem.View());
+			failed.m_Source = Core::String("Sandbox ") + name.View();
+			return failed;
+		}
+		Core::StringBuilder out;
+		IED::ToolResult result;
+		const bool crashed = outcome.m_Output.View().Contains(Core::StringView("Program received signal")) || outcome.m_Output.View().Contains(Core::StringView("Program terminated with signal"));
+		if (outcome.m_Running) {
+			out.Append("Launched on ");
+			out.Append(name.View());
+			out.Append("'s desktop as run ");
+			out.AppendInt(outcome.m_RunId);
+			out.Append(debug ? " under gdb" : "");
+			out.Append("; it runs on (sandbox_apps reads its output and stops it; the owner sees it in the Sandbox activity).\n");
+			if (opened.IsEmpty()) {
+				out.Append("No window of its own appeared within ");
+				out.AppendInt(wait);
+				out.Append(" s - it may still be starting (emulated platforms are slow), or it shows none.\n");
+			}
+			else {
+				out.Append(opened.Count() == 1 ? "Its window:\n" : "Its windows:\n");
+				DesktopState mine;
+				mine.m_Windows = opened;
+				mine.m_Focused = desktop.m_Focused;
+				Core::String lines = WindowsText(mine);
+				out.Append(lines.View().Substring(0, lines.View().IndexOf(Core::StringView("Pointer at"))));
+			}
+		}
+		else {
+			out.Append("It ended after ");
+			out.Append(DurationText(outcome.m_Ms).View());
+			if (!outcome.m_Stopped.IsEmpty()) {
+				out.Append(": ");
+				out.Append(outcome.m_Stopped.View());
+			}
+			else if (debug && crashed) out.Append(": it crashed - gdb's report and backtrace are below");
+			else {
+				out.Append(" with exit ");
+				out.AppendInt(outcome.m_ExitCode);
+				Core::String signal = SignalText(outcome.m_ExitCode);
+				if (!signal.IsEmpty()) {
+					out.Append(" - ");
+					out.Append(signal.View());
+					out.Append(" (launch it again with debug: true for a backtrace; the debug preset gives gdb)");
+				}
+			}
+			out.Append(".\n");
+			result.m_IsError = outcome.m_ExitCode != 0 || crashed;
+			result.m_ReportsFailure = result.m_IsError;
+		}
+		Core::String tail = TailLines(outcome.m_Output.View(), debug && crashed ? 80 : 30, debug && crashed ? 8000 : 3000);
+		if (!tail.IsEmpty()) {
+			out.Append(outcome.m_Running ? "Its output so far:\n" : "Its output:\n");
+			out.Append(tail.View());
+			out.Append("\n");
+		}
+		const bool wantShot = call.m_Args.Member("screenshot").Kind() != Serialization::DomKind::Bool || call.m_Args.Member("screenshot").AsBool();
+		if (outcome.m_Running && wantShot) AttachShot(call, name.View(), Core::StringView(""), Serialization::DomNode(), result, out);
+		result.m_Content = out.ToString();
+		result.m_Preview = TailLines(out.View(), 12, 2048);
+		result.m_Source = Core::String("Sandbox ") + name.View();
+		return result;
+	}
+
+	IED::ToolResult ScreenshotTool(const IED::ToolCall& call) {
+		if (s_Service == nullptr) return NotActive();
+		Core::String name = Core::String(call.m_Args.Member("name").AsView());
+		Core::StringBuilder out;
+		IED::ToolResult result;
+		Serialization::DomNode region = call.m_Args.Member("region");
+		if (region.IsValid() && region.Count() != 4) return Failure(Core::StringView("region: [x, y, width, height] in screen pixels"));
+		if (!AttachShot(call, name.View(), call.m_Args.Member("window").AsView(), region, result, out)) return Failure(out.View());
+		AppendWindows(call, name.View(), out);
+		result.m_Content = out.ToString();
+		result.m_Source = Core::String("Sandbox ") + name.View();
+		return result;
+	}
+
+	IED::ToolResult InputTool(const IED::ToolCall& call) {
+		if (s_Service == nullptr) return NotActive();
+		Core::String name = Core::String(call.m_Args.Member("name").AsView());
+		Core::String summary;
+		Core::String problem;
+		if (!s_Service->Input(call.m_Workspace, name.View(), call.m_Args.Member("actions"), ByAi(call.m_ChatId.View()), Core::StringView(""), summary, problem)) {
+			IED::ToolResult failed = Failure(problem.View());
+			failed.m_Source = Core::String("Sandbox ") + name.View();
+			return failed;
+		}
+		int64 settle = call.m_Args.Member("settle_ms").IsValid() ? call.m_Args.Member("settle_ms").AsInt() : 400;
+		if (settle < 0) settle = 0;
+		if (settle > 5000) settle = 5000;
+		Threading::Thread::Sleep(settle * 1000000);
+		Core::StringBuilder out;
+		out.Append("Done: ");
+		out.Append(summary.View());
+		out.Append(".\n");
+		IED::ToolResult result;
+		if (call.m_Args.Member("screenshot").Kind() != Serialization::DomKind::Bool || call.m_Args.Member("screenshot").AsBool())
+			AttachShot(call, name.View(), Core::StringView(""), Serialization::DomNode(), result, out);
+		AppendWindows(call, name.View(), out);
+		result.m_Content = out.ToString();
+		result.m_Preview = summary;
+		result.m_Source = Core::String("Sandbox ") + name.View();
+		return result;
+	}
+
+	IED::ToolResult AppsTool(const IED::ToolCall& call) {
+		if (s_Service == nullptr) return NotActive();
+		Core::String name = Core::String(call.m_Args.Member("name").AsView());
+		Core::StringBuilder out;
+		if (call.m_Args.Member("stop").IsValid()) {
+			const int64 id = call.m_Args.Member("stop").AsInt();
+			out.Append(s_Service->StopRun(call.m_Workspace.m_Id.View(), id) ? "Stopped run " : "Run is not running: ");
+			out.AppendInt(id);
+			out.Append(".\n");
+			Threading::Thread::Sleep(1500000000);
+		}
+		Core::Array<SandboxRun> apps = s_Service->Apps(call.m_Workspace.m_Id.View(), name.View());
+		if (apps.IsEmpty()) {
+			out.Append("Nothing was launched on ");
+			out.Append(name.View());
+			out.Append("'s desktop (sandbox_launch starts a program there).\n");
+			return IED::ToolText(out.View());
+		}
+		const int64 tailLines = call.m_Args.Member("lines").IsValid() ? call.m_Args.Member("lines").AsInt() : 20;
+		for (const SandboxRun& app : apps) {
+			out.Append("- run ");
+			out.AppendInt(app.m_Id);
+			out.Append(" `");
+			out.Append(app.m_Label.View());
+			out.Append("`: ");
+			if (app.m_Running) {
+				out.Append("running for ");
+				out.Append(DurationText(UnixMs() - app.m_StartedMs).View());
+			}
+			else {
+				out.Append(!app.m_Stopped.IsEmpty() ? app.m_Stopped.View() : Core::StringView("ended"));
+				if (app.m_Stopped.IsEmpty()) {
+					out.Append(" with exit ");
+					out.AppendInt(app.m_ExitCode);
+					Core::String signal = SignalText(app.m_ExitCode);
+					if (!signal.IsEmpty()) {
+						out.Append(" - ");
+						out.Append(signal.View());
+					}
+				}
+				out.Append(" after ");
+				out.Append(DurationText(app.m_EndedMs - app.m_StartedMs).View());
+			}
+			out.Append(app.m_By == "ai" ? " (the AI's)" : " (the owner's)");
+			out.Append("\n");
+			Core::String tail = TailLines(app.m_Output.View(), tailLines < 1 ? 1 : tailLines > 200 ? 200 : tailLines, 12000);
+			if (!tail.IsEmpty()) {
+				out.Append(tail.View());
+				out.Append("\n");
+			}
+		}
+		return IED::ToolText(out.View());
+	}
+
 	// --- the system-message section ------------------------------------------------------------------------------------
 
 	Core::String Section(const IED::Workspace& ws) {
@@ -561,7 +780,7 @@ namespace Sandbox
 			if (i > 0) out.Append("; ");
 			out.Append(summaries[i].View());
 		}
-		out.Append(". sandbox_validate builds and tests in all of them at once and gives a pass/fail matrix; sandbox_run runs one command in one. Read the sandbox skill before creating or changing one.");
+		out.Append(". sandbox_validate builds and tests in all of them at once and gives a pass/fail matrix; sandbox_run runs one command in one; a sandbox with a desktop runs windowed programs you see and drive (sandbox_launch, sandbox_screenshot, sandbox_input, sandbox_apps). Read the sandbox skill before creating or changing one.");
 		return out.ToString();
 	}
 }

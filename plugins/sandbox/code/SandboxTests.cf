@@ -265,3 +265,93 @@ class SandboxDockerTests {
 		assert_true(plus == 2 && minus == 0, "counts");
 	}
 }
+
+[test("server.sandbox.desktop")]
+class SandboxDesktopTests {
+	[test("a_definition_with_a_desktop")]
+	public static void TestDefinition() {
+		Sandbox::SandboxDefinition definition;
+		Core::String problem;
+		assert_true(Sandbox::ParseDefinition(Core::StringView("g"), Core::StringView("{\"os\": \"ubuntu\", \"desktop\": {\"width\": 1600, \"height\": 900}}"), definition, problem), problem.CStr());
+		assert_true(definition.m_Desktop && definition.m_DesktopWidth == 1600 && definition.m_DesktopHeight == 900, "size");
+		Core::String json = Sandbox::DefinitionJson(definition);
+		assert_true(json.View().Contains(Core::StringView("\"desktop\": { \"width\": 1600, \"height\": 900 }")), json.CStr());
+		assert_true(Sandbox::ParseDefinition(Core::StringView("g"), Core::StringView("{\"os\": \"ubuntu\", \"desktop\": true}"), definition, problem) && definition.m_Desktop, "true");
+		assert_true(!Sandbox::ParseDefinition(Core::StringView("g"), Core::StringView("{\"os\": \"ubuntu\", \"desktop\": \"yes\"}"), definition, problem), "a word is no desktop");
+		assert_true(!Sandbox::ParseDefinition(Core::StringView("g"), Core::StringView("{\"os\": \"ubuntu\", \"desktop\": {\"width\": 100}}"), definition, problem), "too small");
+	}
+
+	[test("a_desktop_adds_its_preset_and_changes_the_container")]
+	public static void TestPlan() {
+		Sandbox::Catalog catalog;
+		Core::String problem;
+		assert_true(Sandbox::ParseCatalog(Core::StringView("{\"systems\": [{\"id\": \"alpine\", \"packageManager\": \"apk\", \"versions\": [{\"version\": \"3\", \"image\": \"alpine:3\"}]}], \"presets\": [{\"id\": \"desktop\", \"packages\": {\"apk\": [\"xvfb\", \"openbox\"]}}]}"), catalog, problem), problem.CStr());
+		Sandbox::SandboxDefinition definition;
+		assert_true(Sandbox::ParseDefinition(Core::StringView("g"), Core::StringView("{\"os\": \"alpine\", \"desktop\": true}"), definition, problem), problem.CStr());
+		Sandbox::SandboxPlan plan;
+		assert_true(Sandbox::PlanSandbox(definition, catalog, Core::StringView("k"), Core::StringView("C:/w"), Core::StringView(""), 4, 6, plan, problem), problem.CStr());
+		assert_true(plan.m_Dockerfile.View().Contains(Core::StringView("apk add --no-cache xvfb openbox")), plan.m_Dockerfile.CStr());
+		Sandbox::SandboxDefinition plain = definition;
+		plain.m_Desktop = false;
+		Sandbox::SandboxPlan without;
+		assert_true(Sandbox::PlanSandbox(plain, catalog, Core::StringView("k"), Core::StringView("C:/w"), Core::StringView(""), 4, 6, without, problem), problem.CStr());
+		assert_true(without.m_RunDigest != plan.m_RunDigest, "a desktop is another container");
+	}
+
+	[test("input_becomes_xdotool")]
+	public static void TestInput() {
+		Serialization::DomDoc doc;
+		Serialization::DomNode actions = Serialization::ReadJson(Core::StringView("[{\"action\": \"focus\", \"window\": \"Packer\"}, {\"action\": \"double_click\", \"x\": 10, \"y\": 20}, {\"action\": \"type\", \"text\": \"it's $HOME\"}, {\"action\": \"key\", \"keys\": \"ctrl+s Return\"}, {\"action\": \"drag\", \"x\": 1, \"y\": 2, \"to_x\": 100, \"to_y\": 200}, {\"action\": \"scroll\", \"x\": 5, \"y\": 5, \"amount\": -2}, {\"action\": \"wait\", \"ms\": 250}]"), doc).root;
+		Core::String script;
+		Core::Array<Core::String> args;
+		Core::String summary;
+		Core::String problem;
+		int64 x = 0;
+		int64 y = 0;
+		assert_true(Sandbox::InputScript(actions, 1280, 800, script, args, summary, x, y, problem), problem.CStr());
+		assert_true(script.View().Contains(Core::StringView("xdotool mousemove --sync 10 20 click --repeat 2 --delay 80 1\n")), script.CStr());
+		assert_true(script.View().Contains(Core::StringView("xdotool type --delay 12 -- \"${2}\"\n")), script.CStr());
+		assert_true(args.Count() == 2 && args[0] == "Packer" && args[1] == "it's $HOME", "texts are arguments, never script");
+		assert_true(script.View().Contains(Core::StringView("xdotool key --delay 40 -- ctrl+s Return\n")), script.CStr());
+		assert_true(script.View().Contains(Core::StringView("mouseup 1\n")) && script.View().Contains(Core::StringView("click --repeat 2 --delay 30 4\n")), script.CStr());
+		assert_true(script.View().Contains(Core::StringView("sleep 0.250\n")), script.CStr());
+		assert_true(x == 5 && y == 5, "the pointer's last place");
+		assert_true(summary == "focus \"Packer\"; double-click (10, 20); type \"it's $HOME\"; key ctrl+s Return; drag from (1, 2) to (100, 200); scroll up (5, 5); wait 250 ms", summary.CStr());
+	}
+
+	[test("input_that_cannot_be_done")]
+	public static void TestBadInput() {
+		const char*[5] bad = { "[{\"action\": \"click\", \"x\": 1280, \"y\": 0}]", "[{\"action\": \"click\"}]", "[{\"action\": \"key\", \"keys\": \"ctrl+s; rm -rf /\"}]", "[{\"action\": \"fly\"}]", "[]" };
+		for (int64 i = 0; i < 5; ++i) {
+			Serialization::DomDoc doc;
+			Core::String script;
+			Core::Array<Core::String> args;
+			Core::String summary;
+			Core::String problem;
+			int64 x = 0;
+			int64 y = 0;
+			assert_true(!Sandbox::InputScript(Serialization::ReadJson(Core::StringView(bad[i]), doc).root, 1280, 800, script, args, summary, x, y, problem), bad[i]);
+			assert_true(!problem.IsEmpty(), bad[i]);
+		}
+	}
+
+	[test("windows_frames_and_signals")]
+	public static void TestParsing() {
+		Sandbox::DesktopState state = Sandbox::ParseWindows(Core::StringView("w\t4194316\t101\t120\t484\t316\t38\tprobe term\nw\t2\t0\t0\t1280\t800\t0\t\nf\t4194316\nm\t300\t250\n"));
+		assert_eq((int64)2, state.m_Windows.Count(), "windows");
+		assert_true(state.m_Windows[0].m_Name == "probe term" && state.m_Windows[0].m_Width == 484 && state.m_Windows[0].m_Pid == 38, "fields");
+		assert_true(state.m_Focused == "4194316" && state.m_MouseX == 300 && state.m_MouseY == 250, "focus and pointer");
+		Core::String text = Sandbox::WindowsText(state);
+		assert_true(text.View().Contains(Core::StringView("- \"probe term\" at (101, 120) 484x316, pid 38, focused\n")), text.CStr());
+		Core::String pending = Core::String("noise\nF 3\nabcF 2\nxy");
+		Core::String frame;
+		assert_true(Sandbox::TakeFrames(pending, frame) && frame == "xy" && pending.IsEmpty(), "the newest whole frame");
+		pending = Core::String("F 5\nab");
+		assert_true(!Sandbox::TakeFrames(pending, frame) && pending == "F 5\nab", "a frame not whole waits");
+		assert_true(Sandbox::ShellQuote(Core::StringView("it's")) == "'it'\\''s'", Sandbox::ShellQuote(Core::StringView("it's")).CStr());
+		Core::String debug = Sandbox::DebugCommand(Core::StringView("build/game --windowed"));
+		assert_true(debug.View().Contains(Core::StringView("--args sh -c 'exec build/game --windowed'")) && debug.View().Contains(Core::StringView("thread apply all bt")), debug.CStr());
+		assert_true(Sandbox::SignalText(139).View().StartsWith(Core::StringView("SIGSEGV")) && Sandbox::SignalText(134).View().StartsWith(Core::StringView("SIGABRT")) && Sandbox::SignalText(1).IsEmpty(), "signals");
+		assert_true(Sandbox::DesktopStartScript(1600, 900).View().Contains(Core::StringView("Xvfb :99 -screen 0 1600x900x24")), "the screen's size");
+	}
+}

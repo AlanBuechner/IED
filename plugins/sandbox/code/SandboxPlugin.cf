@@ -60,6 +60,7 @@ namespace Sandbox
 			definition.m_Network = request.m_Params.Str("network", Core::StringView("none"));
 			definition.m_Validate = request.m_Params.Str("validate", Core::StringView(""));
 			definition.m_Description = request.m_Params.Str("description", Core::StringView(""));
+			definition.m_Desktop = request.m_Params.Bool("desktop", false);
 			Core::String notes;
 			Core::String problem;
 			if (!service->Create(ws, definition, request.m_Params.Bool("replace", false), notes, problem)) throw IED::RpcError(IED::ErrorCode::BadRequest, problem.View());
@@ -143,6 +144,78 @@ namespace Sandbox
 			Core::String platform = request.m_Params.Str("platform", Core::StringView(""));
 			if (image.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("name the image"));
 			service->Background([service, ws, image, platform]() { service->Pull(ws, image.View(), platform.View(), nullptr, ByOwner()); });
+			return Queued();
+		});
+		// Desktops (docs/34 "Desktops"): the view's frames (a long poll), the owner's input (it takes control from the AI),
+		// control taken and given back, the windows, the screen brought up, a program launched on it.
+		Register(context, "ied.sandbox/frame", [service](const IED::Request& request) -> Core::String {
+			IED::Workspace ws = WorkspaceOf(request);
+			return service->FrameJson(ws.m_Id.View(), request.m_Params.Str("name", Core::StringView("")).View(), request.m_Params.Int("after", 0), request.m_ClientId.View());
+		});
+		Register(context, "ied.sandbox/input", [service](const IED::Request& request) -> Core::String {
+			IED::Workspace ws = Trusted(request);
+			Core::String summary;
+			Core::String problem;
+			if (!service->Input(ws, request.m_Params.Str("name", Core::StringView("")).View(), request.m_Params.Field("actions"), ByOwner(), request.m_ClientId.View(), summary, problem))
+				throw IED::RpcError(IED::ErrorCode::Unavailable, problem.View());
+			return Core::String("{\"ok\":true}");
+		});
+		Register(context, "ied.sandbox/desktopControl", [service](const IED::Request& request) -> Core::String {
+			IED::Workspace ws = WorkspaceOf(request);
+			Core::String problem;
+			if (!service->SetControl(ws.m_Id.View(), request.m_Params.Str("name", Core::StringView("")).View(), request.m_ClientId.View(), request.m_Params.Bool("take", true), problem))
+				throw IED::RpcError(IED::ErrorCode::NotFound, problem.View());
+			return Core::String("{\"ok\":true}");
+		});
+		Register(context, "ied.sandbox/windows", [service](const IED::Request& request) -> Core::String {
+			IED::Workspace ws = Trusted(request);
+			DesktopState desktop;
+			Core::String problem;
+			if (!service->Windows(ws, request.m_Params.Str("name", Core::StringView("")).View(), desktop, problem)) throw IED::RpcError(IED::ErrorCode::Unavailable, problem.View());
+			IED::JsonWriter json;
+			json.BeginObject();
+			json.Key(Core::StringView("windows"));
+			json.BeginArray();
+			for (const DesktopWindow& window : desktop.m_Windows) {
+				json.BeginObject();
+				json.Field("id", window.m_Id.View());
+				json.Field("name", window.m_Name.View());
+				json.IntField("x", window.m_X);
+				json.IntField("y", window.m_Y);
+				json.IntField("width", window.m_Width);
+				json.IntField("height", window.m_Height);
+				json.IntField("pid", window.m_Pid);
+				json.BoolField("focused", window.m_Id == desktop.m_Focused);
+				json.EndObject();
+			}
+			json.EndArray();
+			json.IntField("mouseX", desktop.m_MouseX);
+			json.IntField("mouseY", desktop.m_MouseY);
+			json.EndObject();
+			return json.ToString();
+		});
+		Register(context, "ied.sandbox/desktop", [service](const IED::Request& request) -> Core::String {
+			IED::Workspace ws = Trusted(request);
+			Core::String name = request.m_Params.Str("name", Core::StringView(""));
+			service->Background([service, ws, name]() {
+				SandboxState* state = nullptr;
+				Core::String problem;
+				if (!service->StartDesktop(ws, name.View(), ByOwner(), state, problem)) service->Scan(ws.m_Id.View(), true);
+			});
+			return Queued();
+		});
+		Register(context, "ied.sandbox/launch", [service](const IED::Request& request) -> Core::String {
+			IED::Workspace ws = Trusted(request);
+			Core::String name = request.m_Params.Str("name", Core::StringView(""));
+			Core::String command = request.m_Params.Str("command", Core::StringView(""));
+			const bool debug = request.m_Params.Bool("debug", false);
+			if (command.View().Trimmed().IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("give a command"));
+			service->Background([service, ws, name, command, debug]() {
+				Core::Array<Core::String> env;
+				DesktopState desktop;
+				Core::Array<DesktopWindow> opened;
+				service->Launch(ws, name.View(), command.View(), Core::StringView(""), env, debug, 1, ByOwner(), nullptr, desktop, opened);
+			});
 			return Queued();
 		});
 		Register(context, "ied.sandbox/removeImage", [service](const IED::Request& request) -> Core::String {

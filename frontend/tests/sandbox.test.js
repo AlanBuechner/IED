@@ -3,8 +3,8 @@
 
 import { test, assertEqual } from "./harness.js";
 import {
-	activityBadge, ago, aiRunning, appendOutput, duration, enginePlatforms, followedRun, keepOutputs, runOf, runResult, sandboxState, shortPlatform, suggestName,
-	validName, validationOf, validationSummary, whoOf,
+	activityBadge, ago, aiDriving, aiRunning, appendOutput, desktopKey, duration, enginePlatforms, followedRun, keepOutputs, runOf, runResult, sandboxState, screenPoint,
+	shortPlatform, suggestName, validName, validationOf, validationSummary, whoOf,
 } from "/plugins/ied.sandbox/ui/model.js";
 
 const READY = { state: "ready", platforms: [{ platform: "linux/amd64", native: true }, { platform: "linux/arm64", native: false }, { platform: "linux/riscv64", native: false }] };
@@ -95,4 +95,26 @@ test("sandbox: who started a run, and what the AI is doing", () => {
 	assertEqual(ago(1000000, 1002000), "now");
 	assertEqual(ago(1000000, 1041000), "41 s ago");
 	assertEqual(ago(1000000, 1000000 + 3 * 60000), "3 min ago");
+});
+
+test("sandbox: a desktop's screen points and keys", () => {
+	assertEqual(screenPoint(320, 200, 640, 400, 1280, 800), { x: 640, y: 400 }, "half size");
+	assertEqual(screenPoint(-5, 900, 640, 400, 1280, 800), { x: 0, y: 799 }, "clamped to the screen");
+	const key = (key, mods) => desktopKey(Object.assign({ key, ctrlKey: false, altKey: false, metaKey: false, shiftKey: false }, mods || {}));
+	assertEqual(key("a"), { text: "a" });
+	assertEqual(key("A", { shiftKey: true }), { text: "A" }, "a capital is typed as it is");
+	assertEqual(key("Enter"), { key: "Return" });
+	assertEqual(key("Backspace"), { key: "BackSpace" });
+	assertEqual(key("s", { ctrlKey: true }), { key: "ctrl+s" });
+	assertEqual(key("S", { ctrlKey: true, shiftKey: true }), { key: "ctrl+shift+s" });
+	assertEqual(key("F4", { altKey: true }), { key: "alt+F4" });
+	assertEqual(key("ArrowLeft", { shiftKey: true }), { key: "shift+Left" });
+	assertEqual(key(" "), { key: "space" });
+	assertEqual(key("Shift"), null, "a modifier alone is nothing");
+	assertEqual(key("Dead"), null);
+	const now = 100000;
+	assertEqual(aiDriving({ action: { by: "ai", text: "click (1, 2)", x: 1, y: 2, ms: now - 1000 } }, now).text, "click (1, 2)");
+	assertEqual(aiDriving({ action: { by: "ai", text: "old", ms: now - 60000 } }, now), null, "an old action is not driving");
+	assertEqual(aiDriving({ action: { by: "owner", text: "x", ms: now } }, now), null, "the owner's input is not the AI's");
+	assertEqual(aiDriving(null, now), null);
 });

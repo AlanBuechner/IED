@@ -323,6 +323,29 @@ namespace Sandbox
 			json.Field("busy", state->m_Busy.View());
 			json.IntField("lastUsedMs", state->m_LastUsedMs);
 			json.IntField("lastRunId", state->m_LastRunId);
+			json.Key(Core::StringView("desktop"));
+			if (!definition.m_Desktop) json.Null();
+			else {
+				json.BeginObject();
+				json.IntField("width", definition.m_DesktopWidth > 0 ? definition.m_DesktopWidth : c_DesktopWidth);
+				json.IntField("height", definition.m_DesktopHeight > 0 ? definition.m_DesktopHeight : c_DesktopHeight);
+				json.BoolField("up", state->m_DesktopUp && state->m_Container == "running");
+				const bool held = state->m_Control == "owner" && UnixMs() - state->m_ControlMs < c_ControlLeaseMs;
+				json.Field("control", held ? Core::StringView("owner") : Core::StringView(""));
+				json.Field("controlClient", held ? state->m_ControlClient.View() : Core::StringView(""));
+				json.Key(Core::StringView("action"));
+				if (state->m_ActionMs == 0) json.Null();
+				else {
+					json.BeginObject();
+					json.Field("by", state->m_ActionBy.View());
+					json.Field("text", state->m_ActionText.View());
+					json.IntField("x", state->m_ActionX);
+					json.IntField("y", state->m_ActionY);
+					json.IntField("ms", state->m_ActionMs);
+					json.EndObject();
+				}
+				json.EndObject();
+			}
 			json.Field("definition", ((Core::String(c_DefinitionsFolder) + "/") + state->m_Name.View() + "/sandbox.json").View());
 			json.EndObject();
 		}
@@ -550,6 +573,7 @@ namespace Sandbox
 					line.Append(definition.m_Platform.View());
 				}
 				if (definition.m_Network == "full") line.Append(", network on");
+				if (definition.m_Desktop) line.Append(", desktop");
 				line.Append(")");
 			}
 			summaries.Push(line.ToString());
@@ -909,7 +933,7 @@ namespace Sandbox
 		}
 		const bool exists = found.exitCode == 0 && !status.IsEmpty();
 		const bool current = exists && config == state->m_Plan.m_RunDigest && built;
-		if (exists && current && status == "running") return true;
+		if (exists && current && status == "running") return !state->m_Definition.m_Desktop || EnsureScreen(ws, state, problem);
 		SetBusy(wsId.View(), state, Core::StringView("starting"));
 		bool ok = true;
 		if (exists && !current) {
@@ -934,6 +958,11 @@ namespace Sandbox
 		else ok = StartContainer(ws, state, run, problem);
 		SetBusy(wsId.View(), state, Core::StringView(""));
 		if (ok) prepared = prepared.IsEmpty() ? Core::String("started the sandbox") : prepared + "; started the sandbox";
+		if (ok) {
+			IED::HostLock lock(*m_Context);
+			state->m_DesktopUp = false;
+		}
+		if (ok && state->m_Definition.m_Desktop) ok = EnsureScreen(ws, state, problem);
 		return ok;
 	}
 
@@ -957,13 +986,7 @@ namespace Sandbox
 			id.AppendInt(run->m_Id);
 			run->m_PidFile = run->m_PidFile + id.View();
 		}
-		// Each run knows which sandbox it is in, so one command builds into a folder of each sandbox's own on the shared
-		// workspace (build/$IED_SANDBOX): a validation runs several at once.
-		Core::Array<Core::String> all;
-		all.Push(Core::String("IED_SANDBOX=") + state->m_Name.View());
-		all.Push(Core::String("IED_PLATFORM=") + (state->m_Definition.m_Platform.IsEmpty() ? NativePlatform(m_Engine->Last()).View() : state->m_Definition.m_Platform.View()));
-		for (const Core::String& pair : state->m_Definition.m_Env) all.Push(pair);
-		for (const Core::String& pair : env) all.Push(pair);
+		Core::Array<Core::String> all = RunEnvironment(state, env);
 		const int64 before = run->m_Output.ByteLength();
 		const int64 started = UnixMs();
 		Core::String stopped;

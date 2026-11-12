@@ -63,6 +63,21 @@ namespace Sandbox
 		definition.m_Platform = NormalPlatform(root.Member("platform").AsView());
 		definition.m_Validate = Core::String(root.Member("validate").AsView());
 		definition.m_Description = Core::String(root.Member("description").AsView());
+		Serialization::DomNode desktop = root.Member("desktop");
+		if (desktop.Kind() == Serialization::DomKind::Bool) definition.m_Desktop = desktop.AsBool();
+		else if (desktop.Kind() == Serialization::DomKind::Object) {
+			definition.m_Desktop = true;
+			definition.m_DesktopWidth = desktop.Member("width").AsInt();
+			definition.m_DesktopHeight = desktop.Member("height").AsInt();
+			if (definition.m_DesktopWidth < 0 || definition.m_DesktopHeight < 0 || definition.m_DesktopWidth > 7680 || definition.m_DesktopHeight > 4320 || (definition.m_DesktopWidth > 0 && definition.m_DesktopWidth < 320) || (definition.m_DesktopHeight > 0 && definition.m_DesktopHeight < 240)) {
+				problem = Core::String("desktop: width 320 to 7680, height 240 to 4320");
+				return false;
+			}
+		}
+		else if (desktop.IsValid() && !desktop.IsNull()) {
+			problem = Core::String("desktop must be true or {\"width\": 1280, \"height\": 800}");
+			return false;
+		}
 		if (!StringList(root.Member("presets"), "presets", definition.m_Presets, problem)) return false;
 		if (!StringList(root.Member("packages"), "packages", definition.m_Packages, problem)) return false;
 		Serialization::DomNode setup = root.Member("setup");
@@ -157,6 +172,17 @@ namespace Sandbox
 				JsonString(out, equals < 0 ? Core::StringView("") : pair.Substring(equals + 1, pair.ByteLength() - equals - 1));
 			}
 			out.Append(" }");
+		}
+		if (definition.m_Desktop) {
+			Member(out, first, "desktop");
+			if (definition.m_DesktopWidth > 0 || definition.m_DesktopHeight > 0) {
+				out.Append("{ \"width\": ");
+				out.AppendInt(definition.m_DesktopWidth > 0 ? definition.m_DesktopWidth : c_DesktopWidth);
+				out.Append(", \"height\": ");
+				out.AppendInt(definition.m_DesktopHeight > 0 ? definition.m_DesktopHeight : c_DesktopHeight);
+				out.Append(" }");
+			}
+			else out.Append("true");
 		}
 		if (!definition.m_Validate.IsEmpty()) {
 			Member(out, first, "validate");
@@ -263,7 +289,9 @@ namespace Sandbox
 		}
 		else {
 			Core::Array<Core::String> packages;
-			for (const Core::String& id : definition.m_Presets) {
+			Core::Array<Core::String> presets = definition.m_Presets;
+			if (definition.m_Desktop && !HasPlatform(presets, Core::StringView(c_DesktopPreset))) presets.Push(Core::String(c_DesktopPreset));
+			for (const Core::String& id : presets) {
 				const CatalogPreset* preset = FindPreset(catalog, id.View());
 				Core::Array<Core::String> names;
 				if (preset == nullptr || plan.m_PackageManager.IsEmpty() || !PresetNames(*preset, plan.m_PackageManager.View(), names)) {
@@ -309,6 +337,7 @@ namespace Sandbox
 		run.Append(Slashes(root).View());
 		run.Append("|");
 		run.Append(definition.m_Network.View());
+		run.Append(definition.m_Desktop ? "|desktop" : "|");
 		run.Append("|");
 		run.AppendInt(plan.m_Cpus);
 		run.Append("|");

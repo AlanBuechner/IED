@@ -160,6 +160,16 @@
 			}
 		},
 		{
+			"id": "desktop", "title": "a desktop the AI and you can see and drive: a virtual screen (Xvfb), the Openbox window manager, xdotool, ImageMagick, fonts, xterm and Mesa's software OpenGL and Vulkan (a definition's \"desktop\": true adds it)",
+			"packages": {
+				"apt": ["xvfb", "xauth", "x11-utils", "openbox", "xdotool", "imagemagick", "fonts-dejavu-core", "xterm", "libgl1-mesa-dri", "mesa-vulkan-drivers", "mesa-utils", "dbus-x11"],
+				"dnf": ["xorg-x11-server-Xvfb", "xorg-x11-xauth", "openbox", "xdotool", "ImageMagick", "dejavu-sans-fonts", "xterm", "mesa-dri-drivers", "mesa-vulkan-drivers", "glx-utils", "dbus-x11"],
+				"apk": ["xvfb", "xauth", "openbox", "xdotool", "imagemagick", "font-dejavu", "xterm", "xprop", "xwininfo", "mesa-dri-gallium", "mesa-vulkan-swrast", "dbus"],
+				"pacman": ["xorg-server-xvfb", "xorg-xauth", "openbox", "xdotool", "imagemagick", "ttf-dejavu", "xterm", "mesa", "vulkan-swrast", "mesa-utils", "dbus"],
+				"zypper": ["xorg-x11-server-Xvfb", "openbox", "xdotool", "ImageMagick", "dejavu-fonts", "xterm", "Mesa-dri", "dbus-1-x11"]
+			}
+		},
+		{
 			"id": "net", "title": "curl, CA certificates and ip",
 			"packages": { "apt": ["curl", "ca-certificates", "iproute2"], "dnf": ["curl", "ca-certificates", "iproute"], "apk": ["curl", "ca-certificates", "iproute2"], "pacman": ["curl", "ca-certificates", "iproute2"], "zypper": ["curl", "ca-certificates", "iproute2"] }
 		}

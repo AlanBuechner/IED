@@ -61,13 +61,31 @@ workspace.
   `sandbox_control(action: "build")`.
 - **Package names differ** per distribution (`build-essential` / `gcc gcc-c++ make` / `build-base`); presets map them.
   A name a repository lacks fails the image build with the package manager's words.
-- **Windowed programs**: the `gui` preset gives a virtual screen. Run with `xvfb-run -a <program>` (Debian, Ubuntu,
-  Fedora have it) or start `Xvfb :99 &` and set `DISPLAY=:99`; OpenGL and Vulkan are Mesa's software renderers
-  (llvmpipe, lavapipe) - correct, slow, no GPU. Photograph the screen with `import -window root /workspace/build/shot.png`
-  and look at it with `image_view`.
+- **Windowed programs** go on a sandbox with a desktop (`sandbox_create(..., desktop: true)`): see "Testing a GUI"
+  below. OpenGL and Vulkan are Mesa's software renderers (llvmpipe, lavapipe) - correct, slow, no GPU.
 - **A command that never ends** (a server, a game loop) needs a limit: `timeout 20 ./game --smoke-test`, or `timeout_s`.
 - **Docker Hub's anonymous pull limit** (an image build failing with "toomanyrequests"): the owner signs Docker in, or
   sets `sandbox.registryMirror` to `mirror.gcr.io/library`.
+
+## Testing and debugging a GUI
+
+A sandbox with `"desktop": true` has a screen (1280x800 unless its definition says) that you and the owner both see -
+the owner watches it live in the Sandbox activity and may take control, and then your input waits.
+
+1. Build the program (`sandbox_run`, into `build/$IED_SANDBOX`), then `sandbox_launch(name, command)`. It answers the
+   window that opened and a screenshot - or how the program ended. A crash (exit 139 SIGSEGV, 134 SIGABRT): launch it again
+   with `debug: true` (the sandbox needs the `debug` preset for gdb) and read the backtrace; fix the source here.
+2. Look before you act: `sandbox_screenshot` gives the image and every window's title, position and size. Coordinates
+   are screen pixels.
+3. Act like a person with `sandbox_input`: `focus` a window by its title first, then `click`, `type`, `key` ("Return",
+   "ctrl+s", "alt+F4"), `drag`, `scroll`. Each call answers a screenshot after `settle_ms` - check it did what you meant
+   before the next step; slow programs (emulated platforms) need a longer `settle_ms` or a `wait` action.
+4. A program's output and how it ended: `sandbox_apps`; `stop` ends one. Close windows you opened when you are done.
+5. "The owner has taken control of this desktop": stop driving; take screenshots if you need to see; continue once they
+   give it back, or ask them.
+
+Rendering problems (black windows, missing text): `glxinfo -B` and `vulkaninfo --summary` in `sandbox_run` say what Mesa
+offers; a program that needs a real GPU feature cannot get it here - say so.
 
 ## What cannot be a sandbox
 

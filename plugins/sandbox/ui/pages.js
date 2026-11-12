@@ -72,6 +72,7 @@ export class SandboxPage {
 				tool("package", "Build", "Build its image", usable && !busy, () => this.control("build")),
 				tool("play", "Start", "Start it", usable && !busy && box.container !== "running", () => this.control("start")),
 				tool("debug-stop", "Stop", "Stop it", usable && !busy && box.container === "running", () => this.control("stop")),
+				box.desktop ? tool("vm-connect", "Desktop", "Its desktop: watch the AI or take control", usable, () => this.actions.openDesktop(this.name)) : null,
 				tool("terminal", "Terminal", "A terminal in it", usable && !busy, () => this.actions.terminal(this.name)),
 				tool("run-all", "Run...", "Run a command in it", usable, () => this.runCommand()),
 				tool("beaker", "Validate", box.validate ? "Run its validate command" : "It has no validate command", usable && !!box.validate, () => this.actions.validate([this.name])),
@@ -89,6 +90,7 @@ export class SandboxPage {
 				fact("Packages", (box.packages || []).join(" ")),
 				fact("Network", box.network === "full" ? "on (full)" : "off while running (packages install with it)"),
 				fact("Limits", box.cpus + " CPUs, " + box.memoryGiB + " GiB"),
+				fact("Desktop", box.desktop ? box.desktop.width + "x" + box.desktop.height + (box.desktop.up ? ", running" : "") : "none"),
 				fact("Validate", box.validate ? h("code", null, box.validate) : h("span.muted", null, "none - Validate All asks for a command")),
 				fact("Built image", box.imageBuilt ? h("code", null, box.tag) : "not yet (the first run builds it)"),
 				fact("Container", box.containerName + " (" + box.container + ")"),
@@ -181,7 +183,7 @@ export class NewPage {
 		const systems = catalog.systems || [];
 		const os = systems.find((system) => system.id === "ubuntu") || systems[0];
 		const version = os ? (os.versions.find((v) => v.default) || os.versions[0]) : null;
-		return { os: os ? os.id : "", version: version ? version.version : "", platform: catalog.native, presets: ["build"], packages: "", validate: "", network: "none", name: "", nameEdited: false };
+		return { os: os ? os.id : "", version: version ? version.version : "", platform: catalog.native, presets: ["build"], packages: "", validate: "", network: "none", desktop: false, name: "", nameEdited: false };
 	}
 
 	render() {
@@ -242,6 +244,8 @@ export class NewPage {
 				field("Packages", h("input.input-field", { type: "text", value: form.packages, placeholder: "more packages, by this system's names", on: { input: (event) => { form.packages = event.target.value; } } })),
 				field("Validate", h("input.input-field", { type: "text", value: form.validate, placeholder: "cmake -B build/$IED_SANDBOX && cmake --build build/$IED_SANDBOX && ctest --test-dir build/$IED_SANDBOX", on: { input: (event) => { form.validate = event.target.value; } } }), "The command Validate All runs here. Build into build/$IED_SANDBOX: sandboxes share the workspace and run at once."),
 				field("Network", select(form.network, [["none", "Off while running (safer)"], ["full", "On"]], (value) => { form.network = value; }), "Installing packages always has the network."),
+				field("Desktop", h("label.sbx-preset" + (form.desktop ? ".on" : ""), null, h("input", { type: "checkbox", checked: form.desktop, on: { change: (event) => { form.desktop = event.target.checked; this.draw(); } } }), "A desktop"),
+					"A screen (1280x800) the AI and you can see and drive, for windowed programs - games, editors, GUI tests. Adds the desktop preset."),
 				field("Name", h("input.input-field" + (nameOk ? "" : ".sbx-bad"), { type: "text", value: form.name, on: { input: (event) => { form.name = event.target.value; form.nameEdited = true; } , change: () => this.draw() } }), nameOk ? null : "Lowercase letters, digits and '-', not taken."),
 				this.buttons));
 	}
@@ -255,7 +259,7 @@ export class NewPage {
 		const form = this.form;
 		const answer = await this.store.request("ied.sandbox/create", {
 			name: form.name, os: form.os + ":" + form.version, platform: form.platform === this.store.catalog.native ? "" : form.platform,
-			presets: form.presets, packages: form.packages.split(/\s+/).filter(Boolean), validate: form.validate, network: form.network, build,
+			presets: form.presets, packages: form.packages.split(/\s+/).filter(Boolean), validate: form.validate, network: form.network, desktop: form.desktop, build,
 		});
 		if (!answer) return;
 		if (answer.notes) this.store.ied.toast(answer.notes, { level: "warn" });

@@ -312,7 +312,10 @@ The four that change projects are `exec`: a solution a build system owns changes
 | T-SBX-9 | `sandbox_engine(action?)` | exec | **Built**, `approval: "ask"`: status, start (Docker Desktop), install_emulators (QEMU's binfmt handlers). |
 | T-SBX-3 | `sandbox_task(name, task)` | exec | Runs a toolbar task with `target: sandbox:<name>`. Not built: task targets (`docs/34` "Not built yet"). |
 | T-SBX-4 | `sandbox_request_network(name, host, port, reason)` | net | Approval card. Not built: the egress gateway. |
-| T-SBX-10 | `sandbox_screenshot(name, command?, wait_s?)` | exec | Not built: a windowed program under Xvfb, its screen as an image. |
+| T-SBX-10 | `sandbox_screenshot(name, window?, region?)` | read | **Built** (`docs/34` "Desktops"): a desktop's screen, a window or a region as an image, with its windows (title, position, size, pid, focus) and the pointer. |
+| T-SBX-11 | `sandbox_launch(name, command, cwd?, env?, debug?, wait_s?, screenshot?)` | exec | **Built**: a windowed program started on a sandbox's desktop as a run that goes on; waits for its window or its end; its window, output and a screenshot, or its exit and signal - under gdb (`debug`) every thread's backtrace. |
+| T-SBX-12 | `sandbox_input(name, actions, screenshot?, settle_ms?)` | exec | **Built**: click, double/right/middle click, move, drag, scroll, type, key, wait, focus with xdotool, then a screenshot; refused while the owner has taken control of the desktop. |
+| T-SBX-13 | `sandbox_apps(name, stop?, lines?)` | exec | **Built**: the programs launched on a desktop - running or how they ended - with their output's end; `stop` ends one. |
 
 ### `profiler`
 

@@ -10,9 +10,10 @@ import { Console, runHeader, runRow } from "./parts.js";
 const FILTERS = [["all", "All"], ["ai", "AI"], ["you", "You"]];
 
 export class ActivityView {
-	constructor(ctx, store) {
+	constructor(ctx, store, actions) {
 		this.ctx = ctx;
 		this.store = store;
+		this.actions = actions;
 		this.filter = "all";
 		this.showingConsole = false;   // a phone shows the console instead of the list
 		this.console = new Console();
@@ -87,10 +88,12 @@ export class ActivityView {
 		}
 		const lead = ai[0] || going[0];
 		const who = whoOf(lead, store.chatTitles);
+		const box = lead.sandbox ? store.sandbox(lead.sandbox) : null;
 		replace(this.now, icon("loading", "spin"),
 			h("span.sbx-now-who" + (who.ai ? ".ai" : ""), null, who.ai ? "The AI" + (who.chat ? " (\u201c" + who.chat + "\u201d)" : "") : who.who),
 			h("span", null, " is running "), h("code", null, lead.label), h("span", null, " in " + (lead.sandbox || "Docker")),
-			going.length > 1 ? h("span.muted", null, " - and " + (going.length - 1) + " more") : null);
+			going.length > 1 ? h("span.muted", null, " - and " + (going.length - 1) + " more") : null,
+			box && box.desktop ? h("button.btn.flat.sbx-small", { title: "See its screen, live", on: { click: () => this.actions.openDesktop(box.name) } }, icon("vm-connect"), "Watch the desktop") : null);
 		this.now.className = "sbx-now going" + (who.ai ? " ai" : "");
 	}
 

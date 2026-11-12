@@ -2,7 +2,10 @@
 
 Owner: `plugins/sandbox` (UI, AI tools and the container lifecycle in its code, `docs/34`).
 
-**Built 2026-11-11** (`docs/34`): F-SBX-1 (docker), F-SBX-2, F-SBX-3 (bind mount; copy mode not yet), F-SBX-4 (reset levels; volumes not yet), F-SBX-5, F-SBX-20, F-SBX-22, F-SBX-23 (outputLinks for `/workspace/` paths), and beyond this catalog: other processors under QEMU emulation, a catalog of distributions with download, presets, and the validation matrix. F-SBX-6 is covered by workspace trust for now (no content-hash approval of `setup` yet).
+**Built 2026-11-11** (`docs/34`): F-SBX-1 (docker), F-SBX-2, F-SBX-3 (bind mount; copy mode not yet), F-SBX-4 (reset levels; volumes not yet), F-SBX-5, F-SBX-20, F-SBX-22, F-SBX-23 (outputLinks for `/workspace/` paths), and beyond this catalog: other processors under QEMU emulation, a catalog of distributions with download, presets, and the validation matrix. F-SBX-6 is covered by workspace trust for now (no content-hash approval of `setup` yet). F-SBX-24 is built
+(`docs/34` "Desktops", 2026-11-11): a desktop per sandbox (Xvfb + Openbox), live in the Sandbox activity with take-control,
+and the AI's `sandbox_launch`, `sandbox_screenshot`, `sandbox_input` and `sandbox_apps`, crashes debugged under gdb; frames
+are JPEG polls, not VNC.
 
 The plan asks for "a sandbox that uses docker ... on another operating system ... like macOS". Two facts shape the design:
 

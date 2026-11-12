@@ -1,0 +1,441 @@
+// SandboxService's desktops (docs/34 "Desktops"): bringing the screen up with the container, the views' frames (one
+// capture loop in the container while any view pulls), input - the AI's and the owner's, who can take control from the
+// AI - window lists, screenshots for the AI, and programs launched on the screen (under gdb to debug a crash).
+
+include "SandboxService.ch"
+
+namespace Sandbox
+{
+	static Core::Array<Core::String> DesktopWords(const char* a, const char* b, const char* c) {
+		Core::Array<Core::String> words;
+		if (a) words.Push(Core::String(a));
+		if (b) words.Push(Core::String(b));
+		if (c) words.Push(Core::String(c));
+		return words;
+	}
+
+	static Core::String JsonText(Core::StringView text) {
+		Core::StringBuilder out;
+		Serialization::WriteJsonString(text, &out);
+		return out.ToString();
+	}
+
+	Core::Array<Core::String> SandboxService::RunEnvironment(SandboxState* state, const Core::Array<Core::String>& extra) {
+		// Each run knows which sandbox it is in, so one command builds into a folder of each sandbox's own on the shared
+		// workspace (build/$IED_SANDBOX): a validation runs several at once. A desktop's runs draw on its screen.
+		Core::Array<Core::String> all;
+		all.Push(Core::String("IED_SANDBOX=") + state->m_Name.View());
+		all.Push(Core::String("IED_PLATFORM=") + (state->m_Definition.m_Platform.IsEmpty() ? NativePlatform(m_Engine->Last()).View() : state->m_Definition.m_Platform.View()));
+		if (state->m_Definition.m_Desktop) all.Push(Core::String("DISPLAY=:99"));
+		for (const Core::String& pair : state->m_Definition.m_Env) all.Push(pair);
+		for (const Core::String& pair : extra) all.Push(pair);
+		return all;
+	}
+
+	bool SandboxService::EnsureScreen(const IED::Workspace& ws, SandboxState* state, Core::String& problem) {
+		const int64 width = state->m_Definition.m_DesktopWidth > 0 ? state->m_Definition.m_DesktopWidth : c_DesktopWidth;
+		const int64 height = state->m_Definition.m_DesktopHeight > 0 ? state->m_Definition.m_DesktopHeight : c_DesktopHeight;
+		Core::Array<Core::String> args = DesktopWords("exec", nullptr, nullptr);
+		args.Push(state->m_Plan.m_Container);
+		args.Push(Core::String("sh"));
+		args.Push(Core::String("-c"));
+		args.Push(DesktopStartScript(width, height));
+		Process::Output started = m_Engine->Run(args, 30000);
+		if (started.exitCode != 0) {
+			Core::String said = (Core::String(started.output.View().Trimmed()) + "\n") + started.errors.View().Trimmed();
+			if (said.View().Contains(Core::StringView("not found")))
+				problem = Core::String("the sandbox's image has no desktop packages: build it again (sandbox_control(action: \"build\")) - its definition must have \"desktop\": true");
+			else problem = Core::String("the desktop did not start: ") + said.View().Trimmed();
+			IED::HostLock lock(*m_Context);
+			state->m_DesktopUp = false;
+			return false;
+		}
+		Core::StringView text = started.output.View().Trimmed();
+		const int64 last = text.IndexOf('\n') < 0 ? 0 : text.ByteLength();
+		Core::StringView line = text;
+		for (int64 i = text.ByteLength() - 1; i >= 0 && last > 0; --i)
+			if (text.ByteAt(i) == '\n') {
+				line = text.Substring(i + 1, text.ByteLength() - i - 1);
+				break;
+			}
+		const int64 space = line.IndexOf(' ');
+		int64 w = width;
+		int64 h = height;
+		if (space > 0) {
+			Core::ParseInt64(line.Substring(0, space), w);
+			Core::ParseInt64(line.Substring(space + 1, line.ByteLength() - space - 1).Trimmed(), h);
+		}
+		bool was = false;
+		{
+			IED::HostLock lock(*m_Context);
+			was = state->m_DesktopUp;
+			state->m_DesktopUp = true;
+			state->m_ScreenWidth = w;
+			state->m_ScreenHeight = h;
+		}
+		if (!was) Publish(ws.m_Id.View());
+		return true;
+	}
+
+	// The sandbox's desktop when it is up already (no docker run): a click from the owner's view must not wait.
+	static SandboxState* ReadyDesktop(SandboxService* service, WorkspaceSandboxes* sandboxes, Core::StringView name) {
+		for (SandboxState* state : sandboxes->m_Sandboxes)
+			if (state->m_Name.View() == name) return state->m_DesktopUp && state->m_Container == "running" && state->m_Planned ? state : nullptr;
+		return nullptr;
+	}
+
+	bool SandboxService::StartDesktop(const IED::Workspace& ws, Core::StringView name, const RunOrigin& origin, SandboxState*& state, Core::String& problem) {
+		if (!Prepare(ws, name, state, problem)) return false;
+		if (!state->m_Definition.m_Desktop) {
+			problem = ((Core::String("sandbox ") + name) + " has no desktop: give it one - sandbox_create(name: \"") + name + "\", ..., desktop: true, replace: true) - and it is built again with the desktop's packages";
+			return false;
+		}
+		bool running = false;
+		bool up = false;
+		{
+			IED::HostLock lock(*m_Context);
+			running = state->m_Container == "running";
+			up = state->m_DesktopUp;
+		}
+		if (running && up && EnsureScreen(ws, state, problem)) return true;
+		problem = Core::String("");
+		SandboxRun* run = BeginRun(ws.m_Id.View(), name, "start", Core::StringView("start the desktop"), origin);
+		Core::String prepared;
+		const bool ok = Ensure(ws, state, true, false, run, nullptr, prepared, problem);
+		EndRun(ws.m_Id.View(), run, ok ? 0 : 1, Core::StringView(""), ok ? Core::StringView("") : problem.View());
+		return ok;
+	}
+
+	void SandboxService::StreamFrames(Core::String wsId, SandboxState* state) {
+		DesktopStream* stream = nullptr;
+		Core::String container;
+		{
+			IED::HostLock lock(*m_Context);
+			stream = state->m_Stream;
+			container = state->m_Plan.m_Container;
+		}
+		Core::String pidFile = Core::String("/tmp/.ied-stream.pid");
+		Core::Array<Core::String> args = DesktopWords("exec", nullptr, nullptr);
+		args.Push(container);
+		args.Push(Core::String("sh"));
+		args.Push(Core::String("-c"));
+		args.Push(FrameLoopScript(70, pidFile.View()));
+		Process::Child child = m_Engine->Start(args);
+		if (!child.IsOpen()) {
+			Threading::LockGuard guard(stream->m_Lock);
+			stream->m_Problem = Core::String("the screen's capture did not start: ") + child.Error();
+			stream->m_Running = false;
+			stream->m_Arrived.NotifyAll();
+			return;
+		}
+		Core::String pending;
+		char8[65536] buffer;
+		while (!m_Stopping) {
+			{
+				Threading::LockGuard guard(stream->m_Lock);
+				if (stream->m_Stop || UnixMs() - stream->m_PullMs > c_StreamIdleMs) break;
+			}
+			if (child.Wait(0) != Process::kTimedOut) break;
+			const int64 got = child.Read(Process::Stream::Output, (void*)&buffer[0], 65536, 200);
+			if (got > 0) {
+				pending.Append(Core::StringView(&buffer[0], got));
+				Core::String frame;
+				if (TakeFrames(pending, frame)) {
+					Threading::LockGuard guard(stream->m_Lock);
+					stream->m_Frame = frame;
+					stream->m_Seq += 1;
+					stream->m_Problem = Core::String("");
+					stream->m_Arrived.NotifyAll();
+				}
+			}
+			else if (got != Process::kTimedOut) break;
+		}
+		m_Engine->Run(KillArguments(container.View(), pidFile.View()), 15000);
+		child.Kill();
+		Threading::LockGuard guard(stream->m_Lock);
+		stream->m_Running = false;
+		stream->m_Arrived.NotifyAll();
+	}
+
+	Core::String SandboxService::FrameJson(Core::StringView wsId, Core::StringView name, int64 after, Core::StringView clientId) {
+		SandboxState* state = nullptr;
+		DesktopStream* stream = nullptr;
+		int64 width = 0;
+		int64 height = 0;
+		bool up = false;
+		{
+			IED::HostLock lock(*m_Context);
+			WorkspaceSandboxes* sandboxes = Of(wsId);
+			state = Find(sandboxes, name);
+			if (state == nullptr) return (Core::String("{\"seq\":0,\"up\":false,\"problem\":") + JsonText((Core::String("no sandbox named ") + name).View()).View()) + "}";
+			up = state->m_DesktopUp && state->m_Container == "running";
+			width = state->m_ScreenWidth;
+			height = state->m_ScreenHeight;
+			if (state->m_Control == "owner" && state->m_ControlClient.View() == clientId && UnixMs() - state->m_ControlMs < c_ControlLeaseMs) state->m_ControlMs = UnixMs();
+			if (state->m_Stream == nullptr) state->m_Stream = new DesktopStream();
+			stream = state->m_Stream;
+		}
+		if (!up) return Core::String("{\"seq\":0,\"up\":false}");
+		bool start = false;
+		{
+			Threading::LockGuard guard(stream->m_Lock);
+			stream->m_PullMs = UnixMs();
+			if (!stream->m_Running) {
+				stream->m_Running = true;
+				stream->m_Stop = false;
+				start = true;
+			}
+		}
+		if (start) {
+			SandboxService* self = this;
+			Core::String id = Core::String(wsId);
+			m_Context->StartThread([self, id, state]() { self->StreamFrames(id, state); });
+		}
+		Threading::LockGuard guard(stream->m_Lock);
+		const int64 deadline = UnixMs() + c_FrameWaitMs;
+		while (stream->m_Seq <= after && stream->m_Running) {
+			const int64 left = deadline - UnixMs();
+			if (left <= 0) break;
+			stream->m_Arrived.WaitFor(stream->m_Lock, left * 1000000);
+		}
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.IntField("seq", stream->m_Seq);
+		json.BoolField("up", true);
+		json.IntField("width", width);
+		json.IntField("height", height);
+		json.Field("problem", stream->m_Problem.View());
+		if (stream->m_Seq > after && !stream->m_Frame.IsEmpty()) {
+			json.Field("mime", Core::StringView("image/jpeg"));
+			json.Field("data", Core::Base64Encode((const void*)stream->m_Frame.CStr(), stream->m_Frame.ByteLength()).View());
+		}
+		json.EndObject();
+		return json.ToString();
+	}
+
+	bool SandboxService::Input(const IED::Workspace& ws, Core::StringView name, const Serialization::DomNode& actions, const RunOrigin& origin, Core::StringView clientId, Core::String& summary, Core::String& problem) {
+		SandboxState* state = nullptr;
+		{
+			IED::HostLock lock(*m_Context);
+			state = ReadyDesktop(this, Of(ws.m_Id.View()), name);
+		}
+		if (state == nullptr && !StartDesktop(ws, name, origin, state, problem)) return false;
+		int64 width = 0;
+		int64 height = 0;
+		Core::String container;
+		{
+			IED::HostLock lock(*m_Context);
+			const bool held = state->m_Control == "owner" && UnixMs() - state->m_ControlMs < c_ControlLeaseMs;
+			if (origin.m_By != "owner" && held) {
+				problem = Core::String("the owner has taken control of this desktop: wait until they give it back (sandbox_screenshot shows the screen meanwhile), or ask them");
+				return false;
+			}
+			if (origin.m_By == "owner") {
+				state->m_Control = Core::String("owner");
+				state->m_ControlClient = Core::String(clientId);
+				state->m_ControlMs = UnixMs();
+			}
+			width = state->m_ScreenWidth;
+			height = state->m_ScreenHeight;
+			container = state->m_Plan.m_Container;
+		}
+		Core::String script;
+		Core::Array<Core::String> words;
+		int64 x = -1;
+		int64 y = -1;
+		if (!InputScript(actions, width, height, script, words, summary, x, y, problem)) return false;
+		Core::Array<Core::String> args = DesktopWords("exec", nullptr, nullptr);
+		args.Push(container);
+		args.Push(Core::String("sh"));
+		args.Push(Core::String("-c"));
+		args.Push(script);
+		args.Push(Core::String("ied-input"));
+		for (const Core::String& word : words) args.Push(word);
+		SandboxRun* run = origin.m_By == "owner" ? nullptr : BeginRun(ws.m_Id.View(), name, "input", summary.View(), origin);
+		Process::Output done;
+		{
+			Threading::LockGuard order(*state->m_Input);
+			done = m_Engine->Run(args, 60000);
+		}
+		Core::String said = Core::String(((done.output + done.errors.View()).View()).Trimmed());
+		if (done.exitCode != 0) problem = said.IsEmpty() ? Core::String("the input stopped") : said;
+		if (run != nullptr) {
+			if (!said.IsEmpty()) Append(ws.m_Id.View(), run, (said + "\n").View());
+			EndRun(ws.m_Id.View(), run, done.exitCode, Core::StringView(""), done.exitCode == 0 ? Core::StringView("") : problem.View());
+		}
+		if (done.exitCode == 0) {
+			IED::HostLock lock(*m_Context);
+			state->m_ActionBy = origin.m_By;
+			state->m_ActionText = summary;
+			state->m_ActionX = x;
+			state->m_ActionY = y;
+			state->m_ActionMs = UnixMs();
+		}
+		if (origin.m_By != "owner") Publish(ws.m_Id.View());
+		return done.exitCode == 0;
+	}
+
+	bool SandboxService::SetControl(Core::StringView wsId, Core::StringView name, Core::StringView clientId, bool take, Core::String& problem) {
+		{
+			IED::HostLock lock(*m_Context);
+			SandboxState* state = Find(Of(wsId), name);
+			if (state == nullptr) {
+				problem = Core::String("no sandbox named ") + name;
+				return false;
+			}
+			if (take) {
+				state->m_Control = Core::String("owner");
+				state->m_ControlClient = Core::String(clientId);
+				state->m_ControlMs = UnixMs();
+			}
+			else {
+				state->m_Control = Core::String("");
+				state->m_ControlClient = Core::String("");
+			}
+		}
+		Publish(wsId);
+		return true;
+	}
+
+	bool SandboxService::Windows(const IED::Workspace& ws, Core::StringView name, DesktopState& desktop, Core::String& problem) {
+		SandboxState* state = nullptr;
+		{
+			IED::HostLock lock(*m_Context);
+			state = ReadyDesktop(this, Of(ws.m_Id.View()), name);
+		}
+		if (state == nullptr && !StartDesktop(ws, name, ByOwner(), state, problem)) return false;
+		Core::Array<Core::String> args = DesktopWords("exec", nullptr, nullptr);
+		args.Push(state->m_Plan.m_Container);
+		args.Push(Core::String("sh"));
+		args.Push(Core::String("-c"));
+		args.Push(WindowsScript());
+		Process::Output listed = m_Engine->Run(args, 30000);
+		if (listed.exitCode != 0) {
+			problem = Core::String("the windows could not be listed: ") + listed.errors.View().Trimmed();
+			return false;
+		}
+		desktop = ParseWindows(listed.output.View());
+		return true;
+	}
+
+	bool SandboxService::Screenshot(const IED::Workspace& ws, Core::StringView name, Core::StringView window, int64 x, int64 y, int64 width, int64 height, Core::String& path, Core::String& problem) {
+		SandboxState* state = nullptr;
+		{
+			IED::HostLock lock(*m_Context);
+			state = ReadyDesktop(this, Of(ws.m_Id.View()), name);
+		}
+		if (state == nullptr && !StartDesktop(ws, name, ByOwner(), state, problem)) return false;
+		Core::Array<Core::String> args = DesktopWords("exec", nullptr, nullptr);
+		args.Push(state->m_Plan.m_Container);
+		args.Push(Core::String("sh"));
+		args.Push(Core::String("-c"));
+		args.Push(ScreenshotScript(window, x, y, width, height));
+		args.Push(Core::String("ied-shot"));
+		args.Push(Core::String(window));
+		Process::Output shot = m_Engine->Run(args, 60000);
+		if (shot.exitCode != 0 || shot.output.ByteLength() < 8) {
+			problem = Core::String("the screenshot failed: ") + (shot.errors.IsEmpty() ? Core::StringView("no picture came") : shot.errors.View().Trimmed());
+			return false;
+		}
+		Core::StringBuilder file;
+		file.Append(".ied/local/sandbox/shots/");
+		file.Append(name);
+		file.Append("-");
+		file.AppendInt(UnixMs());
+		file.Append(".png");
+		path = file.ToString();
+		Core::String absolute = IED::WorkspaceFile(ws, path.View());
+		Core::String folder = Core::String(FS::Path(absolute.View()).Parent().View());
+		FS::MakeDirectories(folder.CStr());
+		if (!FS::WriteFileAtomically(absolute.CStr(), (const void*)shot.output.CStr(), shot.output.ByteLength())) {
+			problem = Core::String("could not write ") + absolute.View();
+			return false;
+		}
+		// The newest 40 are kept.
+		Core::Array<Core::String> shots;
+		for (FS::DirectoryEntry& entry : FS::Directory(folder.CStr()))
+			if (entry.kind == FS::EntryKind::File && entry.name.View().EndsWith(Core::StringView(".png"))) {
+				int64 at = shots.Count();
+				while (at > 0 && entry.name < shots[at - 1]) at -= 1;
+				shots.Insert(at, entry.name);
+			}
+		for (int64 i = 0; i + 40 < shots.Count(); ++i) FS::RemoveFile(((folder + "/") + shots[i].View()).CStr());
+		return true;
+	}
+
+	RunOutcome SandboxService::Launch(const IED::Workspace& ws, Core::StringView name, Core::StringView command, Core::StringView cwd, const Core::Array<Core::String>& env, bool debug, int64 waitSeconds, const RunOrigin& origin, const bool* cancelled, DesktopState& desktop, Core::Array<DesktopWindow>& opened) {
+		RunOutcome outcome;
+		SandboxState* state = nullptr;
+		if (!StartDesktop(ws, name, origin, state, outcome.m_Problem)) return outcome;
+		DesktopState before;
+		Core::String problem;
+		Windows(ws, name, before, problem);
+		Core::String line = debug ? DebugCommand(command) : Core::String(command);
+		SandboxRun* run = BeginRun(ws.m_Id.View(), name, "app", ((debug ? Core::String("debug: ") : Core::String("")) + command).View(), origin);
+		outcome.m_RunId = run->m_Id;
+		Core::StringBuilder pid;
+		pid.Append("/tmp/.ied-run-");
+		pid.AppendInt(run->m_Id);
+		{
+			IED::HostLock lock(*m_Context);
+			run->m_PidFile = pid.ToString();
+			state->m_LastUsedMs = UnixMs();
+		}
+		Core::Array<Core::String> args = ExecArguments(state->m_Plan.m_Container.View(), cwd, RunEnvironment(state, env), line.View(), run->m_PidFile.View());
+		Core::String container = state->m_Plan.m_Container;
+		Core::String wsId = ws.m_Id;
+		SandboxService* self = this;
+		m_Context->StartThread([self, wsId, run, args, container]() {
+			Core::String stopped;
+			const int64 code = self->Stream(wsId.View(), run, args, UnixMs() + 7 * 86400000, nullptr, container.View(), stopped);
+			self->EndRun(wsId.View(), run, code, stopped.View(), Core::StringView(""));
+		});
+		const int64 started = UnixMs();
+		const int64 deadline = started + (waitSeconds < 1 ? 1 : waitSeconds) * 1000;
+		bool ended = false;
+		while (UnixMs() < deadline && !(cancelled != nullptr && *cancelled)) {
+			Threading::Thread::Sleep(400000000);
+			{
+				IED::HostLock lock(*m_Context);
+				ended = !run->m_Running;
+			}
+			if (ended) break;
+			DesktopState now;
+			if (!Windows(ws, name, now, problem)) continue;
+			for (const DesktopWindow& window : now.m_Windows) {
+				bool known = false;
+				for (const DesktopWindow& old : before.m_Windows)
+					if (old.m_Id == window.m_Id) known = true;
+				if (!known) opened.Push(window);
+			}
+			desktop = now;
+			if (!opened.IsEmpty()) {
+				// A moment for it to draw before it is photographed.
+				Threading::Thread::Sleep(700000000);
+				break;
+			}
+		}
+		outcome.m_Ran = true;
+		outcome.m_Ms = UnixMs() - started;
+		{
+			IED::HostLock lock(*m_Context);
+			outcome.m_Running = run->m_Running;
+			outcome.m_ExitCode = run->m_ExitCode;
+			outcome.m_Stopped = run->m_Stopped;
+			outcome.m_Output = run->m_Output;
+		}
+		if (!outcome.m_Running) Windows(ws, name, desktop, problem);
+		return outcome;
+	}
+
+	Core::Array<SandboxRun> SandboxService::Apps(Core::StringView wsId, Core::StringView name) {
+		Core::Array<SandboxRun> apps;
+		IED::HostLock lock(*m_Context);
+		WorkspaceSandboxes* sandboxes = Of(wsId);
+		for (int64 i = sandboxes->m_Runs.Count() - 1; i >= 0; --i) {
+			const SandboxRun* run = sandboxes->m_Runs[i];
+			if (run->m_Kind == "app" && run->m_Sandbox.View() == name) apps.Push(*run);
+		}
+		return apps;
+	}
+}

@@ -144,3 +144,28 @@
 .app.phone .sbx-field { grid-template-columns: minmax(0, 1fr); }
 .app.phone .sbx-field-hint { grid-column: 1; }
 .app.phone .sbx-matrix td:nth-child(3), .app.phone .sbx-matrix th:nth-child(3) { display: none; }
+
+/* A desktop: its screen, the AI's last input marked on it, the windows and programs beside it */
+.sbx-row-desk { flex: none; }
+.sbx-desk-size { font-size: var(--font-size-sm); white-space: nowrap; }
+.sbx-desk-banner { flex: none; border-bottom: var(--border-width) solid var(--border-0); }
+.sbx-desk-note { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-4); font-size: var(--font-size-sm); }
+.sbx-desk-note.ai { color: var(--accent-ai); background: var(--tint-ai); }
+.sbx-desk-note.you { color: var(--accent-info); background: var(--tint-info); }
+.sbx-desk-stage { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg-0); outline: none; }
+.sbx-desk-stage:focus-visible { box-shadow: inset 0 0 0 1px var(--focus); }
+.sbx-desktop.in-control .sbx-desk-stage { box-shadow: inset 0 0 0 2px var(--accent-info); cursor: crosshair; }
+.sbx-desk-frame { position: absolute; image-rendering: auto; user-select: none; -webkit-user-drag: none; }
+.sbx-desk-marker { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; border: 2px solid var(--accent-ai); border-radius: 50%; pointer-events: none; animation: sbx-ping 1.2s ease-out infinite; }
+@keyframes sbx-ping { 0% { transform: scale(0.6); opacity: 1; } 100% { transform: scale(1.6); opacity: 0.2; } }
+.sbx-desk-message { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); padding: var(--space-5); text-align: center; color: var(--text-1); }
+.sbx-desk-side { flex: 0 0 240px; min-width: 0; overflow: auto; border-left: var(--border-width) solid var(--border-0); }
+.sbx-desk-list { padding-bottom: var(--space-2); }
+.sbx-desk-item { display: flex; align-items: center; gap: var(--space-2); padding: 2px var(--space-3); font-size: var(--font-size-sm); border-left: 2px solid transparent; cursor: default; }
+.sbx-desk-item:hover { background: var(--veil); }
+.sbx-desk-item.focused { color: var(--text-0); background: var(--selection); }
+.sbx-desk-item.by-ai { border-left-color: var(--accent-ai); }
+.sbx-desk-item .ci { width: 14px; height: 14px; flex: none; }
+.sbx-desk-item-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app.phone .sbx-desktop .sbx-body { flex-direction: column; }
+.app.phone .sbx-desk-side { flex: 0 0 auto; max-height: 30%; border-left: 0; border-top: var(--border-width) solid var(--border-0); }

@@ -196,7 +196,10 @@ first when it is not ready, with what to do; none runs anything in an untrusted 
 | T-SBX-7 | `sandbox_validate(command?, names?, timeout_s?)` | exec | The validation matrix above. |
 | T-SBX-8 | `sandbox_control(name, action)` | exec | `build`, `rebuild` (no cache), `start`, `stop`, `reset` (a new container from the image), `remove` (container and image; the definition stays), `pull` (download the base image). |
 | T-SBX-9 | `sandbox_engine(action?)` | exec | `status`; `start` (Docker Desktop); `install_emulators`. |
-| T-SBX-10 | `sandbox_screenshot(name, command?, wait_s?)` | exec | Not built. Runs a windowed program under Xvfb (the `gui` preset) and shows the screen as an image. |
+| T-SBX-10 | `sandbox_screenshot(name, window?, region?)` | read | A desktop's screen, a window or a region as an image, with its windows and the pointer ("Desktops"). |
+| T-SBX-11 | `sandbox_launch(name, command, cwd?, env?, debug?, wait_s?, screenshot?)` | exec | A windowed program started on a desktop; its window, output and a screenshot, or how it crashed (under gdb: the backtrace). |
+| T-SBX-12 | `sandbox_input(name, actions, screenshot?, settle_ms?)` | exec | Click, drag, scroll, type, keys, focus on a desktop; refused while the owner has taken control. |
+| T-SBX-13 | `sandbox_apps(name, stop?, lines?)` | exec | The programs launched on a desktop, their state and output; stops one. |
 | T-SBX-3 | `sandbox_task(name, task)` | exec | Not built: needs task targets (below). |
 | T-SBX-4 | `sandbox_request_network(name, host, port, reason)` | net | Not built: needs the egress gateway (below). |
 
@@ -204,6 +207,42 @@ The system-message section (a `function`, only when the workspace has sandboxes)
 names the tools; the `sandbox` skill teaches the loop: look at the engine, pick from the catalog, create, validate, read
 a failure, fix it on the host, validate again on every sandbox - and the caveats (emulation speed, build folders, the
 network being off, GUI programs needing `gui`, what cannot be a sandbox).
+
+## Desktops
+
+Owner, 2026-11-11: "we should have a desktop environment with all the AI tools to test and debug graphical
+applications." A sandbox whose definition has `"desktop": true` (or `{"width": 1600, "height": 900}`; 1280x800 by
+default) gets a screen: the `desktop` preset installs Xvfb, the Openbox window manager, xdotool, ImageMagick, fonts, an
+xterm and Mesa's software OpenGL and Vulkan (llvmpipe, lavapipe), and every run of the sandbox has `DISPLAY=:99`. The
+screen comes up with the container (`Xvfb :99` and Openbox, started again when the container restarts) - so any windowed
+program, a game, an editor, a GUI test runner, draws there, on any distribution and on emulated processors too.
+
+**Seeing it.** A sandbox with a desktop has a Desktop document in the Sandbox activity (`sandbox:desktop/<name>`; the
+Desktop buttons of the Sandboxes list and the sandbox's page, and "Watch the desktop" in Activity while the AI runs
+something there). Its screen is live: while the document shows, the server runs one capture loop in the container
+(`import -window root` every ~120 ms, a frame sent only when the screen changed, JPEG) and the view long-polls
+`ied.sandbox/frame {name, after}` as the Browser tab pulls its page. One `docker exec` costs ~175 ms on Docker Desktop, so
+one loop per desktop rather than one exec per frame; the loop stops 10 s after the last pull. Beside the screen: its
+windows (title, size, focus) and the programs launched there with their state.
+
+**Who drives.** The AI drives by default and the view shows it: a strip says what the AI's last input was ("The AI is
+driving: click (412, 310)") and a ring in the AI's accent marks where it landed. **Take control** gives the owner the
+mouse, wheel and keyboard (clicks, drags, scrolls, typed text in batches, keys with modifiers as xdotool names them); the
+AI's `sandbox_input` is refused meanwhile ("the owner has taken control of this desktop: wait ... or ask them") until the
+owner gives it back - or the lease lapses 90 s after the owner's last input or frame. Launch... and Debug... start a
+program there by hand.
+
+**The AI's tools** (each starts the desktop when it is not up, building the image first when needed):
+
+| Tool | Does |
+|---|---|
+| `sandbox_launch(name, command, cwd?, env?, debug?, wait_s?, screenshot?)` | Starts a windowed program as a run that goes on (its output streams to Activity), waits for a window of its own or its end, and answers its window, its output so far and a screenshot - or how it ended: exit code and signal (SIGSEGV, SIGABRT, ...). `debug: true` runs it under gdb (the `debug` preset), which prints the signal and every thread's backtrace when it crashes. |
+| `sandbox_screenshot(name, window?, region?)` | The screen, a window (by part of its title) or a region as an image, with the windows (title, position, size, pid, focus) and the pointer. Images are files in `.ied/local/sandbox/shots/` (the newest 40 kept) the chat sends like any tool image. |
+| `sandbox_input(name, actions, screenshot?, settle_ms?)` | Actions in order - click, double_click, right_click, middle_click, move, drag, scroll, type, key, wait, focus - with xdotool; text goes as arguments, never as script; coordinates are checked against the screen. Then a screenshot. Recorded as a run of kind `input`, so Activity lists what the AI did. |
+| `sandbox_apps(name, stop?, lines?)` | The programs launched there, running or ended (exit code, signal), each with its output's end - gdb's backtrace for a debugged crash; `stop` ends one (its process group in the container). |
+
+Not yet: a VNC stream (frames are JPEG polls - enough to watch and drive, not for smooth video), sound, the
+accessibility tree (AT-SPI) for finding controls by role and name, a real GPU (`docs/34` "Not built yet").
 
 ## The Sandbox activity
 
@@ -243,7 +282,12 @@ Methods (the window's, each with `wsId`; a job answers `{queued}` at once and go
 `ied.sandbox/state` (the snapshot, and a fresh look at Docker), `ied.sandbox/catalog`, `ied.sandbox/create`,
 `ied.sandbox/control {name, action}`, `ied.sandbox/run {name, command}`, `ied.sandbox/validate {names?, command?}`,
 `ied.sandbox/stopRun {id}`, `ied.sandbox/engine {action: start | emulators | refresh}`, `ied.sandbox/pull {image, platform}`,
-`ied.sandbox/removeImage {image}`. Bindings for other plugins (AGENTS.md rule 7):
+`ied.sandbox/removeImage {image}`; for desktops `ied.sandbox/frame {name, after}` (a long poll: `{seq, up, width,
+height, mime, data}`, data a base64 JPEG when newer than `after`), `ied.sandbox/input {name, actions}` (the owner's; takes
+control), `ied.sandbox/desktopControl {name, take}`, `ied.sandbox/windows {name}`, `ied.sandbox/desktop {name}` (bring the
+screen up) and `ied.sandbox/launch {name, command, debug?}`. A sandbox of the snapshot has `desktop`: null, or `{width,
+height, up, control, controlClient, action: {by, text, x, y, ms}}`; runs of kind `app` are launched programs, of kind
+`input` the AI's input. Bindings for other plugins (AGENTS.md rule 7):
 `sandbox.list` (`{wsId}` -> the snapshot) and `sandbox.run` (`{wsId, name, command, cwd?, timeoutSeconds?}` -> `{queued}`,
 its output and end on the topic: a binding answers within 30 s, a build does not).
 
@@ -273,8 +317,8 @@ Hub for the catalog's official images).
   whose only way out is a proxy container (DNS, HTTP CONNECT, SOCKS5 with remote DNS), every resolved address checked
   against loopback, private, link-local, CGNAT, metadata and reserved ranges, grants as exact host:port re-read on each
   dial; `sandbox_request_network` approval cards (the predecessor let only the owner grant); through Tor/proxy profiles.
-- **GUI desktop** (F-SBX-24, predecessor parity): Xvfb + a VNC server + noVNC in the image (`gui` preset), served to the
-  window through the workspace server, with take-over; first `sandbox_screenshot` for the AI.
+- **Desktop streaming and accessibility**: the desktop is built ("Desktops"); a VNC stream through the workspace server
+  for smooth video, sound, and the accessibility tree (AT-SPI) for the AI to find controls by role and name are not.
 - **Task targets** (F-SBX-21): a task step's `target: "sandbox:<name>"`, the task runner asking the `sandbox.wrap`
   binding for the argv (host stays generic: any plugin may provide a target kind).
 - **Other providers**: `wsl`, `ssh` (a Mac, an ARM box), `vm` (QEMU), Windows containers; **copy mode** (a copy of the

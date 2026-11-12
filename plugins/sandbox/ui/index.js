@@ -7,6 +7,7 @@
 
 import { h, replace } from "/ui-kit/dom.js";
 import { ActivityView } from "./activityview.js";
+import { DesktopView } from "./desktopview.js";
 import { ListView, askValidateCommand } from "./listview.js";
 import { activityBadge } from "./model.js";
 import { NewPage, SandboxPage, ValidationView } from "./pages.js";
@@ -51,6 +52,10 @@ const actions = {
 		await showActivity();
 		api.tabs.open("sandbox:box/" + name, { preview, activity: ACTIVITY });
 	},
+	async openDesktop(name) {
+		await showActivity();
+		api.tabs.open("sandbox:desktop/" + name, { preview: false, activity: ACTIVITY });
+	},
 	async showRun(runId) {
 		storeFor(api, api.workspace.wsId).showRun(runId);
 		await showWindow(ACTIVITY_WINDOW);
@@ -94,8 +99,8 @@ export function activate(ied) {
 	addStylesheet(ied.plugin.base + "ui/sandbox.css");
 	ied.tabs.kind("sandbox", {
 		view: "SandboxDocument",
-		title: (arg) => (arg && arg.startsWith("box/") ? arg.slice(4) : arg === "new" ? "New Sandbox" : "Sandbox"),
-		icon: (arg) => (arg === "new" ? "$(add)" : "$(vm)"),
+		title: (arg) => (arg && arg.startsWith("box/") ? arg.slice(4) : arg && arg.startsWith("desktop/") ? arg.slice(8) + " desktop" : arg === "new" ? "New Sandbox" : "Sandbox"),
+		icon: (arg) => (arg === "new" ? "$(add)" : arg && arg.startsWith("desktop/") ? "$(vm-connect)" : "$(vm)"),
 	});
 	ied.commands.handle("ied.sandbox.open", () => showWindow(ACTIVITY_WINDOW));
 	ied.commands.handle("ied.sandbox.new", () => actions.openNew());
@@ -126,7 +131,7 @@ export function SandboxList(ctx) {
 }
 
 export function SandboxActivity(ctx) {
-	return new ActivityView(ctx, store(ctx));
+	return new ActivityView(ctx, store(ctx), actions);
 }
 
 export function SandboxValidation(ctx) {
@@ -139,6 +144,7 @@ export function SandboxDocument(ctx) {
 		openedBox = arg.slice(4);
 		return new SandboxPage(ctx, store(ctx), actions, arg.slice(4));
 	}
+	if (arg.startsWith("desktop/")) return new DesktopView(ctx, store(ctx), actions, arg.slice(8));
 	if (arg === "new") return new NewPage(ctx, store(ctx), actions);
 	// An older tab (sandbox:manager, before the activity): it says where things went.
 	replace(ctx.el, h("div.sbx-empty", null, h("div", null, "Sandboxes have an activity of their own now: the Sandbox button in the sidebar."),

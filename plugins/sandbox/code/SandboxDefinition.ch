@@ -23,6 +23,9 @@ namespace Sandbox
 		public Core::String m_Description;
 		public bool m_OwnDockerfile;                    // .ied/sandbox/<name>/Dockerfile exists: it is built as it is
 		public Core::String m_OwnDockerfileText;        // its text, for the image's digest
+		public bool m_Desktop;                          // a virtual screen with a window manager, DISPLAY for every run
+		public int64 m_DesktopWidth;                    // its size; 0: c_DesktopWidth x c_DesktopHeight
+		public int64 m_DesktopHeight;
 	}
 
 	// What a definition becomes once the catalog and the settings are applied.
@@ -76,5 +79,9 @@ namespace Sandbox
 	Core::String ContainerPath(Core::StringView cwd);
 
 	const char* c_DefinitionsFolder = ".ied/sandbox";
+	const int64 c_DesktopWidth = 1280;
+	const int64 c_DesktopHeight = 800;
+	// The preset a desktop installs: the virtual screen, a window manager, xdotool, ImageMagick, fonts, Mesa.
+	const char* c_DesktopPreset = "desktop";
 	const char* c_WorkspaceMount = "/workspace";
 }

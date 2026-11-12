@@ -104,6 +104,13 @@
 						"network": { "enum": ["none", "full"] },
 						"cpus": { "type": "integer", "minimum": 1, "maximum": 64 },
 						"memory_gib": { "type": "integer", "minimum": 1, "maximum": 256 },
+						"desktop": {
+							"description": "A desktop to run windowed programs on and drive them (sandbox_launch, sandbox_screenshot, sandbox_input): true (1280x800), or its size. Adds the desktop preset.",
+							"oneOf": [
+								{ "type": "boolean" },
+								{ "type": "object", "properties": { "width": { "type": "integer", "minimum": 320, "maximum": 7680 }, "height": { "type": "integer", "minimum": 240, "maximum": 4320 } }, "additionalProperties": false }
+							]
+						},
 						"description": { "type": "string" },
 						"replace": { "type": "boolean", "description": "Overwrite a sandbox of this name." },
 						"build": { "type": "boolean", "description": "Build its image now (minutes for an emulated platform)." }
@@ -176,6 +183,218 @@
 				"ownThread": true,
 				"timeoutSeconds": 1800,
 				"resultBudgetTokens": 2000
+			},
+			{
+				"name": "sandbox_launch",
+				"description": "Start a windowed program (a game, an editor, a GUI app) on a sandbox's desktop and watch it come up: waits up to wait_s for a window of its own (or its end), then answers its window, its output so far and a screenshot. It keeps running as a run of the Sandbox activity - sandbox_apps reads its output and stops it. A crash answers its exit and signal; with debug: true it runs under gdb (the debug preset), which prints the signal and every thread's backtrace. OpenGL and Vulkan run on Mesa's software renderers (llvmpipe, lavapipe): correct, slow, no GPU. The sandbox needs a desktop (sandbox_create(..., desktop: true)). Example: sandbox_launch(name: \"ubuntu-gui\", command: \"build/$IED_SANDBOX/game --windowed\", debug: true).",
+				"class": "exec",
+				"group": "sandbox",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"name": {
+							"type": "string"
+						},
+						"command": {
+							"type": "string",
+							"description": "The program and its arguments as a shell line, run in /workspace (or cwd) with DISPLAY set."
+						},
+						"cwd": {
+							"type": "string"
+						},
+						"env": {
+							"type": "object",
+							"additionalProperties": {
+								"type": "string"
+							}
+						},
+						"debug": {
+							"type": "boolean",
+							"description": "Run it under gdb: a crash gives a backtrace."
+						},
+						"wait_s": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 120,
+							"description": "How long to wait for its window (default 15; emulated platforms are slow)."
+						},
+						"screenshot": {
+							"type": "boolean",
+							"description": "A screenshot once its window is up (default true)."
+						}
+					},
+					"required": [
+						"name",
+						"command"
+					],
+					"additionalProperties": false
+				},
+				"function": "Sandbox::LaunchTool",
+				"ownThread": true,
+				"timeoutSeconds": 1800,
+				"resultBudgetTokens": 4000
+			},
+			{
+				"name": "sandbox_screenshot",
+				"description": "See a sandbox's desktop: a screenshot of the screen (or of the window whose title has `window`, or of region [x, y, width, height]) as an image, and its windows - title, position, size, pid, which has focus - and the pointer. Coordinates are screen pixels, as sandbox_input takes them.",
+				"class": "read",
+				"group": "sandbox",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"name": {
+							"type": "string"
+						},
+						"window": {
+							"type": "string",
+							"description": "Part of a window's title (a regular expression): only that window."
+						},
+						"region": {
+							"type": "array",
+							"items": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"minItems": 4,
+							"maxItems": 4,
+							"description": "[x, y, width, height]: only this part of the screen."
+						}
+					},
+					"required": [
+						"name"
+					],
+					"additionalProperties": false
+				},
+				"function": "Sandbox::ScreenshotTool",
+				"ownThread": true,
+				"timeoutSeconds": 300,
+				"resultBudgetTokens": 1500
+			},
+			{
+				"name": "sandbox_input",
+				"description": "Drive a sandbox's desktop like a person: actions in order - click, double_click, right_click, middle_click, move (x, y), drag (x, y, to_x, to_y), scroll (x, y, amount: + down, - up), type (text), key (keys as xdotool names them: \"Return\", \"ctrl+s\", \"alt+F4\", \"Tab Tab space\"), wait (ms), focus (window: part of its title). Then a screenshot (screenshot: false skips it) after settle_ms. Coordinates are screen pixels from sandbox_screenshot. While the owner has taken control of the desktop the input is refused: wait, or ask them. Example: sandbox_input(name: \"ubuntu-gui\", actions: [{\"action\": \"click\", \"x\": 640, \"y\": 400}, {\"action\": \"type\", \"text\": \"hello\"}, {\"action\": \"key\", \"keys\": \"Return\"}]).",
+				"class": "exec",
+				"group": "sandbox",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"name": {
+							"type": "string"
+						},
+						"actions": {
+							"type": "array",
+							"minItems": 1,
+							"maxItems": 50,
+							"items": {
+								"type": "object",
+								"properties": {
+									"action": {
+										"enum": [
+											"click",
+											"double_click",
+											"right_click",
+											"middle_click",
+											"move",
+											"drag",
+											"scroll",
+											"type",
+											"key",
+											"wait",
+											"focus"
+										]
+									},
+									"x": {
+										"type": "integer",
+										"minimum": 0
+									},
+									"y": {
+										"type": "integer",
+										"minimum": 0
+									},
+									"to_x": {
+										"type": "integer",
+										"minimum": 0
+									},
+									"to_y": {
+										"type": "integer",
+										"minimum": 0
+									},
+									"amount": {
+										"type": "integer"
+									},
+									"text": {
+										"type": "string"
+									},
+									"keys": {
+										"type": "string"
+									},
+									"ms": {
+										"type": "integer",
+										"minimum": 0,
+										"maximum": 10000
+									},
+									"window": {
+										"type": "string"
+									}
+								},
+								"required": [
+									"action"
+								],
+								"additionalProperties": false
+							}
+						},
+						"screenshot": {
+							"type": "boolean"
+						},
+						"settle_ms": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 5000,
+							"description": "Wait this long before the screenshot (default 400)."
+						}
+					},
+					"required": [
+						"name",
+						"actions"
+					],
+					"additionalProperties": false
+				},
+				"function": "Sandbox::InputTool",
+				"ownThread": true,
+				"timeoutSeconds": 600,
+				"resultBudgetTokens": 1500
+			},
+			{
+				"name": "sandbox_apps",
+				"description": "The programs launched on a sandbox's desktop (sandbox_launch's, and the owner's): each run's state - running, or how it ended (exit code, signal) - and its output's end (gdb's backtrace for a debugged crash). stop: a run's id ends that program (its process tree in the sandbox).",
+				"class": "exec",
+				"group": "sandbox",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"name": {
+							"type": "string"
+						},
+						"stop": {
+							"type": "integer",
+							"description": "The run id of a program to stop first."
+						},
+						"lines": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 200,
+							"description": "Output lines a program (default 20)."
+						}
+					},
+					"required": [
+						"name"
+					],
+					"additionalProperties": false
+				},
+				"function": "Sandbox::AppsTool",
+				"ownThread": true,
+				"timeoutSeconds": 120,
+				"resultBudgetTokens": 4000
 			},
 			{
 				"name": "sandbox_engine",

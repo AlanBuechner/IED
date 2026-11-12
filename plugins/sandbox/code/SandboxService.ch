@@ -9,6 +9,7 @@
 
 include "SandboxEngine.ch"
 include "SandboxDefinition.ch"
+include "SandboxDesktop.ch"
 include "api/Plugin.ch"
 
 namespace Sandbox
@@ -47,7 +48,7 @@ namespace Sandbox
 
 	class SandboxState
 	{
-		[operator("create")] public void Init() { m_Op = new Threading::Mutex(); }
+		[operator("create")] public void Init() { m_Op = new Threading::Mutex(); m_Input = new Threading::Mutex(); }
 
 		public Core::String m_Name;
 		public SandboxDefinition m_Definition;
@@ -60,6 +61,20 @@ namespace Sandbox
 		public int64 m_LastUsedMs;
 		public int64 m_LastRunId;
 		public Threading::Mutex* m_Op;
+		// The desktop (docs/34 "Desktops"), when the definition has one.
+		public bool m_DesktopUp;             // its screen answered since the container started
+		public int64 m_ScreenWidth;
+		public int64 m_ScreenHeight;
+		public DesktopStream* m_Stream;      // the views' frames; null until one pulls
+		public Core::String m_Control;       // "owner" while the owner drives it (the AI's input waits), else ""
+		public Core::String m_ControlClient; // the owner's client that took it
+		public int64 m_ControlMs;            // renewed by that client's input and frames; it lapses after c_ControlLeaseMs
+		public Core::String m_ActionBy;      // the last input: who, what, where
+		public Core::String m_ActionText;
+		public int64 m_ActionX;
+		public int64 m_ActionY;
+		public int64 m_ActionMs;
+		public Threading::Mutex* m_Input;    // one input at a time, in the order it came: keys typed in batches stay in order
 	}
 
 	class ValidationRow
@@ -106,6 +121,7 @@ namespace Sandbox
 		public Core::String m_Problem;
 		public Core::String m_Output;         // its kept output
 		public Core::String m_Prepared;       // what was done first: "built the image (2 m 3 s); started"
+		public bool m_Running;                // a program Launch started still runs
 		public int64 m_Ms;
 	}
 
@@ -153,6 +169,27 @@ namespace Sandbox
 		// Removes a downloaded image.
 		public bool RemoveImage(Core::StringView image, Core::String& said);
 
+		// --- desktops (SandboxDesktopService.cf) ---
+		// Prepares sandbox `name` (built, started) and its desktop's screen; false with `problem`, or when it has none.
+		public bool StartDesktop(const IED::Workspace& ws, Core::StringView name, const RunOrigin& origin, SandboxState*& state, Core::String& problem);
+		// The newest frame of the desktop newer than `after`, waiting for one at most c_FrameWaitMs: {seq, mime, data,
+		// width, height, up, problem}; its capture runs while views pull. A pull by the client in control renews it.
+		public Core::String FrameJson(Core::StringView wsId, Core::StringView name, int64 after, Core::StringView clientId);
+		// `actions` (sandbox_input's) on the desktop. The AI's wait while the owner has control; the owner's take it.
+		public bool Input(const IED::Workspace& ws, Core::StringView name, const Serialization::DomNode& actions, const RunOrigin& origin, Core::StringView clientId, Core::String& summary, Core::String& problem);
+		// The owner takes the desktop from the AI (`take`) or gives it back.
+		public bool SetControl(Core::StringView wsId, Core::StringView name, Core::StringView clientId, bool take, Core::String& problem);
+		// The desktop's windows, focus and pointer.
+		public bool Windows(const IED::Workspace& ws, Core::StringView name, DesktopState& desktop, Core::String& problem);
+		// The screen (or a window named like `window`, or a region) as a PNG in .ied/local/sandbox/shots/; `path` its
+		// workspace path.
+		public bool Screenshot(const IED::Workspace& ws, Core::StringView name, Core::StringView window, int64 x, int64 y, int64 width, int64 height, Core::String& path, Core::String& problem);
+		// Starts `command` on the desktop (under gdb with `debug`) as a run that goes on, and waits at most `waitSeconds`
+		// for a window of its own or its end: `opened` the new windows, `desktop` the screen after.
+		public RunOutcome Launch(const IED::Workspace& ws, Core::StringView name, Core::StringView command, Core::StringView cwd, const Core::Array<Core::String>& env, bool debug, int64 waitSeconds, const RunOrigin& origin, const bool* cancelled, DesktopState& desktop, Core::Array<DesktopWindow>& opened);
+		// The programs launched on sandbox `name`'s desktop, newest first (the runs of kind "app"), with their output.
+		public Core::Array<SandboxRun> Apps(Core::StringView wsId, Core::StringView name);
+
 		// Runs `body` on a thread of the plugin's own (a window's job answers at once).
 		public void Background(func<void()> body);
 		// The workspace's sandboxes, read from disk for a system-message section: "name (os, platform)".
@@ -177,6 +214,9 @@ namespace Sandbox
 		private void LoadValidation(const IED::Workspace& ws);
 		private void SaveValidation(const IED::Workspace& ws);
 		private void IdleStop();
+		private bool EnsureScreen(const IED::Workspace& ws, SandboxState* state, Core::String& problem);
+		private void StreamFrames(Core::String wsId, SandboxState* state);
+		private Core::Array<Core::String> RunEnvironment(SandboxState* state, const Core::Array<Core::String>& extra);
 		private int64 SettingInt(const char* key, Core::StringView wsId, int64 fallback);
 
 		private IED::PluginContext* m_Context;

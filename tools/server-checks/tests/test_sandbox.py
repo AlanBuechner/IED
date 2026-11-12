@@ -182,6 +182,63 @@ class SandboxTests(ChatCase):
 		await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=60)
 		self.assertFalse(os.path.exists(os.path.join(self.repo, ".ied", "sandbox", "deb")), "denied: nothing written")
 
+	async def test_the_ai_drives_a_desktop_and_debugs_a_crash(self):
+		write(os.path.join(self.repo, "src", "crash.c"), CRASH)
+		results = await self.results(
+			("c1", "sandbox_create", {"name": "gui", "os": "alpine", "desktop": True, "presets": ["debug"], "packages": ["gcc", "musl-dev"]}),
+			("l1", "sandbox_launch", {"name": "gui", "command": "xterm -title probe-term -geometry 80x20+40+40", "wait_s": 60}),
+			("s1", "sandbox_screenshot", {"name": "gui"}),
+			("i1", "sandbox_input", {"name": "gui", "actions": [{"action": "focus", "window": "probe-term"}, {"action": "type", "text": "mkdir -p build && echo typed-by-ai > build/typed.txt"}, {"action": "key", "keys": "Return"}], "settle_ms": 1000}),
+			("x1", "sandbox_input", {"name": "gui", "actions": [{"action": "click", "x": 5000, "y": 10}]}),
+			("b1", "sandbox_run", {"name": "gui", "command": "mkdir -p build && cc -g -O0 -o build/crash src/crash.c"}),
+			("d1", "sandbox_launch", {"name": "gui", "command": "build/crash", "debug": True, "wait_s": 60}),
+			("a1", "sandbox_apps", {"name": "gui"}))
+		self.assertIn("Wrote .ied/sandbox/gui/sandbox.json", results["c1"])
+		self.assertIn("\"probe-term\" at", results["l1"], "the window it opened: %s" % results["l1"])
+		self.assertIn("Screenshot: .ied/local/sandbox/shots/gui-", results["l1"])
+		self.assertIn("\"probe-term\" at", results["s1"])
+		self.assertIn("Done: focus \"probe-term\"; type \"mkdir -p build && echo typed-by-ai > bui...\"; key Return.", results["i1"])
+		with open(os.path.join(self.repo, "build", "typed.txt"), encoding="utf-8") as f:
+			self.assertEqual("typed-by-ai", f.read().strip(), "the AI's keys reached the program")
+		self.assertIn("off the screen, which is 1280x800", results["x1"])
+		self.assertIn("SIGSEGV", results["d1"], results["d1"])
+		self.assertIn("crash_here", results["d1"], "gdb's backtrace names the function")
+		self.assertIn("xterm -title probe-term", results["a1"])
+		self.assertIn("running for", results["a1"])
+		shots = os.path.join(local_state(self.data, self.repo), "sandbox", "shots")
+		self.assertTrue(any(name.endswith(".png") for name in os.listdir(shots)), "the screenshots are files the chat sends")
+
+		frame = await self.client.request("ied.sandbox/frame", {"wsId": "w1", "name": "gui", "after": 0}, timeout=30)
+		self.assertTrue(frame["up"] and frame["data"] and frame["mime"] == "image/jpeg", "the view gets frames: %r" % {k: v for k, v in frame.items() if k != "data"})
+		self.assertEqual((1280, 800), (frame["width"], frame["height"]))
+		state = await self.snapshot()
+		gui = [box for box in state["sandboxes"] if box["name"] == "gui"][0]
+		self.assertEqual("ai", gui["desktop"]["action"]["by"], "the view shows the AI's last input")
+		self.assertIn("input", [run["kind"] for run in state["runs"] if run["by"] == "ai"], "the AI's input is in Activity")
+
+		await self.client.request("ied.sandbox/desktopControl", {"wsId": "w1", "name": "gui", "take": True})
+		refused = await self.results(("i2", "sandbox_input", {"name": "gui", "actions": [{"action": "key", "keys": "Return"}]}))
+		self.assertIn("the owner has taken control of this desktop", refused["i2"])
+		await self.client.request("ied.sandbox/input", {"wsId": "w1", "name": "gui", "actions": [{"action": "move", "x": 10, "y": 10}]})
+		await self.client.request("ied.sandbox/desktopControl", {"wsId": "w1", "name": "gui", "take": False})
+		back = await self.results(("i3", "sandbox_input", {"name": "gui", "actions": [{"action": "move", "x": 20, "y": 20}], "screenshot": False}))
+		self.assertIn("Done: move to (20, 20).", back["i3"], "given back, the AI drives again")
+
+
+CRASH = """#include <stdio.h>
+
+static void crash_here(int* where) {
+\t*where = 42;
+}
+
+int main(void) {
+\tputs("about to crash");
+\tfflush(stdout);
+\tcrash_here((int*)0);
+\treturn 0;
+}
+"""
+
 
 if __name__ == "__main__":
 	unittest.main()

@@ -17,6 +17,11 @@ namespace Sandbox
 	IED::ToolResult ValidateTool(const IED::ToolCall& call);
 	IED::ToolResult ControlTool(const IED::ToolCall& call);
 	IED::ToolResult EngineTool(const IED::ToolCall& call);
+	// Desktops (docs/34 "Desktops").
+	IED::ToolResult LaunchTool(const IED::ToolCall& call);
+	IED::ToolResult ScreenshotTool(const IED::ToolCall& call);
+	IED::ToolResult InputTool(const IED::ToolCall& call);
+	IED::ToolResult AppsTool(const IED::ToolCall& call);
 	Core::String Section(const IED::Workspace& ws);
 
 	// The definition sandbox_create's arguments describe (unknown fields ignored); false with `problem`.

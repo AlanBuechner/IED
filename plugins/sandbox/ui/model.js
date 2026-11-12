@@ -142,6 +142,50 @@ export function ago(ms, now) {
 	return new Date(ms).toLocaleDateString();
 }
 
+// --- Desktops ---------------------------------------------------------------------------------------------------------
+
+// The screen pixel under a point of the shown picture: (`x`, `y`) in a picture shown `shownW` x `shownH` of a screen
+// `screenW` x `screenH`, clamped to the screen.
+export function screenPoint(x, y, shownW, shownH, screenW, screenH) {
+	const sx = Math.round((x / Math.max(1, shownW)) * screenW);
+	const sy = Math.round((y / Math.max(1, shownH)) * screenH);
+	return { x: Math.min(Math.max(sx, 0), screenW - 1), y: Math.min(Math.max(sy, 0), screenH - 1) };
+}
+
+const KEY_NAMES = {
+	Enter: "Return", Backspace: "BackSpace", Tab: "Tab", Escape: "Escape", Delete: "Delete", Insert: "Insert", Home: "Home", End: "End",
+	PageUp: "Prior", PageDown: "Next", ArrowLeft: "Left", ArrowRight: "Right", ArrowUp: "Up", ArrowDown: "Down", " ": "space",
+	CapsLock: "Caps_Lock", ContextMenu: "Menu", PrintScreen: "Print",
+};
+
+// What a browser key event is to the sandbox's desktop: {type: text} for a character typed as it is, {key: "ctrl+s"} for
+// a key xdotool names (with its modifiers), or null for a key alone (Shift, Control) or one there is no name for.
+export function desktopKey(event) {
+	const key = event.key;
+	if (!key || key === "Shift" || key === "Control" || key === "Alt" || key === "Meta" || key === "AltGraph" || key === "Dead" || key === "Unidentified") return null;
+	const mods = [];
+	if (event.ctrlKey) mods.push("ctrl");
+	if (event.altKey) mods.push("alt");
+	if (event.metaKey) mods.push("super");
+	let name = KEY_NAMES[key] || (/^F([1-9]|1[0-9]|2[0-4])$/.test(key) ? key : null);
+	if (!name && key.length === 1) {
+		if (!mods.length && key !== " ") return { text: key };
+		name = /^[A-Za-z0-9]$/.test(key) ? key.toLowerCase() : null;
+		if (!name) return mods.length ? null : { text: key };
+		if (event.shiftKey) mods.push("shift");
+	}
+	else if (name && event.shiftKey) mods.push("shift");
+	if (!name) return null;
+	return { key: mods.length ? mods.join("+") + "+" + name : name };
+}
+
+// The desktop's last input when it is the AI's and recent: what to show over the screen ("click (412, 310)"), else null.
+export function aiDriving(desktop, now) {
+	const action = desktop && desktop.action;
+	if (!action || action.by !== "ai") return null;
+	return (now || Date.now()) - action.ms < 8000 ? action : null;
+}
+
 // How a run ended, in a word or two.
 export function runResult(run) {
 	if (!run) return "";

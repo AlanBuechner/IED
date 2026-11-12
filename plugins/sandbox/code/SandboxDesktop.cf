@@ -1,0 +1,406 @@
+include "SandboxDesktop.ch"
+
+namespace Sandbox
+{
+	Core::String DesktopStartScript(int64 width, int64 height) {
+		Core::StringBuilder size;
+		size.AppendInt(width);
+		size.Append("x");
+		size.AppendInt(height);
+		Core::StringBuilder s;
+		s.Append("export DISPLAY=:99\n");
+		s.Append("if ! xdotool getdisplaygeometry >/dev/null 2>&1; then\n");
+		s.Append("  rm -f /tmp/.X99-lock /tmp/.X11-unix/X99 /tmp/.ied-wm\n");
+		s.Append("  (Xvfb :99 -screen 0 ");
+		s.Append(size.View());
+		s.Append("x24 -nolisten tcp -ac -noreset >/tmp/.ied-xvfb.log 2>&1 &)\n");
+		s.Append("  i=0\n");
+		s.Append("  while ! xdotool getdisplaygeometry >/dev/null 2>&1; do\n");
+		s.Append("    i=$((i+1)); if [ $i -gt 150 ]; then echo 'the virtual screen did not start:'; tail -n 8 /tmp/.ied-xvfb.log; exit 1; fi\n");
+		s.Append("    sleep 0.1\n");
+		s.Append("  done\n");
+		s.Append("fi\n");
+		s.Append("if [ ! -e /tmp/.ied-wm ] && command -v openbox >/dev/null 2>&1; then touch /tmp/.ied-wm; (openbox >/tmp/.ied-wm.log 2>&1 &); sleep 0.3; fi\n");
+		s.Append("xdotool getdisplaygeometry\n");
+		return s.ToString();
+	}
+
+	Core::String WindowsScript() {
+		return Core::String(
+			"export DISPLAY=:99\n"
+			"for w in $(xdotool search --onlyvisible --name '.' 2>/dev/null); do\n"
+			"  X=; Y=; WIDTH=; HEIGHT=\n"
+			"  eval \"$(xdotool getwindowgeometry --shell \"$w\" 2>/dev/null)\"\n"
+			"  [ -n \"$WIDTH\" ] || continue\n"
+			"  [ \"$WIDTH\" -gt 1 ] && [ \"$HEIGHT\" -gt 1 ] || continue\n"
+			"  p=$(xdotool getwindowpid \"$w\" 2>/dev/null)\n"
+			"  n=$(xdotool getwindowname \"$w\" 2>/dev/null | tr '\\t\\n' '  ')\n"
+			"  printf 'w\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \"$w\" \"$X\" \"$Y\" \"$WIDTH\" \"$HEIGHT\" \"${p:-0}\" \"$n\"\n"
+			"done\n"
+			"printf 'f\\t%s\\n' \"$(xdotool getwindowfocus 2>/dev/null)\"\n"
+			"X=; Y=; eval \"$(xdotool getmouselocation --shell 2>/dev/null)\"; printf 'm\\t%s\\t%s\\n' \"${X:-0}\" \"${Y:-0}\"\n");
+	}
+
+	static int64 IntOf(Core::StringView text) {
+		int64 value = 0;
+		if (!Core::ParseInt64(text.Trimmed(), value)) return 0;
+		return value;
+	}
+
+	DesktopState ParseWindows(Core::StringView text) {
+		DesktopState state;
+		Core::SplitParts lines = Core::SplitParts(text, '\n');
+		Core::StringView line;
+		while (lines.Next(line)) {
+			Core::Array<Core::StringView> fields = line.Split('\t');
+			if (fields.IsEmpty()) continue;
+			if (fields[0] == "w" && fields.Count() >= 8) {
+				DesktopWindow window;
+				window.m_Id = Core::String(fields[1]);
+				window.m_X = IntOf(fields[2]);
+				window.m_Y = IntOf(fields[3]);
+				window.m_Width = IntOf(fields[4]);
+				window.m_Height = IntOf(fields[5]);
+				window.m_Pid = IntOf(fields[6]);
+				window.m_Name = Core::String(fields[7].Trimmed());
+				state.m_Windows.Push(window);
+			}
+			else if (fields[0] == "f" && fields.Count() >= 2) state.m_Focused = Core::String(fields[1].Trimmed());
+			else if (fields[0] == "m" && fields.Count() >= 3) {
+				state.m_MouseX = IntOf(fields[1]);
+				state.m_MouseY = IntOf(fields[2]);
+			}
+		}
+		return state;
+	}
+
+	Core::String WindowsText(const DesktopState& state) {
+		Core::StringBuilder out;
+		if (state.m_Windows.IsEmpty()) out.Append("No windows are open.\n");
+		for (const DesktopWindow& window : state.m_Windows) {
+			out.Append("- \"");
+			out.Append(window.m_Name.View());
+			out.Append("\" at (");
+			out.AppendInt(window.m_X);
+			out.Append(", ");
+			out.AppendInt(window.m_Y);
+			out.Append(") ");
+			out.AppendInt(window.m_Width);
+			out.Append("x");
+			out.AppendInt(window.m_Height);
+			if (window.m_Pid > 0) {
+				out.Append(", pid ");
+				out.AppendInt(window.m_Pid);
+			}
+			if (window.m_Id == state.m_Focused) out.Append(", focused");
+			out.Append("\n");
+		}
+		out.Append("Pointer at (");
+		out.AppendInt(state.m_MouseX);
+		out.Append(", ");
+		out.AppendInt(state.m_MouseY);
+		out.Append(").\n");
+		return out.ToString();
+	}
+
+	Core::String FrameLoopScript(int64 quality, Core::StringView pidFile) {
+		Core::StringBuilder s;
+		s.Append("export DISPLAY=:99\n");
+		s.Append("echo $$ > ");
+		s.Append(pidFile);
+		s.Append("\nlast=\n");
+		s.Append("while :; do\n");
+		s.Append("  if import -window root -quality ");
+		s.AppendInt(quality < 1 ? 1 : quality > 100 ? 100 : quality);
+		s.Append(" jpeg:/tmp/.ied-frame.jpg 2>/dev/null; then\n");
+		s.Append("    s=$(cksum < /tmp/.ied-frame.jpg)\n");
+		s.Append("    if [ \"$s\" != \"$last\" ]; then last=$s; printf 'F %s\\n' $(wc -c < /tmp/.ied-frame.jpg); cat /tmp/.ied-frame.jpg; fi\n");
+		s.Append("  else sleep 1; fi\n");
+		s.Append("  sleep 0.12\n");
+		s.Append("done\n");
+		return s.ToString();
+	}
+
+	bool TakeFrames(Core::String& pending, Core::String& frame) {
+		bool took = false;
+		while (true) {
+			Core::StringView all = pending.View();
+			const int64 end = all.IndexOf('\n');
+			if (end < 0) {
+				// No header yet; anything long without one is noise (the shell's), dropped.
+				if (all.ByteLength() > 64) pending = Core::String("");
+				return took;
+			}
+			Core::StringView header = all.Substring(0, end);
+			if (!header.StartsWith(Core::StringView("F "))) {
+				pending = Core::String(all.Substring(end + 1, all.ByteLength() - end - 1));
+				continue;
+			}
+			const int64 bytes = IntOf(header.Substring(2, header.ByteLength() - 2));
+			if (bytes <= 0) {
+				pending = Core::String(all.Substring(end + 1, all.ByteLength() - end - 1));
+				continue;
+			}
+			if (all.ByteLength() - end - 1 < bytes) return took;
+			frame = Core::String(all.Substring(end + 1, bytes));
+			took = true;
+			pending = Core::String(all.Substring(end + 1 + bytes, all.ByteLength() - end - 1 - bytes));
+		}
+	}
+
+	Core::String ShellQuote(Core::StringView text) {
+		Core::StringBuilder out;
+		out.Append("'");
+		for (int64 i = 0; i < text.ByteLength(); ++i) {
+			if (text.ByteAt(i) == '\'') out.Append("'\\''");
+			else out.AppendByte(text.ByteAt(i));
+		}
+		out.Append("'");
+		return out.ToString();
+	}
+
+	Core::String DebugCommand(Core::StringView command) {
+		Core::StringBuilder out;
+		out.Append("command -v gdb >/dev/null 2>&1 || { echo 'debugging needs gdb in the sandbox: add the debug preset to its definition'; exit 127; }; ");
+		out.Append("exec gdb -q -batch -ex 'set pagination off' -ex 'set confirm off' -ex 'handle SIGPIPE nostop noprint' -ex run -ex 'echo \\n--- backtrace ---\\n' -ex 'thread apply all bt' --args sh -c ");
+		out.Append(ShellQuote((Core::String("exec ") + command).View()).View());
+		return out.ToString();
+	}
+
+	Core::String SignalText(int64 exitCode) {
+		if (exitCode <= 128 || exitCode > 192) return Core::String("");
+		const int64 signal = exitCode - 128;
+		const char* name = signal == 11 ? "SIGSEGV (a segmentation fault)" : signal == 6 ? "SIGABRT (aborted: an assert or abort())" : signal == 4 ? "SIGILL (an illegal instruction)"
+			: signal == 8 ? "SIGFPE (an arithmetic error)" : signal == 7 ? "SIGBUS (a bus error: misaligned or unmapped memory)" : signal == 9 ? "SIGKILL (killed)"
+			: signal == 15 ? "SIGTERM (terminated)" : signal == 13 ? "SIGPIPE (a broken pipe)" : signal == 5 ? "SIGTRAP (a trap or breakpoint)" : nullptr;
+		if (name != nullptr) return Core::String(name);
+		Core::StringBuilder out;
+		out.Append("signal ");
+		out.AppendInt(signal);
+		return out.ToString();
+	}
+
+	// --- input ------------------------------------------------------------------------------------------------------
+
+	static bool KeysWord(Core::StringView keys) {
+		if (keys.IsEmpty() || keys.ByteLength() > 200) return false;
+		for (int64 i = 0; i < keys.ByteLength(); ++i) {
+			const int32 c = keys.ByteAt(i);
+			const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '+' || c == ' ' || c == '-';
+			if (!ok) return false;
+		}
+		return true;
+	}
+
+	static Core::String Arg(Core::Array<Core::String>& args, Core::StringView value) {
+		args.Push(Core::String(value));
+		Core::StringBuilder ref;
+		ref.Append("\"${");
+		ref.AppendInt(args.Count());
+		ref.Append("}\"");
+		return ref.ToString();
+	}
+
+	static void Point(Core::StringBuilder& s, int64 x, int64 y) {
+		s.AppendInt(x);
+		s.Append(" ");
+		s.AppendInt(y);
+	}
+
+	static void SummaryPoint(Core::StringBuilder& summary, const char* what, int64 x, int64 y) {
+		if (summary.ByteLength() > 0) summary.Append("; ");
+		summary.Append(what);
+		summary.Append(" (");
+		summary.AppendInt(x);
+		summary.Append(", ");
+		summary.AppendInt(y);
+		summary.Append(")");
+	}
+
+	bool InputScript(const Serialization::DomNode& actions, int64 width, int64 height, Core::String& script, Core::Array<Core::String>& args, Core::String& summary, int64& lastX, int64& lastY, Core::String& problem) {
+		Core::StringBuilder s;
+		Core::StringBuilder said;
+		s.Append("export DISPLAY=:99\n");
+		lastX = -1;
+		lastY = -1;
+		if (actions.Kind() != Serialization::DomKind::Array || actions.Count() == 0) {
+			problem = Core::String("give actions: [{\"action\": \"click\", \"x\": 100, \"y\": 200}, ...]");
+			return false;
+		}
+		if (actions.Count() > 50) {
+			problem = Core::String("at most 50 actions a call");
+			return false;
+		}
+		for (int64 i = 0; i < actions.Count(); ++i) {
+			Serialization::DomNode a = actions.At(i);
+			Core::StringView kind = a.Member("action").AsView();
+			const bool pointed = kind == "click" || kind == "double_click" || kind == "right_click" || kind == "middle_click" || kind == "move" || kind == "drag" || kind == "scroll";
+			const int64 x = a.Member("x").AsInt();
+			const int64 y = a.Member("y").AsInt();
+			if (pointed) {
+				if (!a.Member("x").IsValid() || !a.Member("y").IsValid()) {
+					problem = (Core::String(kind) + " needs x and y (screen pixels)");
+					return false;
+				}
+				if (x < 0 || y < 0 || x >= width || y >= height) {
+					Core::StringBuilder why;
+					why.Append(kind);
+					why.Append(" at (");
+					Point(why, x, y);
+					why.Append(") is off the screen, which is ");
+					why.AppendInt(width);
+					why.Append("x");
+					why.AppendInt(height);
+					problem = why.ToString();
+					return false;
+				}
+			}
+			if (kind == "click" || kind == "double_click" || kind == "right_click" || kind == "middle_click") {
+				s.Append("xdotool mousemove --sync ");
+				Point(s, x, y);
+				s.Append(" click ");
+				if (kind == "double_click") s.Append("--repeat 2 --delay 80 ");
+				s.Append(kind == "right_click" ? "3" : kind == "middle_click" ? "2" : "1");
+				s.Append("\n");
+				SummaryPoint(said, kind == "double_click" ? "double-click" : kind == "right_click" ? "right-click" : kind == "middle_click" ? "middle-click" : "click", x, y);
+				lastX = x;
+				lastY = y;
+			}
+			else if (kind == "move") {
+				s.Append("xdotool mousemove --sync ");
+				Point(s, x, y);
+				s.Append("\n");
+				SummaryPoint(said, "move to", x, y);
+				lastX = x;
+				lastY = y;
+			}
+			else if (kind == "drag") {
+				const int64 tx = a.Member("to_x").AsInt();
+				const int64 ty = a.Member("to_y").AsInt();
+				if (!a.Member("to_x").IsValid() || !a.Member("to_y").IsValid() || tx < 0 || ty < 0 || tx >= width || ty >= height) {
+					problem = Core::String("drag needs to_x and to_y on the screen");
+					return false;
+				}
+				s.Append("xdotool mousemove --sync ");
+				Point(s, x, y);
+				s.Append(" mousedown 1\nsleep 0.05\nxdotool mousemove --sync ");
+				Point(s, (x + tx) / 2, (y + ty) / 2);
+				s.Append("\nsleep 0.05\nxdotool mousemove --sync ");
+				Point(s, tx, ty);
+				s.Append(" mouseup 1\n");
+				SummaryPoint(said, "drag from", x, y);
+				said.Append(" to (");
+				said.AppendInt(tx);
+				said.Append(", ");
+				said.AppendInt(ty);
+				said.Append(")");
+				lastX = tx;
+				lastY = ty;
+			}
+			else if (kind == "scroll") {
+				int64 amount = a.Member("amount").IsValid() ? a.Member("amount").AsInt() : 3;
+				if (amount == 0) amount = 3;
+				s.Append("xdotool mousemove --sync ");
+				Point(s, x, y);
+				s.Append(" click --repeat ");
+				s.AppendInt(amount < 0 ? -amount : amount);
+				s.Append(" --delay 30 ");
+				s.Append(amount < 0 ? "4" : "5");
+				s.Append("\n");
+				SummaryPoint(said, amount < 0 ? "scroll up" : "scroll down", x, y);
+				lastX = x;
+				lastY = y;
+			}
+			else if (kind == "type") {
+				Core::StringView text = a.Member("text").AsView();
+				if (text.IsEmpty()) {
+					problem = Core::String("type needs text");
+					return false;
+				}
+				s.Append("xdotool type --delay 12 -- ");
+				s.Append(Arg(args, text).View());
+				s.Append("\n");
+				if (said.ByteLength() > 0) said.Append("; ");
+				said.Append("type \"");
+				said.Append(text.ByteLength() > 40 ? text.Substring(0, 40) : text);
+				said.Append(text.ByteLength() > 40 ? "...\"" : "\"");
+			}
+			else if (kind == "key") {
+				Core::StringView keys = a.Member("keys").AsView().Trimmed();
+				if (!KeysWord(keys)) {
+					problem = Core::String("key needs keys as xdotool names them, a space between presses: \"ctrl+s\", \"Return\", \"alt+F4\", \"Tab Tab space\"");
+					return false;
+				}
+				s.Append("xdotool key --delay 40 -- ");
+				s.Append(keys);
+				s.Append("\n");
+				if (said.ByteLength() > 0) said.Append("; ");
+				said.Append("key ");
+				said.Append(keys);
+			}
+			else if (kind == "wait") {
+				int64 ms = a.Member("ms").AsInt();
+				if (ms < 0) ms = 0;
+				if (ms > 10000) ms = 10000;
+				s.Append("sleep ");
+				s.AppendInt(ms / 1000);
+				s.Append(".");
+				const int64 rest = ms % 1000;
+				if (rest < 100) s.Append("0");
+				if (rest < 10) s.Append("0");
+				s.AppendInt(rest);
+				s.Append("\n");
+				if (said.ByteLength() > 0) said.Append("; ");
+				said.Append("wait ");
+				said.AppendInt(ms);
+				said.Append(" ms");
+			}
+			else if (kind == "focus") {
+				Core::StringView window = a.Member("window").AsView();
+				if (window.IsEmpty()) {
+					problem = Core::String("focus needs window: a part of its title");
+					return false;
+				}
+				Core::String name = Arg(args, window);
+				s.Append("w=$(xdotool search --onlyvisible --name ");
+				s.Append(name.View());
+				s.Append(" | head -n 1); [ -n \"$w\" ] || { echo \"no window's title has \"");
+				s.Append(name.View());
+				s.Append("; exit 3; }; xdotool windowactivate --sync \"$w\" 2>/dev/null || xdotool windowfocus --sync \"$w\"\n");
+				if (said.ByteLength() > 0) said.Append("; ");
+				said.Append("focus \"");
+				said.Append(window);
+				said.Append("\"");
+			}
+			else {
+				problem = (Core::String("not an action: '") + kind) + "' (click, double_click, right_click, middle_click, move, drag, scroll, type, key, wait, focus)";
+				return false;
+			}
+		}
+		script = s.ToString();
+		summary = said.ToString();
+		return true;
+	}
+
+	Core::String ScreenshotScript(Core::StringView window, int64 x, int64 y, int64 width, int64 height) {
+		Core::StringBuilder s;
+		s.Append("export DISPLAY=:99\n");
+		if (!window.IsEmpty()) {
+			s.Append("w=$(xdotool search --onlyvisible --name \"$1\" | head -n 1); [ -n \"$w\" ] || { echo \"no window's title has $1\" >&2; exit 3; }\n");
+			s.Append("import -window \"$w\" png:-\n");
+		}
+		else if (width > 0 && height > 0) {
+			s.Append("import -window root -crop ");
+			s.AppendInt(width);
+			s.Append("x");
+			s.AppendInt(height);
+			s.Append("+");
+			s.AppendInt(x);
+			s.Append("+");
+			s.AppendInt(y);
+			s.Append(" +repage png:-\n");
+		}
+		else s.Append("import -window root png:-\n");
+		return s.ToString();
+	}
+}
