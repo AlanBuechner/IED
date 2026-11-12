@@ -427,7 +427,7 @@ namespace Sandbox
 		out.Append(notes.View());
 		if (call.m_Args.Member("build").AsBool()) {
 			Core::String said;
-			if (!s_Service->Control(call.m_Workspace, definition.m_Name.View(), Core::StringView("build"), call.m_Cancelled, said, problem)) {
+			if (!s_Service->Control(call.m_Workspace, definition.m_Name.View(), Core::StringView("build"), call.m_Cancelled, ByAi(call.m_ChatId.View()), said, problem)) {
 				out.Append("\nIts image did not build: ");
 				out.Append(problem.View());
 				IED::ToolResult failed = IED::ToolText(out.View());
@@ -460,7 +460,7 @@ namespace Sandbox
 		Serialization::DomNode vars = call.m_Args.Member("env");
 		if (vars.Kind() == Serialization::DomKind::Object)
 			for (int64 i = 0; i < vars.Count(); ++i) env.Push((Core::String(vars.KeyAt(i)) + "=") + vars.ValueAt(i).AsView());
-		RunOutcome outcome = s_Service->Exec(call.m_Workspace, name.View(), command.View(), call.m_Args.Member("cwd").AsView(), env, Seconds(call, c_RunDefaultSeconds), call.m_Cancelled);
+		RunOutcome outcome = s_Service->Exec(call.m_Workspace, name.View(), command.View(), call.m_Args.Member("cwd").AsView(), env, Seconds(call, c_RunDefaultSeconds), call.m_Cancelled, ByAi(call.m_ChatId.View()));
 		if (!outcome.m_Ran) {
 			IED::ToolResult failed = Failure(outcome.m_Problem.View());
 			failed.m_Source = Core::String("Sandbox ") + name.View();
@@ -506,7 +506,7 @@ namespace Sandbox
 		Strings(call.m_Args.Member("names"), names);
 		Core::Array<Core::String> defined = s_Service->Summaries(call.m_Workspace);
 		if (defined.IsEmpty()) return Failure(Core::StringView("the workspace has no sandboxes: sandbox_catalog, then sandbox_create"));
-		ValidationRecord record = s_Service->Validate(call.m_Workspace, names, call.m_Args.Member("command").AsView(), Seconds(call, c_RunDefaultSeconds), call.m_Cancelled);
+		ValidationRecord record = s_Service->Validate(call.m_Workspace, names, call.m_Args.Member("command").AsView(), Seconds(call, c_RunDefaultSeconds), call.m_Cancelled, ByAi(call.m_ChatId.View()));
 		IED::ToolResult result = IED::ToolText(ValidationText(record).View());
 		bool failed = false;
 		for (const ValidationRow& row : record.m_Rows)
@@ -523,7 +523,7 @@ namespace Sandbox
 		if (s_Service == nullptr) return NotActive();
 		Core::String said;
 		Core::String problem;
-		if (!s_Service->Control(call.m_Workspace, call.m_Args.Member("name").AsView(), call.m_Args.Member("action").AsView(), call.m_Cancelled, said, problem)) return Failure(problem.View());
+		if (!s_Service->Control(call.m_Workspace, call.m_Args.Member("name").AsView(), call.m_Args.Member("action").AsView(), call.m_Cancelled, ByAi(call.m_ChatId.View()), said, problem)) return Failure(problem.View());
 		return IED::ToolText(said.View());
 	}
 
@@ -533,11 +533,11 @@ namespace Sandbox
 		Core::StringBuilder out;
 		if (action == "start") {
 			Core::String problem;
-			if (!s_Service->StartEngine(call.m_Workspace.m_Id.View(), call.m_Cancelled, problem)) return Failure(problem.View());
+			if (!s_Service->StartEngine(call.m_Workspace.m_Id.View(), call.m_Cancelled, ByAi(call.m_ChatId.View()), problem)) return Failure(problem.View());
 		}
 		else if (action == "install_emulators") {
 			Core::String output;
-			const bool ok = s_Service->InstallEmulators(call.m_Workspace.m_Id.View(), output);
+			const bool ok = s_Service->InstallEmulators(call.m_Workspace.m_Id.View(), ByAi(call.m_ChatId.View()), output);
 			out.Append(TailLines(output.View(), 30, 4000).View());
 			out.Append("\n");
 			if (!ok) return Failure(out.View());

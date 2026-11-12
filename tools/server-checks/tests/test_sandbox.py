@@ -117,6 +117,7 @@ class SandboxTests(ChatCase):
 		self.assertIn("hello from x86_64, 64-bit, little-endian", texts)
 		self.assertIn("hello from aarch64, 64-bit, little-endian", texts, "the arm64 build ran under emulation")
 		self.assertTrue(os.path.isfile(os.path.join(self.repo, "build", "alpine-arm64", "hello")), "the build wrote into the mounted workspace")
+		self.assertEqual({"owner"}, {run["by"] for run in final["runs"]}, "the window's runs are the owner's")
 		boxes = {box["name"]: box for box in final["sandboxes"]}
 		self.assertTrue(boxes["alpine-arm64"]["imageBuilt"] and boxes["alpine-arm64"]["emulated"])
 		self.assertEqual("running", boxes["alpine"]["container"])
@@ -158,6 +159,8 @@ class SandboxTests(ChatCase):
 		self.assertIn("alp linux/amd64", results["r5"], "a run knows its sandbox and platform")
 		self.assertIn("Validation: 1 of 1 passed", results["v1"])
 		self.assertIn("no sandbox named nosuch; the workspace has alp", results["n1"])
+		runs = (await self.snapshot())["runs"]
+		self.assertTrue(runs and all(run["by"] == "ai" and run["chatId"] for run in runs), "the AI's runs name it and its chat: %r" % [(r["by"], r["chatId"], r["label"]) for r in runs])
 		system = self.model.requests()[-1]["body"]["messages"][0]["content"]
 		self.assertIn("sandbox_* tools check that this workspace's program works", system, "a workspace without sandboxes hears of them")
 		chat_id, _ = await self.chat(permission="auto")

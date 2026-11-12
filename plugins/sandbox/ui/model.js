@@ -1,4 +1,4 @@
-// model.js - what the Sandboxes window computes from the server's snapshot (topic sandbox:<wsId>, docs/34): each
+// model.js - what the Sandbox activity computes from the server's snapshot (topic sandbox:<wsId>, docs/34): each
 // sandbox's state as one word with its tone and icon, platform labels, a name for a new sandbox, the outputs of runs
 // kept across "changed" events. No DOM here, so the frontend's unit tests can check it.
 
@@ -98,6 +98,48 @@ export function appendOutput(outputs, runId, text, limit = 65536) {
 export function runOf(runs, sandbox) {
 	const mine = (runs || []).filter((run) => run.sandbox === sandbox);
 	return mine.find((run) => run.running) || mine[0] || null;
+}
+
+// Who started a run, for its row: {who: "AI" | "You" | "A plugin", ai, chat: the AI's chat's title or ""}.
+export function whoOf(run, chatTitles) {
+	if (!run) return { who: "", ai: false, chat: "" };
+	if (run.by === "ai") return { who: "AI", ai: true, chat: (run.chatId && chatTitles && chatTitles.get(run.chatId)) || "" };
+	if (run.by === "plugin") return { who: "A plugin", ai: false, chat: "" };
+	return { who: "You", ai: false, chat: "" };
+}
+
+// The AI's runs going now.
+export function aiRunning(runs) {
+	return (runs || []).filter((run) => run.running && run.by === "ai");
+}
+
+// The Sandbox activity's badge: how many runs the AI has going, null when none.
+export function activityBadge(runs) {
+	const ai = aiRunning(runs);
+	if (!ai.length) return null;
+	const names = [...new Set(ai.map((run) => run.sandbox || "Docker"))];
+	return { count: ai.length, tone: "info", title: "The AI is running " + (ai.length === 1 ? "a command" : ai.length + " commands") + " in " + names.join(", ") };
+}
+
+// The run the Activity view shows: the one picked (`shown`), else the newest going (the AI's first), else the newest.
+export function followedRun(runs, shown) {
+	const all = runs || [];
+	if (shown) {
+		const picked = all.find((run) => run.id === shown);
+		if (picked) return picked;
+	}
+	return all.find((run) => run.running && run.by === "ai") || all.find((run) => run.running) || all[0] || null;
+}
+
+// How long ago `ms` was, briefly: "now", "41 s ago", "3 min ago", "2 h ago", or the date.
+export function ago(ms, now) {
+	if (!(ms > 0)) return "";
+	const passed = (now || Date.now()) - ms;
+	if (passed < 5000) return "now";
+	if (passed < 60000) return Math.floor(passed / 1000) + " s ago";
+	if (passed < 3600000) return Math.floor(passed / 60000) + " min ago";
+	if (passed < 86400000) return Math.floor(passed / 3600000) + " h ago";
+	return new Date(ms).toLocaleDateString();
 }
 
 // How a run ended, in a word or two.

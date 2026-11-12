@@ -4,6 +4,17 @@ namespace Sandbox
 {
 	Core::String SandboxTopic(Core::StringView wsId) { return Core::String("sandbox:") + wsId; }
 
+	static RunOrigin Origin(const char* by, Core::StringView chatId) {
+		RunOrigin origin;
+		origin.m_By = Core::String(by);
+		origin.m_ChatId = Core::String(chatId);
+		return origin;
+	}
+
+	RunOrigin ByOwner() { return Origin("owner", Core::StringView("")); }
+	RunOrigin ByAi(Core::StringView chatId) { return Origin("ai", chatId); }
+	RunOrigin ByPlugin() { return Origin("plugin", Core::StringView("")); }
+
 	Core::String DurationText(int64 ms) {
 		Core::StringBuilder text;
 		if (ms < 1000) {
@@ -229,6 +240,8 @@ namespace Sandbox
 		json.BeginObject();
 		json.IntField("id", run->m_Id);
 		json.Field("sandbox", run->m_Sandbox.View());
+		json.Field("by", run->m_By.View());
+		json.Field("chatId", run->m_ChatId.View());
 		json.Field("kind", run->m_Kind.View());
 		json.Field("label", run->m_Label.View());
 		json.BoolField("running", run->m_Running);
@@ -582,7 +595,7 @@ namespace Sandbox
 
 	Process::Output SandboxService::Docker(const Core::Array<Core::String>& args, int32 timeoutMs) { return m_Engine->Run(args, timeoutMs); }
 
-	SandboxRun* SandboxService::BeginRun(Core::StringView wsId, Core::StringView sandbox, const char* kind, Core::StringView label) {
+	SandboxRun* SandboxService::BeginRun(Core::StringView wsId, Core::StringView sandbox, const char* kind, Core::StringView label, const RunOrigin& origin) {
 		SandboxRun* run = new SandboxRun();
 		{
 			IED::HostLock lock(*m_Context);
@@ -590,6 +603,8 @@ namespace Sandbox
 			m_NextRunId += 1;
 			run->m_Id = m_NextRunId;
 			run->m_Sandbox = Core::String(sandbox);
+			run->m_By = origin.m_By;
+			run->m_ChatId = origin.m_ChatId;
 			run->m_Kind = Core::String(kind);
 			run->m_Label = Core::String(label);
 			run->m_Running = true;
@@ -610,6 +625,7 @@ namespace Sandbox
 			header.Append("> [");
 			header.Append(sandbox.IsEmpty() ? Core::StringView("docker") : sandbox);
 			header.Append("] ");
+			if (origin.m_By == "ai") header.Append("(AI) ");
 			header.Append(label);
 			header.Append("\n");
 			m_Context->Output(wsId, Core::StringView(c_OutputSource), header.View());
@@ -760,7 +776,7 @@ namespace Sandbox
 				if (i > 0) said.Append(", ");
 				said.Append(engine.m_Platforms[i].View());
 			}
-			said.Append("): install QEMU's emulators first - sandbox_engine(action: \"install_emulators\"), or the Sandboxes window's Install emulators");
+			said.Append("): install QEMU's emulators first - sandbox_engine(action: \"install_emulators\"), or Install emulators on the Sandbox activity's New Sandbox page");
 			problem = said.ToString();
 			return false;
 		}
@@ -923,11 +939,11 @@ namespace Sandbox
 
 	// --- jobs ---------------------------------------------------------------------------------------------------------
 
-	RunOutcome SandboxService::Exec(const IED::Workspace& ws, Core::StringView name, Core::StringView command, Core::StringView cwd, const Core::Array<Core::String>& env, int64 seconds, const bool* cancelled) {
+	RunOutcome SandboxService::Exec(const IED::Workspace& ws, Core::StringView name, Core::StringView command, Core::StringView cwd, const Core::Array<Core::String>& env, int64 seconds, const bool* cancelled, const RunOrigin& origin) {
 		RunOutcome outcome;
 		SandboxState* state = nullptr;
 		if (!Prepare(ws, name, state, outcome.m_Problem)) return outcome;
-		SandboxRun* run = BeginRun(ws.m_Id.View(), name, "run", command);
+		SandboxRun* run = BeginRun(ws.m_Id.View(), name, "run", command, origin);
 		outcome.m_RunId = run->m_Id;
 		if (!Ensure(ws, state, true, false, run, cancelled, outcome.m_Prepared, outcome.m_Problem)) {
 			EndRun(ws.m_Id.View(), run, -1, Core::StringView(""), outcome.m_Problem.View());
@@ -971,7 +987,7 @@ namespace Sandbox
 		return outcome;
 	}
 
-	bool SandboxService::Control(const IED::Workspace& ws, Core::StringView name, Core::StringView action, const bool* cancelled, Core::String& said, Core::String& problem) {
+	bool SandboxService::Control(const IED::Workspace& ws, Core::StringView name, Core::StringView action, const bool* cancelled, const RunOrigin& origin, Core::String& said, Core::String& problem) {
 		const bool known = action == "build" || action == "rebuild" || action == "start" || action == "stop" || action == "restart" || action == "reset" || action == "remove" || action == "pull";
 		if (!known) {
 			problem = Core::String("not an action: build, rebuild, start, stop, restart, reset, remove or pull");
@@ -979,7 +995,7 @@ namespace Sandbox
 		}
 		SandboxState* state = nullptr;
 		if (!Prepare(ws, name, state, problem)) return false;
-		SandboxRun* run = BeginRun(ws.m_Id.View(), name, (Core::String(action)).CStr(), (Core::String(action) + " " + name).View());
+		SandboxRun* run = BeginRun(ws.m_Id.View(), name, (Core::String(action)).CStr(), (Core::String(action) + " " + name).View(), origin);
 		Core::String wsId = ws.m_Id;
 		Core::String prepared;
 		bool ok = true;
@@ -1046,7 +1062,7 @@ namespace Sandbox
 		return ok;
 	}
 
-	ValidationRecord SandboxService::Validate(const IED::Workspace& ws, const Core::Array<Core::String>& names, Core::StringView command, int64 seconds, const bool* cancelled) {
+	ValidationRecord SandboxService::Validate(const IED::Workspace& ws, const Core::Array<Core::String>& names, Core::StringView command, int64 seconds, const bool* cancelled, const RunOrigin& origin) {
 		ReadDefinitions(ws);
 		EngineInfo engine = m_Engine->Look(false);
 		Core::String native = NativePlatform(engine);
@@ -1093,7 +1109,7 @@ namespace Sandbox
 		IED::Workspace workspace = ws;
 		const int64 threads = workers < 1 ? 1 : workers > 4 ? 4 : workers;
 		for (int64 t = 0; t < threads; ++t) {
-			m_Context->StartThread([self, workspace, cursor, count, seconds, cancelled]() {
+			m_Context->StartThread([self, workspace, cursor, count, seconds, cancelled, origin]() {
 				while (true) {
 					int64 at = 0;
 					{
@@ -1120,7 +1136,7 @@ namespace Sandbox
 					if (!skip) {
 						self->Publish(workspace.m_Id.View());
 						Core::Array<Core::String> env;
-						RunOutcome outcome = self->Exec(workspace, sandbox.View(), line.View(), Core::StringView(""), env, seconds, cancelled);
+						RunOutcome outcome = self->Exec(workspace, sandbox.View(), line.View(), Core::StringView(""), env, seconds, cancelled, origin);
 						IED::HostLock lock(*self->m_Context);
 						ValidationRow& row = self->Of(workspace.m_Id.View())->m_Validation.m_Rows[at];
 						row.m_RunId = outcome.m_RunId;
@@ -1179,8 +1195,8 @@ namespace Sandbox
 		return false;
 	}
 
-	bool SandboxService::StartEngine(Core::StringView wsId, const bool* cancelled, Core::String& problem) {
-		SandboxRun* run = BeginRun(wsId, Core::StringView(""), "engine", Core::StringView("Start Docker Desktop"));
+	bool SandboxService::StartEngine(Core::StringView wsId, const bool* cancelled, const RunOrigin& origin, Core::String& problem) {
+		SandboxRun* run = BeginRun(wsId, Core::StringView(""), "engine", Core::StringView("Start Docker Desktop"), origin);
 		SandboxService* self = this;
 		Core::String id = Core::String(wsId);
 		DoneFlag* done = new DoneFlag();
@@ -1200,8 +1216,8 @@ namespace Sandbox
 		return ok;
 	}
 
-	bool SandboxService::InstallEmulators(Core::StringView wsId, Core::String& output) {
-		SandboxRun* run = BeginRun(wsId, Core::StringView(""), "emulators", Core::StringView("docker run --privileged --rm tonistiigi/binfmt --install all"));
+	bool SandboxService::InstallEmulators(Core::StringView wsId, const RunOrigin& origin, Core::String& output) {
+		SandboxRun* run = BeginRun(wsId, Core::StringView(""), "emulators", Core::StringView("docker run --privileged --rm tonistiigi/binfmt --install all"), origin);
 		const bool ok = m_Engine->InstallEmulators(output);
 		Append(wsId, run, output.View());
 		EndRun(wsId, run, ok ? 0 : 1, Core::StringView(""), ok ? Core::StringView("") : Core::StringView("installing the emulators failed"));
@@ -1209,7 +1225,7 @@ namespace Sandbox
 		return ok;
 	}
 
-	RunOutcome SandboxService::Pull(const IED::Workspace& ws, Core::StringView image, Core::StringView platform, const bool* cancelled) {
+	RunOutcome SandboxService::Pull(const IED::Workspace& ws, Core::StringView image, Core::StringView platform, const bool* cancelled, const RunOrigin& origin) {
 		RunOutcome outcome;
 		EngineInfo engine = m_Engine->Look(false);
 		if (engine.m_State != "ready") {
@@ -1224,7 +1240,7 @@ namespace Sandbox
 			args.Push(normal);
 		}
 		args.Push(pulled);
-		SandboxRun* run = BeginRun(ws.m_Id.View(), Core::StringView(""), "pull", (Core::String("docker pull ") + (normal.IsEmpty() ? Core::StringView("") : (normal + " ").View()) + pulled.View()).View());
+		SandboxRun* run = BeginRun(ws.m_Id.View(), Core::StringView(""), "pull", (Core::String("docker pull ") + (normal.IsEmpty() ? Core::StringView("") : (normal + " ").View()) + pulled.View()).View(), origin);
 		outcome.m_RunId = run->m_Id;
 		const int64 started = UnixMs();
 		Core::String stopped;

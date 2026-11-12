@@ -1,6 +1,6 @@
 // A workspace's sandboxes (docs/34): their definitions read from .ied/sandbox/, the images and containers Docker holds
-// for them, the jobs that build, start, stop and reset them, the commands run in them and the last validation. What the
-// Sandboxes window shows lives here, on the topic sandbox:<wsId>, so a closed browser loses nothing. State is under the
+// for them, the jobs that build, start, stop and reset them, the commands run in them (and who started each: the AI in
+// which chat, or the owner) and the last validation. What the Sandbox activity shows lives here, on the topic sandbox:<wsId>, so a closed browser loses nothing. State is under the
 // server's lock (IED::HostLock), so the pulled snapshot sees a change and its event together; docker runs outside it,
 // and a sandbox's own lock (m_Op) keeps two jobs from building or starting one sandbox at once.
 //
@@ -13,10 +13,24 @@ include "api/Plugin.ch"
 
 namespace Sandbox
 {
+	// Who started a run: "ai" (a chat's tool call, m_ChatId the chat), "owner" (the Sandbox activity) or "plugin" (a
+	// binding another plugin called).
+	class RunOrigin
+	{
+		public Core::String m_By;
+		public Core::String m_ChatId;
+	}
+
+	RunOrigin ByOwner();
+	RunOrigin ByAi(Core::StringView chatId);
+	RunOrigin ByPlugin();
+
 	class SandboxRun
 	{
 		public int64 m_Id;
 		public Core::String m_Sandbox;
+		public Core::String m_By;            // RunOrigin's
+		public Core::String m_ChatId;
 		public Core::String m_Kind;          // "run", "build", "start", "stop", "reset", "remove", "pull", "emulators", "engine"
 		public Core::String m_Label;         // the command, or what the job does
 		public bool m_Running;
@@ -122,20 +136,20 @@ namespace Sandbox
 
 		// A job on sandbox `name`: build, rebuild, start, stop, reset, remove or pull, run to its end on this thread.
 		// False with `problem`; `said` tells what was done.
-		public bool Control(const IED::Workspace& ws, Core::StringView name, Core::StringView action, const bool* cancelled, Core::String& said, Core::String& problem);
+		public bool Control(const IED::Workspace& ws, Core::StringView name, Core::StringView action, const bool* cancelled, const RunOrigin& origin, Core::String& said, Core::String& problem);
 		// Runs `command` in sandbox `name` - its image built and the sandbox started first when needed - and waits for it,
 		// at most `seconds` or until `cancelled`.
-		public RunOutcome Exec(const IED::Workspace& ws, Core::StringView name, Core::StringView command, Core::StringView cwd, const Core::Array<Core::String>& env, int64 seconds, const bool* cancelled);
+		public RunOutcome Exec(const IED::Workspace& ws, Core::StringView name, Core::StringView command, Core::StringView cwd, const Core::Array<Core::String>& env, int64 seconds, const bool* cancelled, const RunOrigin& origin);
 		// Runs `command` (or each sandbox's `validate`) in the sandboxes `names` (empty: all), sandbox.parallelRuns at a
 		// time, and records the matrix.
-		public ValidationRecord Validate(const IED::Workspace& ws, const Core::Array<Core::String>& names, Core::StringView command, int64 seconds, const bool* cancelled);
+		public ValidationRecord Validate(const IED::Workspace& ws, const Core::Array<Core::String>& names, Core::StringView command, int64 seconds, const bool* cancelled, const RunOrigin& origin);
 		// Stops run `runId` (its command inside the sandbox too); false when no such run is going.
 		public bool StopRun(Core::StringView wsId, int64 runId);
 		// Starts Docker Desktop, publishing the engine's state as it goes.
-		public bool StartEngine(Core::StringView wsId, const bool* cancelled, Core::String& problem);
-		public bool InstallEmulators(Core::StringView wsId, Core::String& output);
+		public bool StartEngine(Core::StringView wsId, const bool* cancelled, const RunOrigin& origin, Core::String& problem);
+		public bool InstallEmulators(Core::StringView wsId, const RunOrigin& origin, Core::String& output);
 		// Downloads `image` for `platform` (a catalog version), its output as a run of no sandbox.
-		public RunOutcome Pull(const IED::Workspace& ws, Core::StringView image, Core::StringView platform, const bool* cancelled);
+		public RunOutcome Pull(const IED::Workspace& ws, Core::StringView image, Core::StringView platform, const bool* cancelled, const RunOrigin& origin);
 		// Removes a downloaded image.
 		public bool RemoveImage(Core::StringView image, Core::String& said);
 
@@ -154,7 +168,7 @@ namespace Sandbox
 		private bool Ensure(const IED::Workspace& ws, SandboxState* state, bool start, bool rebuild, SandboxRun* run, const bool* cancelled, Core::String& prepared, Core::String& problem);
 		private bool BuildImage(const IED::Workspace& ws, SandboxState* state, bool noCache, SandboxRun* run, const bool* cancelled, Core::String& problem);
 		private bool StartContainer(const IED::Workspace& ws, SandboxState* state, SandboxRun* run, Core::String& problem);
-		private SandboxRun* BeginRun(Core::StringView wsId, Core::StringView sandbox, const char* kind, Core::StringView label);
+		private SandboxRun* BeginRun(Core::StringView wsId, Core::StringView sandbox, const char* kind, Core::StringView label, const RunOrigin& origin);
 		private void EndRun(Core::StringView wsId, SandboxRun* run, int64 exitCode, Core::StringView stopped, Core::StringView problem);
 		private void Append(Core::StringView wsId, SandboxRun* run, Core::StringView text);
 		private int64 Stream(Core::StringView wsId, SandboxRun* run, const Core::Array<Core::String>& args, int64 deadlineMs, const bool* cancelled, Core::StringView container, Core::String& stopped);

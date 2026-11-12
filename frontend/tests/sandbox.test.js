@@ -3,7 +3,8 @@
 
 import { test, assertEqual } from "./harness.js";
 import {
-	appendOutput, duration, enginePlatforms, keepOutputs, runOf, runResult, sandboxState, shortPlatform, suggestName, validName, validationOf, validationSummary,
+	activityBadge, ago, aiRunning, appendOutput, duration, enginePlatforms, followedRun, keepOutputs, runOf, runResult, sandboxState, shortPlatform, suggestName,
+	validName, validationOf, validationSummary, whoOf,
 } from "/plugins/ied.sandbox/ui/model.js";
 
 const READY = { state: "ready", platforms: [{ platform: "linux/amd64", native: true }, { platform: "linux/arm64", native: false }, { platform: "linux/riscv64", native: false }] };
@@ -69,4 +70,29 @@ test("sandbox: run outputs across snapshots and events", () => {
 	assertEqual(runResult(runs[0]), "exit 2");
 	assertEqual(runResult({ running: false, stopped: "stopped" }), "stopped");
 	assertEqual(runResult({ running: false, problem: "no docker", exitCode: -1 }), "failed");
+});
+
+test("sandbox: who started a run, and what the AI is doing", () => {
+	const titles = new Map([["c1", "Fix endianness"]]);
+	assertEqual(whoOf({ by: "ai", chatId: "c1" }, titles), { who: "AI", ai: true, chat: "Fix endianness" });
+	assertEqual(whoOf({ by: "ai", chatId: "c9" }, titles).chat, "", "a chat not known yet");
+	assertEqual(whoOf({ by: "owner" }, titles).who, "You");
+	assertEqual(whoOf({ by: "plugin" }, titles).who, "A plugin");
+	const runs = [
+		{ id: 9, sandbox: "alpine", by: "owner", running: true },
+		{ id: 8, sandbox: "alpine-arm64", by: "ai", running: true },
+		{ id: 7, sandbox: "alpine-s390x", by: "ai", running: true },
+		{ id: 6, sandbox: "alpine", by: "ai", running: false },
+	];
+	assertEqual(aiRunning(runs).map((r) => r.id), [8, 7]);
+	assertEqual(activityBadge(runs), { count: 2, tone: "info", title: "The AI is running 2 commands in alpine-arm64, alpine-s390x" });
+	assertEqual(activityBadge([runs[0], runs[3]]), null, "no badge while the AI runs nothing");
+	assertEqual(followedRun(runs, null).id, 8, "the AI's newest going run first");
+	assertEqual(followedRun(runs, 6).id, 6, "a run picked stays");
+	assertEqual(followedRun(runs, 99).id, 8, "a picked run gone: follow again");
+	assertEqual(followedRun([runs[3]], null).id, 6, "nothing going: the newest");
+	assertEqual(followedRun([], null), null);
+	assertEqual(ago(1000000, 1002000), "now");
+	assertEqual(ago(1000000, 1041000), "41 s ago");
+	assertEqual(ago(1000000, 1000000 + 3 * 60000), "3 min ago");
 });

@@ -49,7 +49,7 @@ containers and their runs belong to that workspace. It needs `process.spawn` (it
 | Service: each workspace's sandboxes, their state, the job queue, runs and their output, validation | `code/SandboxService.ch` |
 | AI tools, the system-message section | `code/SandboxTools.ch` |
 | Protocol methods (`ied.sandbox/*`), bindings, the entry | `code/SandboxPlugin.cf` |
-| The Sandboxes window | `ui/` |
+| The Sandbox activity: the Sandboxes, Activity and Validation windows, a sandbox's page, New Sandbox | `ui/` |
 | The skill | `skills/sandbox/SKILL.md` |
 
 ### The engine
@@ -205,29 +205,40 @@ names the tools; the `sandbox` skill teaches the loop: look at the engine, pick 
 a failure, fix it on the host, validate again on every sandbox - and the caveats (emulation speed, build folders, the
 network being off, GUI programs needing `gui`, what cannot be a sandbox).
 
-## The Sandboxes window
+## The Sandbox activity
 
-A tab (`sandbox:manager`, View > Sandboxes, the command palette, Tools > Sandboxes...) laid out like Visual Studio's
-tool windows: dense rows, no decoration, grayscale with the semantic accents only (running = green, building =
-info blue, failed = red).
+Sandbox has a button of its own in the sidebar (after GPU), a dock host like the Profiler's (owner, 2026-11-11: "it
+should be its own tab in the side bar where i can see what the AI is doing in the sandbox"; it was a tab of the
+editor's well before). Laid out like Visual Studio's tool windows: dense rows, no decoration, grayscale with the
+semantic accents only - the AI's accent for what the AI started, running and pass green, busy blue, failed red.
 
-- **Engine strip** at the top: Docker's state and version, the platforms it runs, and the one action the state needs
-  (Start Docker, Install emulators, how to install Docker).
-- **Sandboxes list**: name, OS and version, platform (with "emulated"), state, last validation result; a toolbar with
-  New, Build, Start, Stop, Reset, Terminal, Validate, Remove for the selection, and Validate All.
-- **Details** of the selected sandbox: its definition (open `sandbox.json` in the editor), image and container, and the
-  output of its current or last job.
-- **New Sandbox** form: operating system and version from the catalog (downloaded ones marked), platform (the
-  version's platforms the engine runs; emulated marked), presets as checkboxes, extra packages, network, name; Create
-  writes the definition, Create and Build also builds it.
-- **Validation** matrix: the last validation's rows, each failing one opening its output.
+- **Sandboxes** (a tool window, docked left): Docker's state and version with the one action the state needs (Start
+  Docker, how to install Docker), the platforms it runs (native ones marked), New and Validate All, then the sandboxes -
+  name, system, platform ("emulated"), state, the last validation's result, and an **AI** mark while the AI runs
+  something in one. A sandbox opens as a document of its own.
+- **Activity** (a tool window in the document well, where the activity opens): **what the AI is doing.** A strip on
+  top says what runs now and who started it ("The AI ("Fix the packer") is running `make test` in alpine-s390x"); the
+  runs, newest first, each with who started it - **AI** with its chat, **You**, or a plugin - its sandbox, command,
+  state and time, filtered by All / AI / You; the console shows the run picked, else follows the newest one going (the
+  AI's first), its output streaming in, with Stop and **Open chat** (the chat the AI ran it from).
+- **Validation** (a tool window in the document well): the last validation's pass/fail matrix, a failing row's last
+  lines under it; a row shows its run in Activity.
+- **A sandbox** (`sandbox:box/<name>`, a document): its actions (Build, Start, Stop, Terminal, Run..., Validate, Reset,
+  Remove, `sandbox.json`), its definition, image and container, and its runs with the console.
+- **New Sandbox** (`sandbox:new`, a document): operating system and version from the catalog (downloaded ones marked,
+  Download), platform (the version's platforms the engine runs; emulated marked; Install emulators when Docker lacks
+  one), presets as checkboxes, extra packages, the validate command, network, name; Create writes the definition, Create
+  and Build also builds it.
 
-On a phone the list and the details stack, and the toolbar folds into a menu. Everything shown is the server's topic
-`sandbox:<wsId>`; the browser holds nothing.
+The sidebar button carries a badge - how many commands the AI is running in sandboxes - so the owner sees the AI at
+work from any activity. Every run records who started it (`by`: `ai` with the chat's id, `owner`, `plugin`), and the
+Output window's Sandbox source marks the AI's with "(AI)". On a phone the activity's windows are panes; Activity shows
+the runs, then a run's console. Everything shown is the server's topic `sandbox:<wsId>`, shared by the views through
+one subscription; the browser holds nothing, and a run goes on with every browser closed.
 
 ## Protocol and bindings
 
-Topic `sandbox:<wsId>`: snapshot and `changed` events `{engine, sandboxes: [...], queue, busy, runs: [...], validation}`.
+Topic `sandbox:<wsId>`: snapshot and `changed` events `{wsId, root, key, engine, dockerProblem, sandboxes: [...], runs: [{id, sandbox, by, chatId, kind, label, running, exitCode, stopped, problem, startedMs, endedMs, output?}], validation}` (outputs only in the pulled snapshot, the newest runs'); `output` events `{runId, text}`.
 Methods (the window's, each with `wsId`; a job answers `{queued}` at once and goes on on a thread of the plugin's):
 `ied.sandbox/state` (the snapshot, and a fresh look at Docker), `ied.sandbox/catalog`, `ied.sandbox/create`,
 `ied.sandbox/control {name, action}`, `ied.sandbox/run {name, command}`, `ied.sandbox/validate {names?, command?}`,

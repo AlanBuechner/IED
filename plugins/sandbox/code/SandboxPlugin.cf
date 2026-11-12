@@ -1,5 +1,5 @@
 // The ied.sandbox plugin's entry (runtime.entry "Sandbox::Activate", docs/34): one SandboxService per workspace server
-// behind the Sandboxes window's methods (ied.sandbox/*, each answered at once, its job on a thread of its own and its
+// behind the Sandbox activity's methods (ied.sandbox/*, each answered at once, its job on a thread of its own and its
 // progress on the topic sandbox:<wsId>), the sandbox.* bindings and the AI tools (SandboxTools.cf).
 
 include "SandboxService.ch"
@@ -68,7 +68,7 @@ namespace Sandbox
 				service->Background([service, ws, name]() {
 					Core::String said;
 					Core::String failed;
-					service->Control(ws, name.View(), Core::StringView("build"), nullptr, said, failed);
+					service->Control(ws, name.View(), Core::StringView("build"), nullptr, ByOwner(), said, failed);
 				});
 			}
 			IED::JsonWriter json;
@@ -85,7 +85,7 @@ namespace Sandbox
 			service->Background([service, ws, name, action]() {
 				Core::String said;
 				Core::String problem;
-				if (!service->Control(ws, name.View(), action.View(), nullptr, said, problem) && !problem.IsEmpty()) service->Scan(ws.m_Id.View(), true);
+				if (!service->Control(ws, name.View(), action.View(), nullptr, ByOwner(), said, problem) && !problem.IsEmpty()) service->Scan(ws.m_Id.View(), true);
 			});
 			return Queued();
 		});
@@ -97,7 +97,7 @@ namespace Sandbox
 			const int64 seconds = request.m_Params.Int("timeoutSeconds", 1800);
 			service->Background([service, ws, name, command, seconds]() {
 				Core::Array<Core::String> env;
-				service->Exec(ws, name.View(), command.View(), Core::StringView(""), env, seconds, nullptr);
+				service->Exec(ws, name.View(), command.View(), Core::StringView(""), env, seconds, nullptr, ByOwner());
 			});
 			return Queued();
 		});
@@ -106,7 +106,7 @@ namespace Sandbox
 			Core::Array<Core::String> names = StringsOf(request.m_Params.Field("names"));
 			Core::String command = request.m_Params.Str("command", Core::StringView(""));
 			const int64 seconds = request.m_Params.Int("timeoutSeconds", 1800);
-			service->Background([service, ws, names, command, seconds]() { service->Validate(ws, names, command.View(), seconds, nullptr); });
+			service->Background([service, ws, names, command, seconds]() { service->Validate(ws, names, command.View(), seconds, nullptr, ByOwner()); });
 			return Queued();
 		});
 		Register(context, "ied.sandbox/stopRun", [service](const IED::Request& request) -> Core::String {
@@ -122,12 +122,12 @@ namespace Sandbox
 			if (action == "start")
 				service->Background([service, wsId]() {
 					Core::String problem;
-					service->StartEngine(wsId.View(), nullptr, problem);
+					service->StartEngine(wsId.View(), nullptr, ByOwner(), problem);
 				});
 			else if (action == "emulators")
 				service->Background([service, wsId]() {
 					Core::String output;
-					service->InstallEmulators(wsId.View(), output);
+					service->InstallEmulators(wsId.View(), ByOwner(), output);
 				});
 			else if (action == "refresh")
 				service->Background([service, wsId, trusted]() {
@@ -142,7 +142,7 @@ namespace Sandbox
 			Core::String image = request.m_Params.Str("image", Core::StringView(""));
 			Core::String platform = request.m_Params.Str("platform", Core::StringView(""));
 			if (image.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("name the image"));
-			service->Background([service, ws, image, platform]() { service->Pull(ws, image.View(), platform.View(), nullptr); });
+			service->Background([service, ws, image, platform]() { service->Pull(ws, image.View(), platform.View(), nullptr, ByOwner()); });
 			return Queued();
 		});
 		Register(context, "ied.sandbox/removeImage", [service](const IED::Request& request) -> Core::String {
@@ -170,7 +170,7 @@ namespace Sandbox
 			if (command.View().Trimmed().IsEmpty()) return IED::Refusal(Core::StringView("give a command"));
 			service->Background([service, ws, name, command, cwd, seconds]() {
 				Core::Array<Core::String> env;
-				service->Exec(ws, name.View(), command.View(), cwd.View(), env, seconds, nullptr);
+				service->Exec(ws, name.View(), command.View(), cwd.View(), env, seconds, nullptr, ByPlugin());
 			});
 			return IED::Answer(Core::StringView("{\"queued\":true}"));
 		});

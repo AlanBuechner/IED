@@ -3,7 +3,10 @@
 // processors) - without touching this machine. A catalog of systems to download and presets of packages; committed
 // definitions in .ied/sandbox/<name>/sandbox.json; a validation matrix; terminals into each sandbox; the AI's sandbox_*
 // tools and the sandbox skill. Its server code (code/) is compiled into the server and runs in each workspace server;
-// its UI module draws the Sandboxes window.
+// its UI module draws the Sandbox activity: an activity of the sidebar of its own (owner, 2026-11-11: "it should be its
+// own tab in the side bar where i can see what the AI is doing in the sandbox") - the Sandboxes window beside a document
+// well that shows Activity (what runs, who started it: the AI and its chat, or the owner) and Validation; a sandbox and
+// New Sandbox open as documents there.
 {
 	"manifestVersion": 1,
 	"id": "ied.sandbox",
@@ -23,8 +26,16 @@
 		"outputLinks": [
 			{ "id": "sandbox-path", "regexp": "/workspace/([^\\s():<>\"'|*?]+?\\.[A-Za-z0-9_+-]+):(\\d+)(?::(\\d+))?", "file": 1, "line": 2, "column": 3 }
 		],
+		"activities": [
+			{ "id": "ied.sandbox", "title": "Sandbox", "icon": "$(vm)", "order": 50, "documents": ["sandbox"], "emptyWell": ["ied.sandbox.open", "ied.sandbox.new"] }
+		],
+		"toolWindows": [
+			{ "id": "ied.sandbox.list", "title": "Sandboxes", "icon": "$(vm)", "view": "SandboxList", "defaultDock": "left", "activity": "ied.sandbox" },
+			{ "id": "ied.sandbox.activity", "title": "Activity", "icon": "$(output)", "view": "SandboxActivity", "defaultDock": "document", "activity": "ied.sandbox" },
+			{ "id": "ied.sandbox.validation", "title": "Validation", "icon": "$(beaker)", "view": "SandboxValidation", "defaultDock": "document", "activity": "ied.sandbox", "phoneNav": false }
+		],
 		"commands": [
-			{ "id": "ied.sandbox.open", "title": "Sandboxes", "category": "View", "icon": "$(vm)" },
+			{ "id": "ied.sandbox.open", "title": "Sandbox Activity", "category": "View", "icon": "$(vm)" },
 			{ "id": "ied.sandbox.new", "title": "New Sandbox...", "category": "Sandbox", "icon": "$(add)" },
 			{ "id": "ied.sandbox.validateAll", "title": "Validate in All Sandboxes", "category": "Sandbox", "icon": "$(beaker)" }
 		],
@@ -39,7 +50,7 @@
 		},
 		"bindings": {
 			"provides": [
-				{ "name": "sandbox.list", "version": "1", "kind": "function", "description": "A workspace's sandboxes as the Sandboxes window shows them: {wsId} -> the topic sandbox:<wsId>'s snapshot {engine, sandboxes: [{name, os, image, platform, emulated, imageBuilt, container, ...}], runs, validation}." },
+				{ "name": "sandbox.list", "version": "1", "kind": "function", "description": "A workspace's sandboxes as the Sandbox activity shows them: {wsId} -> the topic sandbox:<wsId>'s snapshot {engine, sandboxes: [{name, os, image, platform, emulated, imageBuilt, container, ...}], runs, validation}." },
 				{ "name": "sandbox.run", "version": "1", "kind": "function", "description": "Runs a shell command in a sandbox (its image built and the sandbox started first when needed): {wsId, name, command, cwd?, timeoutSeconds?} -> {queued}; its output and end are on the topic sandbox:<wsId> (\"output\" and \"changed\" events)." }
 			]
 		},
@@ -108,7 +119,7 @@
 			},
 			{
 				"name": "sandbox_run",
-				"description": "Run a shell command (sh -lc) in a sandbox and wait for it: its image is built and the sandbox started first when needed (said in the result). The workspace is /workspace inside, read-write except .ied/; cwd is workspace-relative; IED_SANDBOX and IED_PLATFORM name the sandbox and its platform. Answers the exit code, the time and the output's end; the full output is in the Output window's Sandbox source. Example: sandbox_run(name: \"alpine\", command: \"make test\").",
+				"description": "Run a shell command (sh -lc) in a sandbox and wait for it: its image is built and the sandbox started first when needed (said in the result). The workspace is /workspace inside, read-write except .ied/; cwd is workspace-relative; IED_SANDBOX and IED_PLATFORM name the sandbox and its platform. Answers the exit code, the time and the output's end. The owner watches it live in the Sandbox activity (the sidebar), marked as yours with this chat. Example: sandbox_run(name: \"alpine\", command: \"make test\").",
 				"class": "exec",
 				"group": "sandbox",
 				"inputSchema": {
@@ -130,7 +141,7 @@
 			},
 			{
 				"name": "sandbox_validate",
-				"description": "Does it work there? Runs one command - command, else each sandbox's own validate - in several sandboxes (names, else all), two at a time, and answers a pass/fail matrix with each failure's last lines. The owner sees the same matrix in the Sandboxes window. Build into build/$IED_SANDBOX (each run has IED_SANDBOX, the sandbox's name): the sandboxes share the workspace and run at once. Example: sandbox_validate(command: \"cmake -B build/$IED_SANDBOX && cmake --build build/$IED_SANDBOX && ctest --test-dir build/$IED_SANDBOX --output-on-failure\").",
+				"description": "Does it work there? Runs one command - command, else each sandbox's own validate - in several sandboxes (names, else all), two at a time, and answers a pass/fail matrix with each failure's last lines. The owner watches each run live in the Sandbox activity and sees the same matrix there. Build into build/$IED_SANDBOX (each run has IED_SANDBOX, the sandbox's name): the sandboxes share the workspace and run at once. Example: sandbox_validate(command: \"cmake -B build/$IED_SANDBOX && cmake --build build/$IED_SANDBOX && ctest --test-dir build/$IED_SANDBOX --output-on-failure\").",
 				"class": "exec",
 				"group": "sandbox",
 				"inputSchema": {
