@@ -1,0 +1,421 @@
+include "SandboxDefinition.ch"
+
+namespace Sandbox
+{
+	static bool IsNameByte(int32 c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'; }
+
+	bool ValidName(Core::StringView name) {
+		if (name.IsEmpty() || name.ByteLength() > 40 || name.ByteAt(0) == '-') return false;
+		for (int64 i = 0; i < name.ByteLength(); ++i)
+			if (!IsNameByte(name.ByteAt(i))) return false;
+		return true;
+	}
+
+	// A package name a package manager takes: letters, digits and . _ + : = @ / - (versions and repositories included);
+	// nothing a shell would read.
+	static bool ValidPackage(Core::StringView name) {
+		if (name.IsEmpty() || name.ByteAt(0) == '-') return false;
+		for (int64 i = 0; i < name.ByteLength(); ++i) {
+			const int32 c = name.ByteAt(i);
+			const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '+' || c == ':' || c == '=' || c == '@' || c == '/' || c == '-';
+			if (!ok) return false;
+		}
+		return true;
+	}
+
+	static bool StringList(const Serialization::DomNode& node, const char* field, Core::Array<Core::String>& list, Core::String& problem) {
+		if (!node.IsValid() || node.IsNull()) return true;
+		if (node.Kind() != Serialization::DomKind::Array) {
+			problem = (Core::String(field) + " must be a list of strings");
+			return false;
+		}
+		for (int64 i = 0; i < node.Count(); ++i) {
+			if (node.At(i).Kind() != Serialization::DomKind::String) {
+				problem = (Core::String(field) + " must be a list of strings");
+				return false;
+			}
+			list.Push(Core::String(node.At(i).AsView()));
+		}
+		return true;
+	}
+
+	bool ParseDefinition(Core::StringView name, Core::StringView json, SandboxDefinition& definition, Core::String& problem) {
+		definition.m_Name = Core::String(name);
+		definition.m_Network = Core::String("none");
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJsonc(json, *doc);
+		if (!read.Ok()) {
+			Core::StringBuilder said;
+			said.Append("sandbox.json does not parse at line ");
+			said.AppendInt(read.line);
+			said.Append(": ");
+			said.Append(read.error);
+			problem = said.ToString();
+			return false;
+		}
+		Serialization::DomNode root = read.root;
+		if (root.Kind() != Serialization::DomKind::Object) {
+			problem = Core::String("sandbox.json must be an object");
+			return false;
+		}
+		definition.m_Os = Core::String(root.Member("os").AsView().Trimmed());
+		definition.m_Image = Core::String(root.Member("image").AsView().Trimmed());
+		definition.m_Platform = NormalPlatform(root.Member("platform").AsView());
+		definition.m_Validate = Core::String(root.Member("validate").AsView());
+		definition.m_Description = Core::String(root.Member("description").AsView());
+		if (!StringList(root.Member("presets"), "presets", definition.m_Presets, problem)) return false;
+		if (!StringList(root.Member("packages"), "packages", definition.m_Packages, problem)) return false;
+		Serialization::DomNode setup = root.Member("setup");
+		if (setup.Kind() == Serialization::DomKind::String) definition.m_Setup.Push(Core::String(setup.AsView()));
+		else if (!StringList(setup, "setup", definition.m_Setup, problem)) return false;
+		Serialization::DomNode env = root.Member("env");
+		if (env.IsValid() && !env.IsNull()) {
+			if (env.Kind() != Serialization::DomKind::Object) {
+				problem = Core::String("env must be an object of names to values");
+				return false;
+			}
+			for (int64 i = 0; i < env.Count(); ++i) definition.m_Env.Push((Core::String(env.KeyAt(i)) + "=") + env.ValueAt(i).AsView());
+		}
+		Serialization::DomNode network = root.Member("network");
+		if (network.IsValid() && !network.IsNull()) {
+			if (network.AsView() != "none" && network.AsView() != "full") {
+				problem = Core::String("network must be \"none\" or \"full\"");
+				return false;
+			}
+			definition.m_Network = Core::String(network.AsView());
+		}
+		definition.m_Cpus = root.Member("cpus").AsInt();
+		definition.m_MemoryGiB = root.Member("memoryGiB").AsInt();
+		if (definition.m_Cpus < 0 || definition.m_Cpus > 256 || definition.m_MemoryGiB < 0 || definition.m_MemoryGiB > 1024) {
+			problem = Core::String("cpus and memoryGiB must be positive");
+			return false;
+		}
+		for (const Core::String& package : definition.m_Packages)
+			if (!ValidPackage(package.View())) {
+				problem = (Core::String("not a package name: '") + package.View()) + "'";
+				return false;
+			}
+		if (definition.m_Os.IsEmpty() && definition.m_Image.IsEmpty()) {
+			problem = Core::String("name an operating system (\"os\": \"ubuntu:24.04\") or an image");
+			return false;
+		}
+		return true;
+	}
+
+	static void JsonString(Core::StringBuilder& out, Core::StringView text) { Serialization::WriteJsonString(text, &out); }
+
+	static void Member(Core::StringBuilder& out, bool& first, const char* key) {
+		out.Append(first ? "\n\t" : ",\n\t");
+		first = false;
+		JsonString(out, Core::StringView(key));
+		out.Append(": ");
+	}
+
+	static void ListMember(Core::StringBuilder& out, bool& first, const char* key, const Core::Array<Core::String>& list) {
+		if (list.IsEmpty()) return;
+		Member(out, first, key);
+		out.Append("[");
+		for (int64 i = 0; i < list.Count(); ++i) {
+			if (i > 0) out.Append(", ");
+			JsonString(out, list[i].View());
+		}
+		out.Append("]");
+	}
+
+	Core::String DefinitionJson(const SandboxDefinition& definition) {
+		Core::StringBuilder out;
+		bool first = true;
+		out.Append("{");
+		if (!definition.m_Description.IsEmpty()) {
+			Member(out, first, "description");
+			JsonString(out, definition.m_Description.View());
+		}
+		if (!definition.m_Os.IsEmpty()) {
+			Member(out, first, "os");
+			JsonString(out, definition.m_Os.View());
+		}
+		if (!definition.m_Image.IsEmpty()) {
+			Member(out, first, "image");
+			JsonString(out, definition.m_Image.View());
+		}
+		if (!definition.m_Platform.IsEmpty()) {
+			Member(out, first, "platform");
+			JsonString(out, definition.m_Platform.View());
+		}
+		ListMember(out, first, "presets", definition.m_Presets);
+		ListMember(out, first, "packages", definition.m_Packages);
+		ListMember(out, first, "setup", definition.m_Setup);
+		if (!definition.m_Env.IsEmpty()) {
+			Member(out, first, "env");
+			out.Append("{");
+			for (int64 i = 0; i < definition.m_Env.Count(); ++i) {
+				Core::StringView pair = definition.m_Env[i].View();
+				const int64 equals = pair.IndexOf('=');
+				out.Append(i > 0 ? ", " : " ");
+				JsonString(out, equals < 0 ? pair : pair.Substring(0, equals));
+				out.Append(": ");
+				JsonString(out, equals < 0 ? Core::StringView("") : pair.Substring(equals + 1, pair.ByteLength() - equals - 1));
+			}
+			out.Append(" }");
+		}
+		if (!definition.m_Validate.IsEmpty()) {
+			Member(out, first, "validate");
+			JsonString(out, definition.m_Validate.View());
+		}
+		Member(out, first, "network");
+		JsonString(out, definition.m_Network.IsEmpty() ? Core::StringView("none") : definition.m_Network.View());
+		if (definition.m_Cpus > 0) {
+			Member(out, first, "cpus");
+			out.AppendInt(definition.m_Cpus);
+		}
+		if (definition.m_MemoryGiB > 0) {
+			Member(out, first, "memoryGiB");
+			out.AppendInt(definition.m_MemoryGiB);
+		}
+		out.Append("\n}\n");
+		return out.ToString();
+	}
+
+	static Core::String Joined(const Core::Array<Core::String>& words) {
+		Core::StringBuilder text;
+		for (const Core::String& word : words) {
+			if (text.ByteLength() > 0) text.Append(" ");
+			text.Append(word.View());
+		}
+		return text.ToString();
+	}
+
+	Core::String InstallCommand(Core::StringView manager, const Core::Array<Core::String>& packages) {
+		Core::String names = Joined(packages);
+		if (manager == "apt")
+			return (Core::String("export DEBIAN_FRONTEND=noninteractive && apt-get update && apt-get install -y --no-install-recommends ca-certificates ") + names.View()) + " && rm -rf /var/lib/apt/lists/*";
+		if (manager == "dnf") return (Core::String("dnf install -y --setopt=install_weak_deps=False ") + names.View()) + " && dnf clean all";
+		if (manager == "yum") return (Core::String("yum install -y ") + names.View()) + " && yum clean all";
+		if (manager == "apk") return Core::String("apk add --no-cache ") + names.View();
+		if (manager == "pacman") return (Core::String("pacman -Syu --noconfirm --needed ") + names.View()) + " && rm -rf /var/cache/pacman/pkg/*";
+		if (manager == "zypper") return (Core::String("zypper --non-interactive refresh && zypper --non-interactive install --no-recommends ") + names.View()) + " && zypper clean --all";
+		return Core::String("");
+	}
+
+	Core::String MirrorImage(Core::StringView image, Core::StringView mirror) {
+		Core::StringView prefix = mirror.Trimmed();
+		while (prefix.EndsWith(Core::StringView("/"))) prefix = prefix.Substring(0, prefix.ByteLength() - 1);
+		if (prefix.IsEmpty()) return Core::String(image);
+		Core::StringView name = image;
+		if (name.StartsWith(Core::StringView("docker.io/"))) name = name.Substring(10, name.ByteLength() - 10);
+		if (name.StartsWith(Core::StringView("library/"))) name = name.Substring(8, name.ByteLength() - 8);
+		if (name.IndexOf('/') >= 0) return Core::String(image);
+		return (Core::String(prefix) + "/") + name;
+	}
+
+	Core::String ShortDigest(Core::StringView text, int64 digits) {
+		Crypto::Sha256Digest digest = Crypto::Sha256((const void*)text.Data(), text.ByteLength());
+		Core::String hex = digest.ToHex();
+		return Core::String(hex.View().Substring(0, digits));
+	}
+
+	Core::String WorkspaceKey(Core::StringView root) {
+		Core::StringBuilder normal;
+		for (int64 i = 0; i < root.ByteLength(); ++i) {
+			const int32 c = root.ByteAt(i);
+			normal.AppendByte(c == '\\' ? '/' : (c >= 'A' && c <= 'Z') ? c + 32 : c);
+		}
+		Core::StringView text = normal.View();
+		while (text.EndsWith(Core::StringView("/"))) text = text.Substring(0, text.ByteLength() - 1);
+		return ShortDigest(text, 8);
+	}
+
+	static Core::String Slashes(Core::StringView path) {
+		Core::StringBuilder text;
+		for (int64 i = 0; i < path.ByteLength(); ++i) text.AppendByte(path.ByteAt(i) == '\\' ? '/' : path.ByteAt(i));
+		Core::StringView view = text.View();
+		while (view.ByteLength() > 3 && view.EndsWith(Core::StringView("/"))) view = view.Substring(0, view.ByteLength() - 1);
+		return Core::String(view);
+	}
+
+	bool PlanSandbox(const SandboxDefinition& definition, const Catalog& catalog, Core::StringView key, Core::StringView root, Core::StringView mirror, int64 cpus, int64 memoryGiB, SandboxPlan& plan, Core::String& problem) {
+		const CatalogOs* os = nullptr;
+		const CatalogVersion* version = nullptr;
+		if (!definition.m_Os.IsEmpty()) {
+			if (!ResolveOs(catalog, definition.m_Os.View(), os, version, problem) && definition.m_Image.IsEmpty()) return false;
+			if (os == nullptr || version == nullptr) {
+				os = nullptr;
+				version = nullptr;
+				problem = Core::String("");
+			}
+		}
+		Core::String image = !definition.m_Image.IsEmpty() ? definition.m_Image : Core::String(version->m_Image);
+		plan.m_BaseImage = MirrorImage(image.View(), mirror);
+		plan.m_Family = os != nullptr ? os->m_Family : Core::String("");
+		plan.m_PackageManager = os != nullptr ? os->m_PackageManager : Core::String("");
+		plan.m_Engine = os != nullptr ? os->m_Engine : Core::String("linux");
+		if (version != nullptr && definition.m_Image.IsEmpty() && !definition.m_Platform.IsEmpty() && !version->m_Platforms.IsEmpty() && !HasPlatform(version->m_Platforms, definition.m_Platform.View())) {
+			problem = ((((Core::String(version->m_Image) + " has no ") + definition.m_Platform.View()) + " image; it has ") + Joined(version->m_Platforms).View());
+			return false;
+		}
+		plan.m_Cpus = definition.m_Cpus > 0 ? definition.m_Cpus : cpus;
+		plan.m_MemoryGiB = definition.m_MemoryGiB > 0 ? definition.m_MemoryGiB : memoryGiB;
+		plan.m_Container = (Core::String("ied-") + key) + "-" + definition.m_Name.View();
+		Core::StringBuilder text;
+		if (definition.m_OwnDockerfile) {
+			plan.m_Dockerfile = Core::String("");
+			text.Append(definition.m_OwnDockerfileText.View());
+		}
+		else {
+			Core::Array<Core::String> packages;
+			for (const Core::String& id : definition.m_Presets) {
+				const CatalogPreset* preset = FindPreset(catalog, id.View());
+				Core::Array<Core::String> names;
+				if (preset == nullptr || plan.m_PackageManager.IsEmpty() || !PresetNames(*preset, plan.m_PackageManager.View(), names)) {
+					plan.m_Missing.Push(id);
+					continue;
+				}
+				for (const Core::String& name : names)
+					if (!HasPlatform(packages, name.View())) packages.Push(name);
+			}
+			for (const Core::String& name : definition.m_Packages)
+				if (!HasPlatform(packages, name.View())) packages.Push(name);
+			text.Append("# Made by IED from .ied/sandbox/");
+			text.Append(definition.m_Name.View());
+			text.Append("/sandbox.json; edit that file, not this one (docs/34).\n");
+			text.Append("FROM ");
+			text.Append(plan.m_BaseImage.View());
+			text.Append("\n");
+			if (!packages.IsEmpty()) {
+				if (plan.m_PackageManager.IsEmpty()) {
+					problem = (Core::String("packages need a package manager: ") + image.View()) + " is not in the catalog, so name its system with \"os\" or install them in \"setup\"";
+					return false;
+				}
+				text.Append("RUN ");
+				text.Append(InstallCommand(plan.m_PackageManager.View(), packages).View());
+				text.Append("\n");
+			}
+			for (const Core::String& line : definition.m_Setup) {
+				Core::StringView trimmed = line.View().Trimmed();
+				if (trimmed.IsEmpty()) continue;
+				text.Append("RUN ");
+				text.Append(trimmed);
+				text.Append("\n");
+			}
+			text.Append("WORKDIR /workspace\n");
+			plan.m_Dockerfile = text.ToString();
+		}
+		Core::String digested = (text.ToString() + "\n") + definition.m_Platform.View();
+		plan.m_Digest = ShortDigest(digested.View(), 12);
+		plan.m_Tag = (((Core::String("ied-sandbox/") + key) + "-") + definition.m_Name.View()) + ":" + plan.m_Digest.View();
+		Core::StringBuilder run;
+		run.Append(plan.m_Tag.View());
+		run.Append("|");
+		run.Append(Slashes(root).View());
+		run.Append("|");
+		run.Append(definition.m_Network.View());
+		run.Append("|");
+		run.AppendInt(plan.m_Cpus);
+		run.Append("|");
+		run.AppendInt(plan.m_MemoryGiB);
+		for (const Core::String& pair : definition.m_Env) {
+			run.Append("|");
+			run.Append(pair.View());
+		}
+		plan.m_RunDigest = ShortDigest(run.View(), 12);
+		return true;
+	}
+
+	static void Push(Core::Array<Core::String>& args, const char* word) { args.Push(Core::String(word)); }
+	static void Push(Core::Array<Core::String>& args, Core::StringView word) { args.Push(Core::String(word)); }
+
+	Core::Array<Core::String> RunArguments(const SandboxDefinition& definition, const SandboxPlan& plan, Core::StringView root) {
+		Core::String folder = Slashes(root);
+		Core::Array<Core::String> args;
+		Push(args, "run");
+		Push(args, "-d");
+		Push(args, "--init");
+		Push(args, "--name");
+		Push(args, plan.m_Container.View());
+		if (!definition.m_Platform.IsEmpty()) {
+			Push(args, "--platform");
+			Push(args, definition.m_Platform.View());
+		}
+		Push(args, "--label");
+		Push(args, (Core::String("ied.sandbox=") + definition.m_Name.View()).View());
+		Push(args, "--label");
+		Push(args, (Core::String("ied.workspace=") + folder.View()).View());
+		Push(args, "--label");
+		Push(args, (Core::String("ied.sandbox.config=") + plan.m_RunDigest.View()).View());
+		Push(args, "-v");
+		Push(args, ((folder + ":") + c_WorkspaceMount).View());
+		Push(args, "-v");
+		Push(args, ((folder + "/.ied:") + c_WorkspaceMount + "/.ied:ro").View());
+		Push(args, "-w");
+		Push(args, c_WorkspaceMount);
+		Core::StringBuilder number;
+		number.AppendInt(plan.m_Cpus);
+		Push(args, "--cpus");
+		Push(args, number.View());
+		number.Clear();
+		number.AppendInt(plan.m_MemoryGiB);
+		number.Append("g");
+		Push(args, "--memory");
+		Push(args, number.View());
+		Push(args, "--pids-limit");
+		Push(args, "4096");
+		Push(args, "--security-opt");
+		Push(args, "no-new-privileges");
+		if (definition.m_Network != "full") {
+			Push(args, "--network");
+			Push(args, "none");
+		}
+		for (const Core::String& pair : definition.m_Env) {
+			Push(args, "-e");
+			Push(args, pair.View());
+		}
+		Push(args, "--entrypoint");
+		Push(args, "sleep");
+		Push(args, plan.m_Tag.View());
+		Push(args, "infinity");
+		return args;
+	}
+
+	Core::String ContainerPath(Core::StringView cwd) {
+		Core::StringView folder = cwd.Trimmed();
+		while (folder.StartsWith(Core::StringView("/")) || folder.StartsWith(Core::StringView("./"))) folder = folder.Substring(folder.ByteAt(0) == '.' ? 2 : 1, folder.ByteLength());
+		while (folder.EndsWith(Core::StringView("/"))) folder = folder.Substring(0, folder.ByteLength() - 1);
+		if (folder.IsEmpty() || folder == ".") return Core::String(c_WorkspaceMount);
+		return (Core::String(c_WorkspaceMount) + "/") + folder;
+	}
+
+	Core::Array<Core::String> ExecArguments(Core::StringView container, Core::StringView cwd, const Core::Array<Core::String>& env, Core::StringView command, Core::StringView pidFile) {
+		Core::Array<Core::String> args;
+		Push(args, "exec");
+		Push(args, "-w");
+		Push(args, ContainerPath(cwd).View());
+		for (const Core::String& pair : env) {
+			Push(args, "-e");
+			Push(args, pair.View());
+		}
+		Push(args, container);
+		Push(args, "sh");
+		Push(args, "-c");
+		Push(args, ((Core::String("echo $$ > ") + pidFile) + "; exec sh -lc \"$1\"").View());
+		Push(args, "ied-run");
+		Push(args, command);
+		return args;
+	}
+
+	Core::Array<Core::String> KillArguments(Core::StringView container, Core::StringView pidFile) {
+		Core::String file = Core::String(pidFile);
+		Core::StringBuilder line;
+		line.Append("p=$(cat ");
+		line.Append(file.View());
+		line.Append(" 2>/dev/null); [ -n \"$p\" ] || exit 0; kill -TERM -\"$p\" 2>/dev/null || kill -TERM \"$p\" 2>/dev/null; sleep 2; kill -KILL -\"$p\" 2>/dev/null; rm -f ");
+		line.Append(file.View());
+		line.Append("; exit 0");
+		Core::Array<Core::String> args;
+		Push(args, "exec");
+		Push(args, container);
+		Push(args, "sh");
+		Push(args, "-c");
+		Push(args, line.View());
+		return args;
+	}
+}

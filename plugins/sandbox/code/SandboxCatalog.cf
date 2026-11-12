@@ -1,0 +1,170 @@
+include "SandboxCatalog.ch"
+
+namespace Sandbox
+{
+	static Core::Array<Core::String> Strings(const Serialization::DomNode& list) {
+		Core::Array<Core::String> strings;
+		for (int64 i = 0; i < list.Count(); ++i) strings.Push(Core::String(list.At(i).AsView()));
+		return strings;
+	}
+
+	static CatalogOs SystemOf(const Serialization::DomNode& node, bool owner) {
+		CatalogOs os;
+		os.m_Id = Core::String(node.Member("id").AsView());
+		os.m_Title = Core::String(node.Member("title").AsView());
+		if (os.m_Title.IsEmpty()) os.m_Title = os.m_Id;
+		os.m_Family = Core::String(node.Member("family").AsView());
+		os.m_PackageManager = Core::String(node.Member("packageManager").AsView());
+		os.m_Engine = Core::String(node.Member("engine").AsView());
+		if (os.m_Engine.IsEmpty()) os.m_Engine = Core::String("linux");
+		os.m_Note = Core::String(node.Member("note").AsView());
+		os.m_Owner = owner;
+		Serialization::DomNode versions = node.Member("versions");
+		for (int64 i = 0; i < versions.Count(); ++i) {
+			Serialization::DomNode entry = versions.At(i);
+			CatalogVersion version;
+			version.m_Version = Core::String(entry.Member("version").AsView());
+			version.m_Title = Core::String(entry.Member("title").AsView());
+			if (version.m_Title.IsEmpty()) version.m_Title = version.m_Version;
+			version.m_Image = Core::String(entry.Member("image").AsView());
+			version.m_Default = entry.Member("default").AsBool();
+			Serialization::DomNode platforms = entry.Member("platforms");
+			for (int64 p = 0; p < platforms.Count(); ++p) {
+				Core::String platform = NormalPlatform(platforms.At(p).AsView());
+				if (!platform.IsEmpty() && !HasPlatform(version.m_Platforms, platform.View())) version.m_Platforms.Push(platform);
+			}
+			if (!version.m_Version.IsEmpty() && !version.m_Image.IsEmpty()) os.m_Versions.Push(version);
+		}
+		return os;
+	}
+
+	bool ParseCatalog(Core::StringView json, Catalog& catalog, Core::String& problem) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJsonc(json, *doc);
+		if (!read.Ok()) {
+			problem = Core::String("catalog.json does not parse: ") + read.error;
+			return false;
+		}
+		Serialization::DomNode systems = read.root.Member("systems");
+		for (int64 i = 0; i < systems.Count(); ++i) {
+			CatalogOs os = SystemOf(systems.At(i), false);
+			if (!os.m_Id.IsEmpty() && !os.m_Versions.IsEmpty()) catalog.m_Systems.Push(os);
+		}
+		Serialization::DomNode presets = read.root.Member("presets");
+		for (int64 i = 0; i < presets.Count(); ++i) {
+			Serialization::DomNode entry = presets.At(i);
+			CatalogPreset preset;
+			preset.m_Id = Core::String(entry.Member("id").AsView());
+			preset.m_Title = Core::String(entry.Member("title").AsView());
+			Serialization::DomNode packages = entry.Member("packages");
+			for (int64 m = 0; m < packages.Count(); ++m) {
+				PresetPackages names;
+				names.m_Manager = Core::String(packages.KeyAt(m));
+				names.m_Names = Strings(packages.ValueAt(m));
+				preset.m_Packages.Push(names);
+			}
+			if (!preset.m_Id.IsEmpty()) catalog.m_Presets.Push(preset);
+		}
+		if (catalog.m_Systems.IsEmpty()) {
+			problem = Core::String("catalog.json lists no systems");
+			return false;
+		}
+		return true;
+	}
+
+	void AddOwnerSystems(Catalog& catalog, const Serialization::DomNode& systems) {
+		for (int64 i = 0; i < systems.Count(); ++i) {
+			CatalogOs os = SystemOf(systems.At(i), true);
+			if (os.m_Id.IsEmpty() || os.m_Versions.IsEmpty()) continue;
+			bool replaced = false;
+			for (int64 s = 0; s < catalog.m_Systems.Count(); ++s)
+				if (catalog.m_Systems[s].m_Id == os.m_Id) {
+					catalog.m_Systems[s] = os;
+					replaced = true;
+				}
+			if (!replaced) catalog.m_Systems.Push(os);
+		}
+	}
+
+	const CatalogOs* FindSystem(const Catalog& catalog, Core::StringView id) {
+		for (const CatalogOs& os : catalog.m_Systems)
+			if (os.m_Id.View() == id) return &os;
+		return nullptr;
+	}
+
+	const CatalogPreset* FindPreset(const Catalog& catalog, Core::StringView id) {
+		for (const CatalogPreset& preset : catalog.m_Presets)
+			if (preset.m_Id.View() == id) return &preset;
+		return nullptr;
+	}
+
+	bool PresetNames(const CatalogPreset& preset, Core::StringView manager, Core::Array<Core::String>& names) {
+		for (const PresetPackages& packages : preset.m_Packages)
+			if (packages.m_Manager.View() == manager) {
+				for (const Core::String& name : packages.m_Names) names.Push(name);
+				return !packages.m_Names.IsEmpty();
+			}
+		return false;
+	}
+
+	static Core::String SystemNames(const Catalog& catalog) {
+		Core::StringBuilder names;
+		for (const CatalogOs& os : catalog.m_Systems) {
+			if (names.ByteLength() > 0) names.Append(", ");
+			names.Append(os.m_Id.View());
+		}
+		return names.ToString();
+	}
+
+	static Core::String VersionNames(const CatalogOs& os) {
+		Core::StringBuilder names;
+		for (const CatalogVersion& version : os.m_Versions) {
+			if (names.ByteLength() > 0) names.Append(", ");
+			names.Append(version.m_Version.View());
+		}
+		return names.ToString();
+	}
+
+	bool ResolveOs(const Catalog& catalog, Core::StringView spec, const CatalogOs*& os, const CatalogVersion*& version, Core::String& problem) {
+		Core::StringView trimmed = spec.Trimmed();
+		const int64 colon = trimmed.IndexOf(':');
+		Core::StringView id = colon < 0 ? trimmed : trimmed.Substring(0, colon);
+		Core::StringView wanted = colon < 0 ? Core::StringView("") : trimmed.Substring(colon + 1, trimmed.ByteLength() - colon - 1);
+		os = FindSystem(catalog, id);
+		version = nullptr;
+		if (os == nullptr) {
+			problem = ((Core::String("no operating system '") + id) + "' in the catalog; it has ") + SystemNames(catalog).View();
+			return false;
+		}
+		for (const CatalogVersion& candidate : os->m_Versions)
+			if (wanted.IsEmpty() ? candidate.m_Default : candidate.m_Version.View() == wanted) version = &candidate;
+		if (version == nullptr && wanted.IsEmpty()) version = &os->m_Versions[0];
+		if (version == nullptr) {
+			problem = ((((Core::String("no version '") + wanted) + "' of ") + id) + " in the catalog; it has ") + VersionNames(*os).View();
+			return false;
+		}
+		return true;
+	}
+
+	Core::String NormalPlatform(Core::StringView platform) {
+		Core::String text = platform.Trimmed().ToLower();
+		Core::StringView p = text.View();
+		if (p.IsEmpty()) return Core::String("");
+		if (p.StartsWith(Core::StringView("linux/"))) p = p.Substring(6, p.ByteLength() - 6);
+		else if (p.StartsWith(Core::StringView("windows/"))) return text;
+		if (p == "amd64" || p == "x86_64" || p == "x64" || p.StartsWith(Core::StringView("amd64/"))) return Core::String("linux/amd64");
+		if (p == "arm64" || p == "aarch64" || p == "arm64/v8") return Core::String("linux/arm64");
+		if (p == "arm" || p == "armv7" || p == "armv7l" || p == "arm/v7" || p == "armhf") return Core::String("linux/arm/v7");
+		if (p == "armv6" || p == "armv6l" || p == "arm/v6" || p == "armel") return Core::String("linux/arm/v6");
+		if (p == "arm/v5" || p == "armv5") return Core::String("linux/arm/v5");
+		if (p == "386" || p == "i386" || p == "i686" || p == "x86") return Core::String("linux/386");
+		if (p == "riscv64" || p == "ppc64le" || p == "s390x" || p == "mips64le" || p == "mips64" || p == "loong64") return Core::String("linux/") + p;
+		return Core::String("linux/") + p;
+	}
+
+	bool HasPlatform(const Core::Array<Core::String>& platforms, Core::StringView platform) {
+		for (const Core::String& candidate : platforms)
+			if (candidate.View() == platform) return true;
+		return false;
+	}
+}

@@ -1,0 +1,84 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "Sandbox settings",
+	"type": "object",
+	"properties": {
+		"sandbox.docker": {
+			"type": "array",
+			"items": { "type": "string", "minLength": 1 },
+			"minItems": 1,
+			"default": ["docker"],
+			"x-ied-tiers": ["app"],
+			"description": "The Docker program sandboxes run with, and any arguments before each command (docker --context <name> for another engine). docker is looked for on PATH, then where Docker Desktop installs it."
+		},
+		"sandbox.registryMirror": {
+			"type": "string",
+			"default": "",
+			"x-ied-tiers": ["app"],
+			"description": "Where official images (ubuntu, debian, alpine, ...) are pulled from instead of Docker Hub, which limits anonymous pulls: mirror.gcr.io/library or public.ecr.aws/docker/library. Empty: Docker Hub. Images with a namespace or registry of their own are pulled as named."
+		},
+		"sandbox.defaultCpus": {
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 64,
+			"default": 4,
+			"x-ied-tiers": ["app", "solution"],
+			"description": "Processors a sandbox may use when its definition does not say (cpus)."
+		},
+		"sandbox.defaultMemoryGiB": {
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 256,
+			"default": 6,
+			"x-ied-tiers": ["app", "solution"],
+			"description": "Memory a sandbox may use, in GiB, when its definition does not say (memoryGiB)."
+		},
+		"sandbox.idleStopMinutes": {
+			"type": "integer",
+			"minimum": 0,
+			"default": 30,
+			"x-ied-tiers": ["app"],
+			"description": "A running sandbox nothing ran in for this long is stopped (its files stay; the next run starts it in a second). 0: never."
+		},
+		"sandbox.parallelRuns": {
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 4,
+			"default": 2,
+			"x-ied-tiers": ["app"],
+			"description": "How many sandboxes a validation runs at once. Emulated platforms are processor-heavy."
+		},
+		"sandbox.images": {
+			"type": "array",
+			"default": [],
+			"x-ied-tiers": ["app"],
+			"description": "Operating systems to add to the catalog, each as the catalog lists them: {id, title, family, packageManager (apt, dnf, apk, pacman, zypper), versions: [{version, image, platforms, default}]}. One with a shipped id replaces it.",
+			"items": {
+				"type": "object",
+				"required": ["id", "versions"],
+				"properties": {
+					"id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]*$" },
+					"title": { "type": "string" },
+					"family": { "type": "string" },
+					"packageManager": { "enum": ["apt", "dnf", "yum", "apk", "pacman", "zypper", ""] },
+					"note": { "type": "string" },
+					"versions": {
+						"type": "array",
+						"minItems": 1,
+						"items": {
+							"type": "object",
+							"required": ["version", "image"],
+							"properties": {
+								"version": { "type": "string" },
+								"title": { "type": "string" },
+								"image": { "type": "string" },
+								"default": { "type": "boolean" },
+								"platforms": { "type": "array", "items": { "type": "string" } }
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}

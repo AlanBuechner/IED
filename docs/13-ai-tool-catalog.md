@@ -303,10 +303,16 @@ The four that change projects are `exec`: a solution a build system owns changes
 
 | ID | Tool | Class | Notes |
 |---|---|---|---|
-| T-SBX-1 | `sandbox_list()` | read | Configured sandboxes and state. |
-| T-SBX-2 | `sandbox_run(name, command, timeout_s?)` | exec | Runs inside the sandbox; output streamed to a terminal. |
-| T-SBX-3 | `sandbox_task(name, task)` | exec | Runs a toolbar task with `target: sandbox:<name>`. |
-| T-SBX-4 | `sandbox_request_network(name, host, port, reason)` | net | Approval card. |
+| T-SBX-1 | `sandbox_list()` | read | **Built** (`docs/34`): Docker's state and the platforms it runs (native, emulated), each sandbox's system, platform, presets, network, image and container state, and the last validation. |
+| T-SBX-5 | `sandbox_catalog(query?)` | read | **Built**: the operating systems and versions a sandbox can be made of, each version's platforms (native, emulated, not runnable yet) and whether it is downloaded; the presets, with their packages per package manager for a query. |
+| T-SBX-6 | `sandbox_create(name, os?, image?, platform?, presets?, packages?, setup?, env?, validate?, network?, cpus?, memory_gib?, description?, replace?, build?)` | write | **Built**: writes `.ied/sandbox/<name>/sandbox.json`; its approval card shows the file as a diff. |
+| T-SBX-2 | `sandbox_run(name, command, cwd?, env?, timeout_s?)` | exec | **Built**: builds the image and starts the sandbox when needed, runs `sh -lc <command>` in `/workspace`, answers the exit code, time and the output's end; streamed to the Output window's Sandbox source; a stop or the time limit ends the command inside the container (its process group). |
+| T-SBX-7 | `sandbox_validate(command?, names?, timeout_s?)` | exec | **Built**: one command (or each sandbox's `validate`) in several sandboxes, `sandbox.parallelRuns` at a time; a pass/fail matrix with each failure's last lines, kept in `.ied/local/sandbox/validation.json`. |
+| T-SBX-8 | `sandbox_control(name, action)` | exec | **Built**: build, rebuild, start, stop, restart, reset, remove, pull. |
+| T-SBX-9 | `sandbox_engine(action?)` | exec | **Built**, `approval: "ask"`: status, start (Docker Desktop), install_emulators (QEMU's binfmt handlers). |
+| T-SBX-3 | `sandbox_task(name, task)` | exec | Runs a toolbar task with `target: sandbox:<name>`. Not built: task targets (`docs/34` "Not built yet"). |
+| T-SBX-4 | `sandbox_request_network(name, host, port, reason)` | net | Approval card. Not built: the egress gateway. |
+| T-SBX-10 | `sandbox_screenshot(name, command?, wait_s?)` | exec | Not built: a windowed program under Xvfb, its screen as an image. |
 
 ### `profiler`
 

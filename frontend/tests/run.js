@@ -60,6 +60,7 @@ import "./boardgroups.test.js";
 import "./filetypes.test.js";
 import "./browser.test.js";
 import "./packages.test.js";
+import "./sandbox.test.js";
 import "./desktop.test.js";
 import "./startpage.test.js";
 import "./profiler.test.js";

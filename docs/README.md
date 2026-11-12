@@ -45,6 +45,7 @@ Planning for the implementing AI (and the owner). `IDEplan.md` at the repo root 
 | [31-nuke-packages](31-nuke-packages.md) | Nuke packages: versioned projects from git repositories (tags as versions, sub-packages, inferred dependencies, the lock), developing a package in place with the program that uses it, one writable copy, IED's read-only folders |
 | [32-planning-board](32-planning-board.md) | The planning board (`plugins/board`): an infinite tiled, layered board to sketch software on; the AI's tools to see it, clean a sketch into a diagram, convert it to and from Mermaid, write the plan and build from it; how agents were evaluated on it and what that changed |
 | [33-file-viewers](33-file-viewers.md) | File viewers (`plugins/filetypes`): pictures and game textures (DDS BC1-BC7, TGA, HDR), sound with its waveform, video, PDF, fonts and hex, wherever a file opens; the workspace's files over HTTP with byte ranges; a binary the text editor is asked for |
+| [34-sandbox](34-sandbox.md) | Sandboxes (`plugins/sandbox`): the workspace's program built, tested and run on other operating systems and processors in Docker - a catalog of Linux distributions to download, QEMU-emulated arm64, riscv64 and more, committed definitions, a validation matrix, the Sandboxes window and the AI's `sandbox_*` tools |
 
 ## Doc conventions
 

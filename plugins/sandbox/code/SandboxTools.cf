@@ -1,0 +1,567 @@
+include "SandboxTools.ch"
+
+namespace Sandbox
+{
+	static SandboxService* s_Service = nullptr;
+
+	void SetService(SandboxService* service) { s_Service = service; }
+
+	static Serialization::DomNode Parsed(Core::StringView json) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		return Serialization::ReadJson(json, *doc).root;
+	}
+
+	static IED::ToolResult Failure(Core::StringView message) { return IED::ToolFailure(message); }
+
+	static IED::ToolResult NotActive() { return IED::ToolFailure(Core::StringView("the sandbox plugin is not active")); }
+
+	static Core::String Bytes(int64 bytes) {
+		Core::StringBuilder text;
+		text.AppendInt((bytes + 536870912) / 1073741824);
+		text.Append(" GiB");
+		return text.ToString();
+	}
+
+	// The engine in one or two lines.
+	static void EngineLines(Core::StringBuilder& out, const Serialization::DomNode& engine) {
+		Core::StringView state = engine.Member("state").AsView();
+		out.Append("Docker: ");
+		out.Append(state);
+		if (state == "ready") {
+			out.Append(" - ");
+			if (!engine.Member("product").AsView().IsEmpty()) {
+				out.Append(engine.Member("product").AsView());
+				out.Append(", ");
+			}
+			out.Append("engine ");
+			out.Append(engine.Member("serverVersion").AsView());
+			out.Append(" ");
+			out.Append(engine.Member("os").AsView());
+			out.Append("/");
+			out.Append(engine.Member("arch").AsView());
+			if (engine.Member("cpus").AsInt() > 0) {
+				out.Append(", ");
+				out.AppendInt(engine.Member("cpus").AsInt());
+				out.Append(" CPUs, ");
+				out.Append(Bytes(engine.Member("memoryBytes").AsInt()).View());
+			}
+			out.Append("\nPlatforms it runs: ");
+			Serialization::DomNode platforms = engine.Member("platforms");
+			for (int64 i = 0; i < platforms.Count(); ++i) {
+				if (i > 0) out.Append(", ");
+				out.Append(platforms.At(i).Member("platform").AsView());
+				out.Append(platforms.At(i).Member("native").AsBool() ? " (native)" : " (emulated)");
+			}
+			out.Append("\n");
+		}
+		else {
+			out.Append("\n");
+			out.Append(engine.Member("advice").AsView());
+			out.Append("\n");
+		}
+	}
+
+	static Core::String Ago(int64 ms) {
+		if (ms <= 0) return Core::String("");
+		return DurationText(UnixMs() - ms) + " ago";
+	}
+
+	Core::String ValidationText(const ValidationRecord& record) {
+		Core::StringBuilder out;
+		int64 passed = 0;
+		for (const ValidationRow& row : record.m_Rows)
+			if (row.m_Result == "pass") passed += 1;
+		out.Append("Validation: ");
+		out.AppendInt(passed);
+		out.Append(" of ");
+		out.AppendInt(record.m_Rows.Count());
+		out.Append(" passed");
+		if (!record.m_Command.IsEmpty()) {
+			out.Append(" - `");
+			out.Append(record.m_Command.View());
+			out.Append("`");
+		}
+		else out.Append(" - each sandbox's own validate command");
+		out.Append("\n");
+		for (const ValidationRow& row : record.m_Rows) {
+			out.Append(row.m_Result == "pass" ? "  pass  " : row.m_Result == "fail" ? "  FAIL  " : "  ");
+			if (row.m_Result != "pass" && row.m_Result != "fail") {
+				out.Append(row.m_Result.View().ToUpper().View());
+				out.Append("  ");
+			}
+			out.Append(row.m_Sandbox.View());
+			out.Append(" (");
+			out.Append(row.m_Os.View());
+			if (!row.m_Platform.IsEmpty()) {
+				out.Append(", ");
+				out.Append(row.m_Platform.View());
+			}
+			out.Append(")");
+			if (row.m_Result == "fail") {
+				out.Append(" exit ");
+				out.AppendInt(row.m_ExitCode);
+			}
+			if (row.m_Ms > 0) {
+				out.Append(" in ");
+				out.Append(DurationText(row.m_Ms).View());
+			}
+			if (record.m_Command.IsEmpty() && !row.m_Command.IsEmpty()) {
+				out.Append(" - `");
+				out.Append(row.m_Command.View());
+				out.Append("`");
+			}
+			out.Append("\n");
+		}
+		for (const ValidationRow& row : record.m_Rows) {
+			if (row.m_Result == "pass" || row.m_Tail.IsEmpty()) continue;
+			out.Append("\n--- ");
+			out.Append(row.m_Sandbox.View());
+			out.Append(" (");
+			out.Append(row.m_Result.View());
+			out.Append(") ---\n");
+			out.Append(row.m_Tail.View());
+			out.Append("\n");
+		}
+		return out.ToString();
+	}
+
+	// --- sandbox_list --------------------------------------------------------------------------------------------------
+
+	IED::ToolResult ListTool(const IED::ToolCall& call) {
+		if (s_Service == nullptr) return NotActive();
+		s_Service->Engine()->Look(true);
+		s_Service->Scan(call.m_Workspace.m_Id.View(), call.m_Workspace.m_Trusted);
+		Serialization::DomNode snapshot = Parsed(s_Service->SnapshotJson(call.m_Workspace.m_Id.View()).View());
+		Core::StringBuilder out;
+		EngineLines(out, snapshot.Member("engine"));
+		Serialization::DomNode sandboxes = snapshot.Member("sandboxes");
+		if (sandboxes.Count() == 0) {
+			out.Append("\nNo sandboxes in this workspace yet: sandbox_catalog lists the operating systems, versions and platforms one can be; sandbox_create makes one.\n");
+			return IED::ToolText(out.View());
+		}
+		out.Append("\nSandboxes (each .ied/sandbox/<name>/sandbox.json; the workspace is /workspace inside):\n");
+		for (int64 i = 0; i < sandboxes.Count(); ++i) {
+			Serialization::DomNode box = sandboxes.At(i);
+			out.Append("- ");
+			out.Append(box.Member("name").AsView());
+			out.Append(": ");
+			out.Append(box.Member("os").AsView().IsEmpty() ? box.Member("image").AsView() : box.Member("os").AsView());
+			out.Append(", ");
+			out.Append(box.Member("platform").AsView());
+			if (box.Member("emulated").AsBool()) out.Append(" (emulated)");
+			if (!box.Member("problem").AsView().IsEmpty()) {
+				out.Append(" - WRONG: ");
+				out.Append(box.Member("problem").AsView());
+				out.Append("\n");
+				continue;
+			}
+			Serialization::DomNode presets = box.Member("presets");
+			if (presets.Count() > 0) {
+				out.Append("; presets ");
+				for (int64 p = 0; p < presets.Count(); ++p) {
+					if (p > 0) out.Append(", ");
+					out.Append(presets.At(p).AsView());
+				}
+			}
+			out.Append("; network ");
+			out.Append(box.Member("network").AsView());
+			out.Append(box.Member("imageBuilt").AsBool() ? "; image built" : "; image not built yet");
+			out.Append("; container ");
+			out.Append(box.Member("container").AsView());
+			if (!box.Member("busy").AsView().IsEmpty()) {
+				out.Append(" (");
+				out.Append(box.Member("busy").AsView());
+				out.Append(")");
+			}
+			if (box.Member("ownDockerfile").AsBool()) out.Append("; its own Dockerfile");
+			if (!box.Member("validate").AsView().IsEmpty()) {
+				out.Append("; validate `");
+				out.Append(box.Member("validate").AsView());
+				out.Append("`");
+			}
+			out.Append("\n");
+		}
+		Serialization::DomNode validation = snapshot.Member("validation");
+		if (validation.IsValid() && !validation.IsNull() && validation.Member("rows").Count() > 0) {
+			out.Append("\nLast validation (");
+			out.Append(Ago(validation.Member("endedMs").AsInt()).View());
+			out.Append(validation.Member("running").AsBool() ? ", still running" : "");
+			out.Append("):\n");
+			Serialization::DomNode rows = validation.Member("rows");
+			for (int64 i = 0; i < rows.Count(); ++i) {
+				out.Append("  ");
+				out.Append(rows.At(i).Member("sandbox").AsView());
+				out.Append(": ");
+				out.Append(rows.At(i).Member("result").AsView());
+				out.Append("\n");
+			}
+		}
+		return IED::ToolText(out.View());
+	}
+
+	// --- sandbox_catalog -----------------------------------------------------------------------------------------------
+
+	static bool Matches(Core::StringView query, Core::StringView text) {
+		if (query.IsEmpty()) return true;
+		return text.ToLower().View().Contains(query);
+	}
+
+	IED::ToolResult CatalogTool(const IED::ToolCall& call) {
+		if (s_Service == nullptr) return NotActive();
+		Core::String query = call.m_Args.Member("query").AsView().Trimmed().ToLower();
+		Serialization::DomNode catalog = Parsed(s_Service->CatalogJson(true).View());
+		Core::StringBuilder out;
+		EngineLines(out, catalog.Member("engine"));
+		out.Append("\nOperating systems - sandbox_create(os: \"<id>:<version>\", platform: ...). Per version: its platforms, * where Docker runs it under emulation (5-20x slower), ! where Docker here cannot run it yet (install emulators); [downloaded] when its image is here already.\n");
+		Serialization::DomNode systems = catalog.Member("systems");
+		int64 shown = 0;
+		for (int64 i = 0; i < systems.Count(); ++i) {
+			Serialization::DomNode os = systems.At(i);
+			Core::StringBuilder haystack;
+			haystack.Append(os.Member("id").AsView());
+			haystack.Append(" ");
+			haystack.Append(os.Member("title").AsView());
+			haystack.Append(" ");
+			haystack.Append(os.Member("family").AsView());
+			haystack.Append(" ");
+			haystack.Append(os.Member("packageManager").AsView());
+			haystack.Append(" ");
+			haystack.Append(os.Member("engine").AsView());
+			Serialization::DomNode versions = os.Member("versions");
+			for (int64 v = 0; v < versions.Count(); ++v) {
+				Serialization::DomNode platforms = versions.At(v).Member("platforms");
+				for (int64 p = 0; p < platforms.Count(); ++p) {
+					haystack.Append(" ");
+					haystack.Append(platforms.At(p).Member("platform").AsView());
+				}
+			}
+			if (!Matches(query.View(), haystack.View())) continue;
+			shown += 1;
+			out.Append("\n");
+			out.Append(os.Member("id").AsView());
+			out.Append(" - ");
+			out.Append(os.Member("title").AsView());
+			if (!os.Member("packageManager").AsView().IsEmpty()) {
+				out.Append(" (");
+				out.Append(os.Member("packageManager").AsView());
+				out.Append(")");
+			}
+			if (os.Member("engine").AsView() == "windows") out.Append(" [Windows containers: not runnable by IED yet]");
+			if (os.Member("owner").AsBool()) out.Append(" [from sandbox.images]");
+			if (!os.Member("note").AsView().IsEmpty()) {
+				out.Append(" - ");
+				out.Append(os.Member("note").AsView());
+			}
+			out.Append("\n");
+			for (int64 v = 0; v < versions.Count(); ++v) {
+				Serialization::DomNode version = versions.At(v);
+				out.Append("  ");
+				out.Append(version.Member("version").AsView());
+				if (version.Member("title").AsView() != version.Member("version").AsView()) {
+					out.Append(" (");
+					out.Append(version.Member("title").AsView());
+					out.Append(")");
+				}
+				if (version.Member("default").AsBool()) out.Append(" default");
+				if (version.Member("downloaded").AsBool()) out.Append(" [downloaded]");
+				out.Append(": ");
+				Serialization::DomNode platforms = version.Member("platforms");
+				for (int64 p = 0; p < platforms.Count(); ++p) {
+					Serialization::DomNode platform = platforms.At(p);
+					if (p > 0) out.Append(" ");
+					Core::StringView name = platform.Member("platform").AsView();
+					out.Append(name.StartsWith(Core::StringView("linux/")) ? name.Substring(6, name.ByteLength() - 6) : name);
+					if (!platform.Member("native").AsBool()) out.Append(platform.Member("runs").AsBool() ? "*" : "!");
+				}
+				out.Append("\n");
+			}
+		}
+		if (shown == 0) {
+			out.Append("\nNothing in the catalog matches '");
+			out.Append(query.View());
+			out.Append("'. An image the catalog lacks: sandbox_create(image: \"<reference>\", os: \"<a catalog system of the same family, for its package manager>\").\n");
+		}
+		out.Append("\nPresets (sandbox_create presets: [...]) - what each installs, per package manager:\n");
+		Serialization::DomNode presets = catalog.Member("presets");
+		for (int64 i = 0; i < presets.Count(); ++i) {
+			Serialization::DomNode preset = presets.At(i);
+			out.Append("- ");
+			out.Append(preset.Member("id").AsView());
+			out.Append(": ");
+			out.Append(preset.Member("title").AsView());
+			Serialization::DomNode packages = preset.Member("packages");
+			if (!query.IsEmpty()) {
+				out.Append(" (");
+				for (int64 m = 0; m < packages.Count(); ++m) {
+					if (m > 0) out.Append("; ");
+					out.Append(packages.KeyAt(m));
+					out.Append(":");
+					Serialization::DomNode names = packages.ValueAt(m);
+					for (int64 n = 0; n < names.Count(); ++n) {
+						out.Append(" ");
+						out.Append(names.At(n).AsView());
+					}
+				}
+				out.Append(")");
+			}
+			out.Append("\n");
+		}
+		if (query.IsEmpty()) out.Append("(sandbox_catalog with a query - a system's id, a package manager - also lists each preset's packages.)\n");
+		return IED::ToolText(out.View());
+	}
+
+	// --- sandbox_create ------------------------------------------------------------------------------------------------
+
+	static bool Strings(const Serialization::DomNode& node, Core::Array<Core::String>& list) {
+		if (!node.IsValid() || node.IsNull()) return true;
+		if (node.Kind() == Serialization::DomKind::String) {
+			list.Push(Core::String(node.AsView()));
+			return true;
+		}
+		for (int64 i = 0; i < node.Count(); ++i) list.Push(Core::String(node.At(i).AsView()));
+		return true;
+	}
+
+	bool DefinitionOfArgs(const Serialization::DomNode& args, SandboxDefinition& definition, Core::String& problem) {
+		definition.m_Name = Core::String(args.Member("name").AsView().Trimmed());
+		definition.m_Os = Core::String(args.Member("os").AsView().Trimmed());
+		definition.m_Image = Core::String(args.Member("image").AsView().Trimmed());
+		definition.m_Platform = NormalPlatform(args.Member("platform").AsView());
+		Strings(args.Member("presets"), definition.m_Presets);
+		Strings(args.Member("packages"), definition.m_Packages);
+		Strings(args.Member("setup"), definition.m_Setup);
+		Serialization::DomNode env = args.Member("env");
+		for (int64 i = 0; i < env.Count(); ++i)
+			if (env.Kind() == Serialization::DomKind::Object) definition.m_Env.Push((Core::String(env.KeyAt(i)) + "=") + env.ValueAt(i).AsView());
+		definition.m_Validate = Core::String(args.Member("validate").AsView());
+		definition.m_Network = Core::String(args.Member("network").AsView().IsEmpty() ? Core::StringView("none") : args.Member("network").AsView());
+		definition.m_Cpus = args.Member("cpus").AsInt();
+		definition.m_MemoryGiB = args.Member("memory_gib").AsInt();
+		definition.m_Description = Core::String(args.Member("description").AsView());
+		if (!ValidName(definition.m_Name.View())) {
+			problem = Core::String("name: lowercase letters, digits and '-', at most 40 (ubuntu-arm64)");
+			return false;
+		}
+		if (definition.m_Os.IsEmpty() && definition.m_Image.IsEmpty()) {
+			problem = Core::String("give os (a catalog system and version, \"ubuntu:24.04\" - sandbox_catalog lists them) or image");
+			return false;
+		}
+		return true;
+	}
+
+	static int64 LineCount(Core::StringView text) {
+		int64 lines = 0;
+		for (int64 i = 0; i < text.ByteLength(); ++i)
+			if (text.ByteAt(i) == '\n') lines += 1;
+		if (text.ByteLength() > 0 && !text.EndsWith(Core::StringView("\n"))) lines += 1;
+		return lines;
+	}
+
+	static void PrefixLines(Core::StringBuilder& out, Core::StringView text, const char* prefix) {
+		Core::SplitParts lines = Core::SplitParts(text, '\n');
+		Core::StringView line;
+		int64 at = 0;
+		while (lines.Next(line)) {
+			at += line.ByteLength() + 1;
+			if (line.IsEmpty() && at > text.ByteLength()) break;
+			out.Append(prefix);
+			out.Append(line);
+			out.Append("\n");
+		}
+	}
+
+	Core::String FileDiff(Core::StringView path, Core::StringView before, Core::StringView after, int64& plus, int64& minus) {
+		minus = LineCount(before);
+		plus = LineCount(after);
+		Core::StringBuilder out;
+		out.Append("--- ");
+		out.Append(before.IsEmpty() ? Core::StringView("/dev/null") : (Core::String("a/") + path).View());
+		out.Append("\n+++ b/");
+		out.Append(path);
+		out.Append("\n@@ -");
+		out.AppendInt(minus == 0 ? 0 : 1);
+		out.Append(",");
+		out.AppendInt(minus);
+		out.Append(" +1,");
+		out.AppendInt(plus);
+		out.Append(" @@\n");
+		PrefixLines(out, before, "-");
+		PrefixLines(out, after, "+");
+		return out.ToString();
+	}
+
+	static Core::String DefinitionPath(Core::StringView name) { return ((Core::String(c_DefinitionsFolder) + "/") + name) + "/sandbox.json"; }
+
+	IED::ToolPlan CreatePlan(const IED::ToolCall& call) {
+		IED::ToolPlan plan;
+		SandboxDefinition definition;
+		Core::String problem;
+		if (!DefinitionOfArgs(call.m_Args, definition, problem)) {
+			plan.m_Error = (Core::String("sandbox_create: ") + problem.View());
+			return plan;
+		}
+		Core::String path = DefinitionPath(definition.m_Name.View());
+		Core::String before;
+		Core::String failed;
+		IED::ReadFile(call.m_Workspace, path.View(), before, failed);
+		plan.m_Summary = (((Core::String("Create sandbox ") + definition.m_Name.View()) + " (") + (definition.m_Os.IsEmpty() ? definition.m_Image.View() : definition.m_Os.View()));
+		if (!definition.m_Platform.IsEmpty()) plan.m_Summary = (plan.m_Summary + ", ") + definition.m_Platform.View();
+		if (definition.m_Network == "full") plan.m_Summary = plan.m_Summary + ", network on";
+		plan.m_Summary = plan.m_Summary + ")";
+		plan.m_Diff = FileDiff(path.View(), before.View(), DefinitionJson(definition).View(), plan.m_Plus, plan.m_Minus);
+		return plan;
+	}
+
+	IED::ToolResult CreateTool(const IED::ToolCall& call) {
+		if (s_Service == nullptr) return NotActive();
+		if (!call.m_Workspace.m_Trusted) return Failure(Core::StringView("the workspace is not trusted: ask the owner to trust it first"));
+		SandboxDefinition definition;
+		Core::String problem;
+		if (!DefinitionOfArgs(call.m_Args, definition, problem)) return Failure(problem.View());
+		Core::String notes;
+		if (!s_Service->Create(call.m_Workspace, definition, call.m_Args.Member("replace").AsBool(), notes, problem)) return Failure(problem.View());
+		Core::StringBuilder out;
+		out.Append("Wrote ");
+		out.Append(DefinitionPath(definition.m_Name.View()).View());
+		out.Append(" (commit it: the definition belongs to the workspace). ");
+		out.Append(notes.View());
+		if (call.m_Args.Member("build").AsBool()) {
+			Core::String said;
+			if (!s_Service->Control(call.m_Workspace, definition.m_Name.View(), Core::StringView("build"), call.m_Cancelled, said, problem)) {
+				out.Append("\nIts image did not build: ");
+				out.Append(problem.View());
+				IED::ToolResult failed = IED::ToolText(out.View());
+				failed.m_IsError = true;
+				failed.m_ReportsFailure = true;
+				return failed;
+			}
+			out.Append("\n");
+			out.Append(said.View());
+			out.Append(".");
+		}
+		else out.Append("\nNothing is built yet: the first sandbox_run or sandbox_validate builds its image and starts it (an emulated platform's first build takes minutes).");
+		return IED::ToolText(out.View());
+	}
+
+	// --- sandbox_run ---------------------------------------------------------------------------------------------------
+
+	static int64 Seconds(const IED::ToolCall& call, int64 fallback) {
+		int64 seconds = call.m_Args.Member("timeout_s").IsValid() ? call.m_Args.Member("timeout_s").AsInt() : fallback;
+		if (seconds < 1 || seconds > c_RunMostSeconds) seconds = c_RunMostSeconds;
+		return seconds;
+	}
+
+	IED::ToolResult RunTool(const IED::ToolCall& call) {
+		if (s_Service == nullptr) return NotActive();
+		Core::String name = Core::String(call.m_Args.Member("name").AsView());
+		Core::String command = Core::String(call.m_Args.Member("command").AsView());
+		if (command.View().Trimmed().IsEmpty()) return Failure(Core::StringView("give a command"));
+		Core::Array<Core::String> env;
+		Serialization::DomNode vars = call.m_Args.Member("env");
+		if (vars.Kind() == Serialization::DomKind::Object)
+			for (int64 i = 0; i < vars.Count(); ++i) env.Push((Core::String(vars.KeyAt(i)) + "=") + vars.ValueAt(i).AsView());
+		RunOutcome outcome = s_Service->Exec(call.m_Workspace, name.View(), command.View(), call.m_Args.Member("cwd").AsView(), env, Seconds(call, c_RunDefaultSeconds), call.m_Cancelled);
+		if (!outcome.m_Ran) {
+			IED::ToolResult failed = Failure(outcome.m_Problem.View());
+			failed.m_Source = Core::String("Sandbox ") + name.View();
+			return failed;
+		}
+		Core::StringBuilder out;
+		out.Append("[sandbox ");
+		out.Append(name.View());
+		if (!outcome.m_Prepared.IsEmpty()) {
+			out.Append("; ");
+			out.Append(outcome.m_Prepared.View());
+		}
+		out.Append("]\n");
+		if (!outcome.m_Stopped.IsEmpty()) {
+			out.Append("the command ");
+			out.Append(outcome.m_Stopped.View());
+		}
+		else {
+			out.Append("exit ");
+			out.AppendInt(outcome.m_ExitCode);
+		}
+		out.Append(" after ");
+		out.Append(DurationText(outcome.m_Ms).View());
+		out.Append("\n");
+		out.Append(TailLines(outcome.m_Output.View(), 80, 10000).View());
+		out.Append("\n(/workspace is the workspace's root: /workspace/src/a.c is src/a.c here.)");
+		IED::ToolResult result = IED::ToolText(out.View());
+		result.m_Preview = TailLines(outcome.m_Output.View(), 12, 2048);
+		result.m_IsError = outcome.m_ExitCode != 0 || !outcome.m_Stopped.IsEmpty();
+		result.m_ReportsFailure = result.m_IsError;
+		result.m_Source = Core::String("Sandbox ") + name.View();
+		return result;
+	}
+
+	// --- sandbox_validate ----------------------------------------------------------------------------------------------
+
+	IED::ToolResult ValidateTool(const IED::ToolCall& call) {
+		if (s_Service == nullptr) return NotActive();
+		if (!call.m_Workspace.m_Trusted) return Failure(Core::StringView("the workspace is not trusted: ask the owner to trust it first"));
+		EngineInfo engine = s_Service->Engine()->Look(false);
+		if (engine.m_State != "ready") return Failure(EngineAdvice(engine).View());
+		Core::Array<Core::String> names;
+		Strings(call.m_Args.Member("names"), names);
+		Core::Array<Core::String> defined = s_Service->Summaries(call.m_Workspace);
+		if (defined.IsEmpty()) return Failure(Core::StringView("the workspace has no sandboxes: sandbox_catalog, then sandbox_create"));
+		ValidationRecord record = s_Service->Validate(call.m_Workspace, names, call.m_Args.Member("command").AsView(), Seconds(call, c_RunDefaultSeconds), call.m_Cancelled);
+		IED::ToolResult result = IED::ToolText(ValidationText(record).View());
+		bool failed = false;
+		for (const ValidationRow& row : record.m_Rows)
+			if (row.m_Result != "pass") failed = true;
+		result.m_IsError = failed;
+		result.m_ReportsFailure = failed;
+		result.m_Source = Core::String("Sandboxes");
+		return result;
+	}
+
+	// --- sandbox_control, sandbox_engine -------------------------------------------------------------------------------
+
+	IED::ToolResult ControlTool(const IED::ToolCall& call) {
+		if (s_Service == nullptr) return NotActive();
+		Core::String said;
+		Core::String problem;
+		if (!s_Service->Control(call.m_Workspace, call.m_Args.Member("name").AsView(), call.m_Args.Member("action").AsView(), call.m_Cancelled, said, problem)) return Failure(problem.View());
+		return IED::ToolText(said.View());
+	}
+
+	IED::ToolResult EngineTool(const IED::ToolCall& call) {
+		if (s_Service == nullptr) return NotActive();
+		Core::StringView action = call.m_Args.Member("action").AsView();
+		Core::StringBuilder out;
+		if (action == "start") {
+			Core::String problem;
+			if (!s_Service->StartEngine(call.m_Workspace.m_Id.View(), call.m_Cancelled, problem)) return Failure(problem.View());
+		}
+		else if (action == "install_emulators") {
+			Core::String output;
+			const bool ok = s_Service->InstallEmulators(call.m_Workspace.m_Id.View(), output);
+			out.Append(TailLines(output.View(), 30, 4000).View());
+			out.Append("\n");
+			if (!ok) return Failure(out.View());
+		}
+		else if (!action.IsEmpty() && action != "status") return Failure(Core::StringView("action: status, start or install_emulators"));
+		Serialization::DomNode engine = Parsed(EngineJson(s_Service->Engine()->Look(true)).View());
+		EngineLines(out, engine);
+		return IED::ToolText(out.View());
+	}
+
+	// --- the system-message section ------------------------------------------------------------------------------------
+
+	Core::String Section(const IED::Workspace& ws) {
+		if (s_Service == nullptr || !ws.m_Trusted) return Core::String("");
+		Core::Array<Core::String> summaries = s_Service->Summaries(ws);
+		if (summaries.IsEmpty())
+			return Core::String("sandbox_* tools check that this workspace's program works on other operating systems and processors - Linux distributions on amd64, arm64, riscv64 and more, in Docker - without touching this machine; read the sandbox skill first.");
+		Core::StringBuilder out;
+		out.Append("This workspace's sandboxes (Docker; the workspace is /workspace inside each): ");
+		for (int64 i = 0; i < summaries.Count(); ++i) {
+			if (i > 0) out.Append("; ");
+			out.Append(summaries[i].View());
+		}
+		out.Append(". sandbox_validate builds and tests in all of them at once and gives a pass/fail matrix; sandbox_run runs one command in one. Read the sandbox skill before creating or changing one.");
+		return out.ToString();
+	}
+}

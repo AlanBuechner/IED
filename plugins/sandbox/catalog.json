@@ -1,0 +1,167 @@
+// What a sandbox can be made from (docs/34 "The catalog"): operating systems, their versions - each an image and the
+// platforms it is published for (checked against the registries 2026-11-11) - and presets, named sets of packages per
+// package manager. The owner's sandbox.images add systems of this shape; one with a shipped id replaces it.
+{
+	"systems": [
+		{
+			"id": "ubuntu", "title": "Ubuntu", "family": "debian", "packageManager": "apt",
+			"versions": [
+				{ "version": "26.04", "title": "26.04 LTS", "image": "ubuntu:26.04", "platforms": ["linux/amd64", "linux/arm64", "linux/arm/v7", "linux/ppc64le", "linux/riscv64", "linux/s390x"] },
+				{ "version": "24.04", "title": "24.04 LTS (Noble)", "image": "ubuntu:24.04", "default": true, "platforms": ["linux/amd64", "linux/arm64", "linux/arm/v7", "linux/ppc64le", "linux/riscv64", "linux/s390x"] },
+				{ "version": "22.04", "title": "22.04 LTS (Jammy)", "image": "ubuntu:22.04", "platforms": ["linux/amd64", "linux/arm64", "linux/arm/v7", "linux/ppc64le", "linux/riscv64", "linux/s390x"] }
+			]
+		},
+		{
+			"id": "debian", "title": "Debian", "family": "debian", "packageManager": "apt",
+			"versions": [
+				{ "version": "13", "title": "13 (Trixie)", "image": "debian:13", "default": true, "platforms": ["linux/amd64", "linux/arm64", "linux/arm/v7", "linux/arm/v5", "linux/386", "linux/ppc64le", "linux/riscv64", "linux/s390x"] },
+				{ "version": "12", "title": "12 (Bookworm)", "image": "debian:12", "platforms": ["linux/amd64", "linux/arm64", "linux/arm/v7", "linux/386", "linux/ppc64le"] },
+				{ "version": "11", "title": "11 (Bullseye)", "image": "debian:11", "platforms": ["linux/amd64", "linux/arm64", "linux/arm/v7", "linux/386"] }
+			]
+		},
+		{
+			"id": "fedora", "title": "Fedora", "family": "fedora", "packageManager": "dnf",
+			"versions": [
+				{ "version": "45", "image": "fedora:45", "platforms": ["linux/amd64", "linux/arm64", "linux/ppc64le", "linux/s390x"] },
+				{ "version": "44", "image": "fedora:44", "default": true, "platforms": ["linux/amd64", "linux/arm64", "linux/ppc64le", "linux/s390x"] },
+				{ "version": "43", "image": "fedora:43", "platforms": ["linux/amd64", "linux/arm64", "linux/ppc64le", "linux/s390x"] }
+			]
+		},
+		{
+			"id": "alpine", "title": "Alpine Linux", "family": "alpine", "packageManager": "apk", "note": "musl libc and BusyBox instead of glibc and GNU tools: finds glibc assumptions",
+			"versions": [
+				{ "version": "3.24", "image": "alpine:3.24", "default": true, "platforms": ["linux/amd64", "linux/arm64", "linux/arm/v7", "linux/arm/v6", "linux/386", "linux/ppc64le", "linux/riscv64", "linux/s390x"] },
+				{ "version": "3.23", "image": "alpine:3.23", "platforms": ["linux/amd64", "linux/arm64", "linux/arm/v7", "linux/arm/v6", "linux/386", "linux/ppc64le", "linux/riscv64", "linux/s390x"] },
+				{ "version": "3.22", "image": "alpine:3.22", "platforms": ["linux/amd64", "linux/arm64", "linux/arm/v7", "linux/arm/v6", "linux/386", "linux/ppc64le", "linux/riscv64", "linux/s390x"] }
+			]
+		},
+		{
+			"id": "arch", "title": "Arch Linux", "family": "arch", "packageManager": "pacman", "note": "rolling release: the newest compilers and libraries",
+			"versions": [
+				{ "version": "latest", "title": "rolling", "image": "archlinux:latest", "default": true, "platforms": ["linux/amd64"] }
+			]
+		},
+		{
+			"id": "opensuse-tumbleweed", "title": "openSUSE Tumbleweed", "family": "suse", "packageManager": "zypper", "note": "rolling release",
+			"versions": [
+				{ "version": "latest", "title": "rolling", "image": "opensuse/tumbleweed:latest", "default": true, "platforms": ["linux/amd64", "linux/arm64", "linux/arm/v7", "linux/arm/v6", "linux/386", "linux/ppc64le", "linux/riscv64", "linux/s390x"] }
+			]
+		},
+		{
+			"id": "opensuse-leap", "title": "openSUSE Leap", "family": "suse", "packageManager": "zypper",
+			"versions": [
+				{ "version": "16.0", "image": "opensuse/leap:16.0", "default": true, "platforms": ["linux/amd64", "linux/arm64", "linux/ppc64le", "linux/s390x"] },
+				{ "version": "15.6", "image": "opensuse/leap:15.6", "platforms": ["linux/amd64", "linux/arm64", "linux/ppc64le", "linux/s390x"] }
+			]
+		},
+		{
+			"id": "rocky", "title": "Rocky Linux", "family": "rhel", "packageManager": "dnf", "note": "binary compatible with Red Hat Enterprise Linux; some packages are in EPEL or CRB",
+			"versions": [
+				{ "version": "10", "image": "rockylinux/rockylinux:10", "default": true, "platforms": ["linux/amd64", "linux/arm64", "linux/ppc64le", "linux/s390x", "linux/riscv64"] },
+				{ "version": "9", "image": "rockylinux/rockylinux:9", "platforms": ["linux/amd64", "linux/arm64", "linux/ppc64le", "linux/s390x"] }
+			]
+		},
+		{
+			"id": "almalinux", "title": "AlmaLinux", "family": "rhel", "packageManager": "dnf", "note": "binary compatible with Red Hat Enterprise Linux",
+			"versions": [
+				{ "version": "10", "image": "almalinux:10", "default": true, "platforms": ["linux/amd64", "linux/arm64", "linux/ppc64le", "linux/s390x"] },
+				{ "version": "9", "image": "almalinux:9", "platforms": ["linux/amd64", "linux/arm64", "linux/ppc64le", "linux/s390x"] }
+			]
+		},
+		{
+			"id": "centos-stream", "title": "CentOS Stream", "family": "rhel", "packageManager": "dnf", "note": "the next Red Hat Enterprise Linux",
+			"versions": [
+				{ "version": "10", "image": "quay.io/centos/centos:stream10", "default": true, "platforms": ["linux/amd64", "linux/arm64", "linux/ppc64le", "linux/s390x"] }
+			]
+		},
+		{
+			"id": "amazonlinux", "title": "Amazon Linux", "family": "rhel", "packageManager": "dnf", "note": "what AWS machines run",
+			"versions": [
+				{ "version": "2023", "image": "amazonlinux:2023", "default": true, "platforms": ["linux/amd64", "linux/arm64"] }
+			]
+		},
+		{
+			"id": "oraclelinux", "title": "Oracle Linux", "family": "rhel", "packageManager": "dnf",
+			"versions": [
+				{ "version": "9", "image": "oraclelinux:9", "default": true, "platforms": ["linux/amd64", "linux/arm64"] }
+			]
+		},
+		{
+			"id": "windows-servercore", "title": "Windows Server Core", "family": "windows", "packageManager": "", "engine": "windows", "note": "Windows containers: Docker Desktop's Windows engine, not runnable by IED yet (docs/34)",
+			"versions": [
+				{ "version": "ltsc2025", "title": "LTSC 2025", "image": "mcr.microsoft.com/windows/servercore:ltsc2025", "default": true, "platforms": ["windows/amd64"] },
+				{ "version": "ltsc2022", "title": "LTSC 2022", "image": "mcr.microsoft.com/windows/servercore:ltsc2022", "platforms": ["windows/amd64"] }
+			]
+		},
+		{
+			"id": "windows-nanoserver", "title": "Windows Nano Server", "family": "windows", "packageManager": "", "engine": "windows", "note": "Windows containers, the smallest Windows; not runnable by IED yet",
+			"versions": [
+				{ "version": "ltsc2025", "title": "LTSC 2025", "image": "mcr.microsoft.com/windows/nanoserver:ltsc2025", "default": true, "platforms": ["windows/amd64"] }
+			]
+		}
+	],
+	"presets": [
+		{
+			"id": "build", "title": "a C and C++ compiler and make",
+			"packages": { "apt": ["build-essential"], "dnf": ["gcc", "gcc-c++", "make"], "apk": ["build-base"], "pacman": ["base-devel"], "zypper": ["gcc", "gcc-c++", "make"] }
+		},
+		{
+			"id": "clang", "title": "Clang and LLD",
+			"packages": { "apt": ["clang", "lld"], "dnf": ["clang", "lld"], "apk": ["clang", "lld"], "pacman": ["clang", "lld"], "zypper": ["clang", "lld"] }
+		},
+		{
+			"id": "cmake", "title": "CMake",
+			"packages": { "apt": ["cmake"], "dnf": ["cmake"], "apk": ["cmake"], "pacman": ["cmake"], "zypper": ["cmake"] }
+		},
+		{
+			"id": "ninja", "title": "Ninja",
+			"packages": { "apt": ["ninja-build"], "dnf": ["ninja-build"], "apk": ["samurai"], "pacman": ["ninja"], "zypper": ["ninja"] }
+		},
+		{
+			"id": "git", "title": "Git",
+			"packages": { "apt": ["git"], "dnf": ["git"], "apk": ["git"], "pacman": ["git"], "zypper": ["git"] }
+		},
+		{
+			"id": "python", "title": "Python 3 with pip and venv",
+			"packages": { "apt": ["python3", "python3-pip", "python3-venv"], "dnf": ["python3", "python3-pip"], "apk": ["python3", "py3-pip"], "pacman": ["python", "python-pip"], "zypper": ["python3", "python3-pip"] }
+		},
+		{
+			"id": "node", "title": "Node.js and npm",
+			"packages": { "apt": ["nodejs", "npm"], "dnf": ["nodejs", "npm"], "apk": ["nodejs", "npm"], "pacman": ["nodejs", "npm"], "zypper": ["nodejs-default", "npm-default"] }
+		},
+		{
+			"id": "go", "title": "Go",
+			"packages": { "apt": ["golang-go"], "dnf": ["golang"], "apk": ["go"], "pacman": ["go"], "zypper": ["go"] }
+		},
+		{
+			"id": "rust", "title": "Rust and Cargo, as the distribution packages them",
+			"packages": { "apt": ["rustc", "cargo"], "dnf": ["rust", "cargo"], "apk": ["rust", "cargo"], "pacman": ["rust"], "zypper": ["rust", "cargo"] }
+		},
+		{
+			"id": "java", "title": "a Java development kit",
+			"packages": { "apt": ["default-jdk-headless"], "dnf": ["java-21-openjdk-devel"], "apk": ["openjdk21-jdk"], "pacman": ["jdk-openjdk"], "zypper": ["java-21-openjdk-devel"] }
+		},
+		{
+			"id": "dotnet", "title": "the .NET 8 SDK where the distribution has it",
+			"packages": { "apt": ["dotnet-sdk-8.0"], "dnf": ["dotnet-sdk-8.0"], "apk": ["dotnet8-sdk"], "pacman": ["dotnet-sdk"] }
+		},
+		{
+			"id": "debug", "title": "gdb, strace and valgrind",
+			"packages": { "apt": ["gdb", "strace", "valgrind"], "dnf": ["gdb", "strace", "valgrind"], "apk": ["gdb", "strace", "valgrind"], "pacman": ["gdb", "strace", "valgrind"], "zypper": ["gdb", "strace", "valgrind"] }
+		},
+		{
+			"id": "gui", "title": "a virtual screen (Xvfb), Mesa's software OpenGL and Vulkan, xdotool and ImageMagick: a windowed program runs headless and can be photographed",
+			"packages": {
+				"apt": ["xvfb", "xauth", "x11-utils", "libgl1-mesa-dri", "mesa-vulkan-drivers", "mesa-utils", "xdotool", "imagemagick"],
+				"dnf": ["xorg-x11-server-Xvfb", "xorg-x11-xauth", "mesa-dri-drivers", "mesa-vulkan-drivers", "xdotool", "ImageMagick"],
+				"apk": ["xvfb", "xauth", "mesa-dri-gallium", "mesa-vulkan-swrast", "xdotool", "imagemagick"],
+				"pacman": ["xorg-server-xvfb", "xorg-xauth", "mesa", "vulkan-swrast", "xdotool", "imagemagick"],
+				"zypper": ["xvfb-run", "xorg-x11-server-Xvfb", "Mesa-dri", "xdotool", "ImageMagick"]
+			}
+		},
+		{
+			"id": "net", "title": "curl, CA certificates and ip",
+			"packages": { "apt": ["curl", "ca-certificates", "iproute2"], "dnf": ["curl", "ca-certificates", "iproute"], "apk": ["curl", "ca-certificates", "iproute2"], "pacman": ["curl", "ca-certificates", "iproute2"], "zypper": ["curl", "ca-certificates", "iproute2"] }
+		}
+	]
+}

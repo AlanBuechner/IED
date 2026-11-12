@@ -1,0 +1,1377 @@
+include "SandboxService.ch"
+
+namespace Sandbox
+{
+	Core::String SandboxTopic(Core::StringView wsId) { return Core::String("sandbox:") + wsId; }
+
+	Core::String DurationText(int64 ms) {
+		Core::StringBuilder text;
+		if (ms < 1000) {
+			text.AppendInt(ms < 0 ? 0 : ms);
+			text.Append(" ms");
+		}
+		else if (ms < 60000) {
+			text.AppendInt(ms / 1000);
+			text.Append(" s");
+		}
+		else if (ms < 3600000) {
+			text.AppendInt(ms / 60000);
+			text.Append(" m ");
+			text.AppendInt((ms / 1000) % 60);
+			text.Append(" s");
+		}
+		else {
+			text.AppendInt(ms / 3600000);
+			text.Append(" h ");
+			text.AppendInt((ms / 60000) % 60);
+			text.Append(" m");
+		}
+		return text.ToString();
+	}
+
+	Core::String TailLines(Core::StringView text, int64 lines, int64 bytes) {
+		Core::StringView trimmed = text;
+		while (trimmed.EndsWith(Core::StringView("\n")) || trimmed.EndsWith(Core::StringView("\r"))) trimmed = trimmed.Substring(0, trimmed.ByteLength() - 1);
+		int64 start = trimmed.ByteLength();
+		int64 seen = 0;
+		while (start > 0 && seen < lines) {
+			start -= 1;
+			if (trimmed.ByteAt(start) == '\n') seen += 1;
+		}
+		if (start > 0 || (start == 0 && trimmed.ByteLength() > 0 && trimmed.ByteAt(0) == '\n')) start += 1;
+		if (trimmed.ByteLength() - start > bytes) {
+			start = trimmed.ByteLength() - bytes;
+			while (start < trimmed.ByteLength() && (trimmed.ByteAt(start) & 0xC0) == 0x80) start += 1;
+		}
+		return Core::String(trimmed.Substring(start, trimmed.ByteLength() - start));
+	}
+
+	Core::String ContainerState(Core::StringView state, Core::StringView config, Core::StringView wanted) {
+		if (state.IsEmpty()) return Core::String("absent");
+		if (!wanted.IsEmpty() && config != wanted) return Core::String("stale");
+		return Core::String(state == "running" ? "running" : "stopped");
+	}
+
+	// Where a validation's workers are: the next row to take and how many finished.
+	class ValidateCursor
+	{
+		public Threading::Mutex m_Lock;
+		public int64 m_Next;
+		public int64 m_Finished;
+	}
+
+	class DoneFlag
+	{
+		public bool m_Done;
+	}
+
+	static Core::Array<Core::String> Words(const char* a, const char* b, const char* c, const char* d) {
+		Core::Array<Core::String> words;
+		if (a) words.Push(Core::String(a));
+		if (b) words.Push(Core::String(b));
+		if (c) words.Push(Core::String(c));
+		if (d) words.Push(Core::String(d));
+		return words;
+	}
+
+	static Core::String Slashes(Core::StringView path) {
+		Core::StringBuilder text;
+		for (int64 i = 0; i < path.ByteLength(); ++i) text.AppendByte(path.ByteAt(i) == '\\' ? '/' : path.ByteAt(i));
+		return text.ToString();
+	}
+
+	static Core::String ReadText(Core::StringView path) {
+		Core::String file = Core::String(path);
+		if (!FS::FileExists(file.CStr())) return Core::String();
+		FS::File opened = FS::File(file.CStr(), "rb");
+		return opened.IsOpen() ? opened.ReadText() : Core::String();
+	}
+
+	static bool WriteText(Core::StringView path, Core::StringView text) {
+		Core::String file = Core::String(path);
+		FS::MakeDirectories(FS::Path(file.View()).Parent().CStr());
+		return FS::WriteFileAtomically(file.CStr(), (const void*)text.Data(), text.ByteLength());
+	}
+
+	static Serialization::DomNode ParseJson(Core::StringView json) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		return Serialization::ReadJson(json, *doc).root;
+	}
+
+	// --- the catalog -------------------------------------------------------------------------------------------------
+
+	const Catalog& SandboxService::TheCatalog() {
+		Core::String owner = m_Context->Setting(Core::StringView("sandbox.images"), Core::StringView(""));
+		Threading::LockGuard guard(m_CatalogLock);
+		if (m_Catalog != nullptr && owner == m_CatalogOwner) return *m_Catalog;
+		Catalog* catalog = new Catalog();
+		Core::String problem;
+		if (!ParseCatalog(ReadText((Slashes(m_Context->Folder().View()) + "/catalog.json").View()).View(), *catalog, problem)) m_Context->Log(problem.View());
+		AddOwnerSystems(*catalog, ParseJson(owner.View()));
+		m_Catalog = catalog;
+		m_CatalogOwner = owner;
+		return *m_Catalog;
+	}
+
+	static Core::String Mirror(IED::PluginContext* context) {
+		return Core::String(ParseJson(context->Setting(Core::StringView("sandbox.registryMirror"), Core::StringView("")).View()).AsView().Trimmed());
+	}
+
+	Core::String SandboxService::CatalogJson(bool downloaded) {
+		const Catalog& catalog = TheCatalog();
+		EngineInfo engine = m_Engine->Look(false);
+		Core::String mirror = Mirror(m_Context);
+		Core::Array<Core::String> local;
+		if (downloaded && engine.m_State == "ready") {
+			Process::Output images = Docker(Words("images", "--format", "{{.Repository}}:{{.Tag}}", nullptr), 20000);
+			Core::SplitParts lines = Core::SplitParts(images.output.View(), '\n');
+			Core::StringView line;
+			while (lines.Next(line))
+				if (!line.Trimmed().IsEmpty()) local.Push(Core::String(line.Trimmed()));
+		}
+		Core::String native = NativePlatform(engine);
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("mirror", mirror.View());
+		json.Field("native", native.View());
+		json.Key(Core::StringView("systems"));
+		json.BeginArray();
+		for (const CatalogOs& os : catalog.m_Systems) {
+			json.BeginObject();
+			json.Field("id", os.m_Id.View());
+			json.Field("title", os.m_Title.View());
+			json.Field("family", os.m_Family.View());
+			json.Field("packageManager", os.m_PackageManager.View());
+			json.Field("engine", os.m_Engine.View());
+			json.Field("note", os.m_Note.View());
+			json.BoolField("owner", os.m_Owner);
+			json.Key(Core::StringView("versions"));
+			json.BeginArray();
+			for (const CatalogVersion& version : os.m_Versions) {
+				Core::String image = MirrorImage(version.m_Image.View(), mirror.View());
+				json.BeginObject();
+				json.Field("version", version.m_Version.View());
+				json.Field("title", version.m_Title.View());
+				json.Field("image", version.m_Image.View());
+				json.Field("pull", image.View());
+				json.BoolField("default", version.m_Default);
+				json.BoolField("downloaded", HasPlatform(local, image.View()) || HasPlatform(local, version.m_Image.View()));
+				json.Key(Core::StringView("platforms"));
+				json.BeginArray();
+				for (const Core::String& platform : version.m_Platforms) {
+					json.BeginObject();
+					json.Field("platform", platform.View());
+					json.BoolField("native", RunsNatively(platform.View(), native.View()));
+					json.BoolField("runs", HasPlatform(engine.m_Platforms, platform.View()));
+					json.EndObject();
+				}
+				json.EndArray();
+				json.EndObject();
+			}
+			json.EndArray();
+			json.EndObject();
+		}
+		json.EndArray();
+		json.Key(Core::StringView("presets"));
+		json.BeginArray();
+		for (const CatalogPreset& preset : catalog.m_Presets) {
+			json.BeginObject();
+			json.Field("id", preset.m_Id.View());
+			json.Field("title", preset.m_Title.View());
+			json.Key(Core::StringView("packages"));
+			json.BeginObject();
+			for (const PresetPackages& packages : preset.m_Packages) {
+				json.Key(packages.m_Manager.View());
+				json.BeginArray();
+				for (const Core::String& name : packages.m_Names) json.String(name.View());
+				json.EndArray();
+			}
+			json.EndObject();
+			json.EndObject();
+		}
+		json.EndArray();
+		json.RawField("engine", EngineJson(engine).View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// --- workspaces, state and the topic ------------------------------------------------------------------------------
+
+	WorkspaceSandboxes* SandboxService::Of(Core::StringView wsId) {
+		Core::String key = Core::String(wsId);
+		WorkspaceSandboxes* sandboxes = nullptr;
+		if (m_Workspaces.TryGet(key, sandboxes)) return sandboxes;
+		sandboxes = new WorkspaceSandboxes();
+		sandboxes->m_WsId = key;
+		m_Workspaces.At(key) = sandboxes;
+		return sandboxes;
+	}
+
+	SandboxState* SandboxService::Find(WorkspaceSandboxes* sandboxes, Core::StringView name) {
+		for (SandboxState* state : sandboxes->m_Sandboxes)
+			if (state->m_Name.View() == name) return state;
+		return nullptr;
+	}
+
+	int64 SandboxService::SettingInt(const char* key, Core::StringView wsId, int64 fallback) {
+		Serialization::DomNode node = ParseJson(m_Context->Setting(Core::StringView(key), wsId).View());
+		return node.Kind() == Serialization::DomKind::Int ? node.AsInt() : fallback;
+	}
+
+	static void StringArray(IED::JsonWriter& json, const char* key, const Core::Array<Core::String>& list) {
+		json.Key(Core::StringView(key));
+		json.BeginArray();
+		for (const Core::String& item : list) json.String(item.View());
+		json.EndArray();
+	}
+
+	static void RunJson(IED::JsonWriter& json, const SandboxRun* run, bool output) {
+		json.BeginObject();
+		json.IntField("id", run->m_Id);
+		json.Field("sandbox", run->m_Sandbox.View());
+		json.Field("kind", run->m_Kind.View());
+		json.Field("label", run->m_Label.View());
+		json.BoolField("running", run->m_Running);
+		json.IntField("exitCode", run->m_ExitCode);
+		json.Field("stopped", run->m_Stopped.View());
+		json.Field("problem", run->m_Problem.View());
+		json.IntField("startedMs", run->m_StartedMs);
+		json.IntField("endedMs", run->m_EndedMs);
+		if (output) json.Field("output", run->m_Output.View());
+		json.EndObject();
+	}
+
+	static void RowJson(IED::JsonWriter& json, const ValidationRow& row) {
+		json.BeginObject();
+		json.Field("sandbox", row.m_Sandbox.View());
+		json.Field("os", row.m_Os.View());
+		json.Field("platform", row.m_Platform.View());
+		json.Field("command", row.m_Command.View());
+		json.Field("result", row.m_Result.View());
+		json.IntField("exitCode", row.m_ExitCode);
+		json.IntField("ms", row.m_Ms);
+		json.IntField("runId", row.m_RunId);
+		json.Field("tail", row.m_Tail.View());
+		json.EndObject();
+	}
+
+	static Core::String ValidationJson(const ValidationRecord& validation) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.IntField("id", validation.m_Id);
+		json.Field("command", validation.m_Command.View());
+		json.BoolField("running", validation.m_Running);
+		json.IntField("startedMs", validation.m_StartedMs);
+		json.IntField("endedMs", validation.m_EndedMs);
+		json.Key(Core::StringView("rows"));
+		json.BeginArray();
+		for (const ValidationRow& row : validation.m_Rows) RowJson(json, row);
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	// The snapshot of `sandboxes`, the server's lock held; run outputs only in the pulled snapshot (`output`), the
+	// "changed" events leave them to the "output" events.
+	static Core::String Snapshot(WorkspaceSandboxes* sandboxes, const EngineInfo& engine, bool output) {
+		Core::String native = NativePlatform(engine);
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("wsId", sandboxes->m_WsId.View());
+		json.Field("root", sandboxes->m_Root.View());
+		json.Field("key", sandboxes->m_Key.View());
+		json.RawField("engine", EngineJson(engine).View());
+		json.Field("dockerProblem", sandboxes->m_DockerProblem.View());
+		json.Key(Core::StringView("sandboxes"));
+		json.BeginArray();
+		for (const SandboxState* state : sandboxes->m_Sandboxes) {
+			const SandboxDefinition& definition = state->m_Definition;
+			Core::String platform = definition.m_Platform.IsEmpty() ? native : definition.m_Platform;
+			json.BeginObject();
+			json.Field("name", state->m_Name.View());
+			json.Field("description", definition.m_Description.View());
+			json.Field("os", definition.m_Os.View());
+			json.Field("image", state->m_Planned ? state->m_Plan.m_BaseImage.View() : definition.m_Image.View());
+			json.Field("platform", platform.View());
+			json.BoolField("emulated", engine.m_State == "ready" && !RunsNatively(platform.View(), native.View()));
+			StringArray(json, "presets", definition.m_Presets);
+			StringArray(json, "packages", definition.m_Packages);
+			json.Field("network", definition.m_Network.View());
+			json.Field("validate", definition.m_Validate.View());
+			json.IntField("cpus", state->m_Planned ? state->m_Plan.m_Cpus : definition.m_Cpus);
+			json.IntField("memoryGiB", state->m_Planned ? state->m_Plan.m_MemoryGiB : definition.m_MemoryGiB);
+			json.BoolField("ownDockerfile", definition.m_OwnDockerfile);
+			json.Field("problem", state->m_Problem.View());
+			StringArray(json, "missingPresets", state->m_Plan.m_Missing);
+			json.Field("tag", state->m_Plan.m_Tag.View());
+			json.Field("containerName", state->m_Plan.m_Container.View());
+			json.BoolField("imageBuilt", state->m_ImageBuilt);
+			json.Field("container", state->m_Container.View());
+			json.Field("busy", state->m_Busy.View());
+			json.IntField("lastUsedMs", state->m_LastUsedMs);
+			json.IntField("lastRunId", state->m_LastRunId);
+			json.Field("definition", ((Core::String(c_DefinitionsFolder) + "/") + state->m_Name.View() + "/sandbox.json").View());
+			json.EndObject();
+		}
+		json.EndArray();
+		json.Key(Core::StringView("runs"));
+		json.BeginArray();
+		for (int64 i = sandboxes->m_Runs.Count() - 1; i >= 0; --i)
+			RunJson(json, sandboxes->m_Runs[i], output && i >= sandboxes->m_Runs.Count() - c_SnapshotRunsWithOutput);
+		json.EndArray();
+		json.Key(Core::StringView("validation"));
+		if (sandboxes->m_Validation.m_Id == 0) json.Null();
+		else json.Raw(ValidationJson(sandboxes->m_Validation).View());
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String SandboxService::SnapshotJson(Core::StringView wsId) {
+		EngineInfo engine = m_Engine->Last();
+		IED::HostLock lock(*m_Context);
+		return Snapshot(Of(wsId), engine, true);
+	}
+
+	void SandboxService::Publish(Core::StringView wsId) {
+		EngineInfo engine = m_Engine->Last();
+		IED::HostLock lock(*m_Context);
+		m_Context->Publish(SandboxTopic(wsId).View(), "changed", Snapshot(Of(wsId), engine, false).View());
+	}
+
+	void SandboxService::SetBusy(Core::StringView wsId, SandboxState* state, Core::StringView busy) {
+		{
+			IED::HostLock lock(*m_Context);
+			state->m_Busy = Core::String(busy);
+		}
+		Publish(wsId);
+	}
+
+	// --- definitions on disk and Docker's state ----------------------------------------------------------------------
+
+	static Core::Array<Core::String> DefinitionNames(Core::StringView root) {
+		Core::Array<Core::String> names;
+		Core::String folder = Slashes(root) + "/" + c_DefinitionsFolder;
+		if (!FS::IsDirectory(folder.CStr())) return names;
+		for (FS::DirectoryEntry& entry : FS::Directory(folder.CStr())) {
+			if (entry.kind != FS::EntryKind::Directory || !ValidName(entry.name.View())) continue;
+			int64 at = names.Count();
+			while (at > 0 && entry.name < names[at - 1]) at -= 1;
+			names.Insert(at, entry.name);
+		}
+		return names;
+	}
+
+	// The definition `name` of the workspace rooted at `root`, read from disk.
+	static bool ReadDefinition(Core::StringView root, Core::StringView name, SandboxDefinition& definition, Core::String& problem) {
+		Core::String folder = ((Slashes(root) + "/") + c_DefinitionsFolder + "/") + name;
+		Core::String file = folder + "/sandbox.json";
+		definition.m_Name = Core::String(name);
+		if (!FS::FileExists(file.CStr())) {
+			problem = (Core::String(c_DefinitionsFolder) + "/") + name + "/ has no sandbox.json";
+			return false;
+		}
+		if (!ParseDefinition(name, ReadText(file.View()).View(), definition, problem)) return false;
+		Core::String dockerfile = folder + "/Dockerfile";
+		definition.m_OwnDockerfile = FS::FileExists(dockerfile.CStr());
+		if (definition.m_OwnDockerfile) definition.m_OwnDockerfileText = ReadText(dockerfile.View());
+		return true;
+	}
+
+	void SandboxService::ReadDefinitions(const IED::Workspace& ws) {
+		const Catalog& catalog = TheCatalog();
+		Core::String key = WorkspaceKey(ws.m_Root.View());
+		Core::String mirror = Mirror(m_Context);
+		const int64 cpus = SettingInt("sandbox.defaultCpus", ws.m_Id.View(), 4);
+		const int64 memory = SettingInt("sandbox.defaultMemoryGiB", ws.m_Id.View(), 6);
+		Core::Array<Core::String> names = DefinitionNames(ws.m_Root.View());
+		Core::Array<SandboxDefinition> definitions;
+		Core::Array<SandboxPlan> plans;
+		Core::Array<Core::String> problems;
+		Core::Array<bool> planned;
+		for (const Core::String& name : names) {
+			SandboxDefinition definition;
+			SandboxPlan plan;
+			Core::String problem;
+			bool ok = ReadDefinition(ws.m_Root.View(), name.View(), definition, problem);
+			if (ok) ok = PlanSandbox(definition, catalog, key.View(), ws.m_Root.View(), mirror.View(), cpus, memory, plan, problem);
+			definitions.Push(definition);
+			plans.Push(plan);
+			problems.Push(problem);
+			planned.Push(ok);
+		}
+		{
+			IED::HostLock lock(*m_Context);
+			WorkspaceSandboxes* sandboxes = Of(ws.m_Id.View());
+			sandboxes->m_Root = ws.m_Root;
+			sandboxes->m_Key = key;
+			Core::Array<SandboxState*> kept;
+			for (int64 i = 0; i < names.Count(); ++i) {
+				SandboxState* state = Find(sandboxes, names[i].View());
+				if (state == nullptr) {
+					state = new SandboxState();
+					state->m_Name = names[i];
+					state->m_Container = Core::String("unknown");
+				}
+				if (state->m_Planned && planned[i] && state->m_Plan.m_RunDigest != plans[i].m_RunDigest && state->m_Container == "running")
+					state->m_Container = Core::String("stale");
+				if (state->m_Planned && planned[i] && state->m_Plan.m_Tag != plans[i].m_Tag) state->m_ImageBuilt = false;
+				state->m_Definition = definitions[i];
+				state->m_Plan = plans[i];
+				state->m_Problem = problems[i];
+				state->m_Planned = planned[i];
+				kept.Push(state);
+			}
+			// A sandbox whose folder went keeps its state while a job is on it.
+			for (SandboxState* state : sandboxes->m_Sandboxes)
+				if (!state->m_Busy.IsEmpty() && !HasPlatform(names, state->m_Name.View())) kept.Push(state);
+			sandboxes->m_Sandboxes = kept;
+		}
+	}
+
+	void SandboxService::ReadDocker(const IED::Workspace& ws) {
+		EngineInfo engine = m_Engine->Look(false);
+		Core::String key = WorkspaceKey(ws.m_Root.View());
+		if (engine.m_State != "ready") {
+			IED::HostLock lock(*m_Context);
+			WorkspaceSandboxes* sandboxes = Of(ws.m_Id.View());
+			sandboxes->m_DockerProblem = EngineAdvice(engine);
+			for (SandboxState* state : sandboxes->m_Sandboxes) state->m_Container = Core::String("unknown");
+			return;
+		}
+		Core::Array<Core::String> args = Words("ps", "-a", "--filter", nullptr);
+		args.Push((Core::String("name=^ied-") + key.View()) + "-");
+		args.Push(Core::String("--format"));
+		args.Push(Core::String("{{.Names}}\t{{.State}}\t{{.Label \"ied.sandbox.config\"}}"));
+		Process::Output containers = Docker(args, 20000);
+		Core::Array<Core::String> images = Words("images", "--filter", nullptr, nullptr);
+		images.Push((Core::String("reference=ied-sandbox/") + key.View()) + "-*");
+		images.Push(Core::String("--format"));
+		images.Push(Core::String("{{.Repository}}:{{.Tag}}"));
+		Process::Output tags = Docker(images, 20000);
+		Core::Array<Core::String> built;
+		Core::SplitParts tagLines = Core::SplitParts(tags.output.View(), '\n');
+		Core::StringView line;
+		while (tagLines.Next(line))
+			if (!line.Trimmed().IsEmpty()) built.Push(Core::String(line.Trimmed()));
+		IED::HostLock lock(*m_Context);
+		WorkspaceSandboxes* sandboxes = Of(ws.m_Id.View());
+		sandboxes->m_DockerProblem = containers.exitCode == 0 ? Core::String("") : Core::String(containers.errors.View().Trimmed());
+		if (containers.exitCode != 0) return;
+		for (SandboxState* state : sandboxes->m_Sandboxes) {
+			state->m_ImageBuilt = state->m_Planned && HasPlatform(built, state->m_Plan.m_Tag.View());
+			state->m_Container = Core::String("absent");
+			Core::SplitParts rows = Core::SplitParts(containers.output.View(), '\n');
+			Core::StringView row;
+			while (rows.Next(row)) {
+				Core::Array<Core::StringView> fields = row.Trimmed().Split('\t');
+				if (fields.Count() < 2 || fields[0] != state->m_Plan.m_Container.View()) continue;
+				state->m_Container = ContainerState(fields[1], fields.Count() > 2 ? fields[2] : Core::StringView(""), state->m_Plan.m_RunDigest.View());
+			}
+		}
+	}
+
+	void SandboxService::ContributeProfiles(const IED::Workspace& ws) {
+		Core::String program;
+		Core::Array<Core::String> leading;
+		Core::String problem;
+		IED::JsonWriter json;
+		json.BeginArray();
+		if (m_Engine->Command(program, leading, problem)) {
+			IED::HostLock lock(*m_Context);
+			for (const SandboxState* state : Of(ws.m_Id.View())->m_Sandboxes) {
+				if (!state->m_Planned) continue;
+				json.BeginObject();
+				json.Field("id", (Core::String("sandbox-") + state->m_Name.View()).View());
+				json.Field("title", (Core::String("Sandbox: ") + state->m_Name.View()).View());
+				json.Field("icon", Core::StringView("$(vm)"));
+				json.Key(Core::StringView("argv"));
+				json.BeginArray();
+				json.String(program.View());
+				for (const Core::String& word : leading) json.String(word.View());
+				json.String(Core::StringView("exec"));
+				json.String(Core::StringView("-it"));
+				json.String(Core::StringView("-w"));
+				json.String(Core::StringView(c_WorkspaceMount));
+				json.String(state->m_Plan.m_Container.View());
+				json.String(Core::StringView("sh"));
+				json.String(Core::StringView("-lc"));
+				json.String(Core::StringView("command -v bash >/dev/null 2>&1 && exec bash -l || exec sh -l"));
+				json.EndArray();
+				json.EndObject();
+			}
+		}
+		json.EndArray();
+		if (!m_Context->Contribute(Core::StringView("terminalProfiles"), ws.m_Id.View(), json.View(), problem)) m_Context->Log(problem.View());
+	}
+
+	void SandboxService::Scan(Core::StringView wsId, bool docker) {
+		IED::Workspace ws;
+		if (!IED::FindWorkspace(wsId, ws)) return;
+		ReadDefinitions(ws);
+		if (docker) ReadDocker(ws);
+		ContributeProfiles(ws);
+		Publish(wsId);
+	}
+
+	bool SandboxService::Definition(const IED::Workspace& ws, Core::StringView name, SandboxDefinition& definition, Core::String& problem) {
+		return ReadDefinition(ws.m_Root.View(), name, definition, problem);
+	}
+
+	Core::Array<Core::String> SandboxService::Summaries(const IED::Workspace& ws) {
+		Core::Array<Core::String> summaries;
+		for (const Core::String& name : DefinitionNames(ws.m_Root.View())) {
+			SandboxDefinition definition;
+			Core::String problem;
+			Core::StringBuilder line;
+			line.Append(name.View());
+			if (!ReadDefinition(ws.m_Root.View(), name.View(), definition, problem)) {
+				line.Append(" (its definition is wrong: ");
+				line.Append(problem.View());
+				line.Append(")");
+			}
+			else {
+				line.Append(" (");
+				line.Append(definition.m_Os.IsEmpty() ? definition.m_Image.View() : definition.m_Os.View());
+				if (!definition.m_Platform.IsEmpty()) {
+					line.Append(", ");
+					line.Append(definition.m_Platform.View());
+				}
+				if (definition.m_Network == "full") line.Append(", network on");
+				line.Append(")");
+			}
+			summaries.Push(line.ToString());
+		}
+		return summaries;
+	}
+
+	// --- creating a definition ----------------------------------------------------------------------------------------
+
+	bool SandboxService::Create(const IED::Workspace& ws, const SandboxDefinition& definition, bool replace, Core::String& notes, Core::String& problem) {
+		if (!ValidName(definition.m_Name.View())) {
+			problem = Core::String("a sandbox name is lowercase letters, digits and '-' (at most 40): ubuntu-arm64");
+			return false;
+		}
+		Core::String path = ((Core::String(c_DefinitionsFolder) + "/") + definition.m_Name.View()) + "/sandbox.json";
+		if (!replace && IED::Exists(ws, path.View())) {
+			problem = (Core::String("a sandbox named ") + definition.m_Name.View()) + " exists already: choose another name, or replace it";
+			return false;
+		}
+		Core::String text = DefinitionJson(definition);
+		SandboxDefinition checked;
+		if (!ParseDefinition(definition.m_Name.View(), text.View(), checked, problem)) return false;
+		SandboxPlan plan;
+		if (!PlanSandbox(checked, TheCatalog(), WorkspaceKey(ws.m_Root.View()).View(), ws.m_Root.View(), Mirror(m_Context).View(), 4, 6, plan, problem)) return false;
+		EngineInfo engine = m_Engine->Look(false);
+		if (engine.m_State == "ready" && !checked.m_Platform.IsEmpty() && plan.m_Engine == "linux" && !HasPlatform(engine.m_Platforms, checked.m_Platform.View()))
+			notes = (Core::String("Docker cannot run ") + checked.m_Platform.View()) + " yet: install QEMU's emulators (sandbox_engine(action: \"install_emulators\")) before running it. ";
+		if (!plan.m_Missing.IsEmpty()) {
+			notes = notes + "No packages for the presets ";
+			for (int64 i = 0; i < plan.m_Missing.Count(); ++i) {
+				if (i > 0) notes = notes + ", ";
+				notes = notes + plan.m_Missing[i].View();
+			}
+			notes = (notes + " with ") + (plan.m_PackageManager.IsEmpty() ? Core::StringView("an image the catalog does not know") : plan.m_PackageManager.View()) + ": add what they need to \"packages\". ";
+		}
+		if (plan.m_Engine == "windows") notes = notes + "A Windows sandbox needs Docker's Windows engine, which IED does not run yet. ";
+		if (!IED::WriteFile(ws, path.View(), text.View(), problem)) return false;
+		Scan(ws.m_Id.View(), false);
+		return true;
+	}
+
+	// --- runs and their output ---------------------------------------------------------------------------------------
+
+	Process::Output SandboxService::Docker(const Core::Array<Core::String>& args, int32 timeoutMs) { return m_Engine->Run(args, timeoutMs); }
+
+	SandboxRun* SandboxService::BeginRun(Core::StringView wsId, Core::StringView sandbox, const char* kind, Core::StringView label) {
+		SandboxRun* run = new SandboxRun();
+		{
+			IED::HostLock lock(*m_Context);
+			WorkspaceSandboxes* sandboxes = Of(wsId);
+			m_NextRunId += 1;
+			run->m_Id = m_NextRunId;
+			run->m_Sandbox = Core::String(sandbox);
+			run->m_Kind = Core::String(kind);
+			run->m_Label = Core::String(label);
+			run->m_Running = true;
+			run->m_StartedMs = UnixMs();
+			sandboxes->m_Runs.Push(run);
+			while (sandboxes->m_Runs.Count() > c_KeptRuns) {
+				bool removed = false;
+				for (int64 i = 0; i < sandboxes->m_Runs.Count() && !removed; ++i)
+					if (!sandboxes->m_Runs[i]->m_Running) {
+						sandboxes->m_Runs.RemoveAt(i);
+						removed = true;
+					}
+				if (!removed) break;
+			}
+			SandboxState* state = Find(sandboxes, sandbox);
+			if (state != nullptr) state->m_LastRunId = run->m_Id;
+			Core::StringBuilder header;
+			header.Append("> [");
+			header.Append(sandbox.IsEmpty() ? Core::StringView("docker") : sandbox);
+			header.Append("] ");
+			header.Append(label);
+			header.Append("\n");
+			m_Context->Output(wsId, Core::StringView(c_OutputSource), header.View());
+		}
+		Publish(wsId);
+		return run;
+	}
+
+	void SandboxService::Append(Core::StringView wsId, SandboxRun* run, Core::StringView text) {
+		if (text.IsEmpty()) return;
+		IED::HostLock lock(*m_Context);
+		run->m_Output = IED::BoundedText(run->m_Output.View(), text, c_KeptOutputBytes);
+		Core::StringBuilder rest;
+		rest.Append("\"runId\":");
+		rest.AppendInt(run->m_Id);
+		IED::Merge merge;
+		merge.m_Field = Core::String("text");
+		merge.m_Text = Core::String(text);
+		merge.m_Rest = rest.ToString();
+		m_Context->PublishMergeable(SandboxTopic(wsId).View(), "output", merge);
+		// The Output window gets whole lines, each with its sandbox, since validations run several at once.
+		Core::String pending = run->m_Pending + text;
+		Core::StringBuilder lines;
+		Core::StringView all = pending.View();
+		int64 start = 0;
+		while (true) {
+			const int64 end = all.IndexOf('\n', start);
+			if (end < 0) break;
+			lines.Append("[");
+			lines.Append(run->m_Sandbox.IsEmpty() ? Core::StringView("docker") : run->m_Sandbox.View());
+			lines.Append("] ");
+			lines.Append(all.Substring(start, end + 1 - start));
+			start = end + 1;
+		}
+		run->m_Pending = Core::String(all.Substring(start, all.ByteLength() - start));
+		if (lines.ByteLength() > 0) m_Context->Output(wsId, Core::StringView(c_OutputSource), lines.View());
+	}
+
+	void SandboxService::EndRun(Core::StringView wsId, SandboxRun* run, int64 exitCode, Core::StringView stopped, Core::StringView problem) {
+		if (!run->m_Pending.IsEmpty()) Append(wsId, run, Core::StringView("\n"));
+		if (!problem.IsEmpty()) Append(wsId, run, ((Core::String(problem) + "\n").View()));
+		{
+			IED::HostLock lock(*m_Context);
+			run->m_Running = false;
+			run->m_ExitCode = exitCode;
+			run->m_Stopped = Core::String(stopped);
+			run->m_Problem = Core::String(problem);
+			run->m_EndedMs = UnixMs();
+			Core::StringBuilder footer;
+			footer.Append("[");
+			footer.Append(run->m_Sandbox.IsEmpty() ? Core::StringView("docker") : run->m_Sandbox.View());
+			footer.Append("] ");
+			if (!stopped.IsEmpty()) footer.Append(stopped);
+			else if (!problem.IsEmpty()) footer.Append("failed");
+			else {
+				footer.Append("exit ");
+				footer.AppendInt(exitCode);
+			}
+			footer.Append(" (");
+			footer.Append(DurationText(run->m_EndedMs - run->m_StartedMs).View());
+			footer.Append(")\n");
+			m_Context->Output(wsId, Core::StringView(c_OutputSource), footer.View());
+		}
+		Publish(wsId);
+	}
+
+	int64 SandboxService::Stream(Core::StringView wsId, SandboxRun* run, const Core::Array<Core::String>& args, int64 deadlineMs, const bool* cancelled, Core::StringView container, Core::String& stopped) {
+		Process::Child child = m_Engine->Start(args);
+		if (!child.IsOpen()) {
+			stopped = (Core::String("docker did not start: ") + child.Error());
+			return -1;
+		}
+		int64 exitedAt = -1;
+		Core::String partial;
+		char8[16384] buffer;
+		while (child.HasOutput()) {
+			const bool cancel = run->m_Cancel || (cancelled != nullptr && *cancelled);
+			if (cancel || UnixMs() > deadlineMs) {
+				stopped = Core::String(cancel ? "stopped" : "ran out of time and was stopped");
+				if (!container.IsEmpty() && !run->m_PidFile.IsEmpty()) Docker(KillArguments(container, run->m_PidFile.View()), 15000);
+				child.Kill();
+				break;
+			}
+			if (exitedAt < 0 && child.Wait(0) != Process::kTimedOut) exitedAt = UnixMs();
+			if (exitedAt >= 0 && UnixMs() - exitedAt > 2000) break;
+			Process::Stream from;
+			const int64 got = child.ReadAny((void*)&buffer[0], 16384, from, 200);
+			if (got > 0) {
+				Core::String bytes = partial + Core::StringView(&buffer[0], got);
+				const int64 whole = IED::WholeCharacters(bytes.View());
+				Append(wsId, run, bytes.View().Substring(0, whole));
+				partial = Core::String(bytes.View().Substring(whole, bytes.ByteLength() - whole));
+			}
+			else if (got != Process::kTimedOut && got != 0) break;
+		}
+		if (!partial.IsEmpty()) Append(wsId, run, partial.View());
+		const int64 code = child.Wait(5000);
+		return stopped.IsEmpty() ? code : -1;
+	}
+
+	// --- preparing a sandbox -----------------------------------------------------------------------------------------
+
+	bool SandboxService::Prepare(const IED::Workspace& ws, Core::StringView name, SandboxState*& state, Core::String& problem) {
+		if (!ws.m_Trusted) {
+			problem = Core::String("the workspace is not trusted: a sandbox runs the workspace's code and its definition's setup, so the owner must trust the workspace first");
+			return false;
+		}
+		ReadDefinitions(ws);
+		{
+			IED::HostLock lock(*m_Context);
+			state = Find(Of(ws.m_Id.View()), name);
+			if (state != nullptr && !state->m_Planned) problem = (((Core::String("sandbox ") + name) + ": ") + state->m_Problem.View());
+		}
+		if (state == nullptr) {
+			Core::StringBuilder said;
+			said.Append("no sandbox named ");
+			said.Append(name);
+			Core::Array<Core::String> names = DefinitionNames(ws.m_Root.View());
+			said.Append(names.IsEmpty() ? Core::StringView(": the workspace has none (sandbox_create makes one)") : Core::StringView("; the workspace has "));
+			for (int64 i = 0; i < names.Count(); ++i) {
+				if (i > 0) said.Append(", ");
+				said.Append(names[i].View());
+			}
+			problem = said.ToString();
+			return false;
+		}
+		if (!problem.IsEmpty()) return false;
+		EngineInfo engine = m_Engine->Look(false);
+		if (engine.m_State != "ready") {
+			problem = EngineAdvice(engine);
+			return false;
+		}
+		if (state->m_Plan.m_Engine == "windows") {
+			problem = Core::String("a Windows sandbox needs Docker's Windows engine (docker desktop engine use windows), which IED does not run yet");
+			return false;
+		}
+		if (engine.m_Os == "windows") {
+			problem = EngineAdvice(engine);
+			return false;
+		}
+		Core::StringView platform = state->m_Definition.m_Platform.View();
+		if (!platform.IsEmpty() && !HasPlatform(engine.m_Platforms, platform)) {
+			Core::StringBuilder said;
+			said.Append("Docker cannot run ");
+			said.Append(platform);
+			said.Append(" here (it runs ");
+			for (int64 i = 0; i < engine.m_Platforms.Count(); ++i) {
+				if (i > 0) said.Append(", ");
+				said.Append(engine.m_Platforms[i].View());
+			}
+			said.Append("): install QEMU's emulators first - sandbox_engine(action: \"install_emulators\"), or the Sandboxes window's Install emulators");
+			problem = said.ToString();
+			return false;
+		}
+		return true;
+	}
+
+	static Core::String BuildFailure(Core::StringView output, int64 code) {
+		Core::StringBuilder said;
+		said.Append("the image did not build (exit ");
+		said.AppendInt(code);
+		said.Append(")");
+		Core::String lower = output.ToLower();
+		if (lower.View().Contains(Core::StringView("toomanyrequests")) || lower.View().Contains(Core::StringView("429 too many requests")))
+			said.Append(": Docker Hub's pull limit for anonymous users was reached - sign Docker in (docker login), wait a few hours, or set sandbox.registryMirror to mirror.gcr.io/library (official images only)");
+		else if (lower.View().Contains(Core::StringView("no match for platform")))
+			said.Append(": the image has no build for this platform (sandbox_catalog lists each version's platforms)");
+		else if (lower.View().Contains(Core::StringView("unable to locate package")) || lower.View().Contains(Core::StringView("no match for argument")) || lower.View().Contains(Core::StringView("not found in repositories")) || lower.View().Contains(Core::StringView("target not found")))
+			said.Append(": a package is not in this distribution's repositories under that name - check \"packages\" and \"presets\"");
+		said.Append("\n");
+		said.Append(TailLines(output, 25, 4000).View());
+		return said.ToString();
+	}
+
+	bool SandboxService::BuildImage(const IED::Workspace& ws, SandboxState* state, bool noCache, SandboxRun* run, const bool* cancelled, Core::String& problem) {
+		Core::String root = Slashes(ws.m_Root.View());
+		Core::String dockerfile;
+		Core::String context;
+		if (state->m_Definition.m_OwnDockerfile) {
+			context = ((root + "/") + c_DefinitionsFolder + "/") + state->m_Name.View();
+			dockerfile = context + "/Dockerfile";
+		}
+		else {
+			dockerfile = Slashes(IED::WorkspaceFile(ws, ((Core::String(".ied/local/sandbox/") + state->m_Name.View()) + "/Dockerfile").View()).View());
+			context = Slashes(FS::Path(dockerfile.View()).Parent().View());
+			if (!WriteText(dockerfile.View(), state->m_Plan.m_Dockerfile.View())) {
+				problem = Core::String("could not write ") + dockerfile.View();
+				return false;
+			}
+		}
+		Core::Array<Core::String> args = Words("build", "--progress", "plain", "-t");
+		args.Push(state->m_Plan.m_Tag);
+		if (!state->m_Definition.m_Platform.IsEmpty()) {
+			args.Push(Core::String("--platform"));
+			args.Push(state->m_Definition.m_Platform);
+		}
+		if (noCache) args.Push(Core::String("--no-cache"));
+		args.Push(Core::String("--label"));
+		args.Push(Core::String("ied.sandbox=") + state->m_Name.View());
+		args.Push(Core::String("--label"));
+		args.Push(Core::String("ied.workspace=") + root.View());
+		args.Push(Core::String("-f"));
+		args.Push(dockerfile);
+		args.Push(context);
+		Append(ws.m_Id.View(), run, (Core::String("Building ") + state->m_Plan.m_Tag.View() + " from " + state->m_Plan.m_BaseImage.View() + (state->m_Definition.m_Platform.IsEmpty() ? Core::StringView("") : (Core::String(" for ") + state->m_Definition.m_Platform.View()).View()) + "\n").View());
+		const int64 before = run->m_Output.ByteLength();
+		Core::String stopped;
+		const int64 code = Stream(ws.m_Id.View(), run, args, UnixMs() + 3600000, cancelled, Core::StringView(""), stopped);
+		if (!stopped.IsEmpty()) {
+			problem = Core::String("building the image was ") + stopped.View();
+			return false;
+		}
+		if (code != 0) {
+			Core::String output;
+			{
+				IED::HostLock lock(*m_Context);
+				output = Core::String(run->m_Output.View().Substring(before < run->m_Output.ByteLength() ? before : 0, run->m_Output.ByteLength()));
+			}
+			problem = BuildFailure(output.View(), code);
+			return false;
+		}
+		// The images of this sandbox's earlier definitions are not used again.
+		Core::Array<Core::String> list = Words("images", nullptr, nullptr, nullptr);
+		list.Push(Core::String(state->m_Plan.m_Tag.View().Substring(0, state->m_Plan.m_Tag.View().IndexOf(':'))));
+		list.Push(Core::String("--format"));
+		list.Push(Core::String("{{.Repository}}:{{.Tag}}"));
+		Process::Output older = Docker(list, 20000);
+		Core::SplitParts lines = Core::SplitParts(older.output.View(), '\n');
+		Core::StringView line;
+		while (lines.Next(line)) {
+			Core::StringView tag = line.Trimmed();
+			if (tag.IsEmpty() || tag == state->m_Plan.m_Tag.View()) continue;
+			Core::Array<Core::String> remove = Words("image", "rm", nullptr, nullptr);
+			remove.Push(Core::String(tag));
+			Docker(remove, 30000);
+		}
+		IED::HostLock lock(*m_Context);
+		state->m_ImageBuilt = true;
+		return true;
+	}
+
+	bool SandboxService::StartContainer(const IED::Workspace& ws, SandboxState* state, SandboxRun* run, Core::String& problem) {
+		Append(ws.m_Id.View(), run, (Core::String("Starting ") + state->m_Plan.m_Container.View() + "\n").View());
+		Process::Output started = Docker(RunArguments(state->m_Definition, state->m_Plan, ws.m_Root.View()), 120000);
+		if (started.exitCode != 0) {
+			problem = Core::String("the sandbox did not start: ") + started.errors.View().Trimmed();
+			return false;
+		}
+		IED::HostLock lock(*m_Context);
+		state->m_Container = Core::String("running");
+		return true;
+	}
+
+	bool SandboxService::Ensure(const IED::Workspace& ws, SandboxState* state, bool start, bool rebuild, SandboxRun* run, const bool* cancelled, Core::String& prepared, Core::String& problem) {
+		Threading::LockGuard op(*state->m_Op);
+		Core::String wsId = ws.m_Id;
+		bool built = false;
+		if (!rebuild) {
+			Core::Array<Core::String> args = Words("image", "inspect", "--format", "{{.Id}}");
+			args.Push(state->m_Plan.m_Tag);
+			built = Docker(args, 20000).exitCode == 0;
+		}
+		if (!built) {
+			SetBusy(wsId.View(), state, Core::StringView(rebuild ? "rebuilding" : "building"));
+			const int64 begun = UnixMs();
+			const bool ok = BuildImage(ws, state, rebuild, run, cancelled, problem);
+			SetBusy(wsId.View(), state, Core::StringView(""));
+			if (!ok) return false;
+			prepared = (Core::String("built the image (") + DurationText(UnixMs() - begun).View()) + ")";
+		}
+		if (!start) return true;
+		Core::Array<Core::String> inspect = Words("inspect", "--format", "{{.State.Status}}\t{{index .Config.Labels \"ied.sandbox.config\"}}", nullptr);
+		inspect.Push(state->m_Plan.m_Container);
+		Process::Output found = Docker(inspect, 20000);
+		Core::String status;
+		Core::String config;
+		if (found.exitCode == 0) {
+			Core::Array<Core::StringView> fields = found.output.View().Trimmed().Split('\t');
+			if (fields.Count() > 0) status = Core::String(fields[0]);
+			if (fields.Count() > 1) config = Core::String(fields[1]);
+		}
+		const bool exists = found.exitCode == 0 && !status.IsEmpty();
+		const bool current = exists && config == state->m_Plan.m_RunDigest && built;
+		if (exists && current && status == "running") return true;
+		SetBusy(wsId.View(), state, Core::StringView("starting"));
+		bool ok = true;
+		if (exists && !current) {
+			Append(wsId.View(), run, (Core::String("Recreating ") + state->m_Plan.m_Container.View() + " (its image or options changed)\n").View());
+			Core::Array<Core::String> remove = Words("rm", "-f", nullptr, nullptr);
+			remove.Push(state->m_Plan.m_Container);
+			Docker(remove, 60000);
+		}
+		if (exists && current) {
+			Core::Array<Core::String> args = Words("start", nullptr, nullptr, nullptr);
+			args.Push(state->m_Plan.m_Container);
+			Process::Output started = Docker(args, 120000);
+			if (started.exitCode != 0) {
+				problem = Core::String("the sandbox did not start: ") + started.errors.View().Trimmed();
+				ok = false;
+			}
+			else {
+				IED::HostLock lock(*m_Context);
+				state->m_Container = Core::String("running");
+			}
+		}
+		else ok = StartContainer(ws, state, run, problem);
+		SetBusy(wsId.View(), state, Core::StringView(""));
+		if (ok) prepared = prepared.IsEmpty() ? Core::String("started the sandbox") : prepared + "; started the sandbox";
+		return ok;
+	}
+
+	// --- jobs ---------------------------------------------------------------------------------------------------------
+
+	RunOutcome SandboxService::Exec(const IED::Workspace& ws, Core::StringView name, Core::StringView command, Core::StringView cwd, const Core::Array<Core::String>& env, int64 seconds, const bool* cancelled) {
+		RunOutcome outcome;
+		SandboxState* state = nullptr;
+		if (!Prepare(ws, name, state, outcome.m_Problem)) return outcome;
+		SandboxRun* run = BeginRun(ws.m_Id.View(), name, "run", command);
+		outcome.m_RunId = run->m_Id;
+		if (!Ensure(ws, state, true, false, run, cancelled, outcome.m_Prepared, outcome.m_Problem)) {
+			EndRun(ws.m_Id.View(), run, -1, Core::StringView(""), outcome.m_Problem.View());
+			return outcome;
+		}
+		{
+			IED::HostLock lock(*m_Context);
+			state->m_LastUsedMs = UnixMs();
+			run->m_PidFile = Core::String("/tmp/.ied-run-");
+			Core::StringBuilder id;
+			id.AppendInt(run->m_Id);
+			run->m_PidFile = run->m_PidFile + id.View();
+		}
+		// Each run knows which sandbox it is in, so one command builds into a folder of each sandbox's own on the shared
+		// workspace (build/$IED_SANDBOX): a validation runs several at once.
+		Core::Array<Core::String> all;
+		all.Push(Core::String("IED_SANDBOX=") + state->m_Name.View());
+		all.Push(Core::String("IED_PLATFORM=") + (state->m_Definition.m_Platform.IsEmpty() ? NativePlatform(m_Engine->Last()).View() : state->m_Definition.m_Platform.View()));
+		for (const Core::String& pair : state->m_Definition.m_Env) all.Push(pair);
+		for (const Core::String& pair : env) all.Push(pair);
+		const int64 before = run->m_Output.ByteLength();
+		const int64 started = UnixMs();
+		Core::String stopped;
+		const int64 code = Stream(ws.m_Id.View(), run, ExecArguments(state->m_Plan.m_Container.View(), cwd, all, command, run->m_PidFile.View()), started + seconds * 1000, cancelled, state->m_Plan.m_Container.View(), stopped);
+		outcome.m_Ms = UnixMs() - started;
+		{
+			IED::HostLock lock(*m_Context);
+			state->m_LastUsedMs = UnixMs();
+			Core::StringView kept = run->m_Output.View();
+			outcome.m_Output = Core::String(before <= kept.ByteLength() && run->m_Output.ByteLength() < c_KeptOutputBytes ? kept.Substring(before, kept.ByteLength() - before) : kept);
+		}
+		outcome.m_Ran = true;
+		outcome.m_ExitCode = code;
+		outcome.m_Stopped = stopped;
+		if (stopped.View().StartsWith(Core::StringView("docker did not start"))) {
+			outcome.m_Ran = false;
+			outcome.m_Problem = stopped;
+			outcome.m_Stopped = Core::String("");
+		}
+		EndRun(ws.m_Id.View(), run, code, outcome.m_Stopped.View(), outcome.m_Ran ? Core::StringView("") : outcome.m_Problem.View());
+		return outcome;
+	}
+
+	bool SandboxService::Control(const IED::Workspace& ws, Core::StringView name, Core::StringView action, const bool* cancelled, Core::String& said, Core::String& problem) {
+		const bool known = action == "build" || action == "rebuild" || action == "start" || action == "stop" || action == "restart" || action == "reset" || action == "remove" || action == "pull";
+		if (!known) {
+			problem = Core::String("not an action: build, rebuild, start, stop, restart, reset, remove or pull");
+			return false;
+		}
+		SandboxState* state = nullptr;
+		if (!Prepare(ws, name, state, problem)) return false;
+		SandboxRun* run = BeginRun(ws.m_Id.View(), name, (Core::String(action)).CStr(), (Core::String(action) + " " + name).View());
+		Core::String wsId = ws.m_Id;
+		Core::String prepared;
+		bool ok = true;
+		if (action == "build" || action == "rebuild") {
+			ok = Ensure(ws, state, false, action == "rebuild", run, cancelled, prepared, problem);
+			said = prepared.IsEmpty() ? (Core::String("the image of ") + name) + " is up to date (" + state->m_Plan.m_Tag.View() + ")" : prepared;
+		}
+		else if (action == "start") {
+			ok = Ensure(ws, state, true, false, run, cancelled, prepared, problem);
+			said = prepared.IsEmpty() ? (Core::String(name) + " is running") : prepared;
+		}
+		else if (action == "stop" || action == "restart" || action == "reset" || action == "remove") {
+			Threading::LockGuard op(*state->m_Op);
+			SetBusy(wsId.View(), state, action == "stop" ? Core::StringView("stopping") : Core::StringView("removing"));
+			Core::Array<Core::String> args = action == "stop" || action == "restart" ? Words("stop", "-t", "5", nullptr) : Words("rm", "-f", nullptr, nullptr);
+			args.Push(state->m_Plan.m_Container);
+			Process::Output done = Docker(args, 120000);
+			Append(wsId.View(), run, (Core::String(done.output.View()) + done.errors.View()).View());
+			if (action == "remove") {
+				Core::Array<Core::String> list = Words("images", nullptr, nullptr, nullptr);
+				list.Push(Core::String(state->m_Plan.m_Tag.View().Substring(0, state->m_Plan.m_Tag.View().IndexOf(':'))));
+				list.Push(Core::String("--format"));
+				list.Push(Core::String("{{.Repository}}:{{.Tag}}"));
+				Process::Output images = Docker(list, 20000);
+				Core::SplitParts lines = Core::SplitParts(images.output.View(), '\n');
+				Core::StringView line;
+				while (lines.Next(line)) {
+					if (line.Trimmed().IsEmpty()) continue;
+					Core::Array<Core::String> remove = Words("image", "rm", nullptr, nullptr);
+					remove.Push(Core::String(line.Trimmed()));
+					Process::Output removed = Docker(remove, 60000);
+					Append(wsId.View(), run, (Core::String(removed.output.View()) + removed.errors.View()).View());
+				}
+				IED::HostLock lock(*m_Context);
+				state->m_ImageBuilt = false;
+			}
+			{
+				IED::HostLock lock(*m_Context);
+				state->m_Container = Core::String(action == "stop" || action == "restart" ? "stopped" : "absent");
+			}
+			SetBusy(wsId.View(), state, Core::StringView(""));
+			said = action == "stop" ? (Core::String(name) + " is stopped") : action == "remove" ? (Core::String(name) + "'s container and images are removed; its definition stays") : Core::String("");
+		}
+		if (ok && (action == "restart" || action == "reset")) {
+			ok = Ensure(ws, state, true, false, run, cancelled, prepared, problem);
+			said = action == "reset" ? (Core::String(name) + " has a new container from its image") : (Core::String(name) + " restarted");
+		}
+		if (action == "pull") {
+			Core::Array<Core::String> args = Words("pull", nullptr, nullptr, nullptr);
+			if (!state->m_Definition.m_Platform.IsEmpty()) {
+				args.Push(Core::String("--platform"));
+				args.Push(state->m_Definition.m_Platform);
+			}
+			args.Push(state->m_Plan.m_BaseImage);
+			Core::String stopped;
+			const int64 code = Stream(wsId.View(), run, args, UnixMs() + 1800000, cancelled, Core::StringView(""), stopped);
+			ok = code == 0;
+			if (!ok) problem = stopped.IsEmpty() ? BuildFailure(run->m_Output.View(), code) : stopped;
+			said = (Core::String("downloaded ") + state->m_Plan.m_BaseImage.View());
+		}
+		EndRun(wsId.View(), run, ok ? 0 : 1, Core::StringView(""), ok ? Core::StringView("") : problem.View());
+		ReadDocker(ws);
+		Publish(wsId.View());
+		return ok;
+	}
+
+	ValidationRecord SandboxService::Validate(const IED::Workspace& ws, const Core::Array<Core::String>& names, Core::StringView command, int64 seconds, const bool* cancelled) {
+		ReadDefinitions(ws);
+		EngineInfo engine = m_Engine->Look(false);
+		Core::String native = NativePlatform(engine);
+		Core::Array<Core::String> chosen = names;
+		Core::Array<SandboxDefinition> definitions;
+		{
+			IED::HostLock lock(*m_Context);
+			WorkspaceSandboxes* sandboxes = Of(ws.m_Id.View());
+			if (chosen.IsEmpty())
+				for (const SandboxState* state : sandboxes->m_Sandboxes) chosen.Push(state->m_Name);
+			ValidationRecord& record = sandboxes->m_Validation;
+			record.m_Id += 1;
+			record.m_Command = Core::String(command);
+			record.m_Running = true;
+			record.m_StartedMs = UnixMs();
+			record.m_EndedMs = 0;
+			record.m_Rows.Clear();
+			for (const Core::String& name : chosen) {
+				ValidationRow row;
+				row.m_Sandbox = name;
+				row.m_Result = Core::String("queued");
+				SandboxState* state = Find(sandboxes, name.View());
+				if (state == nullptr) {
+					row.m_Result = Core::String("error");
+					row.m_Tail = Core::String("no sandbox of this name");
+				}
+				else {
+					row.m_Os = state->m_Definition.m_Os.IsEmpty() ? state->m_Definition.m_Image : state->m_Definition.m_Os;
+					row.m_Platform = state->m_Definition.m_Platform.IsEmpty() ? native : state->m_Definition.m_Platform;
+					row.m_Command = command.IsEmpty() ? state->m_Definition.m_Validate : Core::String(command);
+					if (row.m_Command.IsEmpty()) {
+						row.m_Result = Core::String("error");
+						row.m_Tail = Core::String("no command: give one, or set \"validate\" in its sandbox.json");
+					}
+				}
+				record.m_Rows.Push(row);
+			}
+		}
+		Publish(ws.m_Id.View());
+		const int64 workers = SettingInt("sandbox.parallelRuns", ws.m_Id.View(), 2);
+		ValidateCursor* cursor = new ValidateCursor();
+		const int64 count = chosen.Count();
+		SandboxService* self = this;
+		IED::Workspace workspace = ws;
+		const int64 threads = workers < 1 ? 1 : workers > 4 ? 4 : workers;
+		for (int64 t = 0; t < threads; ++t) {
+			m_Context->StartThread([self, workspace, cursor, count, seconds, cancelled]() {
+				while (true) {
+					int64 at = 0;
+					{
+						Threading::LockGuard guard(cursor->m_Lock);
+						at = cursor->m_Next;
+						cursor->m_Next += 1;
+					}
+					if (at >= count) break;
+					Core::String sandbox;
+					Core::String line;
+					bool skip = false;
+					{
+						IED::HostLock lock(*self->m_Context);
+						ValidationRow& row = self->Of(workspace.m_Id.View())->m_Validation.m_Rows[at];
+						sandbox = row.m_Sandbox;
+						line = row.m_Command;
+						skip = row.m_Result != "queued";
+						if (!skip && cancelled != nullptr && *cancelled) {
+							row.m_Result = Core::String("skipped");
+							skip = true;
+						}
+						if (!skip) row.m_Result = Core::String("running");
+					}
+					if (!skip) {
+						self->Publish(workspace.m_Id.View());
+						Core::Array<Core::String> env;
+						RunOutcome outcome = self->Exec(workspace, sandbox.View(), line.View(), Core::StringView(""), env, seconds, cancelled);
+						IED::HostLock lock(*self->m_Context);
+						ValidationRow& row = self->Of(workspace.m_Id.View())->m_Validation.m_Rows[at];
+						row.m_RunId = outcome.m_RunId;
+						row.m_Ms = outcome.m_Ms;
+						row.m_ExitCode = outcome.m_ExitCode;
+						if (!outcome.m_Ran) {
+							row.m_Result = Core::String("error");
+							row.m_Tail = outcome.m_Problem;
+						}
+						else if (!outcome.m_Stopped.IsEmpty()) {
+							row.m_Result = Core::String("stopped");
+							row.m_Tail = outcome.m_Stopped + "\n" + TailLines(outcome.m_Output.View(), 20, 3000).View();
+						}
+						else if (outcome.m_ExitCode == 0) row.m_Result = Core::String("pass");
+						else {
+							row.m_Result = Core::String("fail");
+							row.m_Tail = TailLines(outcome.m_Output.View(), 30, 4000);
+						}
+					}
+					{
+						Threading::LockGuard guard(cursor->m_Lock);
+						cursor->m_Finished += 1;
+					}
+					self->Publish(workspace.m_Id.View());
+				}
+			});
+		}
+		while (true) {
+			{
+				Threading::LockGuard guard(cursor->m_Lock);
+				if (cursor->m_Finished >= count) break;
+			}
+			Threading::Thread::Sleep(200000000);
+		}
+		ValidationRecord result;
+		{
+			IED::HostLock lock(*m_Context);
+			ValidationRecord& record = Of(ws.m_Id.View())->m_Validation;
+			record.m_Running = false;
+			record.m_EndedMs = UnixMs();
+			result = record;
+		}
+		SaveValidation(ws);
+		ReadDocker(ws);
+		Publish(ws.m_Id.View());
+		return result;
+	}
+
+	bool SandboxService::StopRun(Core::StringView wsId, int64 runId) {
+		IED::HostLock lock(*m_Context);
+		for (SandboxRun* run : Of(wsId)->m_Runs)
+			if (run->m_Id == runId && run->m_Running) {
+				run->m_Cancel = true;
+				return true;
+			}
+		return false;
+	}
+
+	bool SandboxService::StartEngine(Core::StringView wsId, const bool* cancelled, Core::String& problem) {
+		SandboxRun* run = BeginRun(wsId, Core::StringView(""), "engine", Core::StringView("Start Docker Desktop"));
+		SandboxService* self = this;
+		Core::String id = Core::String(wsId);
+		DoneFlag* done = new DoneFlag();
+		// The engine's "starting" reaches the window while the start waits.
+		m_Context->StartThread([self, id, done]() {
+			for (int64 i = 0; i < 70 && !done->m_Done; ++i) {
+				Threading::Thread::Sleep(3000000000);
+				if (!done->m_Done) self->Publish(id.View());
+			}
+		});
+		const bool ok = m_Engine->StartEngine(cancelled, problem);
+		done->m_Done = true;
+		EngineInfo engine = m_Engine->Last();
+		Append(wsId, run, ok ? (Core::String("Docker ") + engine.m_ServerVersion.View() + " is running (" + engine.m_Product.View() + ")\n").View() : Core::StringView(""));
+		EndRun(wsId, run, ok ? 0 : 1, Core::StringView(""), ok ? Core::StringView("") : problem.View());
+		Scan(wsId, true);
+		return ok;
+	}
+
+	bool SandboxService::InstallEmulators(Core::StringView wsId, Core::String& output) {
+		SandboxRun* run = BeginRun(wsId, Core::StringView(""), "emulators", Core::StringView("docker run --privileged --rm tonistiigi/binfmt --install all"));
+		const bool ok = m_Engine->InstallEmulators(output);
+		Append(wsId, run, output.View());
+		EndRun(wsId, run, ok ? 0 : 1, Core::StringView(""), ok ? Core::StringView("") : Core::StringView("installing the emulators failed"));
+		Publish(wsId);
+		return ok;
+	}
+
+	RunOutcome SandboxService::Pull(const IED::Workspace& ws, Core::StringView image, Core::StringView platform, const bool* cancelled) {
+		RunOutcome outcome;
+		EngineInfo engine = m_Engine->Look(false);
+		if (engine.m_State != "ready") {
+			outcome.m_Problem = EngineAdvice(engine);
+			return outcome;
+		}
+		Core::String pulled = MirrorImage(image, Mirror(m_Context).View());
+		Core::Array<Core::String> args = Words("pull", nullptr, nullptr, nullptr);
+		Core::String normal = NormalPlatform(platform);
+		if (!normal.IsEmpty()) {
+			args.Push(Core::String("--platform"));
+			args.Push(normal);
+		}
+		args.Push(pulled);
+		SandboxRun* run = BeginRun(ws.m_Id.View(), Core::StringView(""), "pull", (Core::String("docker pull ") + (normal.IsEmpty() ? Core::StringView("") : (normal + " ").View()) + pulled.View()).View());
+		outcome.m_RunId = run->m_Id;
+		const int64 started = UnixMs();
+		Core::String stopped;
+		const int64 code = Stream(ws.m_Id.View(), run, args, started + 1800000, cancelled, Core::StringView(""), stopped);
+		outcome.m_Ran = true;
+		outcome.m_ExitCode = code;
+		outcome.m_Stopped = stopped;
+		outcome.m_Ms = UnixMs() - started;
+		{
+			IED::HostLock lock(*m_Context);
+			outcome.m_Output = run->m_Output;
+		}
+		if (code != 0 && stopped.IsEmpty()) outcome.m_Problem = BuildFailure(outcome.m_Output.View(), code);
+		EndRun(ws.m_Id.View(), run, code, stopped.View(), outcome.m_Problem.View());
+		return outcome;
+	}
+
+	bool SandboxService::RemoveImage(Core::StringView image, Core::String& said) {
+		Core::Array<Core::String> args = Words("image", "rm", nullptr, nullptr);
+		args.Push(MirrorImage(image, Mirror(m_Context).View()));
+		Process::Output removed = Docker(args, 60000);
+		said = Core::String((removed.exitCode == 0 ? removed.output.View() : removed.errors.View()).Trimmed());
+		return removed.exitCode == 0;
+	}
+
+	void SandboxService::Background(func<void()> body) { m_Context->StartThread(body); }
+
+	// --- validation on disk ------------------------------------------------------------------------------------------
+
+	void SandboxService::SaveValidation(const IED::Workspace& ws) {
+		Core::String json;
+		{
+			IED::HostLock lock(*m_Context);
+			json = ValidationJson(Of(ws.m_Id.View())->m_Validation);
+		}
+		WriteText(IED::WorkspaceFile(ws, Core::StringView(".ied/local/sandbox/validation.json")).View(), json.View());
+	}
+
+	void SandboxService::LoadValidation(const IED::Workspace& ws) {
+		Core::String text = ReadText(IED::WorkspaceFile(ws, Core::StringView(".ied/local/sandbox/validation.json")).View());
+		if (text.IsEmpty()) return;
+		Serialization::DomNode root = ParseJson(text.View());
+		if (!root.IsValid()) return;
+		ValidationRecord record;
+		record.m_Id = root.Member("id").AsInt();
+		record.m_Command = Core::String(root.Member("command").AsView());
+		record.m_StartedMs = root.Member("startedMs").AsInt();
+		record.m_EndedMs = root.Member("endedMs").AsInt();
+		Serialization::DomNode rows = root.Member("rows");
+		for (int64 i = 0; i < rows.Count(); ++i) {
+			Serialization::DomNode node = rows.At(i);
+			ValidationRow row;
+			row.m_Sandbox = Core::String(node.Member("sandbox").AsView());
+			row.m_Os = Core::String(node.Member("os").AsView());
+			row.m_Platform = Core::String(node.Member("platform").AsView());
+			row.m_Command = Core::String(node.Member("command").AsView());
+			row.m_Result = Core::String(node.Member("result").AsView());
+			// A validation the server stopped in the middle of: its unfinished rows did not finish.
+			if (row.m_Result == "running" || row.m_Result == "queued") row.m_Result = Core::String("stopped");
+			row.m_ExitCode = node.Member("exitCode").AsInt();
+			row.m_Ms = node.Member("ms").AsInt();
+			row.m_Tail = Core::String(node.Member("tail").AsView());
+			record.m_Rows.Push(row);
+		}
+		if (record.m_EndedMs == 0) record.m_EndedMs = record.m_StartedMs;
+		IED::HostLock lock(*m_Context);
+		Of(ws.m_Id.View())->m_Validation = record;
+	}
+
+	// --- the service's life ------------------------------------------------------------------------------------------
+
+	static bool TouchesDefinitions(const IED::FileChanges& changes) {
+		if (changes.m_Overflowed) return true;
+		for (const IED::FileChange& change : changes.m_Changes)
+			if (change.m_Path.View().StartsWith(Core::StringView(".ied/sandbox/")) || change.m_Path == ".ied/sandbox") return true;
+		return false;
+	}
+
+	void SandboxService::Start() {
+		SandboxService* self = this;
+		m_Context->OnWorkspace([self](const IED::Workspace& ws) {
+			Core::String wsId = ws.m_Id;
+			{
+				IED::HostLock lock(*self->m_Context);
+				WorkspaceSandboxes* sandboxes = self->Of(wsId.View());
+				sandboxes->m_Root = ws.m_Root;
+				sandboxes->m_Key = WorkspaceKey(ws.m_Root.View());
+			}
+			self->m_Context->TopicFrom(SandboxTopic(wsId.View()).View(), [self, wsId]() -> Core::String { return Snapshot(self->Of(wsId.View()), self->m_Engine->Last(), true); });
+			self->LoadValidation(ws);
+			if (!ws.m_Trusted) return;
+			self->ReadDefinitions(ws);
+			self->ContributeProfiles(ws);
+		});
+		m_Context->OnTrustChanged([self](const IED::Workspace& ws) {
+			if (ws.m_Trusted) self->Scan(ws.m_Id.View(), false);
+		});
+		m_Context->OnFilesChanged([self](const IED::FileChanges& changes) {
+			if (!TouchesDefinitions(changes)) return;
+			IED::Workspace ws;
+			if (!IED::FindWorkspace(changes.m_WsId.View(), ws) || !ws.m_Trusted) return;
+			self->Scan(changes.m_WsId.View(), false);
+		});
+		m_Context->StartThread([self]() { self->IdleStop(); });
+	}
+
+	void SandboxService::Stop() {
+		IED::HostLock lock(*m_Context);
+		m_Stopping = true;
+	}
+
+	// Stops each sandbox no run used for sandbox.idleStopMinutes (its container keeps its files: the next run starts it).
+	void SandboxService::IdleStop() {
+		while (true) {
+			for (int64 i = 0; i < 30; ++i) {
+				Threading::Thread::Sleep(1000000000);
+				IED::HostLock lock(*m_Context);
+				if (m_Stopping) return;
+			}
+			const int64 minutes = SettingInt("sandbox.idleStopMinutes", Core::StringView(""), 30);
+			if (minutes <= 0) continue;
+			Core::Array<Core::String> containers;
+			Core::Array<Core::String> spaces;
+			Core::Array<IED::Workspace> open = IED::Workspaces();
+			{
+				IED::HostLock lock(*m_Context);
+				for (IED::Workspace& ws : open) {
+					WorkspaceSandboxes* sandboxes = Of(ws.m_Id.View());
+					for (SandboxState* state : sandboxes->m_Sandboxes) {
+						bool running = false;
+						for (const SandboxRun* run : sandboxes->m_Runs)
+							if (run->m_Running && run->m_Sandbox == state->m_Name) running = true;
+						if (running || !state->m_Busy.IsEmpty() || state->m_Container != "running" || state->m_LastUsedMs == 0) continue;
+						if (UnixMs() - state->m_LastUsedMs < minutes * 60000) continue;
+						containers.Push(state->m_Plan.m_Container);
+						spaces.Push(ws.m_Id);
+						state->m_Container = Core::String("stopped");
+					}
+				}
+			}
+			for (int64 i = 0; i < containers.Count(); ++i) {
+				Core::Array<Core::String> args = Words("stop", "-t", "5", nullptr);
+				args.Push(containers[i]);
+				Docker(args, 60000);
+				m_Context->Log((Core::String("stopped idle sandbox ") + containers[i].View()).View());
+				Publish(spaces[i].View());
+			}
+		}
+	}
+}

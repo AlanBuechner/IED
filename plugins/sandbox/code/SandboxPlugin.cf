@@ -1,0 +1,190 @@
+// The ied.sandbox plugin's entry (runtime.entry "Sandbox::Activate", docs/34): one SandboxService per workspace server
+// behind the Sandboxes window's methods (ied.sandbox/*, each answered at once, its job on a thread of its own and its
+// progress on the topic sandbox:<wsId>), the sandbox.* bindings and the AI tools (SandboxTools.cf).
+
+include "SandboxService.ch"
+include "SandboxTools.ch"
+
+namespace Sandbox
+{
+	static IED::Workspace WorkspaceOf(const IED::Request& request) {
+		IED::Workspace ws;
+		if (!IED::FindWorkspace(request.m_Params.Str("wsId", Core::StringView("")).View(), ws)) throw IED::RpcError(IED::ErrorCode::NotFound, Core::StringView("no such workspace"));
+		return ws;
+	}
+
+	static IED::Workspace Trusted(const IED::Request& request) {
+		IED::Workspace ws = WorkspaceOf(request);
+		if (!ws.m_Trusted) throw IED::RpcError(IED::ErrorCode::Unavailable, Core::StringView("trust the workspace first: a sandbox runs its code"));
+		return ws;
+	}
+
+	static void Register(IED::PluginContext& context, const char* name, IED::MethodHandler handler) {
+		Core::String problem;
+		if (!context.Method(Core::StringView(name), handler, problem)) context.Log(problem.View());
+	}
+
+	static Core::String Queued() { return Core::String("{\"queued\":true}"); }
+
+	static Core::Array<Core::String> StringsOf(const Serialization::DomNode& list) {
+		Core::Array<Core::String> strings;
+		for (int64 i = 0; i < list.Count(); ++i) strings.Push(Core::String(list.At(i).AsView()));
+		return strings;
+	}
+
+	static void RegisterMethods(IED::PluginContext& context, SandboxService* service) {
+		// The window opened or asked again: the engine and Docker's state are looked at anew.
+		Register(context, "ied.sandbox/state", [service](const IED::Request& request) -> Core::String {
+			IED::Workspace ws = WorkspaceOf(request);
+			Core::String wsId = ws.m_Id;
+			const bool trusted = ws.m_Trusted;
+			service->Background([service, wsId, trusted]() {
+				service->Engine()->Look(true);
+				service->Scan(wsId.View(), trusted);
+			});
+			return service->SnapshotJson(wsId.View());
+		});
+		Register(context, "ied.sandbox/catalog", [service](const IED::Request& request) -> Core::String {
+			WorkspaceOf(request);
+			return service->CatalogJson(true);
+		});
+		Register(context, "ied.sandbox/create", [service](const IED::Request& request) -> Core::String {
+			IED::Workspace ws = Trusted(request);
+			SandboxDefinition definition;
+			definition.m_Name = request.m_Params.Str("name", Core::StringView(""));
+			definition.m_Os = request.m_Params.Str("os", Core::StringView(""));
+			definition.m_Image = request.m_Params.Str("image", Core::StringView(""));
+			definition.m_Platform = NormalPlatform(request.m_Params.Str("platform", Core::StringView("")).View());
+			definition.m_Presets = StringsOf(request.m_Params.Field("presets"));
+			definition.m_Packages = StringsOf(request.m_Params.Field("packages"));
+			definition.m_Network = request.m_Params.Str("network", Core::StringView("none"));
+			definition.m_Validate = request.m_Params.Str("validate", Core::StringView(""));
+			definition.m_Description = request.m_Params.Str("description", Core::StringView(""));
+			Core::String notes;
+			Core::String problem;
+			if (!service->Create(ws, definition, request.m_Params.Bool("replace", false), notes, problem)) throw IED::RpcError(IED::ErrorCode::BadRequest, problem.View());
+			if (request.m_Params.Bool("build", false)) {
+				Core::String name = definition.m_Name;
+				service->Background([service, ws, name]() {
+					Core::String said;
+					Core::String failed;
+					service->Control(ws, name.View(), Core::StringView("build"), nullptr, said, failed);
+				});
+			}
+			IED::JsonWriter json;
+			json.BeginObject();
+			json.Field("name", definition.m_Name.View());
+			json.Field("notes", notes.View());
+			json.EndObject();
+			return json.ToString();
+		});
+		Register(context, "ied.sandbox/control", [service](const IED::Request& request) -> Core::String {
+			IED::Workspace ws = Trusted(request);
+			Core::String name = request.m_Params.Str("name", Core::StringView(""));
+			Core::String action = request.m_Params.Str("action", Core::StringView(""));
+			service->Background([service, ws, name, action]() {
+				Core::String said;
+				Core::String problem;
+				if (!service->Control(ws, name.View(), action.View(), nullptr, said, problem) && !problem.IsEmpty()) service->Scan(ws.m_Id.View(), true);
+			});
+			return Queued();
+		});
+		Register(context, "ied.sandbox/run", [service](const IED::Request& request) -> Core::String {
+			IED::Workspace ws = Trusted(request);
+			Core::String name = request.m_Params.Str("name", Core::StringView(""));
+			Core::String command = request.m_Params.Str("command", Core::StringView(""));
+			if (command.View().Trimmed().IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("give a command"));
+			const int64 seconds = request.m_Params.Int("timeoutSeconds", 1800);
+			service->Background([service, ws, name, command, seconds]() {
+				Core::Array<Core::String> env;
+				service->Exec(ws, name.View(), command.View(), Core::StringView(""), env, seconds, nullptr);
+			});
+			return Queued();
+		});
+		Register(context, "ied.sandbox/validate", [service](const IED::Request& request) -> Core::String {
+			IED::Workspace ws = Trusted(request);
+			Core::Array<Core::String> names = StringsOf(request.m_Params.Field("names"));
+			Core::String command = request.m_Params.Str("command", Core::StringView(""));
+			const int64 seconds = request.m_Params.Int("timeoutSeconds", 1800);
+			service->Background([service, ws, names, command, seconds]() { service->Validate(ws, names, command.View(), seconds, nullptr); });
+			return Queued();
+		});
+		Register(context, "ied.sandbox/stopRun", [service](const IED::Request& request) -> Core::String {
+			IED::Workspace ws = WorkspaceOf(request);
+			const bool stopped = service->StopRun(ws.m_Id.View(), request.m_Params.Int("id", 0));
+			return Core::String(stopped ? "{\"stopped\":true}" : "{\"stopped\":false}");
+		});
+		Register(context, "ied.sandbox/engine", [service](const IED::Request& request) -> Core::String {
+			IED::Workspace ws = WorkspaceOf(request);
+			Core::String action = request.m_Params.Str("action", Core::StringView("refresh"));
+			Core::String wsId = ws.m_Id;
+			const bool trusted = ws.m_Trusted;
+			if (action == "start")
+				service->Background([service, wsId]() {
+					Core::String problem;
+					service->StartEngine(wsId.View(), nullptr, problem);
+				});
+			else if (action == "emulators")
+				service->Background([service, wsId]() {
+					Core::String output;
+					service->InstallEmulators(wsId.View(), output);
+				});
+			else if (action == "refresh")
+				service->Background([service, wsId, trusted]() {
+					service->Engine()->Look(true);
+					service->Scan(wsId.View(), trusted);
+				});
+			else throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("action: start, emulators or refresh"));
+			return Queued();
+		});
+		Register(context, "ied.sandbox/pull", [service](const IED::Request& request) -> Core::String {
+			IED::Workspace ws = WorkspaceOf(request);
+			Core::String image = request.m_Params.Str("image", Core::StringView(""));
+			Core::String platform = request.m_Params.Str("platform", Core::StringView(""));
+			if (image.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("name the image"));
+			service->Background([service, ws, image, platform]() { service->Pull(ws, image.View(), platform.View(), nullptr); });
+			return Queued();
+		});
+		Register(context, "ied.sandbox/removeImage", [service](const IED::Request& request) -> Core::String {
+			WorkspaceOf(request);
+			Core::String said;
+			if (!service->RemoveImage(request.m_Params.Str("image", Core::StringView("")).View(), said)) throw IED::RpcError(IED::ErrorCode::Unavailable, said.View());
+			return Core::String("{\"removed\":true}");
+		});
+	}
+
+	static void ProvideBindings(IED::PluginContext& context, SandboxService* service) {
+		context.Provide(Core::StringView("sandbox.list"), [service](const Serialization::DomNode& args) -> IED::Result {
+			IED::Workspace ws;
+			if (!IED::FindWorkspace(args.Member("wsId").AsView(), ws)) return IED::Refusal(Core::StringView("no such workspace"));
+			return IED::Answer(service->SnapshotJson(ws.m_Id.View()).View());
+		});
+		context.Provide(Core::StringView("sandbox.run"), [service](const Serialization::DomNode& args) -> IED::Result {
+			IED::Workspace ws;
+			if (!IED::FindWorkspace(args.Member("wsId").AsView(), ws)) return IED::Refusal(Core::StringView("no such workspace"));
+			if (!ws.m_Trusted) return IED::Refusal(Core::StringView("the workspace is not trusted"));
+			Core::String name = Core::String(args.Member("name").AsView());
+			Core::String command = Core::String(args.Member("command").AsView());
+			Core::String cwd = Core::String(args.Member("cwd").AsView());
+			const int64 seconds = args.Member("timeoutSeconds").IsValid() ? args.Member("timeoutSeconds").AsInt() : 1800;
+			if (command.View().Trimmed().IsEmpty()) return IED::Refusal(Core::StringView("give a command"));
+			service->Background([service, ws, name, command, cwd, seconds]() {
+				Core::Array<Core::String> env;
+				service->Exec(ws, name.View(), command.View(), cwd.View(), env, seconds, nullptr);
+			});
+			return IED::Answer(Core::StringView("{\"queued\":true}"));
+		});
+	}
+
+	void Activate(IED::PluginContext& context) {
+		SandboxService* service = new SandboxService(&context);
+		SetService(service);
+		service->Start();
+		RegisterMethods(context, service);
+		ProvideBindings(context, service);
+		context.OnDeactivate([service]() {
+			SetService(nullptr);
+			service->Stop();
+		});
+	}
+}

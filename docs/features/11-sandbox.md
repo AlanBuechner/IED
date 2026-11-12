@@ -1,6 +1,8 @@
 # Features: sandbox (SBX)
 
-Owner: `plugins/sandbox` (UI + AI tools) on `src/sandbox` (container/remote lifecycle).
+Owner: `plugins/sandbox` (UI, AI tools and the container lifecycle in its code, `docs/34`).
+
+**Built 2026-11-11** (`docs/34`): F-SBX-1 (docker), F-SBX-2, F-SBX-3 (bind mount; copy mode not yet), F-SBX-4 (reset levels; volumes not yet), F-SBX-5, F-SBX-20, F-SBX-22, F-SBX-23 (outputLinks for `/workspace/` paths), and beyond this catalog: other processors under QEMU emulation, a catalog of distributions with download, presets, and the validation matrix. F-SBX-6 is covered by workspace trust for now (no content-hash approval of `setup` yet).
 
 The plan asks for "a sandbox that uses docker ... on another operating system ... like macOS". Two facts shape the design:
 

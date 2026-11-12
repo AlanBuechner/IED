@@ -57,6 +57,10 @@ class TasksTests {
 		assert_true(Ied::FindsProgram(Core::StringView("bin/tool.cmd"), folder.View(), Core::StringView(""), extensions), "a path under the step's folder");
 		assert_true(!Ied::FindsProgram(Core::StringView("nuke"), folder.View(), path.View(), extensions), "nowhere");
 		assert_true(!Ied::FindsProgram(Core::StringView("tool.exe"), folder.View(), path.View(), extensions), "an extension of its own is not completed");
+		assert_true(FS::WriteFileAtomically((folder / "bin" / "tool").CStr(), "#!/bin/sh", 9), "a Unix script beside it");
+		assert_se((folder / "bin" / "tool.cmd").CStr(), Ied::FoundProgram(Core::StringView("tool"), folder.View(), path.View(), extensions).CStr(), "the program, not the script beside it");
+		assert_true(FS::WriteFileAtomically((folder / "bin" / "only").CStr(), "#!/bin/sh", 9), "a file with no program beside it");
+		assert_se((folder / "bin" / "only").CStr(), Ied::FoundProgram(Core::StringView("only"), folder.View(), path.View(), extensions).CStr(), "still found as it is");
 		Core::String note = Ied::MissingProgramNote(Core::StringView("nuke"), Core::StringView("nuke.command"));
 		assert_true(note.View().IndexOf(Core::StringView("nuke was not found"), 0) >= 0 && note.View().IndexOf(Core::StringView("Set nuke.command (Settings)"), 0) >= 0, "names the program and its setting");
 		FS::RemoveAll(folder.CStr());

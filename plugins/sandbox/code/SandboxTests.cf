@@ -1,0 +1,267 @@
+// The sandbox plugin's text-in, text-out parts (docs/34): the catalog, platform names, definitions, the Dockerfile and
+// docker arguments made of them, and what docker prints that the plugin reads.
+
+include "SandboxDefinition.ch"
+include "SandboxEngine.ch"
+include "SandboxService.ch"
+include "SandboxTools.ch"
+
+static const char* s_Catalog = "{ \"systems\": [ { \"id\": \"ubuntu\", \"title\": \"Ubuntu\", \"family\": \"debian\", \"packageManager\": \"apt\", \"versions\": [ { \"version\": \"22.04\", \"image\": \"ubuntu:22.04\", \"platforms\": [\"linux/amd64\", \"linux/arm64/v8\"] }, { \"version\": \"24.04\", \"image\": \"ubuntu:24.04\", \"default\": true, \"platforms\": [\"linux/amd64\", \"linux/arm64/v8\", \"linux/riscv64\"] } ] }, { \"id\": \"alpine\", \"family\": \"alpine\", \"packageManager\": \"apk\", \"versions\": [ { \"version\": \"3.24\", \"image\": \"alpine:3.24\", \"platforms\": [\"linux/amd64\", \"linux/386\"] } ] } ], \"presets\": [ { \"id\": \"build\", \"title\": \"compiler\", \"packages\": { \"apt\": [\"build-essential\"], \"apk\": [\"build-base\"] } }, { \"id\": \"dotnet\", \"packages\": { \"apt\": [\"dotnet-sdk-8.0\"] } } ] }";
+
+static Sandbox::Catalog TestCatalog() {
+	Sandbox::Catalog catalog;
+	Core::String problem;
+	assert_true(Sandbox::ParseCatalog(Core::StringView(s_Catalog), catalog, problem), problem.CStr());
+	return catalog;
+}
+
+static bool Has(const Core::Array<Core::String>& args, const char* word) {
+	for (const Core::String& arg : args)
+		if (arg == word) return true;
+	return false;
+}
+
+static int64 IndexOf(const Core::Array<Core::String>& args, const char* word) {
+	for (int64 i = 0; i < args.Count(); ++i)
+		if (args[i] == word) return i;
+	return -1;
+}
+
+[test("server.sandbox.catalog")]
+class SandboxCatalogTests {
+	[test("systems_versions_and_normal_platforms")]
+	public static void TestParse() {
+		Sandbox::Catalog catalog = TestCatalog();
+		assert_eq((int64)2, catalog.m_Systems.Count(), "systems");
+		const Sandbox::CatalogOs* ubuntu = Sandbox::FindSystem(catalog, Core::StringView("ubuntu"));
+		assert_true(ubuntu != nullptr, "ubuntu");
+		assert_true(ubuntu->m_Versions[1].m_Platforms[1] == "linux/arm64", "arm64/v8 is arm64");
+		assert_true(ubuntu->m_Engine == "linux", "linux by default");
+		assert_true(Sandbox::FindSystem(catalog, Core::StringView("alpine"))->m_Title == "alpine", "a title defaults to the id");
+	}
+
+	[test("resolve_names_the_default_and_what_there_is")]
+	public static void TestResolve() {
+		Sandbox::Catalog catalog = TestCatalog();
+		const Sandbox::CatalogOs* os = nullptr;
+		const Sandbox::CatalogVersion* version = nullptr;
+		Core::String problem;
+		assert_true(Sandbox::ResolveOs(catalog, Core::StringView("ubuntu"), os, version, problem), problem.CStr());
+		assert_true(version->m_Image == "ubuntu:24.04", "the default version");
+		assert_true(Sandbox::ResolveOs(catalog, Core::StringView(" ubuntu:22.04 "), os, version, problem), problem.CStr());
+		assert_true(version->m_Image == "ubuntu:22.04", "a named version");
+		assert_true(!Sandbox::ResolveOs(catalog, Core::StringView("ubuntu:9.10"), os, version, problem), "no such version");
+		assert_true(problem.View().Contains(Core::StringView("22.04, 24.04")), problem.CStr());
+		assert_true(!Sandbox::ResolveOs(catalog, Core::StringView("gentoo"), os, version, problem), "no such system");
+		assert_true(problem.View().Contains(Core::StringView("ubuntu, alpine")), problem.CStr());
+	}
+
+	[test("platforms_as_docker_names_them")]
+	public static void TestPlatforms() {
+		assert_true(Sandbox::NormalPlatform(Core::StringView("aarch64")) == "linux/arm64", "aarch64");
+		assert_true(Sandbox::NormalPlatform(Core::StringView("ARM64")) == "linux/arm64", "case");
+		assert_true(Sandbox::NormalPlatform(Core::StringView("x86_64")) == "linux/amd64", "x86_64");
+		assert_true(Sandbox::NormalPlatform(Core::StringView("linux/amd64/v3")) == "linux/amd64", "amd64 levels");
+		assert_true(Sandbox::NormalPlatform(Core::StringView("armv7")) == "linux/arm/v7", "armv7");
+		assert_true(Sandbox::NormalPlatform(Core::StringView("i386")) == "linux/386", "i386");
+		assert_true(Sandbox::NormalPlatform(Core::StringView("riscv64")) == "linux/riscv64", "riscv64");
+		assert_true(Sandbox::NormalPlatform(Core::StringView("windows/amd64")) == "windows/amd64", "windows");
+		assert_true(Sandbox::NormalPlatform(Core::StringView("")).IsEmpty(), "empty");
+		assert_true(Sandbox::RunsNatively(Core::StringView("linux/386"), Core::StringView("linux/amd64")), "32-bit x86 on 64-bit x86");
+		assert_true(!Sandbox::RunsNatively(Core::StringView("linux/arm64"), Core::StringView("linux/amd64")), "arm64 is emulated");
+		assert_true(!Sandbox::RunsNatively(Core::StringView("linux/386"), Core::StringView("linux/arm64")), "x86 on arm is emulated");
+	}
+
+	[test("owner_systems_add_and_replace")]
+	public static void TestOwner() {
+		Sandbox::Catalog catalog = TestCatalog();
+		Serialization::DomDoc doc;
+		Serialization::DomNode owner = Serialization::ReadJson(Core::StringView("[{\"id\": \"alpine\", \"packageManager\": \"apk\", \"versions\": [{\"version\": \"edge\", \"image\": \"alpine:edge\"}]}, {\"id\": \"void\", \"versions\": [{\"version\": \"latest\", \"image\": \"ghcr.io/void-linux/void-glibc\"}]}]"), doc).root;
+		Sandbox::AddOwnerSystems(catalog, owner);
+		assert_eq((int64)3, catalog.m_Systems.Count(), "one added");
+		const Sandbox::CatalogOs* alpine = Sandbox::FindSystem(catalog, Core::StringView("alpine"));
+		assert_true(alpine->m_Owner && alpine->m_Versions[0].m_Image == "alpine:edge", "replaced");
+	}
+
+	[test("the_buildx_platforms_line")]
+	public static void TestBuildx() {
+		Core::Array<Core::String> platforms = Sandbox::PlatformsOfBuildx(Core::StringView("Name:   default\nDriver: docker\n\nNodes:\nName:             default\nStatus:           running\nPlatforms:        linux/amd64, linux/amd64/v2, linux/amd64/v3, linux/arm64, linux/riscv64, linux/arm/v7*, linux/arm/v6\nLabels:\n"));
+		assert_eq((int64)5, platforms.Count(), "amd64 levels folded");
+		assert_true(platforms[0] == "linux/amd64" && platforms[3] == "linux/arm/v7", "in order, the star dropped");
+		assert_eq((int64)0, Sandbox::PlatformsOfBuildx(Core::StringView("no such line")).Count(), "none");
+	}
+}
+
+[test("server.sandbox.definition")]
+class SandboxDefinitionTests {
+	[test("names")]
+	public static void TestNames() {
+		assert_true(Sandbox::ValidName(Core::StringView("ubuntu-arm64")), "plain");
+		assert_true(!Sandbox::ValidName(Core::StringView("Ubuntu")), "uppercase");
+		assert_true(!Sandbox::ValidName(Core::StringView("-x")), "leading dash");
+		assert_true(!Sandbox::ValidName(Core::StringView("a/b")), "slash");
+		assert_true(!Sandbox::ValidName(Core::StringView("")), "empty");
+	}
+
+	[test("parse_defaults_and_round_trip")]
+	public static void TestParse() {
+		Sandbox::SandboxDefinition definition;
+		Core::String problem;
+		assert_true(Sandbox::ParseDefinition(Core::StringView("arm"), Core::StringView("{ // made by hand\n \"os\": \"ubuntu:24.04\", \"platform\": \"aarch64\", \"presets\": [\"build\"], \"packages\": [\"libsdl2-dev\"], \"setup\": \"echo hi\", \"env\": {\"CC\": \"gcc\"}, \"validate\": \"make test\", \"cpus\": 2 }"), definition, problem), problem.CStr());
+		assert_true(definition.m_Platform == "linux/arm64", "platform normalized");
+		assert_true(definition.m_Network == "none", "network off by default");
+		assert_true(definition.m_Setup.Count() == 1 && definition.m_Env[0] == "CC=gcc", "setup and env");
+		Core::String json = Sandbox::DefinitionJson(definition);
+		Sandbox::SandboxDefinition again;
+		assert_true(Sandbox::ParseDefinition(Core::StringView("arm"), json.View(), again, problem), json.CStr());
+		assert_true(again.m_Os == "ubuntu:24.04" && again.m_Platform == "linux/arm64" && again.m_Packages[0] == "libsdl2-dev" && again.m_Env[0] == "CC=gcc" && again.m_Cpus == 2, json.CStr());
+		assert_true(json.View().StartsWith(Core::StringView("{\n\t\"os\": \"ubuntu:24.04\"")), json.CStr());
+	}
+
+	[test("wrong_definitions_say_why")]
+	public static void TestWrong() {
+		Sandbox::SandboxDefinition definition;
+		Core::String problem;
+		assert_true(!Sandbox::ParseDefinition(Core::StringView("x"), Core::StringView("{\"presets\": [\"build\"]}"), definition, problem), "no system");
+		assert_true(problem.View().Contains(Core::StringView("operating system")), problem.CStr());
+		assert_true(!Sandbox::ParseDefinition(Core::StringView("x"), Core::StringView("{\"os\": \"ubuntu\", \"network\": \"some\"}"), definition, problem), "network");
+		assert_true(!Sandbox::ParseDefinition(Core::StringView("x"), Core::StringView("{\"os\": \"ubuntu\", \"packages\": [\"gcc; rm -rf /\"]}"), definition, problem), "a package that is shell");
+		assert_true(!Sandbox::ParseDefinition(Core::StringView("x"), Core::StringView("{\"os\": "), definition, problem), "broken JSON");
+		assert_true(problem.View().Contains(Core::StringView("line 1")), problem.CStr());
+	}
+
+	[test("plan_makes_the_dockerfile_tag_and_container")]
+	public static void TestPlan() {
+		Sandbox::Catalog catalog = TestCatalog();
+		Sandbox::SandboxDefinition definition;
+		Core::String problem;
+		assert_true(Sandbox::ParseDefinition(Core::StringView("arm"), Core::StringView("{\"os\": \"ubuntu\", \"platform\": \"linux/arm64\", \"presets\": [\"build\", \"dotnet\", \"nosuch\"], \"packages\": [\"cmake\", \"build-essential\"], \"setup\": [\"useradd dev\"]}"), definition, problem), problem.CStr());
+		Sandbox::SandboxPlan plan;
+		assert_true(Sandbox::PlanSandbox(definition, catalog, Core::StringView("abcd1234"), Core::StringView("C:\\Work\\Game"), Core::StringView(""), 4, 6, plan, problem), problem.CStr());
+		assert_true(plan.m_Dockerfile.View().Contains(Core::StringView("FROM ubuntu:24.04\n")), plan.m_Dockerfile.CStr());
+		assert_true(plan.m_Dockerfile.View().Contains(Core::StringView("apt-get install -y --no-install-recommends ca-certificates build-essential dotnet-sdk-8.0 cmake && rm -rf")), plan.m_Dockerfile.CStr());
+		assert_true(plan.m_Dockerfile.View().Contains(Core::StringView("RUN useradd dev\n")), plan.m_Dockerfile.CStr());
+		assert_eq((int64)1, plan.m_Missing.Count(), "nosuch has no packages");
+		assert_true(plan.m_Tag.View().StartsWith(Core::StringView("ied-sandbox/abcd1234-arm:")) && plan.m_Digest.ByteLength() == 12, plan.m_Tag.CStr());
+		assert_true(plan.m_Container == "ied-abcd1234-arm", plan.m_Container.CStr());
+		assert_true(plan.m_Cpus == 4 && plan.m_MemoryGiB == 6, "the settings' limits");
+		Sandbox::SandboxPlan native;
+		Sandbox::SandboxDefinition other = definition;
+		other.m_Platform = Core::String("");
+		assert_true(Sandbox::PlanSandbox(other, catalog, Core::StringView("abcd1234"), Core::StringView("C:\\Work\\Game"), Core::StringView(""), 4, 6, native, problem), problem.CStr());
+		assert_true(native.m_Digest != plan.m_Digest, "the platform is in the image's digest");
+		Sandbox::SandboxDefinition wide = definition;
+		wide.m_Network = Core::String("full");
+		Sandbox::SandboxPlan networked;
+		assert_true(Sandbox::PlanSandbox(wide, catalog, Core::StringView("abcd1234"), Core::StringView("C:\\Work\\Game"), Core::StringView(""), 4, 6, networked, problem), problem.CStr());
+		assert_true(networked.m_Digest == plan.m_Digest && networked.m_RunDigest != plan.m_RunDigest, "the network changes the container, not the image");
+	}
+
+	[test("a_platform_the_image_lacks")]
+	public static void TestMissingPlatform() {
+		Sandbox::Catalog catalog = TestCatalog();
+		Sandbox::SandboxDefinition definition;
+		Core::String problem;
+		assert_true(Sandbox::ParseDefinition(Core::StringView("s"), Core::StringView("{\"os\": \"ubuntu:22.04\", \"platform\": \"s390x\"}"), definition, problem), problem.CStr());
+		Sandbox::SandboxPlan plan;
+		assert_true(!Sandbox::PlanSandbox(definition, catalog, Core::StringView("k"), Core::StringView("C:/w"), Core::StringView(""), 4, 6, plan, problem), "s390x");
+		assert_true(problem.View().Contains(Core::StringView("linux/amd64 linux/arm64")), problem.CStr());
+	}
+
+	[test("mirror_takes_official_images_only")]
+	public static void TestMirror() {
+		assert_true(Sandbox::MirrorImage(Core::StringView("ubuntu:24.04"), Core::StringView("mirror.gcr.io/library/")) == "mirror.gcr.io/library/ubuntu:24.04", "official");
+		assert_true(Sandbox::MirrorImage(Core::StringView("library/debian:13"), Core::StringView("mirror.gcr.io/library")) == "mirror.gcr.io/library/debian:13", "library/");
+		assert_true(Sandbox::MirrorImage(Core::StringView("opensuse/leap:16.0"), Core::StringView("mirror.gcr.io/library")) == "opensuse/leap:16.0", "a namespace");
+		assert_true(Sandbox::MirrorImage(Core::StringView("quay.io/centos/centos:stream10"), Core::StringView("x")) == "quay.io/centos/centos:stream10", "a registry");
+		assert_true(Sandbox::MirrorImage(Core::StringView("alpine"), Core::StringView("")) == "alpine", "no mirror");
+	}
+
+	[test("workspace_key_ignores_case_and_slashes")]
+	public static void TestKey() {
+		Core::String a = Sandbox::WorkspaceKey(Core::StringView("C:\\GameDev\\IED"));
+		assert_eq((int64)8, a.ByteLength(), "8 digits");
+		assert_true(a == Sandbox::WorkspaceKey(Core::StringView("c:/gamedev/ied/")), "the same folder");
+		assert_true(a != Sandbox::WorkspaceKey(Core::StringView("C:/GameDev/IED2")), "another");
+	}
+}
+
+[test("server.sandbox.docker")]
+class SandboxDockerTests {
+	[test("run_arguments_mount_limits_and_network")]
+	public static void TestRun() {
+		Sandbox::Catalog catalog = TestCatalog();
+		Sandbox::SandboxDefinition definition;
+		Core::String problem;
+		assert_true(Sandbox::ParseDefinition(Core::StringView("a"), Core::StringView("{\"os\": \"alpine\", \"platform\": \"386\", \"env\": {\"X\": \"1\"}}"), definition, problem), problem.CStr());
+		Sandbox::SandboxPlan plan;
+		assert_true(Sandbox::PlanSandbox(definition, catalog, Core::StringView("k"), Core::StringView("C:\\W x"), Core::StringView(""), 2, 3, plan, problem), problem.CStr());
+		Core::Array<Core::String> args = Sandbox::RunArguments(definition, plan, Core::StringView("C:\\W x\\"));
+		assert_true(args[0] == "run" && Has(args, "-d") && Has(args, "--init"), "detached under an init");
+		assert_true(Has(args, "C:/W x:/workspace") && Has(args, "C:/W x/.ied:/workspace/.ied:ro"), "the workspace, .ied read-only");
+		assert_true(args[IndexOf(args, "--platform") + 1] == "linux/386", "platform");
+		assert_true(args[IndexOf(args, "--network") + 1] == "none", "network off");
+		assert_true(args[IndexOf(args, "--memory") + 1] == "3g" && args[IndexOf(args, "--cpus") + 1] == "2", "limits");
+		assert_true(Has(args, "no-new-privileges") && Has(args, "X=1"), "hardening and env");
+		assert_true(args[args.Count() - 2] == plan.m_Tag && args[args.Count() - 1] == "infinity", "sleeps forever");
+		assert_true(Has(args, (Core::String("ied.sandbox.config=") + plan.m_RunDigest.View()).CStr()), "config label");
+	}
+
+	[test("exec_and_kill_arguments")]
+	public static void TestExec() {
+		Core::Array<Core::String> env;
+		env.Push(Core::String("A=b c"));
+		Core::Array<Core::String> args = Sandbox::ExecArguments(Core::StringView("ied-k-a"), Core::StringView("./src/"), env, Core::StringView("make \"all\" && ./t"), Core::StringView("/tmp/.ied-run-7"));
+		assert_true(args[0] == "exec" && args[2] == "/workspace/src", args[2].CStr());
+		assert_true(Has(args, "A=b c") && Has(args, "ied-k-a"), "env and container");
+		assert_true(args[args.Count() - 3] == "echo $$ > /tmp/.ied-run-7; exec sh -lc \"$1\"", args[args.Count() - 3].CStr());
+		assert_true(args[args.Count() - 1] == "make \"all\" && ./t", "the command is one argument, as written");
+		Core::Array<Core::String> kill = Sandbox::KillArguments(Core::StringView("ied-k-a"), Core::StringView("/tmp/.ied-run-7"));
+		assert_true(kill[kill.Count() - 1].View().Contains(Core::StringView("kill -TERM -\"$p\"")), "the process group");
+		assert_true(Sandbox::ContainerPath(Core::StringView("")) == "/workspace" && Sandbox::ContainerPath(Core::StringView("/a/b/")) == "/workspace/a/b", "paths");
+	}
+
+	[test("container_state_and_output_tails")]
+	public static void TestStates() {
+		assert_true(Sandbox::ContainerState(Core::StringView("running"), Core::StringView("abc"), Core::StringView("abc")) == "running", "running");
+		assert_true(Sandbox::ContainerState(Core::StringView("exited"), Core::StringView("abc"), Core::StringView("abc")) == "stopped", "stopped");
+		assert_true(Sandbox::ContainerState(Core::StringView("running"), Core::StringView("old"), Core::StringView("abc")) == "stale", "stale");
+		assert_true(Sandbox::ContainerState(Core::StringView(""), Core::StringView(""), Core::StringView("abc")) == "absent", "absent");
+		assert_true(Sandbox::TailLines(Core::StringView("a\nb\nc\nd\n"), 2, 100) == "c\nd", Sandbox::TailLines(Core::StringView("a\nb\nc\nd\n"), 2, 100).CStr());
+		assert_true(Sandbox::TailLines(Core::StringView("one"), 5, 100) == "one", "short");
+		assert_true(Sandbox::TailLines(Core::StringView("abcdef"), 5, 3) == "def", "bytes");
+		assert_true(Sandbox::DurationText(192000) == "3 m 12 s" && Sandbox::DurationText(41000) == "41 s", "durations");
+	}
+
+	[test("validation_matrix_text")]
+	public static void TestMatrix() {
+		Sandbox::ValidationRecord record;
+		record.m_Command = Core::String("make test");
+		Sandbox::ValidationRow pass;
+		pass.m_Sandbox = Core::String("ubuntu");
+		pass.m_Os = Core::String("ubuntu:24.04");
+		pass.m_Platform = Core::String("linux/amd64");
+		pass.m_Result = Core::String("pass");
+		pass.m_Ms = 41000;
+		Sandbox::ValidationRow fail = pass;
+		fail.m_Sandbox = Core::String("alpine");
+		fail.m_Result = Core::String("fail");
+		fail.m_ExitCode = 2;
+		fail.m_Tail = Core::String("error: 'qsort_r' undeclared");
+		record.m_Rows.Push(pass);
+		record.m_Rows.Push(fail);
+		Core::String text = Sandbox::ValidationText(record);
+		assert_true(text.View().StartsWith(Core::StringView("Validation: 1 of 2 passed - `make test`\n")), text.CStr());
+		assert_true(text.View().Contains(Core::StringView("  FAIL  alpine (ubuntu:24.04, linux/amd64) exit 2 in 41 s\n")), text.CStr());
+		assert_true(text.View().Contains(Core::StringView("--- alpine (fail) ---\nerror: 'qsort_r' undeclared")), text.CStr());
+	}
+
+	[test("a_whole_file_diff")]
+	public static void TestDiff() {
+		int64 plus = 0;
+		int64 minus = 0;
+		Core::String diff = Sandbox::FileDiff(Core::StringView(".ied/sandbox/a/sandbox.json"), Core::StringView(""), Core::StringView("{\n}\n"), plus, minus);
+		assert_true(diff == "--- /dev/null\n+++ b/.ied/sandbox/a/sandbox.json\n@@ -0,0 +1,2 @@\n+{\n+}\n", diff.CStr());
+		assert_true(plus == 2 && minus == 0, "counts");
+	}
+}

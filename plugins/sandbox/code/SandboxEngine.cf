@@ -1,0 +1,324 @@
+include "SandboxEngine.ch"
+include "SandboxCatalog.ch"
+
+namespace Sandbox
+{
+	int64 UnixMs() { return Platform::UnixTimeNs() / 1000000; }
+
+	static Core::String Slashes(Core::StringView path) {
+		Core::StringBuilder text;
+		for (int64 i = 0; i < path.ByteLength(); ++i) text.AppendByte(path.ByteAt(i) == '\\' ? '/' : path.ByteAt(i));
+		return text.ToString();
+	}
+
+	// Where Docker Desktop puts docker.exe: a per-user install, then a machine-wide one; "" when neither has it.
+	static Core::String DesktopDocker() {
+		Core::String local = Platform::GetEnvironmentVariable("LOCALAPPDATA");
+		Core::String user = Slashes(local.View()) + "/Programs/DockerDesktop/resources/bin/docker.exe";
+		if (!local.IsEmpty() && FS::FileExists(user.CStr())) return user;
+		Core::String programs = Platform::GetEnvironmentVariable("ProgramFiles");
+		Core::String machine = Slashes(programs.View()) + "/Docker/Docker/resources/bin/docker.exe";
+		if (!programs.IsEmpty() && FS::FileExists(machine.CStr())) return machine;
+		return Core::String("");
+	}
+
+	bool SandboxEngine::Command(Core::String& program, Core::Array<Core::String>& leading, Core::String& problem) {
+		Core::String json = m_Context->Setting(Core::StringView(c_DockerSetting), Core::StringView(""));
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode list = Serialization::ReadJson(json.View(), *doc).root;
+		Core::String named = Core::String("docker");
+		if (list.Count() > 0 && !list.At(0).AsView().Trimmed().IsEmpty()) named = Core::String(list.At(0).AsView().Trimmed());
+		for (int64 i = 1; i < list.Count(); ++i) leading.Push(Core::String(list.At(i).AsView()));
+		program = IED::FindProgram(named.View());
+		if (program.IsEmpty() && named == "docker") program = DesktopDocker();
+		if (program.IsEmpty()) {
+			problem = (Core::String("no Docker program: ") + named.View()) + " is not a file or a program on PATH";
+			return false;
+		}
+		return true;
+	}
+
+	Process::StartInfo SandboxEngine::Info(const Core::Array<Core::String>& args, bool& found) {
+		Process::StartInfo info;
+		Core::String program;
+		Core::Array<Core::String> leading;
+		Core::String problem;
+		found = Command(program, leading, problem);
+		info.program = program;
+		for (const Core::String& word : leading) info.arguments.Push(word);
+		for (const Core::String& word : args) info.arguments.Push(word);
+		info.input = Process::Redirect::Null;
+		info.output = Process::Redirect::Pipe;
+		info.errors = Process::Redirect::Pipe;
+		// Docker's CLI hints ("What's next: ...") are not output.
+		info.environment.Push(Core::String("DOCKER_CLI_HINTS=false"));
+		return info;
+	}
+
+	Process::Output SandboxEngine::Run(const Core::Array<Core::String>& args, int32 timeoutMs) {
+		bool found = false;
+		Process::StartInfo info = Info(args, found);
+		if (!found) {
+			Process::Output none;
+			none.exitCode = Process::kError;
+			none.error = Core::String("no Docker program");
+			return none;
+		}
+		return Process::Run(info, timeoutMs);
+	}
+
+	Process::Child SandboxEngine::Start(const Core::Array<Core::String>& args) {
+		bool found = false;
+		Process::StartInfo info = Info(args, found);
+		if (!found) return Process::Child();
+		return Process::Child::Start(info);
+	}
+
+	static Core::Array<Core::String> Words(const char* a, const char* b, const char* c) {
+		Core::Array<Core::String> words;
+		if (a) words.Push(Core::String(a));
+		if (b) words.Push(Core::String(b));
+		if (c) words.Push(Core::String(c));
+		return words;
+	}
+
+	// The first line of what docker said on stderr (or stdout), without "error during connect: " noise kept whole.
+	static Core::String FirstLine(Core::StringView text) {
+		Core::StringView trimmed = text.Trimmed();
+		const int64 end = trimmed.IndexOf('\n');
+		return Core::String((end < 0 ? trimmed : trimmed.Substring(0, end)).Trimmed());
+	}
+
+	Core::Array<Core::String> PlatformsOfBuildx(Core::StringView text) {
+		Core::Array<Core::String> platforms;
+		Core::SplitParts lines = Core::SplitParts(text, '\n');
+		Core::StringView line;
+		while (lines.Next(line)) {
+			Core::StringView trimmed = line.Trimmed();
+			if (!trimmed.StartsWith(Core::StringView("Platforms:"))) continue;
+			Core::SplitParts parts = Core::SplitParts(trimmed.Substring(10, trimmed.ByteLength() - 10), ',');
+			Core::StringView part;
+			while (parts.Next(part)) {
+				Core::StringView word = part.Trimmed();
+				const int64 star = word.IndexOf('*');
+				if (star >= 0) word = word.Substring(0, star).Trimmed();
+				// linux/amd64/v2..v4 are the same machine with newer instructions: amd64 says it.
+				if (word.StartsWith(Core::StringView("linux/amd64/"))) continue;
+				Core::String platform = NormalPlatform(word);
+				if (!platform.IsEmpty() && !HasPlatform(platforms, platform.View())) platforms.Push(platform);
+			}
+			break;
+		}
+		return platforms;
+	}
+
+	void SandboxEngine::Store(const EngineInfo& info) {
+		Threading::LockGuard guard(m_Lock);
+		m_Info = info;
+	}
+
+	EngineInfo SandboxEngine::Last() {
+		Threading::LockGuard guard(m_Lock);
+		EngineInfo info = m_Info;
+		if (m_Starting && info.m_State != "ready") info.m_State = Core::String("starting");
+		return info;
+	}
+
+	EngineInfo SandboxEngine::Look(bool force) {
+		{
+			Threading::LockGuard guard(m_Lock);
+			if (!force && m_Info.m_State == "ready" && UnixMs() - m_Info.m_CheckedMs < c_EngineCacheMs) return m_Info;
+		}
+		EngineInfo info;
+		info.m_CheckedMs = UnixMs();
+		Core::String program;
+		Core::Array<Core::String> leading;
+		Core::String problem;
+		if (!Command(program, leading, problem)) {
+			info.m_State = Core::String("missing");
+			info.m_Error = problem;
+			Store(info);
+			return Last();
+		}
+		info.m_Program = program;
+		Process::Output version = Run(Words("version", "--format", "{{json .}}"), 20000);
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode root = Serialization::ReadJson(version.output.View().Trimmed(), *doc).root;
+		info.m_ClientVersion = Core::String(root.Member("Client").Member("Version").AsView());
+		Serialization::DomNode server = root.Member("Server");
+		if (version.exitCode != 0 || !server.IsValid() || server.IsNull()) {
+			info.m_State = Core::String(version.exitCode == Process::kTimedOut ? "failed" : "stopped");
+			info.m_Error = FirstLine(version.errors.IsEmpty() ? (version.error.IsEmpty() ? version.output.View() : version.error.View()) : version.errors.View());
+			if (version.exitCode == Process::kTimedOut) info.m_Error = Core::String("docker version did not answer in 20 s");
+			if (version.exitCode == Process::kError && info.m_ClientVersion.IsEmpty()) {
+				info.m_State = Core::String("failed");
+				info.m_Error = (Core::String("docker did not start (") + program.View() + "): " + version.error.View());
+			}
+			Store(info);
+			return Last();
+		}
+		info.m_State = Core::String("ready");
+		info.m_ServerVersion = Core::String(server.Member("Version").AsView());
+		info.m_Product = Core::String(server.Member("Platform").Member("Name").AsView());
+		info.m_Os = Core::String(server.Member("Os").AsView());
+		info.m_Arch = Core::String(server.Member("Arch").AsView());
+		bool known = false;
+		{
+			Threading::LockGuard guard(m_Lock);
+			known = m_PlatformsOf == info.m_ServerVersion && !m_Platforms.IsEmpty();
+			if (known) {
+				info.m_Platforms = m_Platforms;
+				info.m_Cpus = m_Cpus;
+				info.m_MemoryBytes = m_MemoryBytes;
+			}
+		}
+		if (!known) {
+			Process::Output facts = Run(Words("info", "--format", "{{.NCPU}} {{.MemTotal}}"), 20000);
+			Core::StringView text = facts.output.View().Trimmed();
+			const int64 space = text.IndexOf(' ');
+			if (facts.exitCode == 0 && space > 0) {
+				int64 cpus = 0;
+				int64 memory = 0;
+				Core::ParseInt64(text.Substring(0, space), cpus);
+				Core::ParseInt64(text.Substring(space + 1, text.ByteLength() - space - 1).Trimmed(), memory);
+				info.m_Cpus = cpus;
+				info.m_MemoryBytes = memory;
+			}
+			Process::Output buildx = Run(Words("buildx", "inspect", nullptr), 20000);
+			Core::String native = NormalPlatform(((info.m_Os + "/") + info.m_Arch.View()).View());
+			info.m_Platforms.Push(native);
+			if (buildx.exitCode == 0)
+				for (const Core::String& platform : PlatformsOfBuildx(buildx.output.View()))
+					if (!HasPlatform(info.m_Platforms, platform.View())) info.m_Platforms.Push(platform);
+			// A 64-bit x86 kernel runs 32-bit x86 programs itself: buildx does not list linux/386, Docker runs it.
+			if (native == "linux/amd64" && !HasPlatform(info.m_Platforms, Core::StringView("linux/386"))) info.m_Platforms.Insert(1, Core::String("linux/386"));
+			Threading::LockGuard guard(m_Lock);
+			m_PlatformsOf = info.m_ServerVersion;
+			m_Platforms = info.m_Platforms;
+			m_Cpus = info.m_Cpus;
+			m_MemoryBytes = info.m_MemoryBytes;
+		}
+		Store(info);
+		return Last();
+	}
+
+	bool SandboxEngine::StartEngine(const bool* cancelled, Core::String& problem) {
+		EngineInfo now = Look(true);
+		if (now.m_State == "ready") return true;
+		if (now.m_State == "missing") {
+			problem = EngineAdvice(now);
+			return false;
+		}
+		{
+			Threading::LockGuard guard(m_Lock);
+			if (m_Starting) {
+				problem = Core::String("");
+			}
+			m_Starting = true;
+		}
+		m_Context->Log(Core::StringView("starting Docker Desktop"));
+		Process::Output started = Run(Words("desktop", "start", "--detach"), 60000);
+		if (started.exitCode != 0) {
+			// An older Docker Desktop has no `docker desktop` command: start its program beside docker's resources.
+			Core::String desktop = Slashes(FS::Path(now.m_Program.View()).Parent().Parent().Parent().View()) + "/Docker Desktop.exe";
+			if (FS::FileExists(desktop.CStr())) {
+				Process::StartInfo info;
+				info.program = desktop;
+				info.input = Process::Redirect::Null;
+				info.output = Process::Redirect::Null;
+				info.errors = Process::Redirect::Null;
+				info.killOnClose = false;
+				Process::Child child = Process::Child::Start(info);
+				child.Close();
+			}
+		}
+		const int64 deadline = UnixMs() + c_EngineStartMs;
+		bool ready = false;
+		while (UnixMs() < deadline && !(cancelled != nullptr && *cancelled)) {
+			Threading::Thread::Sleep(3000000000);
+			if (Look(true).m_State == "ready") {
+				ready = true;
+				break;
+			}
+		}
+		{
+			Threading::LockGuard guard(m_Lock);
+			m_Starting = false;
+		}
+		if (!ready) {
+			EngineInfo last = Look(true);
+			ready = last.m_State == "ready";
+			if (!ready) {
+				problem = (Core::String("Docker Desktop did not start within 3 minutes: ") + (last.m_Error.IsEmpty() ? FirstLine(started.errors.View()).View() : last.m_Error.View()));
+				Threading::LockGuard guard(m_Lock);
+				m_Info.m_State = Core::String("failed");
+				m_Info.m_Error = problem;
+			}
+		}
+		return ready;
+	}
+
+	bool SandboxEngine::InstallEmulators(Core::String& output) {
+		Core::Array<Core::String> args = Words("run", "--privileged", "--rm");
+		args.Push(Core::String("tonistiigi/binfmt"));
+		args.Push(Core::String("--install"));
+		args.Push(Core::String("all"));
+		Process::Output ran = Run(args, 600000);
+		output = ran.output + ran.errors.View();
+		{
+			Threading::LockGuard guard(m_Lock);
+			m_PlatformsOf = Core::String("");
+		}
+		Look(true);
+		return ran.exitCode == 0;
+	}
+
+	bool RunsNatively(Core::StringView platform, Core::StringView native) {
+		return platform == native || (native == "linux/amd64" && platform == "linux/386");
+	}
+
+	Core::String NativePlatform(const EngineInfo& info) {
+		if (info.m_Os.IsEmpty()) return Core::String("linux/amd64");
+		return NormalPlatform(((info.m_Os + "/") + info.m_Arch.View()).View());
+	}
+
+	Core::String EngineAdvice(const EngineInfo& info) {
+		if (info.m_State == "missing")
+			return Core::String("Docker is not installed (or sandbox.docker names no program). Install Docker Desktop with its WSL2 backend - winget install Docker.DockerDesktop, or https://www.docker.com/products/docker-desktop/ - then open IED's Sandboxes window again.");
+		if (info.m_State == "stopped")
+			return Core::String("Docker's engine is not running. Start Docker Desktop: the Sandboxes window's Start Docker, or sandbox_engine(action: \"start\").");
+		if (info.m_State == "starting") return Core::String("Docker Desktop is starting; it takes up to a minute or two.");
+		if (info.m_State == "failed") return (Core::String("Docker's engine failed: ") + info.m_Error.View()) + " - restart Docker Desktop, or see its troubleshoot page.";
+		if (info.m_Os == "windows") return Core::String("Docker runs Windows containers now: Linux sandboxes need its Linux engine (docker desktop engine use linux).");
+		return Core::String("");
+	}
+
+	Core::String EngineJson(const EngineInfo& info) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		json.Field("state", info.m_State.View());
+		json.Field("program", info.m_Program.View());
+		json.Field("error", info.m_Error.View());
+		json.Field("advice", EngineAdvice(info).View());
+		json.Field("clientVersion", info.m_ClientVersion.View());
+		json.Field("serverVersion", info.m_ServerVersion.View());
+		json.Field("product", info.m_Product.View());
+		json.Field("os", info.m_Os.View());
+		json.Field("arch", info.m_Arch.View());
+		json.IntField("cpus", info.m_Cpus);
+		json.IntField("memoryBytes", info.m_MemoryBytes);
+		json.Key(Core::StringView("platforms"));
+		json.BeginArray();
+		Core::String native = NativePlatform(info);
+		for (const Core::String& platform : info.m_Platforms) {
+			json.BeginObject();
+			json.Field("platform", platform.View());
+			json.BoolField("native", RunsNatively(platform.View(), native.View()));
+			json.EndObject();
+		}
+		json.EndArray();
+		json.IntField("checkedMs", info.m_CheckedMs);
+		json.EndObject();
+		return json.ToString();
+	}
+}

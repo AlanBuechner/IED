@@ -1,0 +1,187 @@
+// Sandboxes (docs/34): the workspace's program built, tested and run on other operating systems and processors - Linux
+// distributions on amd64, arm64, riscv64, ppc64le, s390x and more, in Docker containers (QEMU emulation for other
+// processors) - without touching this machine. A catalog of systems to download and presets of packages; committed
+// definitions in .ied/sandbox/<name>/sandbox.json; a validation matrix; terminals into each sandbox; the AI's sandbox_*
+// tools and the sandbox skill. Its server code (code/) is compiled into the server and runs in each workspace server;
+// its UI module draws the Sandboxes window.
+{
+	"manifestVersion": 1,
+	"id": "ied.sandbox",
+	"name": "Sandbox",
+	"version": "0.1.0",
+	"description": "Run, build and test the workspace on other operating systems and processors in Docker sandboxes.",
+	"publisher": "IED",
+	"ied": { "api": "^1" },
+	"runtime": { "kind": "builtin", "entry": "Sandbox::Activate", "ui": "ui/index.js" },
+	"permissions": ["process.spawn", "fs.read", "fs.write", "terminal", "ai.tools", "sandbox"],
+	"contributes": {
+		"settings": { "schema": "settings.schema.json", "page": "Sandbox" },
+		"skills": ["skills"],
+		"outputSources": [
+			{ "id": "sandbox", "title": "Sandbox" }
+		],
+		"outputLinks": [
+			{ "id": "sandbox-path", "regexp": "/workspace/([^\\s():<>\"'|*?]+?\\.[A-Za-z0-9_+-]+):(\\d+)(?::(\\d+))?", "file": 1, "line": 2, "column": 3 }
+		],
+		"commands": [
+			{ "id": "ied.sandbox.open", "title": "Sandboxes", "category": "View", "icon": "$(vm)" },
+			{ "id": "ied.sandbox.new", "title": "New Sandbox...", "category": "Sandbox", "icon": "$(add)" },
+			{ "id": "ied.sandbox.validateAll", "title": "Validate in All Sandboxes", "category": "Sandbox", "icon": "$(beaker)" }
+		],
+		"menus": {
+			"menubar/view": [
+				{ "command": "ied.sandbox.open", "group": "2_windows" }
+			],
+			"menubar/tools": [
+				{ "command": "ied.sandbox.open", "group": "3_sandbox" },
+				{ "command": "ied.sandbox.validateAll", "group": "3_sandbox", "order": 1 }
+			]
+		},
+		"bindings": {
+			"provides": [
+				{ "name": "sandbox.list", "version": "1", "kind": "function", "description": "A workspace's sandboxes as the Sandboxes window shows them: {wsId} -> the topic sandbox:<wsId>'s snapshot {engine, sandboxes: [{name, os, image, platform, emulated, imageBuilt, container, ...}], runs, validation}." },
+				{ "name": "sandbox.run", "version": "1", "kind": "function", "description": "Runs a shell command in a sandbox (its image built and the sandbox started first when needed): {wsId, name, command, cwd?, timeoutSeconds?} -> {queued}; its output and end are on the topic sandbox:<wsId> (\"output\" and \"changed\" events)." }
+			]
+		},
+		"systemMessageSections": [
+			{ "id": "sandbox", "function": "Sandbox::Section", "maxTokens": 300, "when": "workspaceTrusted" }
+		],
+		"toolCalls": [
+			{
+				"name": "sandbox_list",
+				"description": "The Docker engine sandboxes run on (its state, the platforms it runs natively and under emulation) and this workspace's sandboxes: each one's operating system, platform, presets, network, whether its image is built and its container running, and the last validation. Start here.",
+				"class": "read",
+				"group": "sandbox",
+				"inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+				"function": "Sandbox::ListTool",
+				"ownThread": true,
+				"timeoutSeconds": 90,
+				"resultBudgetTokens": 2000
+			},
+			{
+				"name": "sandbox_catalog",
+				"description": "What a sandbox can be made from: operating systems (Ubuntu, Debian, Fedora, Alpine, Arch, openSUSE, Rocky, AlmaLinux, CentOS Stream, Amazon Linux, Oracle Linux, ...), their versions with the platforms each is published for - which Docker here runs natively, under emulation, or not yet - and which are downloaded; and the presets (build, clang, cmake, ninja, git, python, node, go, rust, java, dotnet, debug, gui, net). query narrows it (a system, a platform such as arm64, a package manager) and lists each preset's packages.",
+				"class": "read",
+				"group": "sandbox",
+				"inputSchema": {
+					"type": "object",
+					"properties": { "query": { "type": "string", "description": "Words to narrow the list: \"debian\", \"arm64\", \"dnf\"." } },
+					"additionalProperties": false
+				},
+				"function": "Sandbox::CatalogTool",
+				"ownThread": true,
+				"timeoutSeconds": 90,
+				"resultBudgetTokens": 3000
+			},
+			{
+				"name": "sandbox_create",
+				"description": "Create (or with replace, change) a sandbox: writes .ied/sandbox/<name>/sandbox.json, which the owner commits. os is a catalog system and version (\"ubuntu:24.04\", \"alpine\" for its default); platform another processor, run under emulation (\"linux/arm64\", \"linux/riscv64\"); presets and packages what to install; setup shell lines run as root when the image is built; validate the command sandbox_validate runs by default (build and test into a folder of the sandbox's own, since sandboxes share the workspace and run at once: every run has IED_SANDBOX, its name, and IED_PLATFORM - cmake -B build/$IED_SANDBOX && cmake --build build/$IED_SANDBOX && ctest --test-dir build/$IED_SANDBOX). network is \"none\" unless the run itself needs the internet (\"full\"); installing packages always has it. build: build the image now. Example: sandbox_create(name: \"ubuntu-arm64\", os: \"ubuntu:24.04\", platform: \"linux/arm64\", presets: [\"build\", \"cmake\"], validate: \"...\").",
+				"class": "write",
+				"group": "sandbox",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,39}$" },
+						"os": { "type": "string", "description": "A catalog system and version: \"ubuntu:24.04\", \"debian:13\", \"fedora\", \"alpine:3.24\"." },
+						"image": { "type": "string", "description": "Any image instead of the catalog's (os then names its family for the package manager)." },
+						"platform": { "type": "string", "description": "linux/amd64, linux/arm64, linux/arm/v7, linux/386, linux/riscv64, linux/ppc64le, linux/s390x; absent: the engine's own." },
+						"presets": { "type": "array", "items": { "type": "string" } },
+						"packages": { "type": "array", "items": { "type": "string" }, "description": "More packages, by the distribution's names." },
+						"setup": { "type": "array", "items": { "type": "string" }, "description": "Shell lines run as root when the image is built, after the packages." },
+						"env": { "type": "object", "additionalProperties": { "type": "string" } },
+						"validate": { "type": "string" },
+						"network": { "enum": ["none", "full"] },
+						"cpus": { "type": "integer", "minimum": 1, "maximum": 64 },
+						"memory_gib": { "type": "integer", "minimum": 1, "maximum": 256 },
+						"description": { "type": "string" },
+						"replace": { "type": "boolean", "description": "Overwrite a sandbox of this name." },
+						"build": { "type": "boolean", "description": "Build its image now (minutes for an emulated platform)." }
+					},
+					"required": ["name"],
+					"additionalProperties": false
+				},
+				"function": "Sandbox::CreateTool",
+				"plan": "Sandbox::CreatePlan",
+				"ownThread": true,
+				"timeoutSeconds": 1800,
+				"resultBudgetTokens": 1500
+			},
+			{
+				"name": "sandbox_run",
+				"description": "Run a shell command (sh -lc) in a sandbox and wait for it: its image is built and the sandbox started first when needed (said in the result). The workspace is /workspace inside, read-write except .ied/; cwd is workspace-relative; IED_SANDBOX and IED_PLATFORM name the sandbox and its platform. Answers the exit code, the time and the output's end; the full output is in the Output window's Sandbox source. Example: sandbox_run(name: \"alpine\", command: \"make test\").",
+				"class": "exec",
+				"group": "sandbox",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"name": { "type": "string" },
+						"command": { "type": "string" },
+						"cwd": { "type": "string", "description": "A workspace-relative folder to run in." },
+						"env": { "type": "object", "additionalProperties": { "type": "string" } },
+						"timeout_s": { "type": "integer", "minimum": 1, "maximum": 1750, "description": "Default 900; an emulated platform runs 5-20x slower." }
+					},
+					"required": ["name", "command"],
+					"additionalProperties": false
+				},
+				"function": "Sandbox::RunTool",
+				"ownThread": true,
+				"timeoutSeconds": 1800,
+				"resultBudgetTokens": 4000
+			},
+			{
+				"name": "sandbox_validate",
+				"description": "Does it work there? Runs one command - command, else each sandbox's own validate - in several sandboxes (names, else all), two at a time, and answers a pass/fail matrix with each failure's last lines. The owner sees the same matrix in the Sandboxes window. Build into build/$IED_SANDBOX (each run has IED_SANDBOX, the sandbox's name): the sandboxes share the workspace and run at once. Example: sandbox_validate(command: \"cmake -B build/$IED_SANDBOX && cmake --build build/$IED_SANDBOX && ctest --test-dir build/$IED_SANDBOX --output-on-failure\").",
+				"class": "exec",
+				"group": "sandbox",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"command": { "type": "string" },
+						"names": { "type": "array", "items": { "type": "string" } },
+						"timeout_s": { "type": "integer", "minimum": 1, "maximum": 1750, "description": "Each sandbox's limit; default 900." }
+					},
+					"additionalProperties": false
+				},
+				"function": "Sandbox::ValidateTool",
+				"ownThread": true,
+				"timeoutSeconds": 1800,
+				"resultBudgetTokens": 5000
+			},
+			{
+				"name": "sandbox_control",
+				"description": "Manage a sandbox: build (its image, when its definition changed), rebuild (without Docker's cache: fresh packages), start, stop, restart, reset (a new container from the image: anything installed by hand is gone), remove (its container and images; the definition stays), pull (download its base image).",
+				"class": "exec",
+				"group": "sandbox",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"name": { "type": "string" },
+						"action": { "enum": ["build", "rebuild", "start", "stop", "restart", "reset", "remove", "pull"] }
+					},
+					"required": ["name", "action"],
+					"additionalProperties": false
+				},
+				"function": "Sandbox::ControlTool",
+				"ownThread": true,
+				"timeoutSeconds": 1800,
+				"resultBudgetTokens": 2000
+			},
+			{
+				"name": "sandbox_engine",
+				"description": "Docker itself: status; start (Docker Desktop, when its engine is not running; up to 3 minutes); install_emulators (QEMU's handlers for every platform, a privileged container of tonistiigi/binfmt - only when sandbox_catalog marks a needed platform with !). Every call asks the owner.",
+				"class": "exec",
+				"group": "sandbox",
+				"approval": "ask",
+				"inputSchema": {
+					"type": "object",
+					"properties": { "action": { "enum": ["status", "start", "install_emulators"] } },
+					"additionalProperties": false
+				},
+				"function": "Sandbox::EngineTool",
+				"ownThread": true,
+				"timeoutSeconds": 900,
+				"resultBudgetTokens": 1500
+			}
+		]
+	}
+}

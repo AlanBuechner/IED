@@ -55,7 +55,7 @@ Committed, so deleting generated files never loses configuration ("if we delete 
 +- dictionary.txt           project spell-check words
 +- memory/                  project memory facts (approved AI additions)
 +- evals/                   eval tasks for the model arena
-+- sandbox/<name>/          Dockerfile + setup.sh per sandbox
++- sandbox/<name>/          sandbox.json (and optionally its own Dockerfile) per sandbox (docs/34)
 +- local/                   per-machine, gitignored:
    +- chats/                  chat transcripts, run journals, trajectories, media, checkpoints
    +- buffers/                journal of unsaved edits (hot exit)
