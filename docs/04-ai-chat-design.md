@@ -350,7 +350,11 @@ and a `claude-<model>` profile is added for a rung that had none.
 
 **Switching models.** A chat may pin a model of `ai.models` over the default chain (`chat.set {model}`, the composer's Model
 menu, `""` back to Default): the chain stays behind it, so a turn on the pin notes none of its places, and one tries them
-only when the pin fails. The Model button names the pin (by its label) or Default and the effort, and the model chip under the composer
+only when the pin fails. The Model button names the model the next turn starts on by its label - the pin, else its default's
+(owner, 2026-11-12: "dont list "default, default" for the model actually say what it is in the chat"): the snapshot's
+model, and before one (a chat not sent yet) its use's model as the settings have it, else the default chain's now - and
+the effort, a chat not sent yet's from its use's settings too ("Opus 5.5 | Extra high (Chats)"); its title says whose
+default it is. Default stays only while the models are not known. The model chip under the composer
 the model the next turn starts on: both follow `chat.changed`, which carries that model on the chat's topic (`docs/10`
 "Chats"), whoever pinned it - the owner here or on another device, or the AI's `chat_set_model`. The AI has two tools (group `models`, `docs/13`):
 `ai_usage` (the plan's windows with their pace and resets, and for each paced chain which model a turn uses now and why) and

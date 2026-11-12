@@ -86,6 +86,8 @@ test("model menu: what the default effort is and whose, and a use's default mode
 	assertEqual(choices.uses, [{ id: "chat", title: "Chats", model: "", effort: "" }, { id: "board", title: "Planning board", model: "claude-fable", effort: "high" }]);
 	assertEqual(effortFallback(choices, "chat", "", "claude-opus"), { effort: "medium", model: "Opus 5.5" }, "the model's own");
 	assertEqual(effortFallback(choices, "board", "high", "claude-fable"), { effort: "high", use: "Planning board" }, "the use's, as the snapshot says");
+	assertEqual(effortFallback(choices, "board", null, "claude-fable"), { effort: "high", use: "Planning board" }, "before a snapshot (a chat not sent yet): the use's, as the settings have it");
+	assertEqual(effortFallback(choices, "board", "", "claude-fable"), { effort: "medium", model: "Fable 5.2" }, "a snapshot saying none: the model's own");
 	const at = document.createElement("button");
 	document.body.append(at);
 	const close = showModelPicker(at, choices, { model: "", effort: "", now: "claude-fable", use: "board", defaultEffort: "high" }, () => {}, () => {});
@@ -97,6 +99,10 @@ test("model menu: what the default effort is and whose, and a use's default mode
 	const closeOwn = showModelPicker(at, choices, { model: "claude-opus", effort: "", now: "claude-opus", use: "chat", defaultEffort: "" }, () => {}, () => {});
 	assertEqual(document.querySelector(".chat-picker .chat-effort-value").textContent, "Default (Medium, Opus 5.5's own)");
 	closeOwn();
+	const closeDraft = showModelPicker(at, choices, { model: "", effort: "", now: "", use: "board", defaultEffort: null }, () => {}, () => {});
+	assertEqual([document.querySelector(".chat-picker .chat-picker-effort").dataset.model, document.querySelector(".chat-picker .chat-effort-value").textContent],
+		["claude-fable", "Default (High, Planning board's default)"], "a chat not sent yet: its use's model and effort, as the settings have them");
+	closeDraft();
 	at.remove();
 });
 

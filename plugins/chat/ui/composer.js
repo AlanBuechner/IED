@@ -10,7 +10,7 @@ import { h, icon, replace } from "/ui-kit/dom.js";
 import { MenuHost } from "/ui-kit/menu.js";
 import { MODE_CHOICES, PERMISSIONS, compact, contextBar, duration, effortDefaultDetail, effortLabel, modeChange, modeChoice, tokensPerSecond } from "./chatmodel.js";
 import { keptMentions } from "./mentions.js";
-import { choiceLabel, effortFallback, showModelPicker } from "./modelpicker.js";
+import { choiceLabel, effortFallback, nextModel, showModelPicker, useOf } from "./modelpicker.js";
 import { MentionList } from "./mentionlist.js";
 import { AttachBar } from "./attachbar.js";
 import { InputMarks, insertText, plainText } from "./composertext.js";
@@ -270,7 +270,8 @@ export class Composer {
 	}
 
 	// The Model menu: Default (the default chain) or one model (docs/04 "Which model a turn uses"), and the effort slider
-	// at its bottom; the button says the choice by its label ("Opus 5.5", once the models are known) and its effort.
+	// at its bottom; the button names the model the next turn starts on ("Opus 5.5", once the models are known) - its own or
+	// its default's - and its effort.
 	modelButton(summary, model) {
 		if (!this.choices && !this.choicesAsked && this.actions.choices) {
 			this.choicesAsked = true;
@@ -280,15 +281,19 @@ export class Composer {
 			});
 		}
 		this.lastSelectors = [summary, model];
-		const label = choiceLabel(summary, this.choices);
+		// The model the next turn starts on, by name - a chat not sent yet too, from its use's settings - never "Default".
+		const name = nextModel(this.choices, { model: summary.pinnedModel || "", now: model.model || "", use: summary.use });
+		const label = choiceLabel(name, this.choices);
 		// No effort of its own: what the default is - its use's, else the model's own (docs/04 "Effort").
-		const fallback = effortFallback(this.choices, summary.use, model.defaultEffort, model.model);
+		const fallback = effortFallback(this.choices, summary.use, model.defaultEffort, name);
 		const effort = effortLabel(summary.effort, fallback);
-		return h("button.chat-dd.chat-model-dd", { title: "Run this chat on the default chain or a model, and set its effort", "aria-haspopup": "dialog", on: { click: async (event) => {
+		const use = useOf(this.choices, summary.use);
+		const whose = summary.pinnedModel ? "this chat's own model" : use && use.model === name ? "the default for " + use.title + " (Settings > AI > Defaults)" : "the default chain's model now";
+		return h("button.chat-dd.chat-model-dd", { title: (name ? label + ": " + whose + ". " : "") + "Run this chat on its default or a model, and set its effort", "aria-haspopup": "dialog", on: { click: async (event) => {
 			const at = event.currentTarget;
 			const choices = await this.actions.choices();
 			if (choices) this.choices = choices;
-			const current = { model: summary.pinnedModel || "", mode: summary.mode || "agent", effort: summary.effort || "", now: model.model || "", use: summary.use || "chat", defaultEffort: model.defaultEffort || "" };
+			const current = { model: summary.pinnedModel || "", mode: summary.mode || "agent", effort: summary.effort || "", now: model.model || "", use: summary.use || "chat", defaultEffort: model.defaultEffort };
 			if (choices) showModelPicker(at, choices, current, (change) => this.actions.set(change), (value) => this.actions.set({ effort: value }));
 		} } }, h("span", null, label), h("span.chat-dd-effort", { title: "Effort" + (summary.effort ? "" : ": the chat names none, so " + effortDefaultDetail(fallback)) }, effort), icon("chevron-down"));
 	}

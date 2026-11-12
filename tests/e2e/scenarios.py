@@ -2819,6 +2819,8 @@ def ai_defaults_by_use(run):
 		run.reload()
 		show_chat(run)
 		run.wait_text(".chat-selectors .chat-model-dd .chat-dd-effort", "Medium (default)")
+		# The model it runs on by name, never "Default" (owner, 2026-11-12: "dont list "default, default" for the model").
+		check(run.texts(".chat-selectors .chat-model-dd > span:first-child") == ["Opus 5.5"], "the button names the model: %r" % run.texts(".chat-selectors .chat-model-dd > span:first-child"))
 		page.click(".chat-selectors .chat-model-dd")
 		run.wait_text(".chat-picker .chat-effort-value", "Default (Medium, Opus 5.5's own)")
 		check(run.texts(".chat-picker .chat-effort-tick")[0] == "DefaultMed", "the first tick names it: %r" % run.texts(".chat-picker .chat-effort-tick")[:2])
@@ -2838,8 +2840,16 @@ def ai_defaults_by_use(run):
 		page.click(".settings-overlay-close")
 		run.wait_text(".chat-selectors .chat-model-dd .chat-dd-effort", "High (Chats)")
 		run.shot("use-effort")
+		if not run.phone:
+			# A chat not sent yet has no snapshot: it names what it will start on from the Chats use's settings.
+			run.request("settings.set", {"tier": "app", "key": "ai.chats.model", "value": "claude-fable"})
+			page.click(".dock-host:not([hidden]) .tabs-new")
+			draft = ".view[data-ref='chat:new'] .chat-selectors .chat-model-dd"
+			run.wait_text(draft + " > span:first-child", "Fable 5.2")
+			run.wait_text(draft + " .chat-dd-effort", "High (Chats)")
+			run.shot("new-chat")
 	finally:
-		for key in ("ai.models", "ai.defaultModel", "ai.chats.effort"):
+		for key in ("ai.models", "ai.defaultModel", "ai.chats.model", "ai.chats.effort"):
 			run.request("settings.reset", {"tier": "app", "key": key})
 
 

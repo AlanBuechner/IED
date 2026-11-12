@@ -3,7 +3,7 @@
 // sub-agent's chat under its parent in the Chats list; a task's time.
 
 import { test, assertEqual } from "./harness.js";
-import { choiceLabel, choicesFrom, defaultNow, familyOf, modelFamilies } from "/plugins/ied.chat/ui/modelpicker.js";
+import { choiceLabel, choicesFrom, defaultNow, familyOf, modelFamilies, nextModel } from "/plugins/ied.chat/ui/modelpicker.js";
 import { keptBySection, nestAgents, rootsOf } from "/plugins/ied.chat/ui/chatsview.js";
 import { taskTime } from "/plugins/ied.chat/ui/sidepanel.js";
 
@@ -18,10 +18,22 @@ test("model menu: models by family, Claude's under one heading", () => {
 
 test("model menu: the label says what the chat runs on, by the model's label", () => {
 	const choices = choicesFrom({ "ai.models": { value: { qwen: { endpoint: "http://spark:8080/v1" }, "claude-fable-5-2": { provider: "claude-code", model: "claude-fable-5-2", label: "Fable 5.2" } } } });
-	assertEqual(choiceLabel({ pinnedModel: "claude-fable-5-2" }, choices), "Fable 5.2", "a model of its own, by its label");
-	assertEqual(choiceLabel({ pinnedModel: "qwen" }, choices), "qwen", "a profile without a label, by its name");
-	assertEqual(choiceLabel({ pinnedModel: "qwen" }, null), "qwen", "before the models are known");
-	assertEqual(choiceLabel({ pinnedModel: "" }, choices), "Default", "the default chain");
+	assertEqual(choiceLabel("claude-fable-5-2", choices), "Fable 5.2", "a model, by its label");
+	assertEqual(choiceLabel("qwen", choices), "qwen", "a profile without a label, by its name");
+	assertEqual(choiceLabel("qwen", null), "qwen", "before the models are known");
+	assertEqual(choiceLabel("", choices), "Default", "only while nothing says which");
+});
+
+test("model menu: the model a chat's next turn starts on, never just Default", () => {
+	const values = { "ai.models": { value: { qwen: { endpoint: "http://spark:8080/v1" }, "claude-opus": { provider: "claude-code", label: "Opus 5.5" }, "claude-haiku": { provider: "claude-code", label: "Haiku 5.5" } } },
+		"ai.chats.model": { value: "claude-opus" }, "board.ai.model": { value: "gone" } };
+	const uses = [{ id: "chat", title: "Chats", model: "ai.chats.model", effort: "ai.chats.effort" }, { id: "board", title: "Planning board", model: "board.ai.model", effort: "board.ai.effort" }];
+	const choices = choicesFrom(values, [{ role: "primary", now: "claude-haiku" }], [], uses);
+	assertEqual(nextModel(choices, { model: "qwen", now: "claude-opus", use: "chat" }), "qwen", "its own");
+	assertEqual(nextModel(choices, { model: "", now: "claude-haiku", use: "chat" }), "claude-haiku", "what the server says");
+	assertEqual(nextModel(choices, { model: "", now: "", use: "chat" }), "claude-opus", "a chat not sent yet: its use's default model");
+	assertEqual(nextModel(choices, { model: "", now: "", use: "board" }), "claude-haiku", "a use's model that is not a model: the default chain's now");
+	assertEqual(nextModel(null, { model: "", now: "", use: "chat" }), "", "nothing while the models are not known");
 });
 
 test("model menu: the models, the default chain and what a turn on it uses now", () => {

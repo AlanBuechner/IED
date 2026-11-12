@@ -36,11 +36,30 @@ export function modelFamilies(models) {
 	return families;
 }
 
-// What the chat runs on, as its button says it: its model's label, else Default.
-export function choiceLabel(summary, choices) {
-	if (!summary.pinnedModel) return "Default";
-	const model = choices && choices.models ? choices.models.find((m) => m.name === summary.pinnedModel) : null;
-	return model && model.label ? model.label : summary.pinnedModel;
+// What the chat runs on, as its button says it: the label of the model its next turn starts on (nextModel), its own or
+// its default's (owner, 2026-11-12: "dont list "default, default" for the model actually say what it is in the chat");
+// Default only while nothing says which.
+export function choiceLabel(name, choices) {
+	if (!name) return "Default";
+	const model = choices && choices.models ? choices.models.find((m) => m.name === name) : null;
+	return model && model.label ? model.label : name;
+}
+
+// The model a chat's next turn starts on, `current` as showModelPicker's: its own (`model`), else what the server says
+// (`now`, its snapshot's), else - a chat not sent yet, or before its snapshot - its use's default model as the settings
+// have it (docs/04 "Defaults by use"), else the default chain's now. "" while the models are not known.
+export function nextModel(choices, current) {
+	if (current.model) return current.model;
+	if (current.now) return current.now;
+	if (!choices) return "";
+	const use = useOf(choices, current.use);
+	if (use && use.model && choices.models.some((m) => m.name === use.model)) return use.model;
+	return defaultNow(choices);
+}
+
+// A use's entry in the choices ({id, title, model, effort}), the chat use when the chat names none.
+export function useOf(choices, use) {
+	return choices ? (choices.uses || []).find((u) => u.id === (use || "chat")) : null;
 }
 
 // The settings a picker lists: {models: [{name, label, claude, endpoint, efforts, defaultEffort, family, follows,
@@ -71,10 +90,12 @@ export function choicesFrom(values, chains, catalog, uses) {
 }
 
 // What a chat runs at when it names no effort (effortLabel's `fallback`): `defaultEffort` - its use's, as its snapshot
-// says - by the use's title, else the own default of the model a turn uses (`modelName`) by its label.
+// says; null before a snapshot (a chat not sent yet), the use's as the settings have it - by the use's title, else the
+// own default of the model a turn uses (`modelName`) by its label.
 export function effortFallback(choices, use, defaultEffort, modelName) {
-	const entry = choices && (choices.uses || []).find((u) => u.id === (use || "chat"));
-	if (defaultEffort) return { effort: defaultEffort, use: entry ? entry.title : "its use" };
+	const entry = useOf(choices, use);
+	const own = defaultEffort === null || defaultEffort === undefined ? (entry ? entry.effort : "") : defaultEffort;
+	if (own) return { effort: own, use: entry ? entry.title : "its use" };
 	const profile = choices && choices.models.find((m) => m.name === modelName);
 	return { effort: profile ? profile.defaultEffort || "" : "", model: profile ? profile.label || profile.name : "" };
 }
@@ -88,8 +109,8 @@ export function defaultNow(choices) {
 }
 
 // Shows the picker at `at` (the button) for a chat whose choice is `current` ({model - "" for its use's default or the
-// default chain -, mode, effort, now - the model its next turn starts on -, use, defaultEffort - its use's, as the
-// snapshot says}); `pick({model})` gets a change of choice and closes it,
+// default chain -, mode, effort, now - the model its next turn starts on, "" before a snapshot -, use, defaultEffort -
+// its use's, as the snapshot says, null before one}); `pick({model})` gets a change of choice and closes it,
 // `setEffort(effort)` a change of effort ("" the default), which leaves it open. Returns the function that closes it.
 export function showModelPicker(at, choices, current, pick, setEffort) {
 	const sheet = window.matchMedia(PHONE).matches;
@@ -105,10 +126,11 @@ export function showModelPicker(at, choices, current, pick, setEffort) {
 		close();
 		pick(change);
 	};
-	const now = !current.model && current.now ? current.now : defaultNow(choices);
+	// What Default runs now: the server's word when the chat follows it, else its use's model or the default chain's.
+	const now = nextModel(choices, { model: "", now: current.model ? "" : current.now, use: current.use });
 	const label = (name) => (choices.models.find((m) => m.name === name) || { label: name }).label;
 	// Default: the use's own default model when its settings name one (docs/04 "Defaults by use"), else the default chain.
-	const use = (choices.uses || []).find((u) => u.id === (current.use || "chat"));
+	const use = useOf(choices, current.use);
 	const byUse = use && use.model && choices.models.some((m) => m.name === use.model);
 	const defaultRow = h("button.chat-picker-row.grp" + (current.model ? "" : ".on"), {
 		type: "button", "aria-pressed": current.model ? "false" : "true", dataset: { default: "1", now },

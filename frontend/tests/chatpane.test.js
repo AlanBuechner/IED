@@ -135,9 +135,9 @@ test("chat pane: only the owner scrolling up stops following the end - never the
 	}
 });
 
-// The composer's selector titled `title`: its label.
-function picked(pane, title) {
-	return [...pane.composer.selectors.querySelectorAll("button.chat-dd")].find((b) => b.title === title).firstChild.textContent;
+// The model the Model button names.
+function modelShown(pane) {
+	return pane.composer.selectors.querySelector(".chat-model-dd").firstChild.textContent;
 }
 
 function chipText(pane) {
@@ -161,17 +161,16 @@ test("chat pane: the Model menu shows what the chat runs on, and the next turn's
 	try {
 		const topic = ied.topics.get("chat:c1");
 		const summary = (change) => Object.assign({ chatId: "c1", wsId: "w1", title: "Long chat", mode: "agent", permission: "ask", effort: "", pinnedModel: "", state: "idle", turnCount: 1 }, change);
-		const MODEL = "Run this chat on the default chain or a model, and set its effort";
 		topic.snap(Object.assign(snapshotOf(1), { pinnedModel: "fake", model: "fake" }));
-		assertEqual([picked(pane, MODEL), chipText(pane)], ["fake", "fake"], "the snapshot's pin");
+		assertEqual([modelShown(pane), chipText(pane)], ["fake", "fake"], "the snapshot's pin");
 		topic.evt("chat.changed", summary({ pinnedModel: "", model: "claude-opus" }));
-		assertEqual([picked(pane, MODEL), chipText(pane), effortShown(pane)], ["Default", "claude-opus", "Default"], "no model of its own: the default chain's model");
+		assertEqual([modelShown(pane), chipText(pane), effortShown(pane)], ["claude-opus", "claude-opus", "Default"], "no model of its own: the default's model, by name");
 		topic.evt("chat.changed", summary({ pinnedModel: "fake", model: "fake" }));
-		assertEqual([picked(pane, MODEL), chipText(pane)], ["fake", "fake"], "pinned from the picker or by the AI");
+		assertEqual([modelShown(pane), chipText(pane)], ["fake", "fake"], "pinned from the picker or by the AI");
 		topic.evt("turn.start", { turnId: "n1", mode: "agent", model: "fake", group: "default", user: { text: "Go" } });
 		topic.evt("chat.changed", summary({ pinnedModel: "fake", state: "running", model: "fake" }));
 		topic.evt("chat.changed", summary({ pinnedModel: "", state: "running", model: "claude-opus" }));
-		assertEqual([picked(pane, MODEL), chipText(pane)], ["Default", "claude-opus"], "unpinned mid-turn: the next turn's");
+		assertEqual([modelShown(pane), chipText(pane)], ["claude-opus", "claude-opus"], "unpinned mid-turn: the next turn's");
 		topic.evt("chat.changed", summary({ mode: "plan", state: "idle", model: "claude-sonnet" }));
 		assertEqual(chipText(pane), "claude-sonnet", "a new mode: the model its next turn starts on");
 		topic.evt("turn.start", { turnId: "n2", mode: "plan", model: "claude-haiku", group: "default", user: { text: "Plan" } });
@@ -203,7 +202,8 @@ test("chat pane: the Model menu lists Default and the models by label, and its s
 	try {
 		const topic = ied.topics.get("chat:c1");
 		topic.snap(Object.assign(snapshotOf(1), { mode: "ask", effort: "", model: "claude-sonnet" }));
-		assertEqual(effortShown(pane), "Default");
+		assertTrue(await until(() => modelShown(pane) === "Sonnet 5.5"), "the model the default chain uses now, by its label: " + modelShown(pane));
+		assertEqual(effortShown(pane), "Default", "a model whose own effort nobody said");
 		const menu = await open();
 		assertTrue(!!menu, "the Model menu opened");
 		const first = menu.querySelector(".chat-picker-row.grp");
@@ -232,6 +232,29 @@ test("chat pane: the Model menu lists Default and the models by label, and its s
 	}
 	finally {
 		if (picker()) picker().remove();
+		closePane(pane);
+	}
+});
+
+test("chat pane: a chat not sent yet names the model and effort it will start on, from its use's settings", async () => {
+	const ied = fakeIed();
+	ied.client.request = async (method) => {
+		if (method === "settings.get") return { values: {
+			"ai.models": { value: { "claude-opus": { provider: "claude-code", model: "opus", label: "Opus 5.5" }, "claude-haiku": { provider: "claude-code", model: "haiku", label: "Haiku 5.5" } } },
+			"ai.defaultModel": { value: "" }, "ai.chats.model": { value: "claude-opus" }, "ai.chats.effort": { value: "xhigh" } } };
+		if (method === "ai.usage") return { claude: { chains: [{ group: "default", role: "primary", now: "claude-haiku", places: [] }] } };
+		return null;
+	};
+	ied.contributions = (point) => (point === "aiUses" ? [{ value: { id: "chat", title: "Chats", model: "ai.chats.model", effort: "ai.chats.effort" } }] : []);
+	const pane = new ChatPane(ied, "w1", { created: () => {}, openChat: () => {}, shown: () => {} });
+	document.body.append(pane.el);
+	try {
+		pane.show(null);
+		assertTrue(await until(() => modelShown(pane) === "Opus 5.5"), "the Chats default model by its label, never Default: " + modelShown(pane));
+		assertEqual(effortShown(pane), "Extra high (Chats)", "and the Chats default effort");
+		assertTrue(pane.composer.selectors.querySelector(".chat-model-dd").title.startsWith("Opus 5.5: the default for Chats"), "its title says whose default it is");
+	}
+	finally {
 		closePane(pane);
 	}
 });
