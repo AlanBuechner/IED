@@ -13,6 +13,7 @@ import tempfile
 import time
 import urllib.request
 
+import jsonc
 from frames import FrameChecker
 from iedclient import Client, RpcFailure
 from routed import RoutedClient
@@ -147,6 +148,11 @@ def chat_bindings():
 	return manifest["contributes"]["bindings"]
 
 
+def chat_uses():
+	"""The chat plugin's own uses (docs/04 "Defaults by use"), as its manifest contributes them."""
+	return jsonc.load_file(os.path.join(REPO, "plugins", "chat", "ied-plugin.json"))["contributes"]["aiUses"]
+
+
 def make_home(home):
 	"""An install with the host's schemas, the chat plugin - its server code (compiled into the server, docs/26), its
 	prompts, settings, bindings and output source, without its UI - and a demo language plugin with a system-message
@@ -157,7 +163,7 @@ def make_home(home):
 	shutil.copy(os.path.join(REPO, "plugins", "chat", "settings.schema.json"), os.path.join(plugin, "settings.schema.json"))
 	write(os.path.join(plugin, "ied-plugin.json"), json.dumps({"manifestVersion": 1, "id": "ied.chat", "name": "Chat", "version": "0.1.0", "ied": {"api": "^1"},
 		"runtime": {"kind": "builtin", "entry": "Ai::Activate", "servers": ["master", "workspace"]}, "permissions": ["ai.invoke", "ai.tools", "ai.context", "settings.write", "fs.read", "fs.write", "process.spawn", "lsp", "workspace.projects"],
-		"contributes": {"settings": {"schema": "settings.schema.json", "page": "AI"}, "outputSources": [{"id": "ai", "title": "AI"}], "bindings": chat_bindings()}}))
+		"contributes": {"settings": {"schema": "settings.schema.json", "page": "AI"}, "outputSources": [{"id": "ai", "title": "AI"}], "bindings": chat_bindings(), "aiUses": chat_uses()}}))
 	write(os.path.join(home, "plugins", "demo", "ied-plugin.json"), json.dumps(DEMO_PLUGIN))
 	write(os.path.join(home, "plugins", "democode", "ied-plugin.json"), json.dumps(CODE_PLUGIN))
 	write(os.path.join(home, "plugins", "democode", "code", "democode.cf"), CODE_PLUGIN_SOURCE)
@@ -437,13 +443,46 @@ class ChatTests(ChatCase):
 		self.assertEqual("low", (await self.summary(chat_id))["effort"], "kept across a restart")
 		await self.client.sub([topic])
 		snapshot = (await self.client.next_frame(topic))["data"]
-		self.assertEqual(("low", ""), (snapshot["effort"], snapshot["roleEffort"]), "the chat's own, and none from the default chain (it has no roles)")
+		self.assertEqual(("low", ""), (snapshot["effort"], snapshot["defaultEffort"]), "the chat's own, and none from its use (ai.chats.effort is empty)")
 		await self.client.request("chat.set", {"chatId": chat_id, "effort": ""})
 		self.model.queue(text_step("As the model likes."))
 		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
 		body = self.model.requests()[-1]["body"]
 		self.assertFalse("chat_template_kwargs" in body or "reasoning_effort" in body, "no effort: none is sent: %s" % sorted(body))
 		self.assertEqual(None, (await self.last_turn(chat_id)).get("effort"))
+
+	async def test_a_chats_use_gives_the_model_and_effort_it_names_none_of(self):
+		"""docs/04 "Defaults by use": chat.create's `use` - one a plugin contributes (here the chat plugin's agent) - gives a chat with no
+		model or effort of its own the ones the use's settings name (the chats the AI starts: ai.chats.agentModel, agentEffort); its own win; a
+		use no plugin contributes is refused; a chat of no use is the owner's (`chat`, ai.chats.*)."""
+		await self.use_model({})
+		models = await self.client.request("settings.get", {"wsId": "w1"})
+		profiles = dict(models["values"]["ai.models"]["value"], other={"endpoint": self.model.url + "/v1", "model": "other-model", "watchdog": {"prefillBaseS": 2, "idleS": 1, "prefillRate": 1000000}})
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.models", "value": profiles})
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.chats.agentModel", "value": "other"})
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.chats.agentEffort", "value": "high"})
+		chat_id, topic = await self.chat(use="agent")
+		self.assertEqual(("agent", "chat"), ((await self.summary(chat_id))["use"], (await self.summary((await self.chat())[0]))["use"]))
+		await self.client.request("chat.set", {"chatId": chat_id, "title": "Board: plan"})
+		changed = (await self.client.wait_for(topic, lambda f: f.get("kind") == "chat.changed"))[-1]["data"]
+		self.assertEqual(("other", "high"), (changed["model"], changed["defaultEffort"]), "what its next turn starts on: the use's model and effort")
+		self.model.queue(text_step("On the use's model."))
+		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
+		body = self.model.requests()[-1]["body"]
+		self.assertEqual(("other-model", {"reasoning_effort": "high"}), (body["model"], body.get("chat_template_kwargs")), "the use's model at the use's effort")
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.chats.agentEffort", "value": "medium"})
+		changed = (await self.client.wait_for(topic, lambda f: f.get("kind") == "chat.changed" and f["data"].get("defaultEffort") == "medium"))[-1]["data"]
+		self.assertEqual("other", changed["model"], "a chat in memory says what it starts on once the settings change")
+		await self.client.request("chat.set", {"chatId": chat_id, "model": "fake", "effort": "low"})
+		self.model.queue(text_step("On its own."))
+		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
+		body = self.model.requests()[-1]["body"]
+		self.assertEqual({"reasoning_effort": "low"}, body.get("chat_template_kwargs"), "the chat's own effort wins")
+		self.assertNotEqual("other-model", body["model"], "and its own model")
+		with self.assertRaises(RpcFailure) as refused:
+			await self.client.request("chat.create", {"wsId": "w1", "use": "nothing-contributes-this"})
+		self.assertEqual("bad_request", refused.exception.code)
+		self.assertIn("agent", refused.exception.message, "the uses there are named")
 
 	async def test_a_profile_maps_effort_and_other_servers_get_openais_field(self):
 		self.model.post("/_fake/config", {"props": False})

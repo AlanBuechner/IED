@@ -10,7 +10,7 @@
 // Enter picks, Esc closes; a phone shows a bottom sheet.
 
 import { h, icon } from "/ui-kit/dom.js";
-import { EFFORTS, effortStops, effortsOf } from "./chatmodel.js";
+import { EFFORTS, effortDefaultDetail, effortStops, effortsOf } from "./chatmodel.js";
 import { catalogEfforts, familyName, follows, runsOf, versionsOf } from "./claudecatalog.js";
 
 const PHONE = "(max-width: 719px)";
@@ -43,25 +43,40 @@ export function choiceLabel(summary, choices) {
 	return model && model.label ? model.label : summary.pinnedModel;
 }
 
-// The settings a picker lists: {models: [{name, label, claude, endpoint, efforts, family, follows, version}], defaultModel,
-// chains} from settings.get's values, the aiusage snapshot's chains (the default chain, and the model a turn on it uses
-// now) and its catalog (`claude.models`): a Claude profile labelled by the model it runs now, then every version the CLI
-// offers that no profile is named after (`version`).
-export function choicesFrom(values, chains, catalog) {
+// The settings a picker lists: {models: [{name, label, claude, endpoint, efforts, defaultEffort, family, follows,
+// version}], defaultModel, chains, uses} from settings.get's values, the aiusage snapshot's chains (the default chain, and
+// the model a turn on it uses now) and its catalog (`claude.models`): a Claude profile labelled by the model it runs now,
+// with the effort Claude Code gives it when a request names none, then every version the CLI offers that no profile is
+// named after (`version`). `uses` are the aiUses contributions ({id, title, model, effort} naming settings): each with
+// its default model and effort as `values` has them (docs/04 "Defaults by use").
+export function choicesFrom(values, chains, catalog, uses) {
+	const setting = (key) => (key && values[key] && typeof values[key].value === "string" ? values[key].value : "");
 	const models = (values["ai.models"] && values["ai.models"].value) || {};
 	const listed = Object.keys(models).map((name) => {
 		const profile = models[name];
 		const claude = profile.provider === "claude-code";
 		const runs = claude ? runsOf(profile.model || "default", catalog) : null;
 		return { name, label: profile.label || (runs && runs.label) || name, claude, endpoint: profile.endpoint || "", family: runs ? runs.family : "",
-			follows: claude && follows(profile.model), efforts: runs && !Array.isArray(profile.efforts) ? catalogEfforts(runs) : effortsOf(profile) };
+			follows: claude && follows(profile.model), efforts: runs && !Array.isArray(profile.efforts) ? catalogEfforts(runs) : effortsOf(profile),
+			defaultEffort: runs ? runs.defaultEffort || "" : "" };
 	});
-	const versions = versionsOf(catalog).filter((m) => !models[m.value]).map((m) => ({ name: m.value, label: m.label || m.value, claude: true, endpoint: "", family: m.family, version: true, efforts: catalogEfforts(m) }));
+	const versions = versionsOf(catalog).filter((m) => !models[m.value]).map((m) => ({ name: m.value, label: m.label || m.value, claude: true, endpoint: "",
+		family: m.family, version: true, efforts: catalogEfforts(m), defaultEffort: m.defaultEffort || "" }));
 	return {
 		models: listed.concat(versions),
 		defaultModel: (values["ai.defaultModel"] && values["ai.defaultModel"].value) || "",
 		chains: chains || [],
+		uses: (uses || []).map((use) => ({ id: use.id, title: use.title, model: setting(use.model), effort: setting(use.effort) })),
 	};
+}
+
+// What a chat runs at when it names no effort (effortLabel's `fallback`): `defaultEffort` - its use's, as its snapshot
+// says - by the use's title, else the own default of the model a turn uses (`modelName`) by its label.
+export function effortFallback(choices, use, defaultEffort, modelName) {
+	const entry = choices && (choices.uses || []).find((u) => u.id === (use || "chat"));
+	if (defaultEffort) return { effort: defaultEffort, use: entry ? entry.title : "its use" };
+	const profile = choices && choices.models.find((m) => m.name === modelName);
+	return { effort: profile ? profile.defaultEffort || "" : "", model: profile ? profile.label || profile.name : "" };
 }
 
 // The model a turn on the default chain uses now: pacing's pick when the chain has Claude, else its first model.
@@ -72,8 +87,9 @@ export function defaultNow(choices) {
 	return choices.models.length ? choices.models[0].name : "";
 }
 
-// Shows the picker at `at` (the button) for a chat whose choice is `current` ({model - "" for the default chain -, mode,
-// effort, now - the model its next turn starts on}); `pick({model})` gets a change of choice and closes it,
+// Shows the picker at `at` (the button) for a chat whose choice is `current` ({model - "" for its use's default or the
+// default chain -, mode, effort, now - the model its next turn starts on -, use, defaultEffort - its use's, as the
+// snapshot says}); `pick({model})` gets a change of choice and closes it,
 // `setEffort(effort)` a change of effort ("" the default), which leaves it open. Returns the function that closes it.
 export function showModelPicker(at, choices, current, pick, setEffort) {
 	const sheet = window.matchMedia(PHONE).matches;
@@ -91,11 +107,16 @@ export function showModelPicker(at, choices, current, pick, setEffort) {
 	};
 	const now = !current.model && current.now ? current.now : defaultNow(choices);
 	const label = (name) => (choices.models.find((m) => m.name === name) || { label: name }).label;
+	// Default: the use's own default model when its settings name one (docs/04 "Defaults by use"), else the default chain.
+	const use = (choices.uses || []).find((u) => u.id === (current.use || "chat"));
+	const byUse = use && use.model && choices.models.some((m) => m.name === use.model);
 	const defaultRow = h("button.chat-picker-row.grp" + (current.model ? "" : ".on"), {
 		type: "button", "aria-pressed": current.model ? "false" : "true", dataset: { default: "1", now },
-		title: "The default chain (ai.defaultModel): " + (now ? label(now) + " now" : "no model") + "; with Claude it steps down to lighter models while the plan runs ahead of its pace",
+		title: byUse ? use.title + "'s default model (Settings > AI > Defaults): " + label(use.model)
+			: "The default chain (ai.defaultModel): " + (now ? label(now) + " now" : "no model") + "; with Claude it steps down to lighter models while the plan runs ahead of its pace",
 		on: { click: () => chosen({ model: "" }) },
-	}, icon(current.model ? "layers" : "check"), h("span.grp-text", null, h("span.name", null, "Default"), h("span.sub", null, now ? "now " + label(now) : "no model yet")));
+	}, icon(current.model ? "layers" : "check"), h("span.grp-text", null, h("span.name", null, "Default"),
+		h("span.sub", null, byUse ? label(use.model) + ", " + use.title + "'s default" : now ? "now " + label(now) : "no model yet")));
 	const list = h("div.chat-picker-col", { role: "group", "aria-label": "Models" }, defaultRow, h("div.chat-picker-head", null, "Models"),
 		...modelRows(choices.models, current, chosen));
 	const popup = h("div.popup.chat-picker" + (sheet ? ".sheet" : ""), { role: "dialog", "aria-label": "Run this chat on", on: { keydown: (event) => key(event, popup, close) } },
@@ -167,13 +188,15 @@ function effortSection(choices, current, setEffort, now) {
 	const modelName = current.model || now || "";
 	const profile = choices.models.find((m) => m.name === modelName);
 	const supported = profile ? profile.efforts : EFFORTS.map(([id]) => id);
-	const stops = effortStops(current.effort || "", "", true, supported);
+	const fallback = effortFallback(choices, current.use, current.defaultEffort, modelName);
+	const stops = effortStops(current.effort || "", supported, fallback);
 	let at = Math.max(0, stops.findIndex((stop) => stop.value === (current.effort || "")));
 	const value = h("span.chat-effort-value");
 	const slider = h("input.chat-effort-slider", { type: "range", min: "0", max: String(Math.max(0, stops.length - 1)), step: "1", "aria-label": "Effort", disabled: stops.length < 2 ? true : null });
 	slider.value = String(at);
 	const ticks = stops.map((stop, i) => h("button.chat-effort-tick", { type: "button", tabindex: "-1", dataset: { effort: stop.value }, title: stop.label + (stop.detail ? ": " + stop.detail : ""),
-		style: { left: (stops.length > 1 ? (i / (stops.length - 1)) * 100 : 0) + "%" }, on: { click: () => choose(i) } }, stop.value ? SHORT_EFFORTS[stop.value] || stop.label : "Default"));
+		style: { left: (stops.length > 1 ? (i / (stops.length - 1)) * 100 : 0) + "%" }, on: { click: () => choose(i) } },
+		stop.value ? SHORT_EFFORTS[stop.value] || stop.label : stop.effort ? ["Default", h("span.chat-effort-tick-sub", null, SHORT_EFFORTS[stop.effort] || stop.effort)] : "Default"));
 	const describe = (i) => {
 		const stop = stops[i];
 		value.textContent = stop.label + (stop.detail ? " (" + stop.detail + ")" : "");
@@ -194,7 +217,7 @@ function effortSection(choices, current, setEffort, now) {
 	return h("div.chat-picker-effort", { dataset: { model: modelName } },
 		h("div.chat-picker-effort-head", null, h("span.chat-picker-head", null, "Effort"), value, h("span.grow"),
 			modelName ? h("span.meta", { title: "The model a turn uses now" }, shown) : null),
-		stops.length < 2 ? h("div.muted", null, (shown || "This model") + " takes no effort level: it runs as its server does by default.") : slider,
+		stops.length < 2 ? h("div.muted", null, (shown || "This model") + " takes no effort level: it runs as " + (profile && profile.claude ? "Claude Code runs it" : "its server does") + " by default.") : slider,
 		stops.length < 2 ? null : h("div.chat-effort-ticks", null, ...ticks));
 }
 

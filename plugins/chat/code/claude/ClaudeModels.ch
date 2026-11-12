@@ -24,12 +24,20 @@ namespace Ai
 		public Core::String m_Description;    // "Most capable for your hardest and longest-running tasks"
 		public Core::Array<Core::String> m_Efforts;   // supportedEffortLevels
 		public bool m_EffortsSaid;            // the CLI listed them (Haiku 4.5 has none: no effort levels)
+		public Core::String m_DefaultEffort;  // the effort the CLI gives it when a request names none (get_settings); empty: none or not known
 		public Core::String m_Family;         // "fable" (of the resolved id)
 		public Core::Array<int64> m_Version;  // [5, 2]; a date part is not a version
 	}
 
-	// The catalog of an initialize answer's `models`, in its order: every model but "default" and the disabled.
+	// The catalog of an initialize answer's `models`, in its order: every model but "default" and the disabled. A model's
+	// `defaultEffort` is IED's own field (what WriteClaudeCatalog keeps of ClaudeDefaultEfforts).
 	Core::Array<ClaudeCatalogModel*> ReadClaudeCatalog(const Serialization::DomNode& models);
+	// The models' default efforts (`efforts`: {value: effort or ""}, from get_settings after set_model of each) given to
+	// the catalog; a model it does not name keeps the one `kept` (an earlier catalog) has for the same model.
+	void GiveDefaultEfforts(Core::Array<ClaudeCatalogModel*>& catalog, const Serialization::DomNode& efforts, const Core::Array<ClaudeCatalogModel*>& kept);
+	// What the default efforts were asked for: the CLI's version and each model with what it resolves to. Asked again
+	// when it changes.
+	Core::String ClaudeCatalogKey(Core::StringView cliVersion, const Serialization::DomNode& models);
 	// The catalog as the CLI writes it (value, resolvedModel, displayName, description, supportedEffortLevels): what
 	// ReadClaudeCatalog reads back.
 	void WriteClaudeCatalog(IED::JsonWriter& json, const Core::Array<ClaudeCatalogModel*>& catalog);

@@ -8,9 +8,9 @@ Two things: the settings tier model (what lives where, who wins) and the visual 
 
 | Tier | Location | Scope | Examples |
 |---|---|---|---|
-| **App** | `%APPDATA%/IED/settings.json` (+ `keybindings.json`) | this owner, all workspaces | model profiles and groups, prompt overrides, egress profiles, remote access, global plugins, keybindings, UI density/fonts |
-| **Solution** | `<solution>/.ied/solution.json` (or `.ied/solutions/<Name>.json` when several solutions share a folder) - committed | this solution on every machine | default model group, `aiEgress` policy, permission rules (restrict only), toolbar defaults, plugin settings |
-| **Project** | `<solution>/.ied/projects/<Name>.json` - committed | one project | LSP profile choice, sandbox image, project plugin settings |
+| **App** (User) | `%APPDATA%/IED/settings.json` (+ `keybindings.json`) | this owner, all workspaces | model profiles, the programs IED runs (`cpp.clangd.path`, `nuke.command`, `terminal.shell`), keybindings, the editor's look, Claude, web search and Tor, how long things idle |
+| **Solution** | `<solution>/.ied/solution.json` (or `.ied/solutions/<Name>.json` when several solutions share a folder) - committed | this solution on every machine | the AI's defaults by use and default model, what AI edits do (format, diagnostics), sub-agents, which language servers run and clangd's arguments, git's pull mode, the profiler's target frame rate |
+| **Project** | `<solution>/.ied/projects/<Name>.json` - committed | one project | MCP servers; a project-local plugin's settings |
 | Workspace state | `<solution>/.ied/local/` - gitignored; for a folder or file workspace `<app data>/workspaces/<key>/` (opening a folder writes nothing into it; `key` the first 16 hex digits of the SHA-256 of the folder's path compared without case or separator kind). A workspace-relative path under `.ied/local/` names a file there wherever it is - the protocol (`fs.*`, `GET /w/<wsId>/files/`), plugins (`IED::WorkspaceFile`, `docs/26`), the AI and the clients use the one path. What an older server kept of IED's own in a plain folder's `.ied/local/` moves there when the folder opens (a folder holding a solution file keeps the solution's); a build's `lsp-options` stay. A folder made a solution (`docs/03` "Managing projects") keeps its app-data state while it stays open, and that state (chats, layouts, breakpoints, selections, the browser's, captures) moves into the solution's `.ied/local/` when it next opens, what the solution has already kept | this machine | layouts per device class, open documents, toolbar selections, startup project, breakpoints, bookmarks, chats and their media, the browser's pages and shots, GPU and profiler captures |
 
 Rules:
@@ -21,12 +21,59 @@ Rules:
 - Settings files are watched (git pull, hand edits apply live) and written preserving comments.
 - **Secrets never live in settings files**: settings reference `{ "secret": "<name>" }` (Windows Credential Manager) or `{ "env": "VAR" }`.
 
+### Which tier a setting belongs in (2026-11-11)
+
+Owner, 2026-11-11: "because we have the ability to override settings per solution and project we should properly think
+about what settings it even makes sense to override." A tier is allowed only where a value there means something and
+cannot hurt; a setting with no `x-ied-tiers` could be set in every tier, so **every built-in setting names its tiers**
+(`tools/schema-check` fails a built-in plugin whose settings schema leaves one out; a project-local plugin's settings,
+which only the workspace's tiers know, keep the every-tier default).
+
+- **User only** - what is about you or this machine:
+  - *a program on this machine* - a path, a command, a folder of tools (`*.path`, `cpp.clangd.path`, `go.gopls.path`,
+    `nuke.command`, `terminal.shell`, `browser.executable`, `tor.executable`, `webfetch.curl`, `websearch.python`,
+    `gpu.nativeFolder`, `ai.claude.command`, `c4.toolchain`): it differs from machine to machine, and a repository that
+    could set it would make IED run what the repository names;
+  - *how IED looks and behaves for you* - the editor's view, keybindings, notifications, the chat panel's rows, snapping
+    on a board, following a live capture, developer mode, which terminal profile New Terminal runs;
+  - *your accounts, network and privacy* - model profiles and their endpoints (`ai.models`), Claude and its pacing, web
+    search, fetch, Tor, permission rules (`ai.permissions`: a repository may only ever tighten them, not built yet);
+  - *this machine's resources and your own budget* - how long a language server, MCP server, page, chat or Tor idles,
+    how often packages are fetched, a turn's step budget, sending every tool, how long deleted chats are kept, resuming
+    interrupted turns, the GPU replay's debug layer and timing repeats.
+- **User or Solution** - what the codebase decides for everyone who opens it, the same for all its projects:
+  the AI's defaults - `ai.defaultModel`, `ai.fallbackModel` and each use's model and effort (`docs/04` "Defaults by use";
+  a model a machine does not have falls back to the default chain), sub-agents (`ai.agents`, merged by name) -; what an AI
+  edit does (`ai.edits.*`); which language servers run (`*.languageServer`) and clangd's arguments; git's pull mode and
+  how deep repositories are looked for; the profiler's target frame rate.
+- **Project too** - only what IED reads per project (the project owning a file or a task): `mcp.servers`. A setting
+  read per workspace would ignore a project's value, so it does not offer the tier.
+
+| Setting | Tiers |
+|---|---|
+| `lsp.idleStopMinutes`, `keyboard.bindings` | User |
+| `ai.models`, `ai.permissions`, `ai.maxSteps`, `ai.resumeInterrupted`, `ai.tools.loadAll`, `ai.chats.keepDeletedDays`, `ai.chats.offloadAfterMinutes`, `ai.chats.notify`, `ai.chats.panelRows`, `ai.claude.*` | User |
+| `ai.defaultModel`, `ai.fallbackModel`, `ai.agents`, `ai.chats.model`, `ai.chats.effort`, `ai.chats.agentModel`, `ai.chats.agentEffort`, `ai.edits.*` | User, Solution |
+| `board.snap` / `board.ai.model`, `board.ai.effort` | User / User, Solution |
+| `browser.*`, `developer.enabled`, `editor.*`, `gpu.*`, `terminal.*`, `tor.*`, `webfetch.*`, `websearch.*` | User |
+| `c4.toolchain`, `cpp.clangd.path`, `cpp.lldb.path`, `git.path`, `go.path`, `go.gopls.path`, `go.delve.path`, `rust.analyzer.path`, `rust.cargo.path`, `nuke.command`, `nuke.packages.fetchMinutes` | User |
+| `c4.languageServer`, `cpp.languageServer`, `go.languageServer`, `rust.languageServer`, `cpp.clangd.arguments` | User, Solution |
+| `git.scanDepth`, `git.pullMode` | User, Solution |
+| `mcp.servers` / `mcp.idleMinutes` | User, Solution, Project / User |
+| `profiler.port`, `profiler.followLive` / `profiler.targetFps`, `profiler.ai.model`, `profiler.ai.effort` | User / User, Solution |
+
+Changed on 2026-11-11 from what was there: 26 settings that named no tier (every program path among them) became User or
+User and Solution; `lsp.idleStopMinutes`, `mcp.idleMinutes`, `ai.maxSteps`, `ai.resumeInterrupted`, `ai.tools.loadAll`,
+`ai.chats.keepDeletedDays`, `ai.chats.offloadAfterMinutes` and `ai.chats.panelRows` became User only (a machine's
+resources, your budget, your view); `ai.agents` gained the Solution tier. No solution or project file of the owner's set
+any of them.
+
 ### Settings on the wire (M1)
 
 **Where settings are declared.** A plugin's `contributes.settings.schema` names a JSON Schema in the plugin. Each of that schema's top-level `properties` is one setting, keyed by its full dotted name (`"editor.tabSize"`). A property carries its own schema plus:
 
 - `default`;
-- `x-ied-tiers` (the tiers it may be set in; default all);
+- `x-ied-tiers` (the tiers it may be set in; default all - a built-in setting always names them, "Which tier a setting belongs in");
 - `x-ied-merge`: `replace` (the default), `merge` (objects are merged member by member, deeper tiers winning) or `append` (lists are concatenated, app first).
 
 A key claimed by two plugins belongs to the first one loaded; the second gets a plugin problem. The app tier knows the settings of global plugins (built-in and app). A workspace's tiers also know those of its loaded project-local plugins, so a repository's language plugin brings its settings with it once the workspace is trusted.
@@ -103,7 +150,7 @@ entry of its name.
 
 The host declares a few settings of its own next to the plugins': `shared/host-api/schemas/host-settings.v1.schema.json`, owner `ied`, page Environment, read from the install (`--home`) and listed first in `settings.schema`:
 
-- `lsp.idleStopMinutes` (app and solution tiers, 10): a language server none of whose documents a window shows for this many minutes stops and gives its memory back; it starts again when one is shown or asked about; 0 keeps servers running (`docs/24` "Lifecycle").
+- `lsp.idleStopMinutes` (app tier - this machine's memory, "Which tier a setting belongs in" -, 10): a language server none of whose documents a window shows for this many minutes stops and gives its memory back; it starts again when one is shown or asked about; 0 keeps servers running (`docs/24` "Lifecycle").
 - `keyboard.bindings` (app tier): the owner's keyboard shortcuts, `[{command, key?, when?, args?, remove?}]`. An entry with a `key` adds that key (or chord) to the command; one with `remove: true` takes the command's default `key` away, or every default key when it names none. The owner's bindings come after the shell's and the plugins' and so win; the shell applies them as the app tier changes (`settings:app`), in every window. Settings > Environment > **Keyboard** edits them (Help > Keyboard Shortcuts opens it): every command with its keys, searchable, "Only what I changed"; Add records a key or a two-key chord (Enter adds, Escape cancels; the commands that already have it are named) with a when-clause defaulting to the command's first default's; a key's x takes it off (a default shows struck through until its command is reset); Reset drops everything the owner said about the command.
 
 ### The editor's settings

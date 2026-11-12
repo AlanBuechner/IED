@@ -83,7 +83,7 @@ class SettingsTests(ServerTestCase):
 		host = schema["keyboard.bindings"]
 		self.assertEqual(("ied", "Environment", ["app"], []), (host["plugin"], host["page"], host["tiers"], host["default"]))
 		idle = schema["lsp.idleStopMinutes"]
-		self.assertEqual(("ied", ["app", "solution"], 10), (idle["plugin"], idle["tiers"], idle["default"]), "docs/24 Idle")
+		self.assertEqual(("ied", ["app"], 10), (idle["plugin"], idle["tiers"], idle["default"]), "docs/24 Idle; this machine's memory: the User tier (docs/07)")
 		bindings = [{"command": "ied.editor.duplicate", "key": "ctrl+shift+d", "when": "activeTabKind == 'doc'"}, {"command": "ied.editor.find", "remove": True}]
 		await self.client.request("settings.set", {"tier": "app", "key": "keyboard.bindings", "value": bindings})
 		values, _ = await self.values(None)

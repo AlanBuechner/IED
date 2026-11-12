@@ -339,9 +339,13 @@ class SettingsTests(MockCase):
 		self.assertEqual(("ied.chat", "AI", ["app"]), (schema["ai.models"]["plugin"], schema["ai.models"]["page"], schema["ai.models"]["tiers"]))
 		snap = await self.subscribed(client, "settings:w1")
 		self.assertEqual({"value": 0, "source": "default"}, snap["values"]["ai.maxSteps"], "no step limit unless one is set")
-		await client.request("settings.set", {"tier": "solution", "wsId": "w1", "key": "ai.maxSteps", "value": 20})
+		self.assertEqual({"value": "", "source": "default"}, snap["values"]["ai.chats.effort"], "the model's own effort unless one is set")
+		await client.request("settings.set", {"tier": "solution", "wsId": "w1", "key": "ai.chats.effort", "value": "high"})
 		changed = (await client.wait_for("settings:w1", lambda f: f.get("kind") == "settings.changed"))[-1]["data"]
-		self.assertEqual({"value": 20, "source": "solution"}, changed["values"]["ai.maxSteps"])
+		self.assertEqual({"value": "high", "source": "solution"}, changed["values"]["ai.chats.effort"])
+		with self.assertRaises(RpcFailure) as budget:
+			await client.request("settings.set", {"tier": "solution", "wsId": "w1", "key": "ai.maxSteps", "value": 20})
+		self.assertIn("cannot be set in the solution tier", str(budget.exception), "the step budget is the owner's own (docs/07)")
 		with self.assertRaises(RpcFailure) as low:
 			await client.request("settings.set", {"tier": "app", "key": "ai.maxSteps", "value": -1})
 		self.assertTrue(low.exception.data["problems"], "the schema's problem comes with the refusal")

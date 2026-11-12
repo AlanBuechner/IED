@@ -348,6 +348,7 @@ namespace Ai
 		public Core::String m_Title;
 		public bool m_TitledByAi;                       // chat_title named it, and it may again (docs/04 "Chat names")
 		public Core::String m_Section;                  // the Chats list's section it is kept in (docs/04 "Chat sections"); empty: the owner's own
+		public Core::String m_Use;                      // what it is for, a use a plugin contributes (Uses.ch): its defaults; empty: chat
 		public Draft m_Draft;                           // the owner's unsent message (docs/04 "Unsent messages")
 		public ChatMode m_Mode;
 		public PermissionMode m_Permission;
@@ -425,11 +426,12 @@ namespace Ai
 		public BackgroundTask* FindBackground(Core::StringView taskId) const;
 		// The clips as the clients show them: [{name, source, lines, bytes, text}], each text cut to kClipShownBytes.
 		public void WriteClips(IED::JsonWriter& json) const;
-		// The chat:<chatId> snapshot: the summary, the model and group in use and its role's effort, tasks, queued messages,
-		// the clips, `page` (its last, Pages.ch) and what it waits on.
-		public Core::String SnapshotJson(Core::StringView model, Core::StringView groupInUse, Core::StringView roleEffort, const TurnPage& page) const;
-		// The chat topic's chat.changed: the summary, the model and group in use and its role's effort.
-		public Core::String ChangedJson(Core::StringView model, Core::StringView groupInUse, Core::StringView roleEffort) const;
+		// The chat:<chatId> snapshot: the summary, the model and group in use and the effort a turn gets when the chat names
+		// none (its sub-agent's, else its use's; empty: the model's own), tasks, queued messages, the clips, `page` (its
+		// last, Pages.ch) and what it waits on.
+		public Core::String SnapshotJson(Core::StringView model, Core::StringView groupInUse, Core::StringView defaultEffort, const TurnPage& page) const;
+		// The chat topic's chat.changed: the summary, the model and group in use and the default effort.
+		public Core::String ChangedJson(Core::StringView model, Core::StringView groupInUse, Core::StringView defaultEffort) const;
 	}
 
 	int64 ChatNowMs();

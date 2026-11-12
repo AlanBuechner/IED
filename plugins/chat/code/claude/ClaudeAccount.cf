@@ -153,9 +153,35 @@ namespace Ai
 		return SnapshotJson();
 	}
 
+	// The effort the CLI gives each model of `offered` when a request names none (docs/04 "Effort"): set_model, then
+	// get_settings' `applied.effort`, in the process `process` - no model request. {value: effort or ""}.
+	static Core::String AskDefaultEfforts(ClaudeProcess* process, const Serialization::DomNode& offered, ClaudeServe refuse) {
+		IED::JsonWriter json;
+		json.BeginObject();
+		for (int64 i = 0; offered.Kind() == Serialization::DomKind::Array && i < offered.Count(); ++i) {
+			Core::StringView value = offered.At(i).Member("value").AsView();
+			if (value.IsEmpty() || value == "default" || offered.At(i).Member("disabled").AsBool()) continue;
+			IED::JsonWriter request;
+			request.BeginObject();
+			request.Field("subtype", "set_model");
+			request.Field("model", value);
+			request.EndObject();
+			Core::String error;
+			if (!process->Request(request.View(), c_UsageProcessMs, error, refuse).IsValid()) break;
+			Serialization::DomNode settings = process->Request(Core::StringView("{\"subtype\":\"get_settings\"}"), c_UsageProcessMs, error, refuse);
+			if (!settings.IsValid()) break;
+			Serialization::DomNode applied = settings.Member("applied").IsValid() ? settings.Member("applied") : settings.Member("response").Member("applied");
+			json.Field(Core::String(value).CStr(), applied.Member("effort").AsView());
+		}
+		json.EndObject();
+		return json.ToString();
+	}
+
 	// get_usage asked of a CLI process of IED's own (no session kept, no model request); an invalid node with `error`.
-	// `offered` gets the models its initialize answer lists (docs/04 "The Claude models").
-	static Serialization::DomNode AskUsage(const Core::Array<Core::String>& command, Core::StringView folder, Core::String& error, Serialization::DomNode& offered) {
+	// `offered` gets the models its initialize answer lists (docs/04 "The Claude models"); when they, or the CLI's
+	// `version`, are not what `knownKey` says, `defaultEfforts` gets each one's default effort and `key` the new key.
+	static Serialization::DomNode AskUsage(const Core::Array<Core::String>& command, Core::StringView folder, Core::String& error, Serialization::DomNode& offered,
+		Core::StringView version, Core::StringView knownKey, Core::String& key, Core::String& defaultEfforts) {
 		Core::Array<Core::String> argv = command;
 		for (const Core::String& argument : ClaudeBaseArguments()) argv.Push(argument);
 		argv.Push(Core::String("--no-session-persistence"));
@@ -167,6 +193,8 @@ namespace Ai
 		if (initialized.IsValid()) {
 			offered = initialized.Member("models").IsValid() ? initialized.Member("models") : initialized.Member("response").Member("models");
 			answer = process->Request(Core::StringView("{\"subtype\":\"get_usage\",\"skip_behaviors\":true}"), c_UsageProcessMs, error, refuse);
+			key = ClaudeCatalogKey(version, offered);
+			if (key != knownKey) defaultEfforts = AskDefaultEfforts(process, offered, refuse);
 		}
 		process->Stop();
 		return answer;
@@ -232,16 +260,17 @@ namespace Ai
 		SetClaudeCatalog(ReadClaudeCatalog(CatalogFile(m_Context).Member("catalog")));
 	}
 
-	void ClaudeAccount::SyncCatalog(const Serialization::DomNode& models) {
+	void ClaudeAccount::SyncCatalog(const Serialization::DomNode& models, const Serialization::DomNode& defaultEfforts, Core::StringView key) {
 		if (models.Kind() != Serialization::DomKind::Array || !c_ClaudeSubscriptionOffered) return;
 		if (!Configured()) {
 			// Claude taken out (or never set up): no version of it beside ai.models either.
 			SetClaudeCatalog(Core::Array<ClaudeCatalogModel*>());
 			return;
 		}
-		Core::Array<ClaudeCatalogModel*> catalog = ReadClaudeCatalog(models);
-		SetClaudeCatalog(catalog);
 		Serialization::DomNode saved = CatalogFile(m_Context);
+		Core::Array<ClaudeCatalogModel*> catalog = ReadClaudeCatalog(models);
+		GiveDefaultEfforts(catalog, defaultEfforts, ReadClaudeCatalog(saved.Member("catalog")));
+		SetClaudeCatalog(catalog);
 		Core::Array<Core::String> seen;
 		Serialization::DomNode kept = saved.Member("seen");
 		for (int64 i = 0; kept.Kind() == Serialization::DomKind::Array && i < kept.Count(); ++i) seen.Push(Core::String(kept.At(i).AsView()));
@@ -264,7 +293,7 @@ namespace Ai
 		}
 		IED::JsonWriter catalogJson;
 		WriteClaudeCatalog(catalogJson, catalog);
-		if (seen.Count() == before && IED::NodeJson(saved.Member("catalog")) == catalogJson.ToString()) return;
+		if (seen.Count() == before && IED::NodeJson(saved.Member("catalog")) == catalogJson.ToString() && saved.Member("effortsFor").AsView() == key) return;
 		IED::JsonWriter json;
 		json.BeginObject();
 		json.Key(Core::StringView("seen"));
@@ -272,6 +301,7 @@ namespace Ai
 		for (const Core::String& value : seen) json.String(value.View());
 		json.EndArray();
 		json.RawField("catalog", catalogJson.View());
+		json.Field("effortsFor", key);
 		json.EndObject();
 		FS::Path file = FS::Path(m_Context->StateFolder().View()) / "claude-models.json";
 		FS::WriteFileAtomically(file.CStr(), (const void*)json.View().Data(), json.View().ByteLength());
@@ -299,12 +329,17 @@ namespace Ai
 		Core::String error;
 		Serialization::DomNode answer;
 		Serialization::DomNode offered;
+		Core::String key;
+		Core::String defaultEfforts;
+		Core::String knownKey = Core::String(CatalogFile(m_Context).Member("effortsFor").AsView());
 		if (command.IsEmpty()) error = Core::String("no Claude Code CLI was found: install it, or set ai.claude.command");
-		else if (signedIn) answer = AskUsage(command, folder.View(), error, offered);
+		else if (signedIn) answer = AskUsage(command, folder.View(), error, offered, version.View(), knownKey.View(), key, defaultEfforts);
 		Core::String problem;
 		if (signedIn && IsSubscriptionAuth(method.View()) && c_ClaudeSubscriptionOffered && !Configured() && !Setup(false, problem) && !problem.IsEmpty())
 			m_Context->Log((Core::String("Claude could not be set up: ") + problem.View()).View());
-		if (signedIn && IsSubscriptionAuth(method.View())) SyncCatalog(offered);
+		Serialization::DomDoc* effortsDoc = new Serialization::DomDoc();
+		Serialization::DomNode efforts = defaultEfforts.IsEmpty() ? Serialization::DomNode() : Serialization::ReadJson(defaultEfforts.View(), *effortsDoc).root;
+		if (signedIn && IsSubscriptionAuth(method.View())) SyncCatalog(offered, efforts, efforts.IsValid() ? key.View() : knownKey.View());
 		IED::HostLock guard(*m_Context);
 		m_Refreshing = false;
 		m_Asked = true;

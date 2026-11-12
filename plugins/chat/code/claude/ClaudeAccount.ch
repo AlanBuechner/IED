@@ -43,7 +43,7 @@ namespace Ai
 		// The models the CLI's initialize answer offers (`models`) kept as the process's catalog and in the plugin's state
 		// (claude-models.json), and ai.models kept with it (TidyClaudeModels), while Claude is set up; no catalog while it is
 		// not. Any thread, without the host lock.
-		public void SyncCatalog(const Serialization::DomNode& models);
+		public void SyncCatalog(const Serialization::DomNode& models, const Serialization::DomNode& defaultEfforts, Core::StringView key);
 		// The master's, as it starts: the catalog the CLI gave last (claude-models.json), while Claude is set up.
 		public void LoadCatalog();
 		// Inside the host lock: a session's get_usage answer, a rate_limit_event's rate_limit_info.

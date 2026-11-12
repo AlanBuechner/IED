@@ -1,4 +1,5 @@
 include "api/Plugin.ch"
+include "chats/Uses.ch"
 include "ChatTools.ch"
 include "chats/Pages.ch"
 include "chats/Replies.ch"
@@ -180,7 +181,10 @@ namespace Ai
 		if (!model.IsEmpty() && !FindModel(ReadModels(call.m_Context->Setting(Core::StringView("ai.models"), WsId(call.m_Ws)).View(), problems), model))
 			return ToolError(((Core::String("chat_create: there is no model ") + model) + " in ai.models; ai_usage lists them").View());
 		Chat* made = chats->Create(call.m_Ws, title.IsEmpty() ? Core::StringView(c_NewChatTitle) : title, mode, self->m_Group.View());
-		made->m_PinnedModel = model.IsEmpty() ? self->m_PinnedModel : Core::String(model);
+		// A chat the AI starts (docs/04 "Defaults by use"): the model it names, else ai.chats.agentModel, else its creator's.
+		made->m_Use = Core::String(c_UseAgent);
+		const bool agentDefault = !DefaultsOfUse(call.m_Context, WsId(call.m_Ws), Core::StringView(c_UseAgent)).m_Model.IsEmpty();
+		made->m_PinnedModel = !model.IsEmpty() ? Core::String(model) : agentDefault ? Core::String() : self->m_PinnedModel;
 		const bool requires = call.m_Args.Member("require_reply").AsBool();
 		if (requires) chats->Owe(made, self, hops, false);
 		chats->Deliver(made, call.m_Args.Member("text").AsView(), self, hops, requires ? "required" : "");

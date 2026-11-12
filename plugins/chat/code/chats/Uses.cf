@@ -1,0 +1,52 @@
+// What a chat is for and the defaults that gives it: see Uses.ch.
+
+include "Uses.ch"
+
+namespace Ai
+{
+	// A setting's value as a string ("" when it is not one).
+	static Core::String StringSetting(IED::PluginContext* context, Core::StringView key, Core::StringView wsId) {
+		if (key.IsEmpty()) return Core::String();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode value = Serialization::ReadJson(context->Setting(key, wsId).View(), *doc).root;
+		return value.Kind() == Serialization::DomKind::String ? Core::String(value.AsView()) : Core::String();
+	}
+
+	UseDefaults DefaultsOfUse(IED::PluginContext* context, Core::StringView wsId, Core::StringView use) {
+		UseDefaults defaults;
+		defaults.m_Known = false;
+		if (use.IsEmpty()) return defaults;
+		for (const IED::Contribution& contribution : IED::Contributions(wsId, Core::StringView("aiUses"))) {
+			if (contribution.m_Entry.Member("id").AsView() != use) continue;
+			defaults.m_Known = true;
+			defaults.m_Title = Core::String(contribution.m_Entry.Member("title").AsView());
+			defaults.m_Model = StringSetting(context, contribution.m_Entry.Member("model").AsView(), wsId);
+			defaults.m_Effort = StringSetting(context, contribution.m_Entry.Member("effort").AsView(), wsId);
+			return defaults;
+		}
+		return defaults;
+	}
+
+	static Core::StringView UseOf(const Chat* chat) { return chat->m_Use.IsEmpty() ? Core::StringView(c_UseChat) : chat->m_Use.View(); }
+
+	Core::String ChosenModelOf(IED::PluginContext* context, Core::StringView wsId, const Chat* chat) {
+		if (!chat->m_PinnedModel.IsEmpty() || !chat->m_Agent.IsEmpty()) return chat->m_PinnedModel;
+		return DefaultsOfUse(context, wsId, UseOf(chat)).m_Model;
+	}
+
+	Core::String DefaultEffortOf(IED::PluginContext* context, Core::StringView wsId, const Chat* chat, Core::StringView roleEffort) {
+		if (!roleEffort.IsEmpty()) return Core::String(roleEffort);
+		return DefaultsOfUse(context, wsId, UseOf(chat)).m_Effort;
+	}
+
+	Core::String UseIds(Core::StringView wsId) {
+		Core::StringBuilder ids;
+		bool first = true;
+		for (const IED::Contribution& contribution : IED::Contributions(wsId, Core::StringView("aiUses"))) {
+			if (!first) ids.Append(", ");
+			ids.Append(contribution.m_Entry.Member("id").AsView());
+			first = false;
+		}
+		return ids.ToString();
+	}
+}

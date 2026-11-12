@@ -4,21 +4,25 @@
 	"type": "object",
 	"properties": {
 		"go.path": {
+			"x-ied-tiers": ["app"],
 			"type": "string",
 			"default": "",
 			"description": "The go tool the Go tasks, gopls and the installs run: a name looked up on PATH, or a path. Empty: the one IED installed, else go on PATH or in Program Files\\Go (Settings > Languages shows which)."
 		},
 		"go.languageServer": {
+			"x-ied-tiers": ["app", "solution"],
 			"type": "boolean",
 			"default": true,
 			"description": "Run gopls for Go documents of trusted workspaces (Settings > Languages installs it)."
 		},
 		"go.gopls.path": {
+			"x-ied-tiers": ["app"],
 			"type": "string",
 			"default": "",
 			"description": "The gopls to run: a name looked up on PATH, or a path. Empty: the one IED installed, else gopls in %USERPROFILE%\\go\\bin or on PATH."
 		},
 		"go.delve.path": {
+			"x-ied-tiers": ["app"],
 			"type": "string",
 			"default": "",
 			"description": "Delve (dlv), the Go debugger: a name looked up on PATH, or a path. Empty: the one IED installed, else dlv in %USERPROFILE%\\go\\bin or on PATH."

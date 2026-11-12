@@ -27,18 +27,26 @@ export function modeChange(choice) {
 export const PERMISSIONS = [["plan", "Read only"], ["ask", "Ask for edits"], ["acceptEdits", "Accept edits"], ["auto", "Auto"]];
 export const EFFORTS = [["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]];
 // The summary's fields that change which model a chat's next turn starts on.
-const CHOICE_KEYS = ["pinnedModel", "group", "mode"];
+const CHOICE_KEYS = ["pinnedModel", "group", "mode", "use"];
 
 function effortName(id) {
 	return (EFFORTS.find(([e]) => e === id) || [id, id])[1];
 }
 
-// What the Model button says of the effort: the chat's pick, else its role's (docs/04 "Effort"), else the model's own
-// default; `roleEffort` is null while the chat has no snapshot to say.
-export function effortLabel(effort, roleEffort) {
+// What a chat with no effort of its own runs at (docs/04 "Effort"; owner, 2026-11-11: "it should say what that default
+// is instead of just saying default"): `fallback` is {effort, use} - its use's default and the use's title - or {effort,
+// model} - the model's own (Claude Code says it for each model) and the model's label; effort "" when no one says.
+// The Model button: the chat's pick, else "Medium (default)" or "High (Planning board)", else "Default".
+export function effortLabel(effort, fallback) {
 	if (effort) return effortName(effort);
-	if (roleEffort === null) return "Group's";
-	return roleEffort ? effortName(roleEffort) + " (group)" : "Default";
+	if (fallback && fallback.effort) return effortName(fallback.effort) + (fallback.use ? " (" + fallback.use + ")" : " (default)");
+	return "Default";
+}
+
+// What the default stop means: "Medium, Opus 5.5's own", "High, Planning board's default", "the model's own".
+export function effortDefaultDetail(fallback) {
+	if (!fallback || !fallback.effort) return "the model's own";
+	return effortName(fallback.effort) + ", " + (fallback.use ? fallback.use + "'s default" : (fallback.model ? fallback.model + "'s own" : "the model's own"));
 }
 
 // The efforts a model profile (ai.models' entry) takes: those its `efforts` lists (a Claude model's, as the CLI says),
@@ -51,13 +59,11 @@ export function effortsOf(profile) {
 	return EFFORTS.map(([id]) => id).filter((id) => mapping[id]);
 }
 
-// The Model menu's effort slider's stops, left to right (owner, 2026-10-26: "the group default only applys to groups not
-// single models"): a chat on a group starts with its group's default (`roleEffort`, its role's effort; "" the model's own),
-// one on a single model (`alone`) with that model's own default; then the levels the model a turn uses takes (`supported`),
-// the chat's own pick kept when that model does not take it. [{value, label, detail}], value "" the default.
-export function effortStops(effort, roleEffort, alone, supported) {
-	const first = alone ? { value: "", label: "Default", detail: "the model's own" }
-		: { value: "", label: "Group default", detail: roleEffort ? effortName(roleEffort) : "the model's own" };
+// The Model menu's effort slider's stops, left to right: the default first - what it is and whose (`fallback`, as
+// effortLabel's: its use's, else the model's own) - then the levels the model a turn uses takes (`supported`), the chat's
+// own pick kept when that model does not take it. [{value, label, detail, effort}], value "" the default.
+export function effortStops(effort, supported, fallback) {
+	const first = { value: "", label: "Default", detail: effortDefaultDetail(fallback), effort: fallback && fallback.effort ? fallback.effort : "" };
 	const levels = EFFORTS.filter(([id]) => supported.includes(id) || id === effort).map(([id, label]) => ({ value: id, label, detail: supported.includes(id) ? "" : "this model does not take it" }));
 	return [first].concat(levels);
 }
@@ -67,7 +73,7 @@ export class ChatModel {
 		this.summary = null;
 		this.model = "";
 		this.groupInUse = "";
-		this.roleEffort = null;     // the group's effort for this chat, once a snapshot says
+		this.defaultEffort = null;  // its use's effort (or a sub-agent's) when it names none, once a snapshot says; "" none
 		this.turns = [];
 		this.hasMore = false;
 		this.hasNewer = false;
@@ -103,12 +109,12 @@ export class ChatModel {
 		return { all: true };
 	}
 
-	// What the chat's next turn starts on (the snapshot's, or a chat.changed's after the pin, group or mode changed): its
-	// model, its group and that group's effort for its mode.
+	// What the chat's next turn starts on (the snapshot's, or a chat.changed's after the pin, use or mode changed): its
+	// model, its group and the effort it gets when it names none - its use's default (docs/04 "Defaults by use").
 	choose(data) {
 		this.model = data.model || "";
 		this.groupInUse = data.groupInUse || "";
-		this.roleEffort = data.roleEffort || "";
+		this.defaultEffort = data.defaultEffort || "";
 	}
 
 	// --- The window (docs/10 "Chats"): the client holds a few pages of the transcript, never the whole of a long chat.
@@ -205,7 +211,10 @@ export class ChatModel {
 			case "chat.changed": {
 				const before = this.summary || {};
 				this.summary = summaryOf(data);
-				if (data.model !== undefined && CHOICE_KEYS.some((key) => before[key] !== this.summary[key])) this.choose(data);
+				// Its own choice changed, or the settings did (`settingsChanged`: a use's defaults, ai.defaultModel) while no
+				// turn runs: what the server says it starts on now. Otherwise a turn's end keeps the model it ran on.
+				const resting = this.summary.state !== "running";
+				if (data.model !== undefined && (CHOICE_KEYS.some((key) => before[key] !== this.summary[key]) || (data.settingsChanged && resting))) this.choose(data);
 				return { summary: true };
 			}
 			case "turn.start": {

@@ -10,6 +10,7 @@
 			"description": "The git program. Empty: git on PATH."
 		},
 		"git.scanDepth": {
+			"x-ied-tiers": ["app", "solution"],
 			"type": "integer",
 			"minimum": 0,
 			"maximum": 5,
@@ -17,6 +18,7 @@
 			"description": "How many folders down from the workspace folder repositories are looked for, besides the one it is in."
 		},
 		"git.pullMode": {
+			"x-ied-tiers": ["app", "solution"],
 			"enum": ["merge", "rebase", "ffOnly"],
 			"default": "merge",
 			"description": "What Pull does with local commits: merge them, rebase them onto the upstream, or only fast-forward."

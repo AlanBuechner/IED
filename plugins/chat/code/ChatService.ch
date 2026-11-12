@@ -49,6 +49,9 @@ namespace Ai
 		public void PublishMergeable(Chat* chat, const char* kind, const IED::Merge& merge);
 		// The chat's summary changed: chat.changed on its topic and its workspace's, and its header saved.
 		public void Changed(Chat* chat);
+		// The settings of workspace `wsId` ("app": every workspace's) changed: each chat of it in memory publishes what its
+		// next turn starts on (chat.changed). Inside the host lock.
+		public void SettingsChanged(Core::StringView wsId);
 		// A turn for `message` starts - the owner's, or another chat's (docs/04 "Chats talk to each other"); `resumed` why IED
 		// starts it itself after a restart (Resume.ch), "" for a message.
 		public void StartTurn(Chat* chat, const OwnerMessage& message);

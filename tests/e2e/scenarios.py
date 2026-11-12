@@ -2793,17 +2793,54 @@ def model_settings(run):
 	run.shot("tested")
 	page.click(".set-model.editing button:has-text('Save')")
 	page.wait_for_selector(".set-model[data-model='local-test']:not(.editing)")
-	# A chat's Default (no Model Groups any more, owner 2026-11-11): ai.defaultModel on the AI page.
+	# A chat's Default (no Model Groups any more, owner 2026-11-11): ai.defaultModel on AI > Defaults.
 	check(page.query_selector(".set-node[data-page='custom:ied.chat.groups']") is None, "no Model Groups page")
-	page.click(".set-node[data-page='page:AI']")
-	field = ".set-row[data-key='ai.defaultModel'] input"
-	page.fill(field, "local-test")
-	page.press(field, "Enter")
-	page.wait_for_selector(".set-row[data-key='ai.defaultModel'] .set-source.set")
+	page.click(".set-node[data-page='custom:ied.chat.defaults']")
+	page.select_option(".set-default[data-use='default'] select[data-key='ai.defaultModel']", "local-test")
+	page.wait_for_selector(".set-default[data-use='default'] .set-default-reset")
 	values = run.request("settings.get", {"wsId": page.evaluate("ied_shell.wsId")})["values"]
 	check(values["ai.defaultModel"]["value"] == "local-test", "written to the User tier: %s" % values["ai.defaultModel"])
 	run.shot("default-model")
 	run.request("settings.reset", {"tier": "app", "key": "ai.defaultModel"})
+
+
+@scenario(viewports=("desktop", "phone"), targets=("mock",))
+def ai_defaults_by_use(run):
+	"""Defaults by use (owner, 2026-11-11: "we should be able to set a default model/effort for things like the chat,
+	planning board, inline chat, etc. when a model is set to default effort ... it should say what that default is"): a
+	chat with no effort of its own says the model's own (Opus 5.5: Medium) on its Model button and slider; Settings > AI >
+	Defaults lists the default chain and each use with its model and effort, the model's own effort named; a use's
+	effort chosen there is what the button then says. The server's side is a server check (test_chat, test_claude)."""
+	page = open_chat(run)
+	claude = {"claude-opus": {"provider": "claude-code", "model": "opus"}, "claude-fable": {"provider": "claude-code", "model": "fable"}}
+	run.request("settings.set", {"tier": "app", "key": "ai.models", "value": dict(claude, **{"mock-model@local": {"endpoint": "http://127.0.0.1:8080/v1"}})})
+	run.request("settings.set", {"tier": "app", "key": "ai.defaultModel", "value": "claude-opus"})
+	try:
+		run.reload()
+		show_chat(run)
+		run.wait_text(".chat-selectors .chat-model-dd .chat-dd-effort", "Medium (default)")
+		page.click(".chat-selectors .chat-model-dd")
+		run.wait_text(".chat-picker .chat-effort-value", "Default (Medium, Opus 5.5's own)")
+		check(run.texts(".chat-picker .chat-effort-tick")[0] == "DefaultMed", "the first tick names it: %r" % run.texts(".chat-picker .chat-effort-tick")[:2])
+		run.shot("model-own")
+		page.keyboard.press("Escape")
+		open_settings(run, page)
+		page.click(".set-node[data-page='custom:ied.chat.defaults']")
+		page.wait_for_selector(".set-default[data-use='board']")
+		uses = page.eval_on_selector_all(".set-default", "rows => rows.map(r => r.dataset.use)")
+		check(uses[:3] == ["default", "chat", "agent"] and "board" in uses and "profiler" in uses, "the default chain, then every use: %r" % uses)
+		run.wait_text(".set-default[data-use='chat'] select[data-key='ai.chats.effort'] option", "The model's own (Medium)")
+		page.select_option(".set-default[data-use='chat'] select[data-key='ai.chats.effort']", "high")
+		page.wait_for_selector(".set-default[data-use='chat'] .set-default-reset")
+		values = run.request("settings.get", {"wsId": page.evaluate("ied_shell.wsId")})["values"]
+		check(values["ai.chats.effort"] == {"value": "high", "source": "app"}, "written to the User tier: %s" % values["ai.chats.effort"])
+		run.shot("defaults")
+		page.click(".settings-overlay-close")
+		run.wait_text(".chat-selectors .chat-model-dd .chat-dd-effort", "High (Chats)")
+		run.shot("use-effort")
+	finally:
+		for key in ("ai.models", "ai.defaultModel", "ai.chats.effort"):
+			run.request("settings.reset", {"tier": "app", "key": key})
 
 
 @scenario(viewports=("desktop", "phone"), targets=("mock",))
@@ -2833,7 +2870,7 @@ def claude_model_versions(run):
 		run.wait_text(".chat-selectors .chat-model-dd", "Opus 4.8")
 		page.click(".chat-selectors .chat-model-dd")
 		page.wait_for_selector(picker + " .chat-picker-family.sub:not([hidden]) .chat-picker-row.on:has-text('Opus 4.8')")
-		check(run.texts(".chat-picker .chat-effort-tick") == ["Default", "Low", "Med", "High", "XHigh", "Max"], "Opus 4.8's levels")
+		check(run.texts(".chat-picker .chat-effort-tick") == ["DefaultHigh", "Low", "Med", "High", "XHigh", "Max"], "Opus 4.8's levels, its own (High) named: %r" % run.texts(".chat-picker .chat-effort-tick"))
 		page.click(".chat-picker .chat-picker-family.sub .chat-picker-row:has-text('Haiku 4.5')")
 		run.wait_text(".chat-selectors .chat-model-dd", "Haiku 4.5")
 		page.click(".chat-selectors .chat-model-dd")

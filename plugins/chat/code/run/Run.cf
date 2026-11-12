@@ -1,4 +1,5 @@
 include "api/Plugin.ch"
+include "chats/Uses.ch"
 include "Run.ch"
 include "prompts/Contributed.ch"
 include "aitools/ChatTools.ch"
@@ -122,8 +123,10 @@ namespace Ai
 		for (const Core::String& problem : problems) m_Context->Log(problem.View());
 		// The default chain behind the chat's own model (DefaultChain.ch): model groups are gone.
 		Core::String groups = DefaultGroupsJson(m_Context, WsId(m_Ws));
-		m_Candidates = TurnCandidates(models, groups.View(), m_Turn->m_Group.View(), m_Chat->m_Agent.View(), Core::StringView(ChatModeName(m_Turn->m_Mode)), m_Chat->m_PinnedModel.View(), m_Role);
-		if (m_Chat->RunsAlone()) m_Role.m_Effort = Core::String();
+		// The chat's own model, else its use's default (Uses.ch), first; then the chain.
+		m_Chosen = ChosenModelOf(m_Context, WsId(m_Ws), m_Chat);
+		m_Candidates = TurnCandidates(models, groups.View(), m_Turn->m_Group.View(), m_Chat->m_Agent.View(), Core::StringView(ChatModeName(m_Turn->m_Mode)), m_Chosen.View(), m_Role);
+		m_Role.m_Effort = DefaultEffortOf(m_Context, WsId(m_Ws), m_Chat, m_Chat->RunsAlone() ? Core::StringView("") : m_Role.m_Effort.View());
 		m_Rules = ReadPermissionRules(m_Context->Setting(Core::StringView("ai.permissions"), WsId(m_Ws)).View());
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
 		m_MaxSteps = Serialization::ReadJson(m_Context->Setting(Core::StringView("ai.maxSteps"), WsId(m_Ws)).View(), *doc).root.AsInt();

@@ -144,7 +144,7 @@
 		"ai.agents": {
 			"type": "object",
 			"default": {},
-			"x-ied-tiers": ["app"],
+			"x-ied-tiers": ["app", "solution"],
 			"x-ied-merge": "merge",
 			"description": "Sub-agents by name: the agents a chat may run with agent_run, each a model with what it is for, the mode its chat runs in and the agents it may run itself (docs/04 Sub-agents).",
 			"additionalProperties": { "$ref": "#/$defs/agent" }
@@ -178,28 +178,28 @@
 		"ai.resumeInterrupted": {
 			"enum": ["agent", "always", "never"],
 			"default": "agent",
-			"x-ied-tiers": ["app", "solution"],
+			"x-ied-tiers": ["app"],
 			"description": "A turn a server restart cut off: agent - an Agent-mode chat goes on by itself once IED is back (at most 3 restarts in a row; others wait for your next message); always - every chat does; never - every chat waits for you (docs/12 Restart behavior). A chat whose tool restarted IED on purpose (ied_relaunch) always goes on."
 		},
 		"ai.maxSteps": {
 			"type": "integer",
 			"minimum": 0,
 			"default": 0,
-			"x-ied-tiers": ["app", "solution"],
+			"x-ied-tiers": ["app"],
 			"description": "Model requests one turn may make before it pauses; 0 is no limit (docs/12 Budgets). Loop and no-progress detection still pause a turn that runs away."
 		},
 		"ai.chats.keepDeletedDays": {
 			"type": "integer",
 			"minimum": 1,
 			"default": 30,
-			"x-ied-tiers": ["app", "solution"],
+			"x-ied-tiers": ["app"],
 			"description": "Days a deleted chat is kept, whole and restorable from the Chats list's Deleted section, before it is removed for good (docs/04 Deleting a chat)."
 		},
 		"ai.chats.offloadAfterMinutes": {
 			"type": "number",
 			"minimum": 0,
 			"default": 10,
-			"x-ied-tiers": ["app", "solution"],
+			"x-ied-tiers": ["app"],
 			"description": "Minutes an idle chat keeps its turns in the server's memory after a turn ran in it, whether a tab shows it or not (a tab reads it a page at a time from disk); then only its header stays, and its turns are read back when its next turn starts. 0 keeps every chat loaded (docs/04 What stays in memory)."
 		},
 		"ai.chats.notify": {
@@ -214,7 +214,7 @@
 			"minimum": 1,
 			"maximum": 200,
 			"default": 5,
-			"x-ied-tiers": ["app", "solution"],
+			"x-ied-tiers": ["app"],
 			"description": "Rows a long list of a chat's details panel shows - modified files, tasks, background tasks, the clipboard, what the chat has open - before its Show all (docs/15 Chat)."
 		},
 		"ai.claude.command": {
@@ -274,8 +274,32 @@
 		"ai.tools.loadAll": {
 			"type": "boolean",
 			"default": false,
-			"x-ied-tiers": ["app", "solution"],
+			"x-ied-tiers": ["app"],
 			"description": "Send every tool's definition with every request. Off, plugin tools and tool groups are listed by name and loaded on demand with tool_search, which keeps the context small (docs/13 Loading tools on demand)."
+		},
+		"ai.chats.model": {
+			"type": "string",
+			"default": "",
+			"x-ied-tiers": ["app", "solution"],
+			"description": "The model the chats you start run on when they name none: a profile of ai.models, or a version Claude Code offers (claude-opus-4-8). Empty: the default chain (ai.defaultModel). Settings > AI > Defaults sets every use's (docs/04 Defaults by use)."
+		},
+		"ai.chats.effort": {
+			"enum": ["", "low", "medium", "high", "xhigh", "max"],
+			"default": "",
+			"x-ied-tiers": ["app", "solution"],
+			"description": "The effort the chats you start run at when they name none: low, medium, high, xhigh or max. Empty: the model's own (Claude Code says what it is for each model)."
+		},
+		"ai.chats.agentModel": {
+			"type": "string",
+			"default": "",
+			"x-ied-tiers": ["app", "solution"],
+			"description": "The model the chats the AI starts (chat_create) run on when they name none: a profile of ai.models, or a version Claude Code offers (claude-opus-4-8). Empty: the default chain (ai.defaultModel). Settings > AI > Defaults sets every use's (docs/04 Defaults by use)."
+		},
+		"ai.chats.agentEffort": {
+			"enum": ["", "low", "medium", "high", "xhigh", "max"],
+			"default": "",
+			"x-ied-tiers": ["app", "solution"],
+			"description": "The effort the chats the AI starts (chat_create) run at when they name none: low, medium, high, xhigh or max. Empty: the model's own (Claude Code says what it is for each model)."
 		}
 	}
 }

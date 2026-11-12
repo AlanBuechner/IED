@@ -15,6 +15,9 @@
 	"permissions": ["fs.read", "fs.write", "ai.tools"],
 	"contributes": {
 		"settings": { "schema": "settings.schema.json", "page": "Planning Board" },
+		"aiUses": [
+			{ "id": "board", "title": "Planning board", "description": "A board's chat, which reads and changes the board with you.", "model": "board.ai.model", "effort": "board.ai.effort" }
+		],
 		"skills": ["skills"],
 		"bindings": {
 			"provides": [

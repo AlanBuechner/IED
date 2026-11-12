@@ -87,7 +87,29 @@ def validate_file(registry, path, kind):
 		instance = jsonc.load_file(path)
 	except (OSError, ValueError) as e:
 		return ["cannot parse: %s" % e]
-	return [str(p) for p in validator.validate(instance)]
+	problems = [str(p) for p in validator.validate(instance)]
+	if kind == "plugin-manifest":
+		problems += settings_tier_problems(path, instance)
+	return problems
+
+
+def settings_tier_problems(manifest_path, manifest):
+	"""A built-in plugin's settings each say the tiers they may be set in (docs/07 "Which tier a setting belongs in"):
+	left out, a setting could be set in every tier - a repository could name a program for IED to run."""
+	try:
+		pathlib.Path(manifest_path).resolve().relative_to(REPO / "plugins")
+	except ValueError:
+		return []
+	settings = ((manifest.get("contributes") or {}).get("settings") or {}).get("schema")
+	if not settings:
+		return []
+	schema_path = pathlib.Path(manifest_path).parent / settings
+	try:
+		schema = jsonc.load_file(schema_path)
+	except (OSError, ValueError) as e:
+		return ["%s: cannot parse: %s" % (settings, e)]
+	return ["%s: %s says no x-ied-tiers (docs/07 \"Which tier a setting belongs in\")" % (settings, key)
+		for key, spec in (schema.get("properties") or {}).items() if isinstance(spec, dict) and "x-ied-tiers" not in spec]
 
 
 def _validate_lines(validator, path):

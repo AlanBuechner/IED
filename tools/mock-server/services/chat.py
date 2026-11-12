@@ -120,6 +120,7 @@ class Chat:
 		self.permission = "plan" if mode == "plan" else "auto"
 		self.group = ""
 		self.pinned_model = ""
+		self.use = "chat"   # what it is for (docs/04 "Defaults by use"): its use's settings give its defaults
 		self.effort = ""
 		self.endless = False   # Agent, until stopped (docs/04): no finish
 		self.state = "idle"
@@ -156,7 +157,7 @@ class Chat:
 		done = sum(1 for t in self.tasks if t["status"] in ("done", "skipped"))
 		out = {
 			"chatId": self.chat_id, "wsId": self.ws_id, "title": self.title, "mode": self.mode, "permission": self.permission, "group": self.group,
-			"pinnedModel": self.pinned_model, "endless": self.endless, "state": self.state, "turnCount": len(self.turns), "updatedMs": self.updated_ms, "tasksDone": done, "tasksTotal": len(self.tasks),
+			"pinnedModel": self.pinned_model, "use": self.use, "endless": self.endless, "state": self.state, "turnCount": len(self.turns), "updatedMs": self.updated_ms, "tasksDone": done, "tasksTotal": len(self.tasks),
 			"approvalsWaiting": sum(1 for a in self.approvals.values() if a.decision is None),
 		}
 		if self.effort:
@@ -180,16 +181,19 @@ def usage_window(id, label, utilization, through, length_ms, now, work_week=Fals
 
 
 ALL_EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+# The uses the plugins contribute (aiUses) and the settings of each one's default model and effort.
+USES = {"chat": ("ai.chats.model", "ai.chats.effort"), "agent": ("ai.chats.agentModel", "ai.chats.agentEffort"),
+	"board": ("board.ai.model", "board.ai.effort"), "profiler": ("profiler.ai.model", "profiler.ai.effort")}
 # aiusage claude.models (ClaudeModels.cf WriteClaudeModels): the catalog the Claude CLI 2.1.317 offers, shortened.
 CLAUDE_MODELS = [
-	{"value": "opus", "resolved": "claude-opus-5-5", "label": "Opus 5.5", "description": "Best for everyday, complex tasks", "family": "opus", "alias": True, "runs": "opus", "newest": True, "efforts": ALL_EFFORTS},
-	{"value": "claude-fable-5-2", "resolved": "claude-fable-5-2", "label": "Fable 5.2", "description": "Most capable for your hardest tasks", "family": "fable", "alias": False, "newest": True, "efforts": ALL_EFFORTS},
-	{"value": "sonnet", "resolved": "claude-sonnet-5-5", "label": "Sonnet 5.5", "description": "Efficient for routine tasks", "family": "sonnet", "alias": True, "runs": "sonnet", "newest": True, "efforts": ALL_EFFORTS},
-	{"value": "haiku", "resolved": "claude-haiku-5-5", "label": "Haiku 5.5", "description": "Fastest for quick answers", "family": "haiku", "alias": True, "runs": "haiku", "newest": True, "efforts": ALL_EFFORTS},
-	{"value": "fable", "resolved": "claude-fable-5-1", "label": "Fable 5.1", "description": "Most capable for your hardest tasks", "family": "fable", "alias": True, "runs": "claude-fable-5-2", "newest": False, "efforts": ALL_EFFORTS},
+	{"value": "opus", "resolved": "claude-opus-5-5", "label": "Opus 5.5", "description": "Best for everyday, complex tasks", "family": "opus", "alias": True, "runs": "opus", "newest": True, "efforts": ALL_EFFORTS, "defaultEffort": "medium"},
+	{"value": "claude-fable-5-2", "resolved": "claude-fable-5-2", "label": "Fable 5.2", "description": "Most capable for your hardest tasks", "family": "fable", "alias": False, "newest": True, "efforts": ALL_EFFORTS, "defaultEffort": "medium"},
+	{"value": "sonnet", "resolved": "claude-sonnet-5-5", "label": "Sonnet 5.5", "description": "Efficient for routine tasks", "family": "sonnet", "alias": True, "runs": "sonnet", "newest": True, "efforts": ALL_EFFORTS, "defaultEffort": "medium"},
+	{"value": "haiku", "resolved": "claude-haiku-5-5", "label": "Haiku 5.5", "description": "Fastest for quick answers", "family": "haiku", "alias": True, "runs": "haiku", "newest": True, "efforts": ALL_EFFORTS, "defaultEffort": "medium"},
+	{"value": "fable", "resolved": "claude-fable-5-1", "label": "Fable 5.1", "description": "Most capable for your hardest tasks", "family": "fable", "alias": True, "runs": "claude-fable-5-2", "newest": False, "efforts": ALL_EFFORTS, "defaultEffort": "high"},
 	{"value": "claude-haiku-4-5-20251001", "resolved": "claude-haiku-4-5-20251001", "label": "Haiku 4.5", "description": "Fastest for quick answers", "family": "haiku", "alias": False, "newest": False},
-	{"value": "claude-opus-4-8", "resolved": "claude-opus-4-8", "label": "Opus 4.8", "description": "Best for everyday, complex tasks", "family": "opus", "alias": False, "newest": False, "efforts": ALL_EFFORTS},
-	{"value": "claude-opus-4-6", "resolved": "claude-opus-4-6", "label": "Opus 4.6", "description": "Best for everyday, complex tasks", "family": "opus", "alias": False, "newest": False, "efforts": ["low", "medium", "high", "max"]},
+	{"value": "claude-opus-4-8", "resolved": "claude-opus-4-8", "label": "Opus 4.8", "description": "Best for everyday, complex tasks", "family": "opus", "alias": False, "newest": False, "efforts": ALL_EFFORTS, "defaultEffort": "high"},
+	{"value": "claude-opus-4-6", "resolved": "claude-opus-4-6", "label": "Opus 4.6", "description": "Best for everyday, complex tasks", "family": "opus", "alias": False, "newest": False, "efforts": ["low", "medium", "high", "max"], "defaultEffort": "high"},
 ]
 
 
@@ -258,12 +262,13 @@ class Chats:
 
 	def in_use(self, chat):
 		"""What the chat's next turn starts on (docs/10 "Chats"): the snapshot's and the chat topic's chat.changed - its model
-		of its own, else the default chain's first (ai.defaultModel, else the mock's model). Model groups are gone: the
-		group is always the default chain and no role gives an effort."""
+		of its own, else its use's default (USES' settings), else the default chain's first (ai.defaultModel, else the
+		mock's model) - and the effort it gets when it names none: its use's default."""
 		values = self.server.settings.values(None)
+		model_key, effort_key = USES.get(chat.use, USES["chat"])
 		named = values.get("ai.defaultModel", {}).get("value") or ""
-		model = chat.pinned_model or named or MODEL
-		return {"model": model, "groupInUse": GROUP, "roleEffort": ""}
+		model = chat.pinned_model or values.get(model_key, {}).get("value") or named or MODEL
+		return {"model": model, "groupInUse": GROUP, "defaultEffort": values.get(effort_key, {}).get("value") or ""}
 
 	def get(self, chat_id):
 		chat = self.items.get(chat_id)
@@ -315,6 +320,10 @@ class Chats:
 		return self.list_snapshot(ws_id)
 
 	def _settings(self, chat, p):
+		if "use" in p.raw:
+			if (p.str("use") or "chat") not in USES:
+				raise RpcError("bad_request", "no use %s; the plugins contribute %s" % (p.str("use"), ", ".join(USES)))
+			chat.use = p.str("use") or "chat"
 		if "title" in p.raw:
 			chat.title = p.str("title")
 		if "mode" in p.raw:

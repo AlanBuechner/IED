@@ -44,7 +44,7 @@
 			"type": "integer",
 			"minimum": 0,
 			"default": 10,
-			"x-ied-tiers": ["app", "solution"],
+			"x-ied-tiers": ["app"],
 			"description": "A server no call used for this long is stopped; its tools stay offered and the next call starts it again. 0: it runs until IED stops."
 		}
 	}

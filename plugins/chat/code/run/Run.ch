@@ -177,6 +177,7 @@ namespace Ai
 		private Core::Array<ModelProfile*> m_Candidates;
 		private int64 m_Candidate;
 		private RoleModel m_Role;
+		private Core::String m_Chosen;        // the model the chat names first: its own, else its use's (Uses.ch)
 		private Core::String m_System;
 		// The core tools and the workspace's plugins' tools, as the turn started.
 		private ToolRegistry* m_Tools;

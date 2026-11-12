@@ -4,6 +4,7 @@
 	"type": "object",
 	"properties": {
 		"c4.languageServer": {
+			"x-ied-tiers": ["app", "solution"],
 			"type": "boolean",
 			"default": true,
 			"description": "Run C4LSP for C4 sources: diagnostics, completion, navigation, formatting and refactoring."

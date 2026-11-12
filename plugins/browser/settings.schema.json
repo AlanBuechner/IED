@@ -4,11 +4,13 @@
 	"type": "object",
 	"properties": {
 		"browser.executable": {
+			"x-ied-tiers": ["app"],
 			"type": "string",
 			"default": "",
 			"description": "The browser the server runs pages in (Edge or Chrome, run headless with IED's own profile). Empty: Microsoft Edge, else Google Chrome, where they install."
 		},
 		"browser.unloadAfterSeconds": {
+			"x-ied-tiers": ["app"],
 			"type": "integer",
 			"minimum": 0,
 			"default": 600,

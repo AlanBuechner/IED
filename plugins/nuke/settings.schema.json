@@ -4,11 +4,13 @@
 	"type": "object",
 	"properties": {
 		"nuke.command": {
+			"x-ied-tiers": ["app"],
 			"type": "string",
 			"default": "nuke",
 			"description": "How the Nuke tasks start Nuke: a name on PATH (nuke install-ied puts the install's bin/ there) or the path of nuke.cmd (bin/ in the IED install or repository)."
 		},
 		"nuke.packages.fetchMinutes": {
+			"x-ied-tiers": ["app"],
 			"type": "number",
 			"minimum": 0,
 			"default": 5,

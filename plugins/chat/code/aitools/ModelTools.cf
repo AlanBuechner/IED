@@ -2,6 +2,7 @@ include "api/Plugin.ch"
 include "ModelTools.ch"
 include "claude/Pacing.ch"
 include "chats/DefaultChain.ch"
+include "chats/Uses.ch"
 
 namespace Ai
 {
@@ -122,7 +123,12 @@ namespace Ai
 		Core::StringBuilder out;
 		out.Append(UsageText(*chats->m_Claude, models, groups.View(), ToolsNowMs()).View());
 		out.Append("This chat: ");
-		out.Append(call.m_Chat->m_PinnedModel.IsEmpty() ? Core::StringView("the default chain") : (Core::String("pinned to ") + call.m_Chat->m_PinnedModel.View()).View());
+		Core::String chosen = ChosenModelOf(call.m_Context, WsId(call.m_Ws), call.m_Chat);
+		if (!call.m_Chat->m_PinnedModel.IsEmpty()) out.Append((Core::String("pinned to ") + call.m_Chat->m_PinnedModel.View()).View());
+		else if (!chosen.IsEmpty()) out.Append((Core::String("its use's default, ") + chosen.View()).View());
+		else out.Append("the default chain");
+		Core::String effort = DefaultEffortOf(call.m_Context, WsId(call.m_Ws), call.m_Chat, Core::StringView(""));
+		if (call.m_Chat->m_Effort.IsEmpty() && !effort.IsEmpty()) out.Append(((Core::String(", effort ") + effort.View()) + " by its use's default").View());
 		out.Append(" (chat_set_model changes it for the next turns)\n");
 		return ToolResult(out.View(), Core::StringView("Claude usage"));
 	}

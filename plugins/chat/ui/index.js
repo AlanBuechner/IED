@@ -11,6 +11,7 @@ import { ChatsView } from "./chatsview.js";
 import { ChatList } from "./chatmodel.js";
 import { archiveChat, deleteChat, renameChat } from "./chatactions.js";
 import { ModelsPage } from "./modelsettings.js";
+import { DefaultsPage } from "./defaultssettings.js";
 import { ClaudePage, ClaudeStatusView } from "./claudeusage.js";
 import { TurnNotices, notifySetting } from "./turnnotices.js";
 
@@ -151,6 +152,12 @@ export function ModelsSettings(ctx) {
 	return new ModelsPage(ctx);
 }
 
+
+// Settings > AI > Defaults: each use's default model and effort (docs/04 "Defaults by use").
+export function DefaultsSettings(ctx) {
+	addStyles(ctx.ied);
+	return new DefaultsPage(ctx);
+}
 
 export function ClaudeSettings(ctx) {
 	addStyles(ctx.ied);

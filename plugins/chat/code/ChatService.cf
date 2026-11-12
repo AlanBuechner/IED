@@ -1,4 +1,5 @@
 include "api/Plugin.ch"
+include "chats/Uses.ch"
 include "ChatService.ch"
 include "claude/Pacing.ch"
 include "run/Run.ch"
@@ -49,6 +50,14 @@ namespace Ai
 		Register("chat.archive", [self](const IED::Request& request) -> Core::String { return self->ArchiveMethod(request); });
 		Register("chat.unarchive", [self](const IED::Request& request) -> Core::String { return self->UnarchiveMethod(request); });
 		m_Claude = new ClaudeAccount(context);
+		// A setting a chat's next turn reads changed (a use's defaults, ai.defaultModel, ai.models): the chats in memory
+		// say what they start on now, so an open chat's Model button follows Settings (docs/04 "Defaults by use").
+		context->Listen(Core::StringView("settings.changed"), [self](const IED::Event& event) {
+			if (!event.m_Topic.View().StartsWith(Core::StringView("settings:"))) return;
+			Core::String wsId = Core::String(event.m_Topic.View().Substring(9, event.m_Topic.ByteLength() - 9));
+			IED::HostLock guard(*self->m_Context);
+			self->SettingsChanged(wsId.View());
+		});
 		LoadWindows();
 		context->StartThread([self]() { self->ClaudeKeeper(); });
 		context->StartThread([self]() { self->DeletedKeeper(); });
@@ -149,16 +158,16 @@ namespace Ai
 		Core::Array<Core::String> problems;
 		Core::Array<ModelProfile*> models = ReadModels(context->Setting(Core::StringView("ai.models"), WsId(ws)).View(), problems);
 		return TurnCandidates(models, DefaultGroupsJson(context, WsId(ws)).View(), GroupOf(context, chat, ws).View(), chat->m_Agent.View(),
-			Core::StringView(ChatModeName(chat->m_Mode)), chat->m_PinnedModel.View(), role);
+			Core::StringView(ChatModeName(chat->m_Mode)), ChosenModelOf(context, WsId(ws), chat).View(), role);
 	}
 
 	Core::String Chats::NextModel(const Chat* chat, const IED::Workspace& ws, Core::String& group, Core::String& roleEffort) const {
 		RoleModel role;
 		Core::Array<ModelProfile*> candidates = CandidatesOf(m_Context, chat, ws, role);
 		group = GroupOf(m_Context, chat, ws);
-		roleEffort = chat->RunsAlone() ? Core::String() : role.m_Effort;
+		roleEffort = DefaultEffortOf(m_Context, WsId(ws), chat, chat->RunsAlone() ? Core::StringView("") : role.m_Effort.View());
 		if (candidates.IsEmpty()) return Core::String();
-		Core::Array<ChainPlace*> order = TurnOrder(PlacesOf(candidates, role, chat->m_PinnedModel.View(), *m_Claude, ChatNowMs()));
+		Core::Array<ChainPlace*> order = TurnOrder(PlacesOf(candidates, role, ChosenModelOf(m_Context, WsId(ws), chat).View(), *m_Claude, ChatNowMs()));
 		return order.IsEmpty() ? candidates[0]->m_Name : order[0]->m_Model;
 	}
 
@@ -182,6 +191,19 @@ namespace Ai
 		if (!chat->m_Run && !chat->m_ClaudeAsked && !chat->m_ClaudeSession.IsEmpty() && ContextSource(chat->m_Context.View()) != "claude") CountClaude(chat, ws);
 		Core::String model = NextModel(chat, ws, group, roleEffort);
 		return chat->SnapshotJson(model.View(), group.View(), roleEffort.View(), LastPage(LocalStateOf(ws), chat));
+	}
+
+	void Chats::SettingsChanged(Core::StringView wsId) {
+		for (Chat* chat : m_Chats) {
+			if (chat->m_Offloaded || (wsId != "app" && chat->m_WsId.View() != wsId)) continue;
+			IED::Workspace ws = WorkspaceOf(chat);
+			Core::String group;
+			Core::String defaultEffort;
+			Core::String model = NextModel(chat, ws, group, defaultEffort);
+			// Marked, so a client takes a model and effort it did not choose (docs/10 chat.changed).
+			Core::String changed = chat->ChangedJson(model.View(), group.View(), defaultEffort.View());
+			Publish(chat, "chat.changed", (Core::String("{\"settingsChanged\":true,") + changed.View().Substring(1, changed.ByteLength() - 1)).View());
+		}
 	}
 
 	void Chats::Changed(Chat* chat) {
@@ -495,6 +517,16 @@ namespace Ai
 		}
 	}
 
+	// chat.create / chat.set {use}: what the chat is for, a use a plugin loaded for the workspace contributes (Uses.ch).
+	static void ReadUse(IED::PluginContext* context, const IED::Workspace& ws, Chat* chat, const IED::Params& params) {
+		if (!params.Has("use")) return;
+		Core::String use = params.Str("use");
+		if (use == c_UseChat) use = Core::String();
+		if (!use.IsEmpty() && !DefaultsOfUse(context, WsId(ws), use.View()).m_Known)
+			throw IED::RpcError(IED::ErrorCode::BadRequest, ((Core::String("no use ") + use.View()) + "; the plugins contribute " + UseIds(WsId(ws)).View()).View());
+		chat->m_Use = use;
+	}
+
 	// chat.set {model}: a model of ai.models pinned over the group's primary, "" back to the group's (docs/04 "Switching models").
 	static void ReadPinnedModel(IED::PluginContext* context, const IED::Workspace& ws, Chat* chat, const IED::Params& params) {
 		if (!params.Has("model")) return;
@@ -511,6 +543,7 @@ namespace Ai
 		ChatMode mode = ChatMode::Agent;
 		if (params.Has("mode") && !ReadChatMode(params.Str("mode").View(), mode)) throw IED::RpcError(IED::ErrorCode::BadRequest, "mode must be ask, plan or agent");
 		Chat* chat = NewChat(ws, Core::StringView(c_NewChatTitle), mode, Core::StringView(""));
+		ReadUse(m_Context, ws, chat, params);
 		ReadPinnedModel(m_Context, ws, chat, params);
 		ReadSettings(chat, params);
 		Announce(ws, chat);
@@ -521,6 +554,7 @@ namespace Ai
 	Core::String Chats::SetMethod(const IED::Request& request) {
 		const IED::Params& params = request.m_Params;
 		Chat* chat = Get(params.Str("chatId").View());
+		ReadUse(m_Context, WorkspaceOf(chat), chat, params);
 		ReadPinnedModel(m_Context, WorkspaceOf(chat), chat, params);
 		ReadSettings(chat, params);
 		Changed(chat);

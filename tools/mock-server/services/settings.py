@@ -106,6 +106,9 @@ class Settings:
 		chats = getattr(self.server, "chat", None)
 		if chats is not None:
 			self.server.hub.publish("aiusage", "usage.changed", chats.usage_snapshot())
+			# and each chat says what its next turn starts on now (a use's defaults may have changed, docs/04)
+			for chat in chats.items.values():
+				chats.publish(chat, "chat.changed", dict(chat.summary(), settingsChanged=True, **chats.in_use(chat)))
 
 	def tier_of(self, p):
 		tier = p.str("tier")

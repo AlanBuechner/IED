@@ -5,10 +5,17 @@
 export const TIERS = [["app", "User"], ["solution", "Solution"], ["project", "Project"]];
 
 // "cpp.clangd.path" -> "Clangd Path"; "ai.maxSteps" -> "Max Steps".
+// The words of key parts that read in capitals: board.ai.model is AI Model.
+const ACRONYMS = new Set(["ai", "lsp", "mcp", "gpu", "url", "ui"]);
+
+function words(part) {
+	return part.replace(/([a-z])([A-Z])/g, "$1 $2").split(" ").map((word) => ACRONYMS.has(word.toLowerCase()) ? word.toUpperCase() : word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+}
+
 export function settingTitle(key) {
 	const parts = key.split(".");
 	const rest = parts.length > 1 ? parts.slice(1) : parts;
-	return rest.map((part) => part.replace(/([a-z])([A-Z])/g, "$1 $2")).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+	return rest.map(words).join(" ");
 }
 
 function hidden(entry) {
@@ -136,7 +143,7 @@ export function groupOf(key, entry) {
 	if (typeof named === "string" && named.trim()) return named.trim();
 	const parts = key.split(".");
 	if (parts.length < 3) return "";
-	return parts.slice(1, -1).map((part) => part.replace(/([a-z])([A-Z])/g, "$1 $2")).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+	return parts.slice(1, -1).map(words).join(" ");
 }
 
 // A page's keys in its groups: [{id, title, keys}], the general group ("General") first, then the others by title; a

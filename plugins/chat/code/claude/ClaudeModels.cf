@@ -50,6 +50,7 @@ namespace Ai
 			Serialization::DomNode efforts = entry.Member("supportedEffortLevels");
 			model->m_EffortsSaid = efforts.Kind() == Serialization::DomKind::Array;
 			for (int64 e = 0; model->m_EffortsSaid && e < efforts.Count(); ++e) model->m_Efforts.Push(Core::String(efforts.At(e).AsView()));
+			model->m_DefaultEffort = Core::String(entry.Member("defaultEffort").AsView());
 			FamilyOf(model->m_Resolved.View(), model->m_Family, model->m_Version);
 			catalog.Push(model);
 		}
@@ -73,9 +74,33 @@ namespace Ai
 			json.Field("displayName", model->m_Label.View());
 			json.Field("description", model->m_Description.View());
 			WriteEfforts(json, model, "supportedEffortLevels");
+			if (!model->m_DefaultEffort.IsEmpty()) json.Field("defaultEffort", model->m_DefaultEffort.View());
 			json.EndObject();
 		}
 		json.EndArray();
+	}
+
+	void GiveDefaultEfforts(Core::Array<ClaudeCatalogModel*>& catalog, const Serialization::DomNode& efforts, const Core::Array<ClaudeCatalogModel*>& kept) {
+		for (ClaudeCatalogModel* model : catalog) {
+			if (efforts.Kind() == Serialization::DomKind::Object && efforts.Member(model->m_Value.CStr()).IsValid()) {
+				model->m_DefaultEffort = Core::String(efforts.Member(model->m_Value.CStr()).AsView());
+				continue;
+			}
+			for (const ClaudeCatalogModel* before : kept)
+				if (before->m_Value == model->m_Value && before->m_Resolved == model->m_Resolved) model->m_DefaultEffort = before->m_DefaultEffort;
+		}
+	}
+
+	Core::String ClaudeCatalogKey(Core::StringView cliVersion, const Serialization::DomNode& models) {
+		Core::StringBuilder key;
+		key.Append(cliVersion);
+		for (int64 i = 0; models.Kind() == Serialization::DomKind::Array && i < models.Count(); ++i) {
+			key.Append("|");
+			key.Append(models.At(i).Member("value").AsView());
+			key.Append("=");
+			key.Append(models.At(i).Member("resolvedModel").AsView());
+		}
+		return key.ToString();
 	}
 
 	// The newest model of `family` in the catalog (by version; the first of equals); null when it has none.
@@ -111,6 +136,7 @@ namespace Ai
 			if (isAlias) json.Field("runs", ResolveClaudeModel(catalog, model->m_Value.View()).View());
 			json.BoolField("newest", newest && CompareVersions(model->m_Version, newest->m_Version) >= 0);
 			WriteEfforts(json, model, "efforts");
+			if (!model->m_DefaultEffort.IsEmpty()) json.Field("defaultEffort", model->m_DefaultEffort.View());
 			json.EndObject();
 		}
 		json.EndArray();

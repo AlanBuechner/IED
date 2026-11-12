@@ -19,7 +19,7 @@ namespace Ai
 	// --- Which Claude ----------------------------------------------------------------------------------------------------
 
 	void TurnRun::ChooseClaude() {
-		Core::Array<ChainPlace*> places = PlacesOf(m_Candidates, m_Role, m_Chat->m_PinnedModel.View(), *m_Chats->m_Claude, ClaudeNowMs());
+		Core::Array<ChainPlace*> places = PlacesOf(m_Candidates, m_Role, m_Chosen.View(), *m_Chats->m_Claude, ClaudeNowMs());
 		Core::Array<ChainPlace*> order = TurnOrder(places);
 		for (const ChainPlace* place : PassedOver(places, order))
 			UiNote(Core::StringView("routing"), ((place->m_Model + " skipped for pace: ") + place->m_Why.View()).View());

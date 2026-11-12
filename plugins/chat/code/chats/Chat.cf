@@ -496,6 +496,7 @@ namespace Ai
 		json.Field("wsId", m_WsId.View());
 		json.Field("title", m_Title.View());
 		if (!m_Section.IsEmpty()) json.Field("section", m_Section.View());
+		json.Field("use", m_Use.IsEmpty() ? Core::StringView("chat") : m_Use.View());
 		json.Field("mode", ChatModeName(m_Mode));
 		json.Field("permission", PermissionModeName(m_Permission));
 		json.Field("group", m_Group.View());
@@ -688,26 +689,26 @@ namespace Ai
 		json.EndArray();
 	}
 
-	static void WriteInUse(IED::JsonWriter& json, Core::StringView model, Core::StringView groupInUse, Core::StringView roleEffort) {
+	static void WriteInUse(IED::JsonWriter& json, Core::StringView model, Core::StringView groupInUse, Core::StringView defaultEffort) {
 		json.Field("model", model);
 		json.Field("groupInUse", groupInUse);
-		json.Field("roleEffort", roleEffort);
+		json.Field("defaultEffort", defaultEffort);
 	}
 
-	Core::String Chat::ChangedJson(Core::StringView model, Core::StringView groupInUse, Core::StringView roleEffort) const {
+	Core::String Chat::ChangedJson(Core::StringView model, Core::StringView groupInUse, Core::StringView defaultEffort) const {
 		IED::JsonWriter json;
 		json.BeginObject();
 		WriteSummary(json);
-		WriteInUse(json, model, groupInUse, roleEffort);
+		WriteInUse(json, model, groupInUse, defaultEffort);
 		json.EndObject();
 		return json.ToString();
 	}
 
-	Core::String Chat::SnapshotJson(Core::StringView model, Core::StringView groupInUse, Core::StringView roleEffort, const TurnPage& page) const {
+	Core::String Chat::SnapshotJson(Core::StringView model, Core::StringView groupInUse, Core::StringView defaultEffort, const TurnPage& page) const {
 		IED::JsonWriter json;
 		json.BeginObject();
 		WriteSummary(json);
-		WriteInUse(json, model, groupInUse, roleEffort);
+		WriteInUse(json, model, groupInUse, defaultEffort);
 		if (!m_Draft.m_Text.IsEmpty()) {
 			json.Key(Core::StringView("draft"));
 			WriteDraft(json, m_Draft);

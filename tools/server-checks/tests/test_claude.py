@@ -143,6 +143,32 @@ class ClaudeTurnTests(ClaudeCase):
 		from server import local_state
 		return local_state(self.data, self.repo)
 
+	async def test_each_models_own_effort_and_a_uses_default_reach_the_cli(self):
+		"""docs/04 "Effort": the master's refresh asks the CLI the effort it gives each model when a request names none
+		(set_model, get_settings) and aiusage says it (claude.models' defaultEffort) - once per CLI and catalog. A chat of a
+		use (the chats the AI starts) with none of its own runs at the use's effort on the use's model (ai.chats.agent*)."""
+		await self.use_claude(models={"claude-fable": {"provider": "claude-code", "model": "fable"}})
+		usage = await self.client.request("ai.usage", {"refresh": True})
+		efforts = {m["value"]: m.get("defaultEffort", "") for m in usage["claude"]["models"]}
+		self.assertEqual(("medium", "high", "medium", "xhigh", ""), (efforts["opus"], efforts["fable"], efforts["claude-fable-5-2"], efforts["claude-opus-4-7"], efforts["claude-haiku-4-5-20251001"]),
+			"as Claude Code 2.1.317 answers")
+		asked = len([m for m in self.received("control_request") if m["request"]["subtype"] == "get_settings"])
+		self.assertEqual(13, asked, "each model once")
+		await self.client.request("ai.usage", {"refresh": True})
+		self.assertEqual(asked, len([m for m in self.received("control_request") if m["request"]["subtype"] == "get_settings"]), "not again for the same CLI and catalog")
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.chats.agentModel", "value": "claude-fable"})
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.chats.agentEffort", "value": "high"})
+		self.script({"blocks": [{"text": "Board."}]}, {"blocks": [{"text": "Mine."}]})
+		chat_id, _ = await self.chat(use="agent")
+		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
+		argv = self.sessions_started()[-1]
+		self.assertEqual(("claude-fable-5-2", "high"), (argv[argv.index("--model") + 1], argv[argv.index("--effort") + 1]), "the use's model, its newest, at the use's effort")
+		own, _ = await self.chat()
+		self.assertEqual("finished", (await self.turn(own))["stop"])
+		argv = self.sessions_started()[-1]
+		self.assertEqual("opus", argv[argv.index("--model") + 1], "a chat of your own: the default chain")
+		self.assertNotIn("--effort", argv, "no effort named: the CLI's own")
+
 	async def test_effort_goes_to_the_cli_and_a_new_one_restarts_the_session(self):
 		await self.use_claude()
 		self.script({"blocks": [{"text": "One."}]}, {"blocks": [{"text": "Two."}]})

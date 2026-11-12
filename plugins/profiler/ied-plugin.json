@@ -15,6 +15,9 @@
 	"permissions": ["profiler", "net.listen", "fs.read", "fs.write", "process.spawn", "ai.tools"],
 	"contributes": {
 		"settings": { "schema": "settings.schema.json", "page": "Profiler" },
+		"aiUses": [
+			{ "id": "profiler", "title": "Profiler questions", "description": "A chat asked about a capture or a zone (Ask AI in the profiler).", "model": "profiler.ai.model", "effort": "profiler.ai.effort" }
+		],
 		"skills": ["skills"],
 		"bindings": {
 			"provides": [

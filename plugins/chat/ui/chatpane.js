@@ -588,7 +588,8 @@ export class ChatPane {
 	async choices() {
 		const [settings, usage] = await Promise.all([this.request("settings.get", { wsId: this.wsId }), this.ied.client.request("ai.usage", {}).catch(() => null)]);
 		const chains = usage && usage.claude && usage.claude.chains ? usage.claude.chains : [];
-		return settings && settings.values ? choicesFrom(settings.values, chains, usage && usage.claude ? usage.claude.models : []) : null;
+		const uses = this.ied.contributions ? this.ied.contributions("aiUses").map((c) => c.value) : [];
+		return settings && settings.values ? choicesFrom(settings.values, chains, usage && usage.claude ? usage.claude.models : [], uses) : null;
 	}
 
 	openFile(path, line) {

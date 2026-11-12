@@ -450,7 +450,7 @@ export class CaptureView {
 			if (zone.children.length) lines.push("Its children: " + zone.children.slice(0, 8).map((c) => c.name + " " + duration(c.totalNs)).join(", ") + ".");
 		}
 		lines.push("Use the profile_* tools with capture \"" + this.captureId + "\" to look closer.");
-		const created = await this.request("chat.create", { wsId: this.ctx.wsId, title: zone ? "Profiler: " + zone.name : "Profiler question" });
+		const created = await this.request("chat.create", { wsId: this.ctx.wsId, title: zone ? "Profiler: " + zone.name : "Profiler question", use: "profiler" });
 		if (!created) return;
 		await this.request("chat.send", { chatId: created.chatId, text: lines.join("\n"), as: "message" });
 		await this.ied.commands.run("shell.showActivity", { id: "ied.chat" });

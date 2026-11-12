@@ -75,6 +75,27 @@ class ClaudeModelsTests {
 		assert_true(!models.At(5).Member("efforts").IsValid() && models.At(10).Member("efforts").Count() == 4, "the efforts each takes, as the CLI said");
 	}
 
+	[test("default_efforts")]
+	public static void TestDefaultEfforts() {
+		Core::Array<Ai::ClaudeCatalogModel*> catalog = Catalog();
+		// As the CLI 2.1.317 answered get_settings after set_model of each (Haiku 4.5 takes no effort level).
+		Ai::GiveDefaultEfforts(catalog, Parse(Text("{\"opus\":\"medium\",\"fable\":\"high\",\"claude-fable-5-2\":\"medium\",\"claude-haiku-4-5-20251001\":\"\"}")), Core::Array<Ai::ClaudeCatalogModel*>());
+		assert_true(catalog[0]->m_DefaultEffort == "medium" && catalog[4]->m_DefaultEffort == "high" && catalog[5]->m_DefaultEffort.IsEmpty(), "each model's own");
+		IED::JsonWriter json;
+		Ai::WriteClaudeCatalog(json, catalog);
+		Core::Array<Ai::ClaudeCatalogModel*> kept = Ai::ReadClaudeCatalog(Parse(json.View()));
+		assert_true(kept[4]->m_DefaultEffort == "high", "kept with the catalog");
+		Core::Array<Ai::ClaudeCatalogModel*> again = Catalog();
+		Ai::GiveDefaultEfforts(again, Serialization::DomNode(), kept);
+		assert_true(again[0]->m_DefaultEffort == "medium" && again[1]->m_DefaultEffort == "medium", "not asked again: the kept ones, model by model");
+		IED::JsonWriter models;
+		Ai::WriteClaudeModels(models, again);
+		assert_true(Parse(models.View()).At(4).Member("defaultEffort").AsView() == "high", "the menus get them");
+		Serialization::DomNode offered = Parse(Text(c_Catalog));
+		assert_true(Ai::ClaudeCatalogKey(Text("2.1.317"), offered) == Ai::ClaudeCatalogKey(Text("2.1.317"), offered), "the same CLI and catalog: the same key");
+		assert_true(Ai::ClaudeCatalogKey(Text("2.1.318"), offered) != Ai::ClaudeCatalogKey(Text("2.1.317"), offered), "another CLI: asked again");
+	}
+
 	[test("versions")]
 	public static void TestVersions() {
 		Core::Array<Core::String> problems;

@@ -8,9 +8,9 @@
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { MenuHost } from "/ui-kit/menu.js";
-import { MODE_CHOICES, PERMISSIONS, compact, contextBar, duration, effortLabel, modeChange, modeChoice, tokensPerSecond } from "./chatmodel.js";
+import { MODE_CHOICES, PERMISSIONS, compact, contextBar, duration, effortDefaultDetail, effortLabel, modeChange, modeChoice, tokensPerSecond } from "./chatmodel.js";
 import { keptMentions } from "./mentions.js";
-import { choiceLabel, showModelPicker } from "./modelpicker.js";
+import { choiceLabel, effortFallback, showModelPicker } from "./modelpicker.js";
 import { MentionList } from "./mentionlist.js";
 import { AttachBar } from "./attachbar.js";
 import { InputMarks, insertText, plainText } from "./composertext.js";
@@ -281,14 +281,16 @@ export class Composer {
 		}
 		this.lastSelectors = [summary, model];
 		const label = choiceLabel(summary, this.choices);
-		const effort = effortLabel(summary.effort, "");
+		// No effort of its own: what the default is - its use's, else the model's own (docs/04 "Effort").
+		const fallback = effortFallback(this.choices, summary.use, model.defaultEffort, model.model);
+		const effort = effortLabel(summary.effort, fallback);
 		return h("button.chat-dd.chat-model-dd", { title: "Run this chat on the default chain or a model, and set its effort", "aria-haspopup": "dialog", on: { click: async (event) => {
 			const at = event.currentTarget;
 			const choices = await this.actions.choices();
 			if (choices) this.choices = choices;
-			const current = { model: summary.pinnedModel || "", mode: summary.mode || "agent", effort: summary.effort || "", now: model.model || "" };
+			const current = { model: summary.pinnedModel || "", mode: summary.mode || "agent", effort: summary.effort || "", now: model.model || "", use: summary.use || "chat", defaultEffort: model.defaultEffort || "" };
 			if (choices) showModelPicker(at, choices, current, (change) => this.actions.set(change), (value) => this.actions.set({ effort: value }));
-		} } }, h("span", null, label), h("span.chat-dd-effort", { title: "Effort" }, effort), icon("chevron-down"));
+		} } }, h("span", null, label), h("span.chat-dd-effort", { title: "Effort" + (summary.effort ? "" : ": the chat names none, so " + effortDefaultDetail(fallback)) }, effort), icon("chevron-down"));
 	}
 
 	renderTelemetry(model) {

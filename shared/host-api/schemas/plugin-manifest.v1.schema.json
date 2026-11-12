@@ -302,6 +302,7 @@
 					}
 				},
 				"agentModes": { "type": "array", "items": { "type": "string", "description": "Path to an agent-mode.v1 JSON file." } },
+				"aiUses": { "type": "array", "items": { "$ref": "#/$defs/aiUse" } },
 				"mcpServers": { "type": "array", "items": { "$ref": "#/$defs/mcpServer" } },
 				"modelProviders": {
 					"type": "array",
@@ -573,6 +574,19 @@
 				"env": { "type": "object", "additionalProperties": { "type": "string" } },
 				"cwd": { "type": "string", "description": "A command's folder; without one the workspace's." },
 				"scope": { "enum": ["ied", "user"], "default": "ied", "description": "user: the step writes outside IED's tools folder, for the user (rustup's own folders); the owner is asked before it runs." }
+			}
+		},
+		"aiUse": {
+			"type": "object",
+			"required": ["id", "title", "model", "effort"],
+			"additionalProperties": false,
+			"description": "What chats the plugin starts are for (docs/04 \"Defaults by use\"): chat.create's `use`. A chat of the use with no model or effort of its own takes the ones the two settings give (settings of the plugin's own, at the tiers it allows); the settings window's AI > Defaults shows every use.",
+			"properties": {
+				"id": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9]*$", "description": "chat.create's use: board, profiler, ..." },
+				"title": { "type": "string", "description": "As AI > Defaults lists it: Planning board." },
+				"description": { "type": "string" },
+				"model": { "type": "string", "description": "The setting holding the use's default model: a profile of ai.models or a version Claude Code offers; empty, the default chain." },
+				"effort": { "type": "string", "description": "The setting holding the use's default effort: low, medium, high, xhigh or max; empty, the model's own." }
 			}
 		},
 		"settingsPage": {

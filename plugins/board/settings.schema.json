@@ -3,9 +3,24 @@
 	"type": "object",
 	"properties": {
 		"board.snap": {
+			"x-ied-tiers": ["app"],
 			"type": "boolean",
 			"default": true,
 			"description": "Shapes moved, resized or drawn on a planning board snap to the edges and centers of the elements on the screen, and a moved selection to equal gaps between its neighbours, with guides showing what lined up. Hold Alt while dragging to place freely; the toolbar's magnet turns it off and on."
+		},
+		"board.ai.model": {
+			"type": "string",
+			"default": "",
+			"x-ied-tiers": ["app", "solution"],
+			"x-ied-group": "AI",
+			"description": "The model a planning board's chats run on when they name none: a profile of ai.models, or a version Claude Code offers (claude-opus-4-8). Empty: the default chain (ai.defaultModel). Settings > AI > Defaults sets every use's (docs/04 Defaults by use)."
+		},
+		"board.ai.effort": {
+			"enum": ["", "low", "medium", "high", "xhigh", "max"],
+			"default": "",
+			"x-ied-tiers": ["app", "solution"],
+			"x-ied-group": "AI",
+			"description": "The effort a planning board's chats run at when they name none: low, medium, high, xhigh or max. Empty: the model's own (Claude Code says what it is for each model)."
 		}
 	}
 }

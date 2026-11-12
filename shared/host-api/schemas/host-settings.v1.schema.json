@@ -9,7 +9,7 @@
 			"type": "number",
 			"default": 10,
 			"minimum": 0,
-			"x-ied-tiers": ["app", "solution"],
+			"x-ied-tiers": ["app"],
 			"description": "A language server none of whose documents a window shows for this many minutes stops, giving back its memory; it starts again when one of its documents is shown or asked about (docs/24). 0 keeps servers running."
 		},
 		"keyboard.bindings": {

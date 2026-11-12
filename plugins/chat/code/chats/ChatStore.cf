@@ -35,6 +35,7 @@ namespace Ai
 		json.Field("title", chat->m_Title.View());
 		if (chat->m_TitledByAi) json.BoolField("titledByAi", true);
 		if (!chat->m_Section.IsEmpty()) json.Field("section", chat->m_Section.View());
+		if (!chat->m_Use.IsEmpty()) json.Field("use", chat->m_Use.View());
 		if (!chat->m_Draft.m_Text.IsEmpty()) {
 			json.Key(Core::StringView("draft"));
 			WriteDraft(json, chat->m_Draft);
@@ -188,6 +189,7 @@ namespace Ai
 		chat->m_Title = Core::String(header.Member("title").AsView());
 		chat->m_TitledByAi = header.Member("titledByAi").AsBool();
 		chat->m_Section = Core::String(header.Member("section").AsView());
+		chat->m_Use = Core::String(header.Member("use").AsView());
 		chat->m_Draft.m_Text = Core::String(header.Member("draft").Member("text").AsView());
 		ReadMentions(header.Member("draft").Member("mentions"), chat->m_Draft.m_Mentions);
 		ReadChatMode(header.Member("mode").AsView(), chat->m_Mode);

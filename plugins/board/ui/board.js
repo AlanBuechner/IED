@@ -18,6 +18,7 @@ const PHONE = 720;
 // width a board's chat takes when it opens a group of its own beside the boards.
 const PANEL_WINDOW = "ied.board.panel";
 const CHAT_SECTION = "Boards";
+const CHAT_USE = "board";   // the board's aiUses contribution
 const CHAT_SHARE = 0.3;
 const PANEL_PLACED_KEY = "ied.board.panelPlaced";
 
@@ -423,7 +424,9 @@ export class BoardView {
 			const list = await this.ied.client.request("chat.list", { wsId: this.ctx.wsId }).catch(() => null);
 			const summary = list && (list.chats || []).find((c) => c.chatId === this.local.chatId);
 			if (summary) {
-				if (summary.section !== CHAT_SECTION) this.ied.client.request("chat.set", { chatId: summary.chatId, section: CHAT_SECTION }).catch(() => null);
+				// A board's chat is kept in the Boards section and runs on the board's defaults (board.ai.model/effort,
+				// docs/04 "Defaults by use"); one made before either is put right.
+				if (summary.section !== CHAT_SECTION || summary.use !== CHAT_USE) this.ied.client.request("chat.set", { chatId: summary.chatId, section: CHAT_SECTION, use: CHAT_USE }).catch(() => null);
 				return summary;
 			}
 		}
@@ -434,7 +437,7 @@ export class BoardView {
 
 	async createChat() {
 		const title = "Board: " + (this.model.title || this.path.split("/").pop().replace(/\.iedboard$/, ""));
-		const made = await this.ied.client.request("chat.create", { wsId: this.ctx.wsId, title, section: CHAT_SECTION }).catch((e) => { this.ied.toast("Cannot start a chat: " + e.message, { level: "error" }); return null; });
+		const made = await this.ied.client.request("chat.create", { wsId: this.ctx.wsId, title, section: CHAT_SECTION, use: CHAT_USE }).catch((e) => { this.ied.toast("Cannot start a chat: " + e.message, { level: "error" }); return null; });
 		if (made) this.saveLocal({ chatId: made.chatId });
 		return made;
 	}

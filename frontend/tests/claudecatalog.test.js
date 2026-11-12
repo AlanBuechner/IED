@@ -4,7 +4,8 @@
 
 import { test, assertEqual } from "./harness.js";
 import { catalogEfforts, follows, runsOf, versionsOf } from "/plugins/ied.chat/ui/claudecatalog.js";
-import { choicesFrom, showModelPicker } from "/plugins/ied.chat/ui/modelpicker.js";
+import { choicesFrom, effortFallback, showModelPicker } from "/plugins/ied.chat/ui/modelpicker.js";
+import { DefaultsPage } from "/plugins/ied.chat/ui/defaultssettings.js";
 import { ModelsPage } from "/plugins/ied.chat/ui/modelsettings.js";
 
 const ALL = ["low", "medium", "high", "xhigh", "max"];
@@ -71,5 +72,69 @@ test("settings: the Models page says how Claude's models stay current", async ()
 	assertEqual(card("desk").querySelector(".chip").textContent, "lan", "a model server's card as before");
 	const versions = [...el.querySelectorAll(".set-claude-version")].map((row) => [row.dataset.model, row.querySelector(".chip") ? row.querySelector(".chip").textContent : "", row.lastChild.textContent]);
 	assertEqual(versions, [["claude-fable-5-2", "newest Fable", "effort low, medium, high, xhigh, max"], ["claude-haiku-4-5-20251001", "", "no effort levels"], ["claude-opus-4-6", "", "effort low, medium, high, max"]]);
+	page.dispose();
+});
+
+test("model menu: what the default effort is and whose, and a use's default model", () => {
+	const catalog = CATALOG.map((m) => Object.assign({}, m, { defaultEffort: m.value === "fable" || m.value === "claude-opus-4-6" ? "high" : m.value === "claude-haiku-4-5-20251001" ? "" : "medium" }));
+	const values = { "ai.models": { value: { "claude-opus": { provider: "claude-code", model: "opus" }, "claude-fable": { provider: "claude-code", model: "fable" } } },
+		"board.ai.model": { value: "claude-fable" }, "board.ai.effort": { value: "high" } };
+	const uses = [{ id: "chat", title: "Chats", model: "ai.chats.model", effort: "ai.chats.effort" }, { id: "board", title: "Planning board", model: "board.ai.model", effort: "board.ai.effort" }];
+	const choices = choicesFrom(values, [{ role: "primary", now: "claude-opus" }], catalog, uses);
+	assertEqual(choices.models.map((m) => [m.name, m.defaultEffort]), [["claude-opus", "medium"], ["claude-fable", "medium"], ["claude-fable-5-2", "medium"], ["claude-haiku-4-5-20251001", ""], ["claude-opus-4-6", "high"]],
+		"each model's own, as Claude Code says: claude-fable runs Fable 5.2's");
+	assertEqual(choices.uses, [{ id: "chat", title: "Chats", model: "", effort: "" }, { id: "board", title: "Planning board", model: "claude-fable", effort: "high" }]);
+	assertEqual(effortFallback(choices, "chat", "", "claude-opus"), { effort: "medium", model: "Opus 5.5" }, "the model's own");
+	assertEqual(effortFallback(choices, "board", "high", "claude-fable"), { effort: "high", use: "Planning board" }, "the use's, as the snapshot says");
+	const at = document.createElement("button");
+	document.body.append(at);
+	const close = showModelPicker(at, choices, { model: "", effort: "", now: "claude-fable", use: "board", defaultEffort: "high" }, () => {}, () => {});
+	const popup = document.querySelector(".chat-picker");
+	assertEqual(popup.querySelector(".chat-picker-row.grp .sub").textContent, "Fable 5.2, Planning board's default", "Default: the use's model");
+	assertEqual(popup.querySelector(".chat-effort-value").textContent, "Default (High, Planning board's default)", "the slider says what the default is");
+	assertEqual(popup.querySelector(".chat-effort-tick").textContent, "DefaultHigh", "and its first tick");
+	close();
+	const closeOwn = showModelPicker(at, choices, { model: "claude-opus", effort: "", now: "claude-opus", use: "chat", defaultEffort: "" }, () => {}, () => {});
+	assertEqual(document.querySelector(".chat-picker .chat-effort-value").textContent, "Default (Medium, Opus 5.5's own)");
+	closeOwn();
+	at.remove();
+});
+
+test("settings: AI > Defaults sets each use's model and effort, naming the model's own effort", async () => {
+	const values = {
+		"ai.models": { value: { "claude-opus": { provider: "claude-code", model: "opus" }, qwen: { endpoint: "http://q/v1" } }, source: "app" },
+		"ai.defaultModel": { value: "", source: "default" },
+		"ai.chats.model": { value: "", source: "default" }, "ai.chats.effort": { value: "", source: "default" },
+		"board.ai.model": { value: "claude-opus", source: "solution" }, "board.ai.effort": { value: "high", source: "app" },
+	};
+	const writes = [];
+	const settings = {
+		schema: (key) => (key in values ? { type: "string" } : null),
+		value: (key) => values[key] || { value: null, source: "default" },
+		tier: () => "app",
+		set: async (key, value) => { writes.push([key, value]); return null; },
+		reset: async (key) => { writes.push([key, null]); return null; },
+		onChange: () => () => {},
+	};
+	const catalog = CATALOG.map((m) => Object.assign({}, m, { defaultEffort: "medium" }));
+	const contributions = [{ value: { id: "chat", title: "Chats", model: "ai.chats.model", effort: "ai.chats.effort" } }, { value: { id: "board", title: "Planning board", model: "board.ai.model", effort: "board.ai.effort" } },
+		{ value: { id: "gone", title: "A plugin not here", model: "gone.ai.model", effort: "gone.ai.effort" } }];
+	const ied = { client: { request: async () => ({ claude: { models: catalog, chains: [{ role: "primary", now: "claude-opus" }] } }) }, contributions: () => contributions };
+	const el = document.createElement("div");
+	const page = new DefaultsPage({ el, settings, ied });
+	await page.load();
+	assertEqual([...el.querySelectorAll(".set-default")].map((row) => row.dataset.use), ["default", "chat", "board"], "the default chain, then each use whose settings are here");
+	const chat = el.querySelector(".set-default[data-use='chat']");
+	const effort = chat.querySelector("select[data-key='ai.chats.effort']");
+	assertEqual(effort.options[0].textContent, "The model's own (Medium)", "the model's own effort named");
+	assertEqual(chat.querySelector("select[data-key='ai.chats.model']").options[0].textContent, "Default chain (Opus 5.5 now)");
+	const board = el.querySelector(".set-default[data-use='board']");
+	assertEqual([board.querySelector("select[data-key='board.ai.model']").value, board.querySelector("select[data-key='board.ai.effort']").value], ["claude-opus", "high"]);
+	assertEqual([...board.querySelectorAll(".set-default-source, .set-default-reset")].map((e) => e.textContent), ["set in Solution", "Reset"], "where each comes from; Reset where the edited tier sets it");
+	effort.value = "high";
+	effort.dispatchEvent(new Event("change"));
+	board.querySelector(".set-default-reset").click();
+	await Promise.resolve();
+	assertEqual(writes, [["ai.chats.effort", "high"], ["board.ai.effort", null]]);
 	page.dispose();
 });

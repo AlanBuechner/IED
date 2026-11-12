@@ -46,6 +46,12 @@ MODELS = [
 	{"value": "claude-opus-4-6", "resolvedModel": "claude-opus-4-6", "displayName": "Opus 4.6", "description": EVERYDAY, "supportedEffortLevels": ["low", "medium", "high", "max"]},
 	{"value": "claude-sonnet-4-6", "resolvedModel": "claude-sonnet-4-6", "displayName": "Sonnet 4.6", "description": ROUTINE, "supportedEffortLevels": ["low", "medium", "high", "max"]}]
 
+# get_settings' applied effort of each model when a request names none, as Claude Code 2.1.317 answers (Haiku 4.5 takes
+# no effort level).
+DEFAULT_EFFORTS = {"default": "medium", "opus": "medium", "sonnet": "medium", "haiku": "medium", "fable": "high", "claude-fable-5-2": "medium",
+	"claude-haiku-4-5-20251001": None, "claude-sonnet-5": "high", "claude-opus-5": "high", "claude-fable-5": "high", "claude-opus-4-8": "high",
+	"claude-opus-4-7": "xhigh", "claude-opus-4-6": "high", "claude-sonnet-4-6": "high"}
+
 
 class State:
 	def __init__(self, folder):
@@ -178,6 +184,11 @@ class Cli:
 		elif subtype == "set_model":
 			self.model = request.get("model") or "default"
 			self.answer(message, {})
+		elif subtype == "get_settings":
+			# The effort a request that names none gets, for the current model (efforts.json, else DEFAULT_EFFORTS).
+			efforts = self.state.read("efforts.json", DEFAULT_EFFORTS)
+			effort = self.flag("--effort") or efforts.get(self.model, efforts.get(self.resolved()))
+			self.answer(message, {"effective": {}, "sources": [], "applied": {"model": self.resolved(), "effort": effort, "advisor": None}})
 		elif subtype == "interrupt":
 			self.interrupted = True
 			self.answer(message, {"still_queued": []})
