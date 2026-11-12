@@ -532,7 +532,8 @@ class ClaudeUsageTests(ClaudeCase):
 		notes = self.notes(turn)
 		self.assertTrue(any(n.startswith("switched to claude-fable: Claude refused the request") and "it frees in " in n for n in notes), notes)
 		self.assertTrue(any(n.startswith("switched to fake: Claude refused the request") for n in notes), notes)
-		self.assertIn("fable", [m["request"].get("model") for m in self.received("control_request") if m["request"]["subtype"] == "set_model"], "Fable was asked")
+		asked = [m["request"].get("model") or "" for m in self.received("control_request") if m["request"]["subtype"] == "set_model"]
+		self.assertTrue(any("fable" in model for model in asked), "Fable was asked - its newest once the CLI said which: %s" % asked)
 		self.assertEqual("Local took over.", self.segments(turn, "text")[-1]["text"].strip())
 		usage = await self.client.request("ai.usage", {})
 		self.assertTrue({w["id"]: w for w in usage["claude"]["usage"]["windows"]}["seven_day"]["usedUp"], "the refusal shows in the usage")
@@ -590,7 +591,7 @@ class ClaudeSetupTests(ClaudeCase):
 		usage = await self.client.request("ai.usage", {"refresh": True})
 		self.assertTrue(usage["claude"]["configured"] and usage["claude"]["offered"] and usage["claude"]["cli"]["asked"], usage["claude"])
 		models = await self.setting("ai.models")
-		self.assertEqual(["claude-fable", "claude-fable-5-2", "claude-haiku", "claude-opus", "claude-sonnet", "fake"], sorted(models), "the four Claude models, and Fable 5.2 the CLI offers")
+		self.assertEqual(["claude-fable", "claude-haiku", "claude-opus", "claude-sonnet", "fake"], sorted(models), "the four Claude families; their versions are not written")
 		self.assertEqual(("opus", "sonnet", "haiku", "fable"), tuple(models["claude-" + alias]["model"] for alias in ("opus", "sonnet", "haiku", "fable")))
 		self.assertEqual(({}, ""), (await self.setting("ai.groups"), await self.setting("ai.defaultModel")), "no group is written: the default chain is made of the Claude models")
 		self.assertEqual([("claude-opus", 1.0), ("claude-sonnet", 1.25), ("claude-haiku", 1.5), ("claude-fable", 1.0), ("fake", None)],
@@ -600,27 +601,52 @@ class ClaudeSetupTests(ClaudeCase):
 		self.assertEqual(["fake"], sorted(await self.setting("ai.models")), "the CLI's models too")
 		self.assertTrue((await self.client.request("ai.claude.setup", {}))["claude"]["configured"], "Add Claude models puts them back")
 
-	async def test_the_models_the_cli_offers_are_added_once_each(self):
-		"""The master's refresh adds to ai.models each current model the CLI offers that IED has not seen - an alias as
-		claude-<alias>, a full id newer than its alias's model by that id, never "default" or an older version - with the
-		CLI's name as its label; one the owner takes out stays out; one the CLI offers later comes in."""
-		await self.use_claude()
-		await self.client.request("ai.usage", {"refresh": True})
+	async def test_the_claude_models_follow_what_the_cli_offers(self):
+		"""docs/04 "The Claude models": the master's refresh keeps the CLI's catalog. Each family's profile runs the newest
+		model of its family the CLI offers (Fable 5.2 while the fable alias still means 5.1); every version it offers is a
+		model a chat can be pinned to, never written to ai.models; what the first sync wrote that the catalog now gives
+		goes; a family the CLI brings later gets its profile once, and one taken out stays out."""
+		first_sync = {"claude-opus": {"provider": "claude-code", "model": "opus", "label": "Opus 5.5"}, "claude-fable-5-2": {"provider": "claude-code", "model": "claude-fable-5-2", "label": "Fable 5.2"}}
+		ladder = {"claude-" + family: {"provider": "claude-code", "model": family} for family in ("sonnet", "haiku", "fable")}
+		await self.use_claude(models=dict(ladder, **first_sync))
+		usage = await self.client.request("ai.usage", {"refresh": True})
+		catalog = {m["value"]: m for m in usage["claude"]["models"]}
+		self.assertEqual(13, len(catalog), "every model the CLI offers but default")
+		self.assertEqual(("claude-fable-5-2", False, "Fable 5.1"), (catalog["fable"]["runs"], catalog["fable"]["newest"], catalog["fable"]["label"]), "the fable alias lags")
+		self.assertEqual(("opus", True), (catalog["opus"]["runs"], catalog["opus"]["newest"]))
+		self.assertEqual((False, "haiku"), ("efforts" in catalog["claude-haiku-4-5-20251001"], catalog["claude-haiku-4-5-20251001"]["family"]), "Haiku 4.5 takes no effort level")
 		models = await self.setting("ai.models")
-		self.assertEqual(["claude-fable", "claude-fable-5-2", "claude-haiku", "claude-opus", "claude-sonnet", "fake"], sorted(models), "neither default nor Opus 4.6")
-		self.assertEqual({"provider": "claude-code", "model": "claude-fable-5-2", "label": "Fable 5.2"}, models["claude-fable-5-2"], "newer than the fable alias's 5.1: by its id")
-		self.assertEqual({"provider": "claude-code", "model": "fable", "label": "Fable 5.1"}, models["claude-fable"], "an alias, every effort: none listed")
-		self.assertEqual({"provider": "claude-code", "model": "opus", "label": "Opus 5.5"}, models["claude-opus"], "IED's own profile of the alias gets the CLI's name")
-		without = {name: profile for name, profile in models.items() if name != "claude-fable-5-2"}
-		await self.client.request("settings.set", {"tier": "app", "key": "ai.models", "value": without})
-		await self.client.request("ai.usage", {"refresh": True})
-		self.assertEqual(without, await self.setting("ai.models"), "a model the owner took out stays out")
-		self.put("models.json", offered_models() + [{"value": "claude-opus-6", "resolvedModel": "claude-opus-6", "displayName": "Opus 6", "supportedEffortLevels": ["low", "medium", "high"]}])
-		await self.client.request("ai.usage", {"refresh": True})
+		self.assertEqual(["claude-fable", "claude-haiku", "claude-opus", "claude-sonnet", "fake"], sorted(models), "the version the first sync wrote: the catalog gives it now")
+		self.assertEqual({"provider": "claude-code", "model": "opus"}, models["claude-opus"], "its name comes from the catalog now")
+
+		self.script({"blocks": [{"text": "On Fable."}]}, {"blocks": [{"text": "On Opus 4.6."}]})
+		chat_id, _ = await self.chat()
+		await self.client.request("chat.set", {"chatId": chat_id, "model": "claude-fable"})
+		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
+		argv = self.sessions_started()[-1]
+		self.assertEqual("claude-fable-5-2", argv[argv.index("--model") + 1], "the fable family runs its newest")
+		await self.client.request("chat.set", {"chatId": chat_id, "model": "claude-opus-4-6"})
+		self.assertEqual("finished", (await self.turn(chat_id, "Again."))["stop"])
+		self.assertEqual("claude-opus-4-6", (await self.last_turn(chat_id))["model"], "a version not in ai.models")
+		asked = [a[a.index("--model") + 1] for a in self.sessions_started()] + [m["request"].get("model") for m in self.received("control_request") if m["request"]["subtype"] == "set_model"]
+		self.assertIn("claude-opus-4-6", asked)
+		self.assertNotIn("claude-opus-4-6", await self.setting("ai.models"), "pinned without being written")
+
+		# A later CLI: Opus 6 behind the alias, Opus 5.5 among the versions, and a family with no alias.
+		later = [dict(m, resolvedModel="claude-opus-6", displayName="Opus 6") if m["value"] == "opus" else m for m in offered_models()]
+		self.put("models.json", later + [{"value": "claude-opus-5-5", "resolvedModel": "claude-opus-5-5", "displayName": "Opus 5.5"},
+			{"value": "claude-mythos-1", "resolvedModel": "claude-mythos-1", "displayName": "Mythos 1"}])
+		usage = await self.client.request("ai.usage", {"refresh": True})
+		catalog = {m["value"]: m for m in usage["claude"]["models"]}
+		self.assertEqual(("Opus 6", "opus"), (catalog["opus"]["label"], catalog["opus"]["runs"]), "Opus 6 the day the CLI offers it")
+		self.assertFalse(catalog["claude-opus-5-5"]["alias"], "Opus 5.5 still there, as a version")
 		models = await self.setting("ai.models")
-		self.assertEqual({"provider": "claude-code", "model": "claude-opus-6", "label": "Opus 6", "efforts": ["low", "medium", "high"]}, models.get("claude-opus-6"),
-			"a model the CLI offers later, with the efforts it takes")
-		self.assertEqual(sorted(list(without) + ["claude-opus-6"]), sorted(models), "and nothing else")
+		self.assertEqual({"provider": "claude-code", "model": "mythos"}, models.get("claude-mythos"), "a new family gets its profile")
+		self.assertEqual(["claude-fable", "claude-haiku", "claude-mythos", "claude-opus", "claude-sonnet", "fake"], sorted(models), "and nothing else")
+		del models["claude-mythos"]
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.models", "value": models})
+		await self.client.request("ai.usage", {"refresh": True})
+		self.assertNotIn("claude-mythos", await self.setting("ai.models"), "a family taken out stays out")
 
 	async def test_model_groups_move_into_ai_agents_and_the_default_model(self):
 		"""Model groups are gone (owner, 2026-11-11): the master's refresh moves the app settings' ai.groups once - their

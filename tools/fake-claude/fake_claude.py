@@ -25,17 +25,26 @@ CONTEXT_USAGE = {"totalTokens": 41234, "maxTokens": 1000000, "rawMaxTokens": 100
 	{"name": "Messages", "tokens": 17234, "color": "purple_FOR_SUBAGENTS_ONLY", "kind": "used"}, {"name": "Free space", "tokens": 913766, "color": "promptBorder", "kind": "free"},
 	{"name": "Autocompact buffer", "tokens": 45000, "color": "inactive", "kind": "buffer"}]}
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
-# initialize's `models` unless models.json says others, as Claude Code 2.1.317 lists them: "default" first, the aliases
-# with the model each resolves to, a full id newer than its alias's (Fable 5.2 beside fable at 5.1) and an older one the
-# CLI keeps offering (Opus 4.6). --model and set_model take any value; resolved() maps it to its model.
+# initialize's `models` unless models.json says others, as Claude Code 2.1.317 lists them (descriptions shortened): "default"
+# first, the aliases with the model each resolves to, a full id newer than its alias's (Fable 5.2 beside fable at 5.1),
+# then the older versions the CLI keeps offering - Haiku 4.5 with no effort levels. --model and set_model take any value;
+# resolved() maps it to its model.
+EVERYDAY, ROUTINE, QUICK, HARDEST = "Best for everyday, complex tasks", "Efficient for routine tasks", "Fastest for quick answers", "Most capable for your hardest tasks"
 MODELS = [
-	{"value": "default", "resolvedModel": "claude-opus-5-5", "displayName": "Default (recommended)"},
-	{"value": "opus", "resolvedModel": "claude-opus-5-5", "displayName": "Opus 5.5", "supportedEffortLevels": EFFORTS},
-	{"value": "sonnet", "resolvedModel": "claude-sonnet-5-5", "displayName": "Sonnet 5.5", "supportedEffortLevels": EFFORTS},
-	{"value": "haiku", "resolvedModel": "claude-haiku-5-5", "displayName": "Haiku 5.5", "supportedEffortLevels": EFFORTS},
-	{"value": "claude-fable-5-2", "resolvedModel": "claude-fable-5-2", "displayName": "Fable 5.2", "supportedEffortLevels": EFFORTS},
-	{"value": "fable", "resolvedModel": "claude-fable-5-1", "displayName": "Fable 5.1", "supportedEffortLevels": EFFORTS},
-	{"value": "claude-opus-4-6", "resolvedModel": "claude-opus-4-6", "displayName": "Opus 4.6", "supportedEffortLevels": ["low", "medium", "high", "max"]}]
+	{"value": "default", "resolvedModel": "claude-opus-5-5", "displayName": "Default (recommended)", "description": "Opus 5.5 - " + EVERYDAY, "supportedEffortLevels": EFFORTS},
+	{"value": "opus", "resolvedModel": "claude-opus-5-5", "displayName": "Opus 5.5", "description": EVERYDAY, "supportedEffortLevels": EFFORTS},
+	{"value": "claude-fable-5-2", "resolvedModel": "claude-fable-5-2", "displayName": "Fable 5.2", "description": HARDEST, "supportedEffortLevels": EFFORTS},
+	{"value": "sonnet", "resolvedModel": "claude-sonnet-5-5", "displayName": "Sonnet 5.5", "description": ROUTINE, "supportedEffortLevels": EFFORTS},
+	{"value": "haiku", "resolvedModel": "claude-haiku-5-5", "displayName": "Haiku 5.5", "description": QUICK, "supportedEffortLevels": EFFORTS},
+	{"value": "fable", "resolvedModel": "claude-fable-5-1", "displayName": "Fable 5.1", "description": HARDEST, "supportedEffortLevels": EFFORTS},
+	{"value": "claude-haiku-4-5-20251001", "resolvedModel": "claude-haiku-4-5-20251001", "displayName": "Haiku 4.5", "description": QUICK},
+	{"value": "claude-sonnet-5", "resolvedModel": "claude-sonnet-5", "displayName": "Sonnet 5", "description": ROUTINE, "supportedEffortLevels": EFFORTS},
+	{"value": "claude-opus-5", "resolvedModel": "claude-opus-5", "displayName": "Opus 5", "description": EVERYDAY, "supportedEffortLevels": EFFORTS},
+	{"value": "claude-fable-5", "resolvedModel": "claude-fable-5", "displayName": "Fable 5", "description": HARDEST, "supportedEffortLevels": EFFORTS},
+	{"value": "claude-opus-4-8", "resolvedModel": "claude-opus-4-8", "displayName": "Opus 4.8", "description": EVERYDAY, "supportedEffortLevels": EFFORTS},
+	{"value": "claude-opus-4-7", "resolvedModel": "claude-opus-4-7", "displayName": "Opus 4.7", "description": EVERYDAY, "supportedEffortLevels": EFFORTS},
+	{"value": "claude-opus-4-6", "resolvedModel": "claude-opus-4-6", "displayName": "Opus 4.6", "description": EVERYDAY, "supportedEffortLevels": ["low", "medium", "high", "max"]},
+	{"value": "claude-sonnet-4-6", "resolvedModel": "claude-sonnet-4-6", "displayName": "Sonnet 4.6", "description": ROUTINE, "supportedEffortLevels": ["low", "medium", "high", "max"]}]
 
 
 class State:

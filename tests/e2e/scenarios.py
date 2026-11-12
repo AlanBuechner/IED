@@ -2806,6 +2806,54 @@ def model_settings(run):
 	run.request("settings.reset", {"tier": "app", "key": "ai.defaultModel"})
 
 
+@scenario(viewports=("desktop", "phone"), targets=("mock",))
+def claude_model_versions(run):
+	"""The Claude models the CLI offers (docs/04 "The Claude models"; owner, 2026-11-11: "kept up to date with the latest
+	models without needing to do so manually while still having access to the old claude models"): a family's profile is
+	labelled by the model it runs now (claude-fable: Fable 5.2, the fable alias still at 5.1); Claude > Versions in the
+	Model menu holds every version the CLI offers, one picked keeps the chat on it; Settings > AI > Models says how they
+	stay current. The server's side is a server check (test_claude)."""
+	page = open_chat(run)
+	claude = {"claude-opus": {"provider": "claude-code", "model": "opus"}, "claude-fable": {"provider": "claude-code", "model": "fable"}}
+	run.request("settings.set", {"tier": "app", "key": "ai.models", "value": dict(claude, **{"mock-model@local": {"endpoint": "http://127.0.0.1:8080/v1"}})})
+	try:
+		run.reload()
+		show_chat(run)
+		page.click(".chat-selectors .chat-model-dd")
+		picker = ".chat-picker" + (".sheet" if run.phone else "")
+		page.wait_for_selector(picker + " .chat-picker-row.fam.sub")
+		claude_rows = run.texts(".chat-picker .chat-picker-family:not(.sub) > .chat-picker-row:not(.fam) .name")
+		check(claude_rows[:2] == ["Opus 5.5", "Fable 5.2"], "each family by the model it runs now: %r" % claude_rows)
+		check(page.get_attribute(".chat-picker .chat-picker-row.fam.sub", "aria-expanded") == "false", "Versions folded")
+		page.click(".chat-picker .chat-picker-row.fam.sub")
+		versions = run.texts(".chat-picker .chat-picker-family.sub .chat-picker-row .name")
+		check(versions == ["Fable 5.2", "Haiku 4.5", "Opus 4.8", "Opus 4.6"], "every version the CLI offers: %r" % versions)
+		run.shot("versions")
+		page.click(".chat-picker .chat-picker-family.sub .chat-picker-row:has-text('Opus 4.8')")
+		run.wait_text(".chat-selectors .chat-model-dd", "Opus 4.8")
+		page.click(".chat-selectors .chat-model-dd")
+		page.wait_for_selector(picker + " .chat-picker-family.sub:not([hidden]) .chat-picker-row.on:has-text('Opus 4.8')")
+		check(run.texts(".chat-picker .chat-effort-tick") == ["Default", "Low", "Med", "High", "XHigh", "Max"], "Opus 4.8's levels")
+		page.click(".chat-picker .chat-picker-family.sub .chat-picker-row:has-text('Haiku 4.5')")
+		run.wait_text(".chat-selectors .chat-model-dd", "Haiku 4.5")
+		page.click(".chat-selectors .chat-model-dd")
+		run.wait_text(".chat-picker .chat-picker-effort", "takes no effort level")
+		run.shot("no-effort")
+		page.keyboard.press("Escape")
+		open_settings(run, page)
+		page.click(".set-node[data-page='custom:ied.chat.models']")
+		run.wait_text(".set-claude-models .set-model[data-model='claude-fable'] .set-model-facts", "the newest Fable")
+		facts = run.texts(".set-claude-models .set-model[data-model='claude-fable'] .set-model-facts span")
+		check(facts[:2] == ["runs the newest Fable: Fable 5.2 (claude-fable-5-2)", "Claude Code's fable alias is still Fable 5.1"], "what the fable family runs: %r" % facts)
+		check(page.query_selector(".set-claude-models .set-model[data-model='mock-model@local']") is None, "a model server is not among Claude's")
+		page.click(".set-claude-versions > summary")
+		page.wait_for_selector(".set-claude-version[data-model='claude-haiku-4-5-20251001']")
+		check(run.texts(".set-claude-version[data-model='claude-haiku-4-5-20251001'] .muted")[-1] == "no effort levels", "Haiku 4.5 takes none")
+		run.shot("settings")
+	finally:
+		run.request("settings.reset", {"tier": "app", "key": "ai.models"})
+
+
 FAKE_MCP = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tools", "fake-mcp", "fake_mcp.py")
 FAKE_CA = os.path.join(os.path.dirname(FAKE_MCP), "tls", "ca.pem")
 

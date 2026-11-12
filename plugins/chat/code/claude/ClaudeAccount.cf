@@ -11,6 +11,7 @@ namespace Ai
 		m_Usage.m_ExtraUtilization = -1;
 		m_Replica = context->Server() != "master";
 		if (m_Replica) return;
+		LoadCatalog();
 		ClaudeAccount* self = this;
 		context->TopicFrom(Core::StringView(c_UsageTopic), [self]() -> Core::String { return self->SnapshotJson(); });
 		context->Provide(Core::StringView("ai.claude.account"), [self](const Serialization::DomNode& args) -> IED::Result { return self->AccountBinding(args); });
@@ -215,42 +216,64 @@ namespace Ai
 		m_Context->Log(Core::StringView("model groups are gone: their sub-agents are in ai.agents, and a chat runs on its model or the default chain (docs/04 Which model a turn uses)"));
 	}
 
-	void ClaudeAccount::SyncCatalog(const Serialization::DomNode& models) {
-		if (models.Kind() != Serialization::DomKind::Array || !c_ClaudeSubscriptionOffered || !Configured()) return;
-		FS::Path file = FS::Path(m_Context->StateFolder().View()) / "claude-models.json";
-		Core::Array<Core::String> seen;
+	// claude-models.json in the plugin's state: {"seen": [the families and values seen], "catalog": [as the CLI said it]}.
+	static Serialization::DomNode CatalogFile(IED::PluginContext* context) {
+		FS::Path file = FS::Path(context->StateFolder().View()) / "claude-models.json";
 		FS::File opened = FS::File(file.CStr(), "rb");
-		if (opened.IsOpen()) {
-			Serialization::DomDoc* doc = new Serialization::DomDoc();
-			Serialization::DomNode kept = Serialization::ReadJson(opened.ReadText().View(), *doc).root.Member("seen");
-			for (int64 i = 0; kept.Kind() == Serialization::DomKind::Array && i < kept.Count(); ++i) seen.Push(Core::String(kept.At(i).AsView()));
-			opened.Close();
+		if (!opened.IsOpen()) return Serialization::DomNode();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::DomNode root = Serialization::ReadJson(opened.ReadText().View(), *doc).root;
+		opened.Close();
+		return root;
+	}
+
+	void ClaudeAccount::LoadCatalog() {
+		if (!c_ClaudeSubscriptionOffered || !Configured()) return;
+		SetClaudeCatalog(ReadClaudeCatalog(CatalogFile(m_Context).Member("catalog")));
+	}
+
+	void ClaudeAccount::SyncCatalog(const Serialization::DomNode& models) {
+		if (models.Kind() != Serialization::DomKind::Array || !c_ClaudeSubscriptionOffered) return;
+		if (!Configured()) {
+			// Claude taken out (or never set up): no version of it beside ai.models either.
+			SetClaudeCatalog(Core::Array<ClaudeCatalogModel*>());
+			return;
 		}
+		Core::Array<ClaudeCatalogModel*> catalog = ReadClaudeCatalog(models);
+		SetClaudeCatalog(catalog);
+		Serialization::DomNode saved = CatalogFile(m_Context);
+		Core::Array<Core::String> seen;
+		Serialization::DomNode kept = saved.Member("seen");
+		for (int64 i = 0; kept.Kind() == Serialization::DomKind::Array && i < kept.Count(); ++i) seen.Push(Core::String(kept.At(i).AsView()));
 		const int64 before = seen.Count();
 		Core::String modelsOut;
 		Core::Array<Core::String> added;
 		Core::String problem;
-		if (WithCatalogModels(m_Context->Setting(Core::StringView("ai.models"), Core::StringView("")).View(), models, seen, modelsOut, added)) {
+		if (TidyClaudeModels(m_Context->Setting(Core::StringView("ai.models"), Core::StringView("")).View(), catalog, seen, modelsOut, added)) {
 			if (!m_Context->SetSetting(Core::StringView("ai.models"), modelsOut.View(), problem)) {
-				m_Context->Log((Core::String("the Claude models the CLI offers could not be added: ") + problem.View()).View());
+				m_Context->Log((Core::String("ai.models could not be kept with the Claude models the CLI offers: ") + problem.View()).View());
 				return;
 			}
 			Core::StringBuilder said;
-			said.Append("Claude: the models the CLI offers are in ai.models");
+			said.Append("Claude: ai.models kept with the models the CLI offers");
 			for (int64 i = 0; i < added.Count(); ++i) {
 				said.Append(i == 0 ? " - added " : ", ");
 				said.Append(added[i].View());
 			}
 			m_Context->Log(said.View());
 		}
-		if (seen.Count() == before) return;
+		IED::JsonWriter catalogJson;
+		WriteClaudeCatalog(catalogJson, catalog);
+		if (seen.Count() == before && IED::NodeJson(saved.Member("catalog")) == catalogJson.ToString()) return;
 		IED::JsonWriter json;
 		json.BeginObject();
 		json.Key(Core::StringView("seen"));
 		json.BeginArray();
 		for (const Core::String& value : seen) json.String(value.View());
 		json.EndArray();
+		json.RawField("catalog", catalogJson.View());
 		json.EndObject();
+		FS::Path file = FS::Path(m_Context->StateFolder().View()) / "claude-models.json";
 		FS::WriteFileAtomically(file.CStr(), (const void*)json.View().Data(), json.View().ByteLength());
 	}
 
@@ -339,6 +362,8 @@ namespace Ai
 		json.BoolField("installing", m_Installing);
 		json.Key(Core::StringView("usage"));
 		WriteUsage(json, m_Usage, Days(), AccountNowMs());
+		json.Key(Core::StringView("catalog"));
+		WriteClaudeCatalog(json, ClaudeCatalog());
 		json.EndObject();
 		return json.ToString();
 	}
@@ -353,6 +378,7 @@ namespace Ai
 		m_Asked = state.Member("asked").AsBool();
 		m_SigningIn = state.Member("signingIn").AsBool();
 		m_Installing = state.Member("installing").AsBool();
+		if (state.Member("catalog").Kind() == Serialization::DomKind::Array) SetClaudeCatalog(ReadClaudeCatalog(state.Member("catalog")));
 		Serialization::DomNode taken = state.Member("usage");
 		m_Usage.Forget();
 		m_Usage.m_Known = taken.Member("known").AsBool();
@@ -483,6 +509,9 @@ namespace Ai
 		Core::Array<Core::String> problems;
 		Core::Array<ModelProfile*> models = ReadModels(m_Context->Setting(Core::StringView("ai.models"), Core::StringView("")).View(), problems);
 		WriteChains(json, ClaudeChains(models, DefaultGroupsJson(m_Context, Core::StringView("")).View(), *this, now));
+		// The Claude models the CLI offers (docs/04 "The Claude models"): what each family runs now, and every version.
+		json.Key(Core::StringView("models"));
+		WriteClaudeModels(json, ClaudeCatalog());
 		json.Key(Core::StringView("usage"));
 		WriteUsage(json, m_Usage, Days(), now);
 		json.EndObject();

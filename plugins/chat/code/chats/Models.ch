@@ -31,7 +31,9 @@ namespace Ai
 		public Core::String m_Name;          // its key in ai.models: what groups and chats name
 		public Provider m_Provider;
 		public Core::String m_Endpoint;      // an OpenAI-compatible base URL ("http://127.0.0.1:8080/v1"); empty for Claude Code
-		public Core::String m_Model;         // the id a request names; the profile's name when unset (Claude Code: "default")
+		public Core::String m_Model;         // the id a request names; the profile's name when unset (Claude Code: "default"; a family's alias resolved)
+		public Core::String m_Written;       // Claude Code: `model` as ai.models has it (an alias, a family or a full id)
+		public bool m_FromCatalog;           // Claude Code: a version the CLI offers, not in ai.models (ReadModels)
 		public int64 m_ContextWindow;        // tokens; 0 when unknown
 		public int64 m_MaxOutput;            // tokens a reply may take; 0: the server's default
 		public Privacy m_Privacy;

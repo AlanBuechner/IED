@@ -47,6 +47,9 @@ in a long run.
   chain. A chat's running turn keeps its model: switching mid-turn would read the whole conversation into a new cache.
 - The default chain (Claude's: opus, sonnet, haiku, then fable, then the local model) already steps down as
   the windows run ahead of pace; pinning is for when you know the work better than the pace does.
+- `claude-opus`, `claude-sonnet`, `claude-haiku` and `claude-fable` each run the newest model of their family Claude Code
+  offers (`ai_usage` names it). Older versions Claude Code still offers are models too, by their id
+  (`claude-opus-4-8`, `claude-sonnet-5`): pin one only when the owner asks for that version.
 
 ## Not to do
 

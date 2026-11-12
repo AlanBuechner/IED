@@ -58,6 +58,12 @@ namespace Ai
 		}
 		out.Append("Claude ");
 		out.Append(profile->m_Model.View());
+		if (profile->m_FromCatalog) out.Append(" (a version the CLI offers)");
+		else if (profile->m_Written != profile->m_Model) {
+			out.Append(" (the newest ");
+			out.Append(profile->m_Written.View());
+			out.Append(")");
+		}
 		out.Append("\n");
 	}
 

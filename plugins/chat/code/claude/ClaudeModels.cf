@@ -1,11 +1,11 @@
 // The Claude models the CLI offers: see ClaudeModels.ch.
 
 include "ClaudeModels.ch"
-include "api/Plugin.ch"
 
 namespace Ai
 {
-	const int64 c_AllEfforts = 5;
+	Threading::Mutex s_ClaudeCatalogLock;
+	Core::Array<ClaudeCatalogModel*> s_ClaudeCatalog;   // s_ClaudeCatalogLock
 
 	static bool IsFullId(Core::StringView value) { return value.StartsWith(Core::StringView("claude-")); }
 
@@ -36,102 +36,167 @@ namespace Ai
 		return 0;
 	}
 
-	static ClaudeCatalogModel* ModelFrom(const Serialization::DomNode& entry) {
-		ClaudeCatalogModel* model = new ClaudeCatalogModel();
-		model->m_Value = Core::String(entry.Member("value").AsView());
-		model->m_Resolved = Core::String(entry.Member("resolvedModel").AsView());
-		if (model->m_Resolved.IsEmpty()) model->m_Resolved = model->m_Value;
-		model->m_Label = Core::String(entry.Member("displayName").AsView());
-		Serialization::DomNode efforts = entry.Member("supportedEffortLevels");
-		for (int64 i = 0; efforts.Kind() == Serialization::DomKind::Array && i < efforts.Count(); ++i) model->m_Efforts.Push(Core::String(efforts.At(i).AsView()));
-		return model;
-	}
-
-	Core::Array<ClaudeCatalogModel*> CurrentClaudeModels(const Serialization::DomNode& models) {
-		Core::Array<ClaudeCatalogModel*> all;
+	Core::Array<ClaudeCatalogModel*> ReadClaudeCatalog(const Serialization::DomNode& models) {
+		Core::Array<ClaudeCatalogModel*> catalog;
 		for (int64 i = 0; models.Kind() == Serialization::DomKind::Array && i < models.Count(); ++i) {
-			ClaudeCatalogModel* model = ModelFrom(models.At(i));
-			if (model->m_Value.IsEmpty() || model->m_Value == "default" || models.At(i).Member("disabled").AsBool()) continue;
-			all.Push(model);
+			Serialization::DomNode entry = models.At(i);
+			ClaudeCatalogModel* model = new ClaudeCatalogModel();
+			model->m_Value = Core::String(entry.Member("value").AsView());
+			if (model->m_Value.IsEmpty() || model->m_Value == "default" || entry.Member("disabled").AsBool()) continue;
+			model->m_Resolved = Core::String(entry.Member("resolvedModel").AsView());
+			if (model->m_Resolved.IsEmpty()) model->m_Resolved = model->m_Value;
+			model->m_Label = Core::String(entry.Member("displayName").AsView());
+			model->m_Description = Core::String(entry.Member("description").AsView());
+			Serialization::DomNode efforts = entry.Member("supportedEffortLevels");
+			model->m_EffortsSaid = efforts.Kind() == Serialization::DomKind::Array;
+			for (int64 e = 0; model->m_EffortsSaid && e < efforts.Count(); ++e) model->m_Efforts.Push(Core::String(efforts.At(e).AsView()));
+			FamilyOf(model->m_Resolved.View(), model->m_Family, model->m_Version);
+			catalog.Push(model);
 		}
-		Core::Array<ClaudeCatalogModel*> current;
-		for (ClaudeCatalogModel* model : all) {
-			if (!IsFullId(model->m_Value.View())) {
-				current.Push(model);
-				continue;
-			}
-			Core::String family;
-			Core::Array<int64> version;
-			FamilyOf(model->m_Value.View(), family, version);
-			// Kept when newer than every other model of its family the catalog has (its alias's model included).
-			bool newest = true;
-			for (ClaudeCatalogModel* other : all) {
-				if (other == model) continue;
-				Core::String otherFamily;
-				Core::Array<int64> otherVersion;
-				FamilyOf(other->m_Resolved.View(), otherFamily, otherVersion);
-				if (otherFamily == family && CompareVersions(otherVersion, version) >= 0 && other->m_Resolved != model->m_Resolved) newest = false;
-				if (otherFamily == family && other->m_Resolved == model->m_Resolved && !IsFullId(other->m_Value.View())) newest = false;
-			}
-			if (newest) current.Push(model);
-		}
-		return current;
+		return catalog;
 	}
 
-	Core::String ClaudeProfileName(Core::StringView value) {
-		return IsFullId(value) ? Core::String(value) : Core::String("claude-") + value;
+	static void WriteEfforts(IED::JsonWriter& json, const ClaudeCatalogModel* model, const char* key) {
+		if (!model->m_EffortsSaid) return;
+		json.Key(Core::StringView(key));
+		json.BeginArray();
+		for (const Core::String& effort : model->m_Efforts) json.String(effort.View());
+		json.EndArray();
 	}
 
-	static void WriteProfile(IED::JsonWriter& json, const ClaudeCatalogModel* model) {
-		json.BeginObject();
-		json.Field("provider", "claude-code");
-		json.Field("model", model->m_Value.View());
-		if (!model->m_Label.IsEmpty()) json.Field("label", model->m_Label.View());
-		if (!model->m_Efforts.IsEmpty() && model->m_Efforts.Count() < c_AllEfforts) {
-			json.Key(Core::StringView("efforts"));
-			json.BeginArray();
-			for (const Core::String& effort : model->m_Efforts) json.String(effort.View());
-			json.EndArray();
+	void WriteClaudeCatalog(IED::JsonWriter& json, const Core::Array<ClaudeCatalogModel*>& catalog) {
+		json.BeginArray();
+		for (const ClaudeCatalogModel* model : catalog) {
+			json.BeginObject();
+			json.Field("value", model->m_Value.View());
+			json.Field("resolvedModel", model->m_Resolved.View());
+			json.Field("displayName", model->m_Label.View());
+			json.Field("description", model->m_Description.View());
+			WriteEfforts(json, model, "supportedEffortLevels");
+			json.EndObject();
 		}
-		json.EndObject();
+		json.EndArray();
 	}
 
-	bool WithCatalogModels(Core::StringView modelsJson, const Serialization::DomNode& models, Core::Array<Core::String>& seen, Core::String& modelsOut, Core::Array<Core::String>& added) {
+	// The newest model of `family` in the catalog (by version; the first of equals); null when it has none.
+	static ClaudeCatalogModel* NewestOf(const Core::Array<ClaudeCatalogModel*>& catalog, Core::StringView family) {
+		ClaudeCatalogModel* newest = nullptr;
+		for (ClaudeCatalogModel* model : catalog)
+			if (model->m_Family.View() == family && (!newest || CompareVersions(model->m_Version, newest->m_Version) > 0)) newest = model;
+		return newest;
+	}
+
+	Core::String ResolveClaudeModel(const Core::Array<ClaudeCatalogModel*>& catalog, Core::StringView model) {
+		if (model.IsEmpty() || model == "default" || IsFullId(model)) return Core::String(model);
+		ClaudeCatalogModel* named = nullptr;
+		for (ClaudeCatalogModel* entry : catalog)
+			if (entry->m_Value.View() == model) named = entry;
+		ClaudeCatalogModel* newest = NewestOf(catalog, named ? named->m_Family.View() : model);
+		if (!newest || (named && CompareVersions(newest->m_Version, named->m_Version) <= 0)) return Core::String(model);
+		return newest->m_Resolved;
+	}
+
+	void WriteClaudeModels(IED::JsonWriter& json, const Core::Array<ClaudeCatalogModel*>& catalog) {
+		json.BeginArray();
+		for (const ClaudeCatalogModel* model : catalog) {
+			const bool isAlias = !IsFullId(model->m_Value.View());
+			ClaudeCatalogModel* newest = NewestOf(catalog, model->m_Family.View());
+			json.BeginObject();
+			json.Field("value", model->m_Value.View());
+			json.Field("resolved", model->m_Resolved.View());
+			json.Field("label", model->m_Label.View());
+			json.Field("description", model->m_Description.View());
+			json.Field("family", model->m_Family.View());
+			json.BoolField("alias", isAlias);
+			if (isAlias) json.Field("runs", ResolveClaudeModel(catalog, model->m_Value.View()).View());
+			json.BoolField("newest", newest && CompareVersions(model->m_Version, newest->m_Version) >= 0);
+			WriteEfforts(json, model, "efforts");
+			json.EndObject();
+		}
+		json.EndArray();
+	}
+
+	void SetClaudeCatalog(const Core::Array<ClaudeCatalogModel*>& catalog) {
+		Threading::LockGuard guard(s_ClaudeCatalogLock);
+		s_ClaudeCatalog = catalog;
+	}
+
+	Core::Array<ClaudeCatalogModel*> ClaudeCatalog() {
+		Threading::LockGuard guard(s_ClaudeCatalogLock);
+		return s_ClaudeCatalog;
+	}
+
+	Core::String ClaudeFamilyProfile(Core::StringView family) { return Core::String("claude-") + family; }
+
+	// A claude-code profile of one version as IED's earlier sync wrote it: named by its id, nothing but the provider, the
+	// model, the CLI's name and efforts.
+	static bool IsSyncedVersion(Core::StringView name, const Serialization::DomNode& profile, const Core::Array<ClaudeCatalogModel*>& catalog) {
+		if (profile.Member("provider").AsView() != "claude-code" || profile.Member("model").AsView() != name || !IsFullId(name)) return false;
+		for (int64 m = 0; m < profile.Count(); ++m) {
+			Core::StringView key = profile.KeyAt(m);
+			if (key != "provider" && key != "model" && key != "label" && key != "efforts") return false;
+		}
+		for (const ClaudeCatalogModel* model : catalog)
+			if (model->m_Value.View() == name) return true;
+		return false;
+	}
+
+	// A label IED's earlier sync gave a family's profile: the CLI's name of a model.
+	static bool IsSyncedLabel(const Serialization::DomNode& profile, const Core::Array<ClaudeCatalogModel*>& catalog) {
+		if (profile.Member("provider").AsView() != "claude-code" || IsFullId(profile.Member("model").AsView())) return false;
+		Core::StringView label = profile.Member("label").AsView();
+		for (const ClaudeCatalogModel* model : catalog)
+			if (!label.IsEmpty() && model->m_Label.View() == label) return true;
+		return false;
+	}
+
+	bool TidyClaudeModels(Core::StringView modelsJson, const Core::Array<ClaudeCatalogModel*>& catalog, Core::Array<Core::String>& seen, Core::String& modelsOut, Core::Array<Core::String>& added) {
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
 		Serialization::DomNode old = Serialization::ReadJson(modelsJson, *doc).root;
-		Core::Array<ClaudeCatalogModel*> current = CurrentClaudeModels(models);
 		bool changed = false;
 		IED::JsonWriter json;
 		json.BeginObject();
 		for (int64 i = 0; old.Kind() == Serialization::DomKind::Object && i < old.Count(); ++i) {
 			Serialization::DomNode profile = old.ValueAt(i);
-			Core::StringView name = old.KeyAt(i);
-			ClaudeCatalogModel* named = nullptr;
-			for (ClaudeCatalogModel* model : current)
-				if (profile.Member("provider").AsView() == "claude-code" && profile.Member("model").AsView() == model->m_Value.View() && ClaudeProfileName(model->m_Value.View()).View() == name) named = model;
-			if (named && !profile.Member("label").IsValid() && !named->m_Label.IsEmpty()) {
-				// One of IED's own Claude profiles without the name the CLI gives its model: given it.
-				IED::JsonWriter labeled;
-				labeled.BeginObject();
-				for (int64 m = 0; m < profile.Count(); ++m) labeled.RawField(Core::String(profile.KeyAt(m)).CStr(), IED::NodeJson(profile.ValueAt(m)).View());
-				labeled.Field("label", named->m_Label.View());
-				labeled.EndObject();
-				json.RawField(Core::String(name).CStr(), labeled.View());
+			Core::String name = Core::String(old.KeyAt(i));
+			if (IsSyncedVersion(name.View(), profile, catalog)) {
 				changed = true;
 				continue;
 			}
-			json.RawField(Core::String(name).CStr(), IED::NodeJson(profile).View());
+			if (!IsSyncedLabel(profile, catalog)) {
+				json.RawField(name.CStr(), IED::NodeJson(profile).View());
+				continue;
+			}
+			IED::JsonWriter kept;
+			kept.BeginObject();
+			for (int64 m = 0; m < profile.Count(); ++m)
+				if (profile.KeyAt(m) != "label") kept.RawField(Core::String(profile.KeyAt(m)).CStr(), IED::NodeJson(profile.ValueAt(m)).View());
+			kept.EndObject();
+			json.RawField(name.CStr(), kept.View());
+			changed = true;
 		}
-		for (ClaudeCatalogModel* model : current) {
-			const bool known = seen.Contains(model->m_Value);
-			if (!known) seen.Push(model->m_Value);
-			Core::String name = ClaudeProfileName(model->m_Value.View());
+		// The families: each the first time the catalog has it, unless a profile serves it already (its alias or name).
+		Core::Array<Core::String> families;
+		for (const ClaudeCatalogModel* model : catalog)
+			if (!families.Contains(model->m_Family)) families.Push(model->m_Family);
+		for (const Core::String& family : families) {
+			Core::String value = family;
+			for (const ClaudeCatalogModel* model : catalog)
+				if (model->m_Family == family && !IsFullId(model->m_Value.View())) value = model->m_Value;
+			const bool known = seen.Contains(family) || seen.Contains(value);
+			if (!seen.Contains(family)) seen.Push(family);
+			Core::String name = ClaudeFamilyProfile(family.View());
 			bool served = old.Member(name.CStr()).IsValid();
-			for (int64 i = 0; !served && old.Kind() == Serialization::DomKind::Object && i < old.Count(); ++i)
-				served = old.ValueAt(i).Member("provider").AsView() == "claude-code" && old.ValueAt(i).Member("model").AsView() == model->m_Value.View();
+			for (int64 i = 0; !served && old.Kind() == Serialization::DomKind::Object && i < old.Count(); ++i) {
+				Core::StringView model = old.ValueAt(i).Member("model").AsView();
+				served = old.ValueAt(i).Member("provider").AsView() == "claude-code" && (model == value.View() || model == family.View());
+			}
 			if (known || served) continue;
 			json.Key(name.View());
-			WriteProfile(json, model);
+			json.BeginObject();
+			json.Field("provider", "claude-code");
+			json.Field("model", value.View());
+			json.EndObject();
 			added.Push(name);
 			changed = true;
 		}

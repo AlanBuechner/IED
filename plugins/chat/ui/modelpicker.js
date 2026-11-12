@@ -1,14 +1,17 @@
 // modelpicker.js - the composer's Model menu (docs/04 "Which model a turn uses"): what a chat runs on and how hard it
 // thinks. Model groups are gone (owner, 2026-11-11: "i dont realy use the model groups so we can get rid of that"): first
 // Default - the default chain, with the model a turn uses on it now (pacing's step down as the plan runs ahead of pace) -
-// then the models by family, each by its label (the Claude CLI's name: "Opus 5.5"): Claude's under one heading, each
-// other server's under its host, a family of more than FOLD_OVER models folded unless it holds the chat's choice. At the
+// then the models by family, each by its label (the Claude CLI's name: "Opus 5.5"): Claude's under one heading - each
+// family's profile with the model it runs now, then Versions, folded, every version the CLI offers (docs/04 "The Claude
+// models") - each other server's under its host, a family of more than FOLD_OVER models folded unless it holds the chat's
+// choice. At the
 // bottom the effort slider (owner, 2026-10-26): the model's own default first, then the levels the model a turn uses takes
 // (a Claude model's own list, from the CLI). Up/Down move along the list (Down past its last row reaches the slider),
 // Enter picks, Esc closes; a phone shows a bottom sheet.
 
 import { h, icon } from "/ui-kit/dom.js";
 import { EFFORTS, effortStops, effortsOf } from "./chatmodel.js";
+import { catalogEfforts, familyName, follows, runsOf, versionsOf } from "./claudecatalog.js";
 
 const PHONE = "(max-width: 719px)";
 const FOLD_OVER = 3;
@@ -40,12 +43,22 @@ export function choiceLabel(summary, choices) {
 	return model && model.label ? model.label : summary.pinnedModel;
 }
 
-// The settings a picker lists: {models: [{name, label, claude, endpoint, efforts}], defaultModel, chains} from
-// settings.get's values and the aiusage snapshot's chains (the default chain, and the model a turn on it uses now).
-export function choicesFrom(values, chains) {
+// The settings a picker lists: {models: [{name, label, claude, endpoint, efforts, family, follows, version}], defaultModel,
+// chains} from settings.get's values, the aiusage snapshot's chains (the default chain, and the model a turn on it uses
+// now) and its catalog (`claude.models`): a Claude profile labelled by the model it runs now, then every version the CLI
+// offers that no profile is named after (`version`).
+export function choicesFrom(values, chains, catalog) {
 	const models = (values["ai.models"] && values["ai.models"].value) || {};
+	const listed = Object.keys(models).map((name) => {
+		const profile = models[name];
+		const claude = profile.provider === "claude-code";
+		const runs = claude ? runsOf(profile.model || "default", catalog) : null;
+		return { name, label: profile.label || (runs && runs.label) || name, claude, endpoint: profile.endpoint || "", family: runs ? runs.family : "",
+			follows: claude && follows(profile.model), efforts: runs && !Array.isArray(profile.efforts) ? catalogEfforts(runs) : effortsOf(profile) };
+	});
+	const versions = versionsOf(catalog).filter((m) => !models[m.value]).map((m) => ({ name: m.value, label: m.label || m.value, claude: true, endpoint: "", family: m.family, version: true, efforts: catalogEfforts(m) }));
 	return {
-		models: Object.keys(models).map((name) => ({ name, label: models[name].label || name, claude: models[name].provider === "claude-code", endpoint: models[name].endpoint || "", efforts: effortsOf(models[name]) })),
+		models: listed.concat(versions),
 		defaultModel: (values["ai.defaultModel"] && values["ai.defaultModel"].value) || "",
 		chains: chains || [],
 	};
@@ -98,26 +111,45 @@ export function showModelPicker(at, choices, current, pick, setEffort) {
 function modelRows(models, current, chosen) {
 	if (!models.length) return [h("div.chat-picker-empty.muted", null, "No models yet: Settings > AI > Models")];
 	const rows = [];
+	const modelRow = (model) => row(model.name === current.model, model.label || model.name, model.label && model.label !== model.name ? model.name : model.claude ? "Claude subscription" : "",
+		modelTitle(model), () => chosen({ model: model.name }), model.claude ? "sparkle" : "server");
 	for (const family of modelFamilies(models)) {
 		const holds = family.models.some((m) => m.name === current.model);
-		const open = holds || family.models.length <= FOLD_OVER;
-		const folds = family.models.length > 1;
-		const items = family.models.map((model) => row(model.name === current.model, model.label || model.name, model.label && model.label !== model.name ? model.name : model.claude ? "Claude subscription" : "", model.name, () => chosen({ model: model.name }), model.claude ? "sparkle" : "server"));
-		if (!folds) {
+		const main = family.models.filter((m) => !m.version);
+		const versions = family.models.filter((m) => m.version);
+		const open = holds || main.length <= FOLD_OVER;
+		const items = main.map(modelRow);
+		if (versions.length) {
+			const inVersions = versions.some((m) => m.name === current.model);
+			items.push(...fold("Versions", versions.length, versions.map(modelRow), inVersions, "Every version Claude Code offers, each kept while it does", ".sub"));
+		}
+		if (family.models.length <= 1) {
 			rows.push(...items);
 			continue;
 		}
-		const list = h("div.chat-picker-family", { hidden: !open }, ...items);
-		const head = h("button.chat-picker-row.fam", { type: "button", "aria-expanded": open ? "true" : "false", title: "Show or fold " + family.name + "'s models",
-			on: { click: () => {
-				list.hidden = !list.hidden;
-				head.setAttribute("aria-expanded", list.hidden ? "false" : "true");
-				replaceChevron(head, list.hidden);
-			} } },
-		icon(open ? "chevron-down" : "chevron-right"), h("span.name", null, family.name), h("span.meta", null, String(family.models.length)));
-		rows.push(head, list);
+		rows.push(...fold(family.name, main.length, items, open, "Show or fold " + family.name + "'s models", ""));
 	}
 	return rows;
+}
+
+// A Claude model's title: what a family's profile runs now, or the version a chat is pinned to.
+function modelTitle(model) {
+	if (model.version) return model.name + ": this version, offered by Claude Code";
+	if (model.follows && model.family) return model.name + ": the newest " + familyName(model.family) + " Claude Code offers - " + model.label + " now";
+	return model.name;
+}
+
+// A folding heading and its rows, open or not: [head, list].
+function fold(name, count, items, open, title, kind) {
+	const list = h("div.chat-picker-family" + kind, { hidden: !open }, ...items);
+	const head = h("button.chat-picker-row.fam" + kind, { type: "button", "aria-expanded": open ? "true" : "false", title,
+		on: { click: () => {
+			list.hidden = !list.hidden;
+			head.setAttribute("aria-expanded", list.hidden ? "false" : "true");
+			replaceChevron(head, list.hidden);
+		} } },
+	icon(open ? "chevron-down" : "chevron-right"), h("span.name", null, name), h("span.meta", null, String(count)));
+	return [head, list];
 }
 
 function replaceChevron(head, folded) {

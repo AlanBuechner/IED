@@ -1,4 +1,5 @@
 include "Models.ch"
+include "claude/ClaudeModels.ch"
 
 namespace Ai
 {
@@ -35,14 +36,16 @@ namespace Ai
 		return true;
 	}
 
-	// A Claude Code profile (docs/04 "The Claude Code provider"): the CLI's model, always cloud. `model: "auto"` (the first
-	// pacing design) is refused: the server rewrites it into ai.groups once (ClaudeWire.ch WithoutAutoProfiles).
+	// A Claude Code profile (docs/04 "The Claude Code provider"): the CLI's model, always cloud - a family's alias runs the
+	// newest model of the family the CLI offers (ClaudeModels.ch ResolveClaudeModel). `model: "auto"` (the first pacing
+	// design) is refused: the server rewrites it into ai.groups once (ClaudeWire.ch WithoutAutoProfiles).
 	static ModelProfile* ReadClaude(ModelProfile* profile, const Serialization::DomNode& entry, Core::Array<Core::String>& problems) {
 		if (!c_ClaudeSubscriptionOffered) {
 			problems.Push(((Core::String("ai.models.") + profile->m_Name.View()) + ": ") + c_ClaudeNotOffered);
 			return nullptr;
 		}
-		profile->m_Model = entry.Member("model").Kind() == Serialization::DomKind::String ? Core::String(entry.Member("model").AsView()) : Core::String("default");
+		profile->m_Written = entry.Member("model").Kind() == Serialization::DomKind::String ? Core::String(entry.Member("model").AsView()) : Core::String("default");
+		profile->m_Model = ResolveClaudeModel(ClaudeCatalog(), profile->m_Written.View());
 		profile->m_Privacy = Privacy::Cloud;
 		profile->m_ContextWindow = entry.Member("contextWindow").AsInt();
 		if (profile->m_Model == "auto") {
@@ -108,6 +111,20 @@ namespace Ai
 		for (int64 i = 0; root.Kind() == Serialization::DomKind::Object && i < root.Count(); ++i) {
 			ModelProfile* profile = ReadModel(root.KeyAt(i), root.ValueAt(i), problems);
 			if (profile) models.Push(profile);
+		}
+		// Every version of a Claude model the CLI offers, by its id, beside ai.models (docs/04 "The Claude models").
+		Core::Array<ClaudeCatalogModel*> catalog = c_ClaudeSubscriptionOffered ? ClaudeCatalog() : Core::Array<ClaudeCatalogModel*>();
+		for (const ClaudeCatalogModel* version : catalog) {
+			if (!version->m_Value.View().StartsWith(Core::StringView("claude-")) || FindModel(models, version->m_Value.View())) continue;
+			IED::JsonWriter entry;
+			entry.BeginObject();
+			entry.Field("provider", "claude-code");
+			entry.Field("model", version->m_Value.View());
+			entry.EndObject();
+			ModelProfile* profile = ReadModel(version->m_Value.View(), ParseValue(entry.View()), problems);
+			if (!profile) continue;
+			profile->m_FromCatalog = true;
+			models.Push(profile);
 		}
 		return models;
 	}

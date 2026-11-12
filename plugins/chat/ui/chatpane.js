@@ -583,12 +583,12 @@ export class ChatPane {
 		if (await this.request("settings.set", { tier: "app", key: "ai.permissions", value: Object.assign({}, current, { allow }) })) await this.approve(approval, "allow");
 	}
 
-	// What the Model menu lists: the models of the settings, and the default chain as pacing has it now - the model a turn
-	// on it uses (aiusage; none when the server cannot say) (modelpicker.js).
+	// What the Model menu lists: the models of the settings, the default chain as pacing has it now - the model a turn on
+	// it uses - and the Claude models the CLI offers (aiusage; none when the server cannot say) (modelpicker.js).
 	async choices() {
 		const [settings, usage] = await Promise.all([this.request("settings.get", { wsId: this.wsId }), this.ied.client.request("ai.usage", {}).catch(() => null)]);
 		const chains = usage && usage.claude && usage.claude.chains ? usage.claude.chains : [];
-		return settings && settings.values ? choicesFrom(settings.values, chains) : null;
+		return settings && settings.values ? choicesFrom(settings.values, chains, usage && usage.claude ? usage.claude.models : []) : null;
 	}
 
 	openFile(path, line) {

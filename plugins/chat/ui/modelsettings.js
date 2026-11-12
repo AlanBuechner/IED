@@ -1,4 +1,6 @@
-// modelsettings.js - Settings > AI > Models (docs/04 "Model profiles"): each ai.models profile with its endpoint, model,
+// modelsettings.js - Settings > AI > Models (docs/04 "Model profiles"): Claude Code's models first - how they stay current,
+// each family's profile with the model it runs now and the versions the CLI offers (docs/04 "The Claude models") - then
+// the model servers: each ai.models profile with its endpoint, model,
 // window, privacy and whether it is sent images (left out: its server says), a form to add or change one, and Test
 // connection (ai.probe), which asks the server what it serves: its models, its context per slot, its slots and whether
 // it takes images. Profiles live in the app tier (the User settings file), never in a
@@ -7,8 +9,15 @@
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { confirmDialog } from "/ui-kit/dialog.js";
 import { compact } from "./chatmodel.js";
+import { catalogEfforts, familyName, follows, runsOf, versionsOf } from "./claudecatalog.js";
 
 const PRIVACY = ["local", "lan", "cloud"];
+
+// What a Claude model's efforts say: "effort low, medium, high", "no effort levels" when the CLI listed none.
+function effortText(efforts, said) {
+	if (!said) return "no effort levels";
+	return efforts.length ? "effort " + efforts.join(", ") : "no effort levels";
+}
 // ai.models `vision`: left out, the server says (llama.cpp's /props modalities).
 const IMAGES = [["", "As its server says"], ["true", "Send them"], ["false", "Never send them"]];
 
@@ -49,14 +58,33 @@ export class ModelsPage {
 		this.settings = ctx.settings;
 		this.probes = new Map();
 		this.editing = null;
+		this.catalog = null;   // the Claude models the CLI offers (aiusage claude.models); null until asked
+		this.claude = h("div.set-models.set-claude-models");
 		this.list = h("div.set-models");
 		replace(ctx.el,
 			h("div.set-crumbs", null, "AI \u203a Models \u00b7 ", h("span.mono", null, "ai.models")),
 			h("h1", null, "Models"),
-			h("p.set-lead", null, "Where each model is served and how to talk to it: an OpenAI-compatible endpoint (llama.cpp, vLLM, LM Studio, Ollama's /v1), or Claude Code on your subscription - its models are added as the CLI offers them (AI > Claude). Models are kept in your User settings, never in a repository."),
+			h("p.set-lead", null, "Where each model is served and how to talk to it. Models are kept in your User settings, never in a repository."),
+			this.claude,
+			h("h2.set-sub", null, "Model servers"),
+			h("p.set-lead", null, "An OpenAI-compatible endpoint each: llama.cpp, vLLM, LM Studio, Ollama's /v1."),
 			h("div.set-bar", null, h("button.btn", { on: { click: () => this.edit("") } }, icon("add"), "Add model")),
 			this.list);
 		this.stop = this.settings.onChange(() => this.render());
+		this.render();
+		this.loadCatalog();
+	}
+
+	async loadCatalog() {
+		const client = this.ctx.ied && this.ctx.ied.client;
+		if (!client) return;
+		try {
+			const usage = await client.request("ai.usage", {});
+			this.catalog = (usage && usage.claude && usage.claude.models) || [];
+		}
+		catch (e) {
+			this.catalog = [];
+		}
 		this.render();
 	}
 
@@ -67,13 +95,38 @@ export class ModelsPage {
 	render() {
 		const models = this.models();
 		const names = Object.keys(models);
-		const cards = names.map((name) => this.editing === name ? this.form(name, models[name]) : this.card(name, models[name]));
+		const claude = names.filter((name) => models[name].provider === "claude-code");
+		const others = names.filter((name) => models[name].provider !== "claude-code");
+		const cards = others.map((name) => this.editing === name ? this.form(name, models[name]) : this.card(name, models[name]));
 		if (this.editing === "") cards.unshift(this.form("", { endpoint: "http://", privacy: "local" }));
-		replace(this.list, ...cards, names.length || this.editing === "" ? null : h("p.muted", null, "No model yet. Add the endpoint of a model server you run."));
+		replace(this.list, ...cards, others.length || this.editing === "" ? null : h("p.muted", null, "No model server yet. Add the endpoint of one you run."));
+		replace(this.claude, ...this.claudeSection(claude, models));
+	}
+
+	// Claude Code's models (docs/04 "The Claude models"): how they stay current, each family's profile with what it runs
+	// now, and the versions the CLI offers, folded.
+	claudeSection(names, models) {
+		const catalog = this.catalog || [];
+		const versions = versionsOf(catalog);
+		if (!names.length && !versions.length) return [];
+		const fold = versions.length ? h("details.set-claude-versions", null,
+			h("summary", null, "Versions Claude Code offers ", h("span.muted", null, "(" + versions.length + ")")),
+			h("p.muted", null, "Each can be picked in a chat's Model menu (Claude > Versions) to keep a chat on it; it stays there while Claude Code offers it. Nothing here is written to your settings."),
+			h("div.set-claude-version-list", null, ...versions.map((m) => h("div.set-claude-version", { dataset: { model: m.value } },
+				h("b", null, m.label || m.value), h("span.mono.muted", null, m.value),
+				m.newest ? h("span.chip", null, "newest " + familyName(m.family)) : null,
+				h("span.grow"),
+				h("span.muted", null, effortText(catalogEfforts(m), Array.isArray(m.efforts))))))) : null;
+		return [
+			h("h2.set-sub", null, "Claude Code"),
+			h("p.set-lead", null, "Claude's models stay current by themselves: each family below runs the newest model of its family Claude Code offers - the day a new one is out, with nothing to change - and every version it still offers can be picked in a chat's Model menu. Sign-in and usage: AI > Claude."),
+			...names.map((name) => this.claudeCard(name, models[name], catalog)),
+			this.catalog === null ? h("p.muted", null, "Asking Claude Code which models it offers\u2026") : !catalog.length ? h("p.muted", null, "Claude Code has not said which models it offers yet: AI > Claude, Refresh.") : null,
+			fold,
+		];
 	}
 
 	card(name, profile) {
-		if (profile.provider === "claude-code") return this.claudeCard(name, profile);
 		const probe = this.probes.get(name);
 		return h("div.set-model", { dataset: { model: name } },
 			h("div.set-model-head", null, h("b", null, name), h("span.chip" + (profile.privacy === "cloud" ? ".warn" : ""), null, profile.privacy || "local"),
@@ -91,18 +144,27 @@ export class ModelsPage {
 				probe.ok && probe.models.length && !probe.modelServed ? " - it does not serve " + (profile.model || name) : "") : null);
 	}
 
-	// A Claude model (provider claude-code, docs/04 "The Claude models"): Claude Code runs it on the owner's subscription,
-	// so there is no endpoint to test or edit; added as the CLI offers it, and one removed stays removed.
-	claudeCard(name, profile) {
-		const efforts = Array.isArray(profile.efforts) && profile.efforts.length ? profile.efforts : null;
+	// A Claude model of ai.models (provider claude-code): Claude Code runs it on the owner's subscription, so there is no
+	// endpoint to test or edit. A family's profile (`model` an alias or a family's name) runs the newest of its family the
+	// CLI offers; one naming a full id stays on that version.
+	claudeCard(name, profile, catalog) {
+		const model = profile.model || "default";
+		const runs = runsOf(model, catalog);
+		const named = (catalog || []).find((m) => m.value === model);
+		const lags = named && named.alias && runs && runs.value !== named.value;
+		const efforts = Array.isArray(profile.efforts) ? profile.efforts : runs ? catalogEfforts(runs) : null;
+		const what = follows(model)
+			? (runs ? "the newest " + familyName(runs.family) + ": " + runs.label + " (" + runs.resolved + ")" : "the newest model of Claude Code's " + model)
+			: (runs ? "this version: " + runs.label : model);
 		return h("div.set-model.claude-model", { dataset: { model: name } },
-			h("div.set-model-head", null, h("b", null, profile.label || name), profile.label ? h("span.mono.muted", null, name) : null,
+			h("div.set-model-head", null, h("b", null, profile.label || (runs && runs.label) || name), h("span.mono.muted", null, name),
 				h("span.chip", null, "Claude Code"),
 				h("span.grow"),
 				h("button.btn.flat", { title: "Remove " + name, "aria-label": "Remove " + name, on: { click: () => this.remove(name) } }, icon("trash"))),
 			h("div.set-model-facts", null,
-				h("span", null, "model " + (profile.model || name)),
-				efforts ? h("span", null, "effort " + efforts.join(", ")) : null,
+				h("span", null, "runs " + what),
+				lags ? h("span.muted", null, "Claude Code's " + model + " alias is still " + named.label) : null,
+				efforts && efforts.length < 5 ? h("span", null, effortText(efforts, true)) : null,
 				profile.contextWindow ? h("span", null, compact(profile.contextWindow) + " context") : null,
 				h("span", null, "on your subscription")));
 	}

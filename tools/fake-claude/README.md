@@ -22,8 +22,9 @@ leading arguments the setting names come before IED's own.
   error answer, as the real CLI's.
 - **The models it offers** (`initialize`'s `models`, `MODELS` in `fake_claude.py`), as Claude Code 2.1.317 lists them:
   each `{value, resolvedModel, displayName, supportedEffortLevels?}` - `default` (Opus 5.5) first, the aliases `opus`,
-  `sonnet`, `haiku` (5.5 each) and `fable` (Fable 5.1), `claude-fable-5-2` (newer than its alias's model) and the older
-  `claude-opus-4-6` (four effort levels). `models.json` replaces the list, so a check can offer a model released later.
+  `sonnet`, `haiku` (5.5 each) and `fable` (Fable 5.1), `claude-fable-5-2` (newer than its alias's model) and the eight
+  older versions (`claude-opus-4-6` with four effort levels, `claude-haiku-4-5-20251001` with none). `models.json` replaces
+  the list, so a check can offer a model released later.
   The model a `--model` or `set_model` value resolves to (in `system/init`, `message_start` and the result's
   `modelUsage`) is the list's `resolvedModel` for it; a value it does not list is taken as a full id.
 - **A user message** starts a query: `system/init` first (the session id, the tools as `mcp__ied__<name>`, `apiKeySource`),

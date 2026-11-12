@@ -156,17 +156,36 @@ with the CLI's own windows - IED never sees what is typed into them:
   runs ahead of pace, then the local model. It does so once (a mark in the plugin's state
   folder): Claude models the owner removes stay removed; Add Claude models adds them again.
 
-**The Claude models** (owner, 2026-11-11: "thre were also some updates to claude that we should update for as well as make
-sure we properly support future models automaticly"). The CLI's `initialize` answer lists the models it offers - each an
-alias (`opus`, `sonnet`, `haiku`, `fable`) or a full id, with the model it resolves to, its name, what it is for and the
-efforts it takes (CLI 2.1.317: Opus, Sonnet and Haiku 5.5, Fable 5.2 as `claude-fable-5-2` while the `fable` alias still
-meant 5.1, and the older versions). Each refresh of the master's account reads it (`AskUsage`) and adds to `ai.models` each
-*current* model it has not seen before: an alias (profile `claude-<alias>`), a full id newer than every other model of its
-family the CLI lists (`claude-fable-5-2`), or the newest of a family with no alias - never `default` or the older versions.
-An added profile has the CLI's name as its `label` and the efforts it takes when not every one (`efforts`); IED's own
-`claude-<alias>` profiles without a label get the CLI's name. The values seen are kept in the plugin's state
-(`claude-models.json`), so a model the owner takes out of `ai.models` stays out. A model released after this build of IED
-appears as soon as the CLI offers it (`plugins/chat/code/claude/ClaudeModels.cf`; unit `server.ai.claude.models`).
+**The Claude models** (owner, 2026-11-11: "make sure we properly support future models automaticly", then "kept up to
+date with the latest models without needing to do so manually while still having access to the old claude models"). The
+CLI's `initialize` answer lists the models it offers - each an alias (`opus`, `sonnet`, `haiku`, `fable`) or a full id, with
+the model it resolves to, its name, what it is for and the efforts it takes. CLI 2.1.317 offers 14: `default`; Opus, Sonnet
+and Haiku 5.5 behind their aliases; Fable 5.2 as `claude-fable-5-2` while the `fable` alias still means 5.1; and eight
+older versions (Opus 5, 4.8, 4.7, 4.6; Sonnet 5, 4.6; Fable 5; Haiku 4.5, which takes no effort level). Each refresh of
+the master's account reads it (`AskUsage`) and keeps it as the **catalog** - in the plugin's state (`claude-models.json`,
+so it is there as the server starts) and, through the account's state, in each workspace server. From it:
+
+- **A family's profile runs its newest model.** `claude-opus` (`"model": "opus"`) and the others IED sets up name a family:
+  a turn on one runs the newest model of that family the catalog has - the alias itself while that is it (the CLI resolves
+  it, so a new Opus behind `opus` is used the day the CLI offers it), else the newer full id (`claude-fable` runs
+  `claude-fable-5-2`). `"model"` may also name a family with no alias. A profile naming a full id stays on that version.
+  Nothing is written when a model comes out; the name the menus show is the catalog's, never a stored label
+  (`ResolveClaudeModel`; the Fable week window still applies, matched by the family in the id).
+- **Every version the CLI offers is a model.** Each full id of the catalog is a model of its own, named by that id
+  (`claude-opus-4-8`), beside `ai.models` wherever models are read (`ReadModels`) - a chat can be pinned to it, an agent
+  or `ai.defaultModel` can name it - without being written to the settings; it is there while the CLI offers it (a chat
+  pinned to one that goes runs on the default chain). The Model menu lists them under Claude > Versions, folded.
+- **ai.models is kept with it.** A family the catalog brings that no profile serves gets `claude-<family>`, once (the
+  families seen are kept, so one the owner takes out stays out). What the first sync of this design wrote that the catalog
+  now gives by itself goes: the CLI's name as a family profile's `label`, a profile of one version named by its id with
+  nothing of the owner's in it. A label the owner wrote is kept. With no Claude profile left (Claude taken out), there is no
+  catalog either.
+
+Settings > AI > Models says this in a Claude Code section of its own: each family's profile with what it runs now (and when
+the CLI's alias lags behind), then the versions the CLI offers, folded, each with its efforts; the model servers below it.
+The aiusage snapshot carries the catalog (`claude.models`: value, resolved, label, family, alias, `runs` for an alias,
+`newest`, efforts). `plugins/chat/code/claude/ClaudeModels.cf`; unit `server.ai.claude.models`; server check
+`test_the_claude_models_follow_what_the_cli_offers`; e2e `claude_model_versions`.
 
 **Distributed builds.** Anthropic's terms (the Agent SDK overview, checked 2026-10-22): "Unless previously approved, Anthropic
 does not allow third party developers to offer claude.ai login or rate limits for their products." The owner's own builds
@@ -312,9 +331,8 @@ version, whether it is signed in), each window as a bar with the even line marke
 every place's state (used now, over its pace) and the model a turn uses now, the **Weekly pace** (Every day or Work days
 only, and the work days), Refresh, Add Claude models (the automatic setup's profiles), and the rows of
 `ai.claude.command` and `ai.claude.usageRefreshMinutes`. The default chain is made by `ai.defaultModel`, `ai.claude.stepDown`
-and `ai.fallbackModel` on the AI page (Model Groups, which edited chains, is gone). Settings > AI > Models shows a Claude
-model as what it is - its name, the CLI's alias or id, the efforts it takes when not every one - with no endpoint to test or
-edit; removing one keeps it out. The command Chat: Claude Usage opens the Claude page (on a phone, which has no status
+and `ai.fallbackModel` on the AI page (Model Groups, which edited chains, is gone). Settings > AI > Models shows the Claude
+models in a section of their own ("The Claude models"), with no endpoint to test or edit. The command Chat: Claude Usage opens the Claude page (on a phone, which has no status
 bar, from the command palette).
 
 **As built.** Server (`plugins/chat/code/`): `claudewire` (usage windows from `get_usage` and `rate_limit_event`, a model's pace

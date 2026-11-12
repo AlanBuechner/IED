@@ -1,9 +1,11 @@
-// claudemodels: the models the CLI offers that IED adds to ai.models (docs/04 "The Claude models"), and the default
-// chain a chat with no model of its own runs on now that model groups are gone (docs/04 "Which model a turn uses").
+// claudemodels: the Claude models the CLI offers (docs/04 "The Claude models") - each family's profile running its newest
+// model, every version a model of its own beside ai.models, ai.models kept with the catalog - and the default chain a chat
+// with no model of its own runs on now that model groups are gone (docs/04 "Which model a turn uses").
 
 include "api/Plugin.ch"
 include "ClaudeModels.ch"
 include "chats/DefaultChain.ch"
+include "chats/Models.ch"
 
 static Core::StringView Text(const char* text) { return Core::StringView(text); }
 
@@ -12,58 +14,110 @@ static Serialization::DomNode Parse(Core::StringView json) {
 	return Serialization::ReadJson(json, *doc).root;
 }
 
-// The catalog the CLI 2.1.317 offered (its initialize answer's models), shortened.
+// The catalog the CLI 2.1.317 offered (its initialize answer's models, the descriptions left out), and a family with no
+// alias (Mythos) as a later CLI could offer one.
 const char* c_Catalog = "["
 	"{\"value\":\"default\",\"resolvedModel\":\"claude-opus-5-5\",\"displayName\":\"Default (recommended)\",\"supportedEffortLevels\":[\"low\",\"medium\",\"high\",\"xhigh\",\"max\"]},"
 	"{\"value\":\"opus\",\"resolvedModel\":\"claude-opus-5-5\",\"displayName\":\"Opus 5.5\",\"supportedEffortLevels\":[\"low\",\"medium\",\"high\",\"xhigh\",\"max\"]},"
 	"{\"value\":\"claude-fable-5-2\",\"resolvedModel\":\"claude-fable-5-2\",\"displayName\":\"Fable 5.2\",\"supportedEffortLevels\":[\"low\",\"medium\",\"high\",\"xhigh\",\"max\"]},"
-	"{\"value\":\"sonnet\",\"resolvedModel\":\"claude-sonnet-5-5\",\"displayName\":\"Sonnet 5.5\"},"
-	"{\"value\":\"haiku\",\"resolvedModel\":\"claude-haiku-5-5\",\"displayName\":\"Haiku 5.5\"},"
-	"{\"value\":\"fable\",\"resolvedModel\":\"claude-fable-5-1\",\"displayName\":\"Fable 5.1\"},"
+	"{\"value\":\"sonnet\",\"resolvedModel\":\"claude-sonnet-5-5\",\"displayName\":\"Sonnet 5.5\",\"supportedEffortLevels\":[\"low\",\"medium\",\"high\",\"xhigh\",\"max\"]},"
+	"{\"value\":\"haiku\",\"resolvedModel\":\"claude-haiku-5-5\",\"displayName\":\"Haiku 5.5\",\"supportedEffortLevels\":[\"low\",\"medium\",\"high\",\"xhigh\",\"max\"]},"
+	"{\"value\":\"fable\",\"resolvedModel\":\"claude-fable-5-1\",\"displayName\":\"Fable 5.1\",\"supportedEffortLevels\":[\"low\",\"medium\",\"high\",\"xhigh\",\"max\"]},"
 	"{\"value\":\"claude-haiku-4-5-20251001\",\"resolvedModel\":\"claude-haiku-4-5-20251001\",\"displayName\":\"Haiku 4.5\"},"
-	"{\"value\":\"claude-opus-5\",\"resolvedModel\":\"claude-opus-5\",\"displayName\":\"Opus 5\"},"
-	"{\"value\":\"claude-fable-5\",\"resolvedModel\":\"claude-fable-5\",\"displayName\":\"Fable 5\"},"
+	"{\"value\":\"claude-sonnet-5\",\"resolvedModel\":\"claude-sonnet-5\",\"displayName\":\"Sonnet 5\",\"supportedEffortLevels\":[\"low\",\"medium\",\"high\",\"xhigh\",\"max\"]},"
+	"{\"value\":\"claude-opus-5\",\"resolvedModel\":\"claude-opus-5\",\"displayName\":\"Opus 5\",\"supportedEffortLevels\":[\"low\",\"medium\",\"high\",\"xhigh\",\"max\"]},"
+	"{\"value\":\"claude-fable-5\",\"resolvedModel\":\"claude-fable-5\",\"displayName\":\"Fable 5\",\"supportedEffortLevels\":[\"low\",\"medium\",\"high\",\"xhigh\",\"max\"]},"
+	"{\"value\":\"claude-opus-4-8\",\"resolvedModel\":\"claude-opus-4-8\",\"displayName\":\"Opus 4.8\",\"supportedEffortLevels\":[\"low\",\"medium\",\"high\",\"xhigh\",\"max\"]},"
 	"{\"value\":\"claude-opus-4-6\",\"resolvedModel\":\"claude-opus-4-6\",\"displayName\":\"Opus 4.6\",\"supportedEffortLevels\":[\"low\",\"medium\",\"high\",\"max\"]},"
-	"{\"value\":\"claude-mythos-6\",\"resolvedModel\":\"claude-mythos-6\",\"displayName\":\"Mythos 6\"},"
-	"{\"value\":\"claude-mythos-5-2\",\"resolvedModel\":\"claude-mythos-5-2\",\"displayName\":\"Mythos 5.2\"}"
+	"{\"value\":\"claude-mythos-5-2\",\"resolvedModel\":\"claude-mythos-5-2\",\"displayName\":\"Mythos 5.2\"},"
+	"{\"value\":\"claude-mythos-6\",\"resolvedModel\":\"claude-mythos-6\",\"displayName\":\"Mythos 6\"}"
 	"]";
 
 const char* c_Ladder = "{\"claude-opus\":{\"provider\":\"claude-code\",\"model\":\"opus\"},\"claude-sonnet\":{\"provider\":\"claude-code\",\"model\":\"sonnet\"},"
 	"\"claude-haiku\":{\"provider\":\"claude-code\",\"model\":\"haiku\"},\"claude-fable\":{\"provider\":\"claude-code\",\"model\":\"fable\"},"
 	"\"qwen\":{\"endpoint\":\"http://q/v1\",\"model\":\"qwen\"}}";
 
+static Core::Array<Ai::ClaudeCatalogModel*> Catalog() { return Ai::ReadClaudeCatalog(Parse(Text(c_Catalog))); }
+
 [test("server.ai.claude.models")]
 class ClaudeModelsTests {
-	[test("current")]
-	public static void TestCurrent() {
-		Core::StringBuilder values;
-		for (Ai::ClaudeCatalogModel* model : Ai::CurrentClaudeModels(Parse(Text(c_Catalog)))) {
-			values.Append(model->m_Value.View());
-			values.Append(" ");
-		}
-		assert_se("opus claude-fable-5-2 sonnet haiku fable claude-mythos-6 ", values.ToString().CStr(),
-			"the aliases, a full id newer than its family's alias (Fable 5.2), the newest of a family with none; never default or the older ids");
-		assert_se("claude-fable-5-2", Ai::ClaudeProfileName(Text("claude-fable-5-2")).CStr(), "a full id names its profile");
-		assert_se("claude-opus", Ai::ClaudeProfileName(Text("opus")).CStr(), "an alias as IED named it");
+	[test("catalog")]
+	public static void TestCatalog() {
+		Core::Array<Ai::ClaudeCatalogModel*> catalog = Catalog();
+		assert_true(catalog.Count() == 13 && catalog[0]->m_Value == "opus", "every model but default");
+		Ai::ClaudeCatalogModel* haiku = catalog[5];
+		assert_true(haiku->m_Family == "haiku" && haiku->m_Version.Count() == 2 && haiku->m_Version[1] == 5, "a date is not a version");
+		assert_true(!haiku->m_EffortsSaid && catalog[0]->m_EffortsSaid && catalog[0]->m_Efforts.Count() == 5, "Haiku 4.5 takes no effort level");
+		IED::JsonWriter json;
+		Ai::WriteClaudeCatalog(json, catalog);
+		assert_true(Ai::ReadClaudeCatalog(Parse(json.View())).Count() == 13, "written as the CLI says it, read back");
 	}
 
-	[test("added_once")]
-	public static void TestAdded() {
+	[test("newest")]
+	public static void TestNewest() {
+		Core::Array<Ai::ClaudeCatalogModel*> catalog = Catalog();
+		assert_se("opus", Ai::ResolveClaudeModel(catalog, Text("opus")).CStr(), "an alias at its family's newest: the CLI resolves it");
+		assert_se("claude-fable-5-2", Ai::ResolveClaudeModel(catalog, Text("fable")).CStr(), "the fable alias still at 5.1: Fable 5.2, the newest");
+		assert_se("claude-opus-4-8", Ai::ResolveClaudeModel(catalog, Text("claude-opus-4-8")).CStr(), "a version pinned is itself");
+		assert_se("claude-mythos-6", Ai::ResolveClaudeModel(catalog, Text("mythos")).CStr(), "a family with no alias: its newest");
+		assert_se("zeta", Ai::ResolveClaudeModel(catalog, Text("zeta")).CStr(), "not in the catalog: as written");
+		assert_se("fable", Ai::ResolveClaudeModel(Core::Array<Ai::ClaudeCatalogModel*>(), Text("fable")).CStr(), "no catalog yet: the alias");
+		// A later CLI: Opus 6 behind the alias, 5.5 a version among the others.
+		Core::Array<Ai::ClaudeCatalogModel*> later = Ai::ReadClaudeCatalog(Parse(Text("[{\"value\":\"opus\",\"resolvedModel\":\"claude-opus-6\",\"displayName\":\"Opus 6\"},"
+			"{\"value\":\"claude-opus-5-5\",\"resolvedModel\":\"claude-opus-5-5\",\"displayName\":\"Opus 5.5\"}]")));
+		assert_se("opus", Ai::ResolveClaudeModel(later, Text("opus")).CStr(), "Opus 6 the day the CLI offers it");
+		IED::JsonWriter json;
+		Ai::WriteClaudeModels(json, catalog);
+		Serialization::DomNode models = Parse(json.View());
+		assert_true(models.At(4).Member("value").AsView() == "fable" && models.At(4).Member("runs").AsView() == "claude-fable-5-2" && !models.At(4).Member("newest").AsBool(),
+			"what an alias's family runs now");
+		assert_true(models.At(1).Member("newest").AsBool() && !models.At(1).Member("alias").AsBool() && models.At(1).Member("family").AsView() == "fable", "Fable 5.2 its family's newest");
+		assert_true(!models.At(5).Member("efforts").IsValid() && models.At(10).Member("efforts").Count() == 4, "the efforts each takes, as the CLI said");
+	}
+
+	[test("versions")]
+	public static void TestVersions() {
+		Core::Array<Core::String> problems;
+		Ai::SetClaudeCatalog(Catalog());
+		Core::Array<Ai::ModelProfile*> models = Ai::ReadModels(Text(c_Ladder), problems);
+		Ai::SetClaudeCatalog(Core::Array<Ai::ClaudeCatalogModel*>());
+		Ai::ModelProfile* fable = Ai::FindModel(models, Text("claude-fable"));
+		assert_true(fable && fable->m_Model == "claude-fable-5-2" && fable->m_Written == "fable" && !fable->m_FromCatalog, "the fable family runs Fable 5.2");
+		assert_true(Ai::FindModel(models, Text("claude-opus"))->m_Model == "opus", "Opus by its alias");
+		Ai::ModelProfile* old = Ai::FindModel(models, Text("claude-opus-4-8"));
+		assert_true(old && old->IsClaude() && old->m_FromCatalog && old->m_Model == "claude-opus-4-8" && old->m_Privacy == Ai::Privacy::Cloud, "an older version, a model of its own");
+		assert_true(models.Count() == 5 + 9 && Ai::FindModel(models, Text("claude-fable-5-2")) && Ai::FindModel(models, Text("claude-mythos-6")), "every version beside ai.models");
+		assert_true(problems.IsEmpty(), "nothing refused");
+		assert_true(Ai::ReadModels(Text(c_Ladder), problems).Count() == 5, "no catalog: ai.models alone");
+	}
+
+	[test("tidy")]
+	public static void TestTidy() {
+		// ai.models as the first sync wrote it, a model of the owner's on an old version, and a local model.
+		const char* written = "{\"claude-opus\":{\"provider\":\"claude-code\",\"model\":\"opus\",\"label\":\"Opus 5.5\"},"
+			"\"claude-fable\":{\"provider\":\"claude-code\",\"model\":\"fable\",\"label\":\"Fable 5.1\"},"
+			"\"claude-fable-5-2\":{\"provider\":\"claude-code\",\"model\":\"claude-fable-5-2\",\"label\":\"Fable 5.2\"},"
+			"\"old-opus\":{\"provider\":\"claude-code\",\"model\":\"claude-opus-4-8\",\"label\":\"Old Opus\",\"contextWindow\":200000},"
+			"\"claude-sonnet\":{\"provider\":\"claude-code\",\"model\":\"sonnet\",\"label\":\"My Sonnet\"},"
+			"\"claude-haiku\":{\"provider\":\"claude-code\",\"model\":\"haiku\"},"
+			"\"qwen\":{\"endpoint\":\"http://q/v1\"}}";
 		Core::Array<Core::String> seen;
+		seen.Push(Core::String("opus"));
 		Core::String out;
 		Core::Array<Core::String> added;
-		assert_true(Ai::WithCatalogModels(Text(c_Ladder), Parse(Text(c_Catalog)), seen, out, added), "something new");
+		assert_true(Ai::TidyClaudeModels(Text(written), Catalog(), seen, out, added), "changed");
 		Serialization::DomNode models = Parse(out.View());
-		assert_true(added.Count() == 2 && added[0] == "claude-fable-5-2" && added[1] == "claude-mythos-6", "the models no profile serves");
-		assert_true(models.Member("claude-fable-5-2").Member("model").AsView() == "claude-fable-5-2" && models.Member("claude-fable-5-2").Member("label").AsView() == "Fable 5.2", "named by its id, labelled by the CLI's name");
-		assert_true(!models.Member("claude-fable-5-2").Member("efforts").IsValid(), "every effort: none listed");
-		assert_true(models.Member("claude-opus").Member("label").AsView() == "Opus 5.5" && models.Member("claude-fable").Member("label").AsView() == "Fable 5.1", "IED's own Claude profiles get the CLI's names");
+		assert_true(!models.Member("claude-opus").Member("label").IsValid() && !models.Member("claude-fable").Member("label").IsValid(), "the CLI's names: the catalog gives them now");
+		assert_true(models.Member("claude-sonnet").Member("label").AsView() == "My Sonnet", "a name of the owner's kept");
+		assert_true(!models.Member("claude-fable-5-2").IsValid(), "a version the sync wrote: the catalog gives it now");
+		assert_true(models.Member("old-opus").Member("contextWindow").AsInt() == 200000, "the owner's own kept");
+		assert_true(added.Count() == 1 && added[0] == "claude-mythos" && models.Member("claude-mythos").Member("model").AsView() == "mythos", "a new family, by its name");
 		assert_true(models.Member("qwen").Member("endpoint").AsView() == "http://q/v1", "the others as they were");
-		assert_true(seen.Contains(Core::String("claude-fable-5-2")) && seen.Contains(Core::String("opus")), "what was seen kept");
+		assert_true(seen.Contains(Core::String("fable")) && seen.Contains(Core::String("mythos")), "the families seen");
 		Core::String again;
 		Core::Array<Core::String> none;
-		assert_true(!Ai::WithCatalogModels(Text("{\"claude-opus\":{\"provider\":\"claude-code\",\"model\":\"opus\",\"label\":\"Opus 5.5\"}}"), Parse(Text(c_Catalog)), seen, again, none) && none.IsEmpty(),
-			"a model seen before and taken out of ai.models stays out");
+		assert_true(!Ai::TidyClaudeModels(Text("{\"claude-opus\":{\"provider\":\"claude-code\",\"model\":\"opus\"}}"), Catalog(), seen, again, none) && none.IsEmpty(),
+			"a family seen before and taken out of ai.models stays out");
 	}
 
 	[test("default_chain")]

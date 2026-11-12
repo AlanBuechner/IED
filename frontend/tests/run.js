@@ -43,6 +43,7 @@ import "./chatnotices.test.js";
 import "./chatreplies.test.js";
 import "./chatwindow.test.js";
 import "./agents.test.js";
+import "./claudecatalog.test.js";
 import "./claude.test.js";
 import "./hovercard.test.js";
 import "./newproject.test.js";

@@ -179,6 +179,20 @@ def usage_window(id, label, utilization, through, length_ms, now, work_week=Fals
 	return window
 
 
+ALL_EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+# aiusage claude.models (ClaudeModels.cf WriteClaudeModels): the catalog the Claude CLI 2.1.317 offers, shortened.
+CLAUDE_MODELS = [
+	{"value": "opus", "resolved": "claude-opus-5-5", "label": "Opus 5.5", "description": "Best for everyday, complex tasks", "family": "opus", "alias": True, "runs": "opus", "newest": True, "efforts": ALL_EFFORTS},
+	{"value": "claude-fable-5-2", "resolved": "claude-fable-5-2", "label": "Fable 5.2", "description": "Most capable for your hardest tasks", "family": "fable", "alias": False, "newest": True, "efforts": ALL_EFFORTS},
+	{"value": "sonnet", "resolved": "claude-sonnet-5-5", "label": "Sonnet 5.5", "description": "Efficient for routine tasks", "family": "sonnet", "alias": True, "runs": "sonnet", "newest": True, "efforts": ALL_EFFORTS},
+	{"value": "haiku", "resolved": "claude-haiku-5-5", "label": "Haiku 5.5", "description": "Fastest for quick answers", "family": "haiku", "alias": True, "runs": "haiku", "newest": True, "efforts": ALL_EFFORTS},
+	{"value": "fable", "resolved": "claude-fable-5-1", "label": "Fable 5.1", "description": "Most capable for your hardest tasks", "family": "fable", "alias": True, "runs": "claude-fable-5-2", "newest": False, "efforts": ALL_EFFORTS},
+	{"value": "claude-haiku-4-5-20251001", "resolved": "claude-haiku-4-5-20251001", "label": "Haiku 4.5", "description": "Fastest for quick answers", "family": "haiku", "alias": False, "newest": False},
+	{"value": "claude-opus-4-8", "resolved": "claude-opus-4-8", "label": "Opus 4.8", "description": "Best for everyday, complex tasks", "family": "opus", "alias": False, "newest": False, "efforts": ALL_EFFORTS},
+	{"value": "claude-opus-4-6", "resolved": "claude-opus-4-6", "label": "Opus 4.6", "description": "Best for everyday, complex tasks", "family": "opus", "alias": False, "newest": False, "efforts": ["low", "medium", "high", "max"]},
+]
+
+
 def claude_usage(now, pace_days="week"):
 	"""aiusage for a claude-code model on a Max plan (the shapes of plugins/chat/code/claude/ClaudeWire.cf); `pace_days`
 	ai.claude.paceDays."""
@@ -189,7 +203,7 @@ def claude_usage(now, pace_days="week"):
 		{"model": "claude-sonnet", "claude": True, "pace": {"max": 1.5, "target": "both"}, "state": "use", "why": ""},
 		{"model": "claude-haiku", "claude": True, "state": "use", "why": ""}]
 	return {"claude": {"offered": True, "configured": True, "cli": {"asked": True, "path": "C:/Users/me/.local/bin/claude.exe", "version": "2.1.304", "signIn": "signed_in", "authMethod": "claude.ai", "subscription": True, "signingIn": False, "installing": False},
-		"refreshing": False, "nowMs": now, "chains": [{"group": "default", "role": "primary", "now": "claude-sonnet", "places": places}],
+		"refreshing": False, "nowMs": now, "chains": [{"group": "default", "role": "primary", "now": "claude-sonnet", "places": places}], "models": CLAUDE_MODELS,
 		"usage": {"known": True, "available": True, "plan": "max", "status": "allowed", "limitedBy": "", "limitResetsAtMs": 0, "extraEnabled": False, "updatedMs": now - 90000, "paceDays": pace_days, "windows": windows}}}
 
 
@@ -280,7 +294,7 @@ class Chats:
 		if any(isinstance(m, dict) and m.get("provider") == "claude-code" for m in models.values()):
 			return claude_usage(now_ms(), values.get("ai.claude.paceDays", {}).get("value") or "week")
 		return {"claude": {"offered": True, "configured": False, "cli": {"asked": True, "path": "", "version": "", "signIn": "", "authMethod": "", "subscription": False, "signingIn": False, "installing": False}, "refreshing": False,
-			"nowMs": now_ms(), "chains": [], "usage": {"known": False, "available": False, "plan": "", "status": "", "limitedBy": "",
+			"nowMs": now_ms(), "chains": [], "models": [], "usage": {"known": False, "available": False, "plan": "", "status": "", "limitedBy": "",
 				"limitResetsAtMs": 0, "extraEnabled": False, "updatedMs": 0, "windows": []}}}
 
 	# --- methods -----------------------------------------------------------------------------------------------------
