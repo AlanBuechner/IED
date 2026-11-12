@@ -741,7 +741,8 @@ class ClaudeToolTests(ClaudeCase):
 		results = {m["tool_call_id"]: m["content"] for m in sent["messages"] if m["role"] == "tool"}
 		self.assertIn("Session (5 h): 50% used, resets in 2 h 30 min; 50% through; pace 1.00x", results["c1"])
 		self.assertIn("on the Claude subscription; plan max", results["c1"])
-		self.assertIn("- claude-opus: Claude opus", results["c1"])
+		self.assertIn("- claude-opus: Claude opus - Opus 5.5: Best for everyday, complex tasks; effort low/medium/high/xhigh/max, its own medium", results["c1"], "what the AI chooses by: what each model is for, its efforts and its own")
+		self.assertIn("claude-haiku-4-5-20251001 (a version the CLI offers) - Haiku 4.5: Fastest for quick answers; no effort levels (effort default)", results["c1"])
 		self.assertIn("next turns use claude-opus", results["c2"])
 		self.assertEqual("claude-opus", (await self.summary(helper))["pinnedModel"])
 		self.model.queue(call_step("chat_set_model", {"model": "gpt-nothing"}, "c3"), text_step("Done."))
