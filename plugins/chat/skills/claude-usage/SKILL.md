@@ -38,13 +38,18 @@ in a long run.
   a design. Room left near a reset is lost at the reset.
 - **Ahead of pace:** keep the strongest model for the decisions and give routine work - renames, mechanical edits,
   searching, writing tests that follow a pattern - to a helper chat on a cheaper model:
-  `chat_create({"title": "Rename the fields", "text": "...", "model": "claude-sonnet"})` or `claude-haiku` for the simplest.
+  `chat_create({"title": "Rename the fields", "text": "...", "model": "claude-sonnet", "effort": "medium"})`.
+- **Starting a chat, you choose its model and effort** (`chat_create` needs both; `ai_usage` says what each model is for,
+  the efforts it takes and its own). Choose for the job, then **go one step stronger** - a stronger model or a higher
+  effort than you think it needs: a helper too weak for its work costs more in wrong turns and redoing than the stronger
+  one costs in usage. Ahead of pace that still means one step above the cheapest that could do it, not the strongest.
+  `"effort": "default"` is the model's own (Medium for the 5.5 models).
 - **A window used up** (the 5-hour session or the shared week): Claude will likely refuse every model it limits - Fable
   too - and each turn then falls to the chain's local model after Claude says so. Say so to the owner, and give the work a
   local model can do to a chat pinned to it, rather than waiting on refusals; Claude is asked again each turn, so a plan
   upgraded meanwhile is used at once.
-- `chat_set_model({"model": "claude-sonnet", "chat": "<id>"})` moves a chat's next turns; `""` gives it back the default
-  chain. A chat's running turn keeps its model: switching mid-turn would read the whole conversation into a new cache.
+- `chat_set_model({"model": "claude-sonnet", "effort": "high", "chat": "<id>"})` moves a chat's next turns (`effort`
+  optional); `""` gives it back the default chain. A chat's running turn keeps its model: switching mid-turn would read the whole conversation into a new cache.
 - The default chain (Claude's: opus, sonnet, haiku, then fable, then the local model) already steps down as
   the windows run ahead of pace; pinning is for when you know the work better than the pace does.
 - `claude-opus`, `claude-sonnet`, `claude-haiku` and `claude-fable` each run the newest model of their family Claude Code

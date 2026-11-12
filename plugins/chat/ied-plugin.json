@@ -19,8 +19,7 @@
 		"skills": ["skills"],
 		"settings": { "schema": "settings.schema.json", "page": "AI" },
 		"aiUses": [
-			{ "id": "chat", "title": "Chats", "description": "The chats you start: New chat, the start page, Ctrl+T.", "model": "ai.chats.model", "effort": "ai.chats.effort" },
-			{ "id": "agent", "title": "Chats the AI starts", "description": "chat_create's chats when it names no model; a sub-agent runs on its own (ai.agents).", "model": "ai.chats.agentModel", "effort": "ai.chats.agentEffort" }
+			{ "id": "chat", "title": "Chats", "description": "The chats you start: New chat, the start page, Ctrl+T. A chat the AI starts runs on the model and effort it chose for the job.", "model": "ai.chats.model", "effort": "ai.chats.effort" }
 		],
 		"bindings": {
 			"consumes": [
@@ -56,7 +55,7 @@
 		},
 		"settingsPages": [
 			{ "id": "ied.chat.models", "page": "AI", "title": "Models", "view": "ModelsSettings", "keys": ["ai.models"] },
-			{ "id": "ied.chat.defaults", "page": "AI", "title": "Defaults", "view": "DefaultsSettings", "keys": ["ai.defaultModel", "ai.chats.model", "ai.chats.effort", "ai.chats.agentModel", "ai.chats.agentEffort"] },
+			{ "id": "ied.chat.defaults", "page": "AI", "title": "Defaults", "view": "DefaultsSettings", "keys": ["ai.defaultModel", "ai.chats.model", "ai.chats.effort"] },
 			{ "id": "ied.chat.claude", "page": "AI", "title": "Claude", "view": "ClaudeSettings", "keys": ["ai.claude.command", "ai.claude.usageRefreshMinutes", "ai.claude.paceDays", "ai.claude.workDays"] }
 		],
 		"activities": [

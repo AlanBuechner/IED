@@ -3,7 +3,8 @@
 // uses (`aiUses`: {id, title, description?, model, effort}, `model` and `effort` naming settings of its own), and
 // chat.create names one: a chat of that use with no model or effort of its own runs on the model and effort those
 // settings give (empty: the default chain; the model's own effort). The chat plugin's own: `chat` (the chats the owner
-// starts, ai.chats.model / ai.chats.effort) and `agent` (the chats the AI starts, ai.chats.agentModel / agentEffort).
+// starts, ai.chats.model / ai.chats.effort). A chat the AI starts is `agent`, which no plugin contributes: it runs on the
+// model and effort the AI chose for the job (chat_create), never a setting's.
 
 include "bedrock.ch"
 include "api/Plugin.ch"
@@ -12,7 +13,7 @@ include "Chat.ch"
 namespace Ai
 {
 	const char* c_UseChat = "chat";       // a chat the owner starts: chat.create's default
-	const char* c_UseAgent = "agent";     // a chat the AI starts (chat_create)
+	const char* c_UseAgent = "agent";     // a chat the AI starts (chat_create): on what it chose, no defaults
 
 	struct UseDefaults
 	{

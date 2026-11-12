@@ -64,9 +64,18 @@ on its agent's model and effort.
 | Use | Contributed by | Settings | Chats |
 |---|---|---|---|
 | `chat` | chat | `ai.chats.model`, `ai.chats.effort` | the chats you start (`chat.create`'s default) |
-| `agent` | chat | `ai.chats.agentModel`, `ai.chats.agentEffort` | the chats the AI starts with `chat_create` and no model (else its creator's model, as before) |
 | `board` | board | `board.ai.model`, `board.ai.effort` | a planning board's chat (a board's chat made earlier is given the use when the board finds it) |
 | `profiler` | profiler | `profiler.ai.model`, `profiler.ai.effort` | Ask AI on a capture or a zone |
+
+**A chat the AI starts is not a use with defaults** (owner, 2026-11-11: "when an AI starts a new chat it should be able
+to decide the model and effort that is best for the job rather then having it pre decided in the settings though it
+should be instructed to over compensate just in case"): `chat_create` requires `model` and `effort` (`default`: the
+model's own), refuses a call that leaves one out with the models there are and "one step stronger / higher", and tells
+the AI to choose for the job and then go one step stronger - a helper too weak for its work costs more in wrong turns
+than the stronger one in usage; ahead of the plan's pace, one step above the cheapest that could do it. `ai_usage` lists
+each Claude model with what it is for (the CLI's description), the efforts it takes and its own effort, so the choice is
+an informed one; `chat_set_model` takes `effort` too. The chat it starts is of use `agent`, which no plugin contributes,
+so no setting changes what the AI chose.
 
 Inline chat (Ctrl+I, F-EDT-100) is not built yet; it will contribute its own use the same way. Each use's settings are
 the User and Solution tiers' (a solution can say its boards run on Fable at High; `docs/07` "Which tier a setting belongs
@@ -646,7 +655,7 @@ Owner, 2026-10-26: "edit/re send a message that will revert the chat to that poi
 A chat can hand work to another chat of its workspace and hear back, the way a lead hands a task to a colleague. The tools are the deferred group `chats` (`docs/13`), loaded with `tool_search` or by calling one:
 
 - `chat_list` names the workspace's chats (id, title, mode, running or idle, the first line of its last answer); `chat_read` shows another chat's last turns (at most 5), messages and answers without the tool calls.
-- `chat_send` sends a chat a message: an idle chat starts a turn with it, a running one gets it at its next step (as a message the owner sends while it runs). `chat_create` starts a new chat with a message (a title and mode optional; it uses this chat's model group), to split the work. Both are Exec tools: they ask in Ask mode, and "Allow for this chat" adds `chat.send(<id>)` / `chat.create(*)`.
+- `chat_send` sends a chat a message: an idle chat starts a turn with it, a running one gets it at its next step (as a message the owner sends while it runs). `chat_create` starts a new chat with a message (a title and mode optional; the model and effort the AI chose for the job, "Defaults by use"), to split the work. Both are Exec tools: they ask in Ask mode, and "Allow for this chat" adds `chat.send(<id>)` / `chat.create(*)`.
 - `chat_wait` waits for another chat's turn to end and returns its answer (default 120 s, at most 600 s; a stop ends the wait).
 
 The receiving turn says who sent it: its user message carries `from {chatId, title}`, the transcript heads it "From chat <title>" with a link that opens that chat, and the model is told the message came from that chat and that it can answer with `chat_send`. A chain of chats messaging chats is cut at 3 hops (`hops` on the turn), so two chats cannot keep each other running forever. The model is told where a chain stands, so it never sends into the cut (2026-10-31: a chat that had lost count sent a fourth): a message from another chat says "message 2 of at most 3 in a row between chats" and whether `chat_send` can still answer it (the message keeps its `hops` in the chat's header), and `chat_send` and `chat_create` say the same of what they sent (`ChainNote`, unit `server.ai.tasks`).

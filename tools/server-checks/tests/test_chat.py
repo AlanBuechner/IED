@@ -452,17 +452,17 @@ class ChatTests(ChatCase):
 		self.assertEqual(None, (await self.last_turn(chat_id)).get("effort"))
 
 	async def test_a_chats_use_gives_the_model_and_effort_it_names_none_of(self):
-		"""docs/04 "Defaults by use": chat.create's `use` - one a plugin contributes (here the chat plugin's agent) - gives a chat with no
-		model or effort of its own the ones the use's settings name (the chats the AI starts: ai.chats.agentModel, agentEffort); its own win; a
-		use no plugin contributes is refused; a chat of no use is the owner's (`chat`, ai.chats.*)."""
+		"""docs/04 "Defaults by use": a chat's use - `chat`, the chats the owner starts, when chat.create names none - gives a
+		chat with no model or effort of its own the ones the use's settings name (ai.chats.model, ai.chats.effort); its own
+		win; a use no plugin contributes is refused."""
 		await self.use_model({})
 		models = await self.client.request("settings.get", {"wsId": "w1"})
 		profiles = dict(models["values"]["ai.models"]["value"], other={"endpoint": self.model.url + "/v1", "model": "other-model", "watchdog": {"prefillBaseS": 2, "idleS": 1, "prefillRate": 1000000}})
 		await self.client.request("settings.set", {"tier": "app", "key": "ai.models", "value": profiles})
-		await self.client.request("settings.set", {"tier": "app", "key": "ai.chats.agentModel", "value": "other"})
-		await self.client.request("settings.set", {"tier": "app", "key": "ai.chats.agentEffort", "value": "high"})
-		chat_id, topic = await self.chat(use="agent")
-		self.assertEqual(("agent", "chat"), ((await self.summary(chat_id))["use"], (await self.summary((await self.chat())[0]))["use"]))
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.chats.model", "value": "other"})
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.chats.effort", "value": "high"})
+		chat_id, topic = await self.chat()
+		self.assertEqual("chat", (await self.summary(chat_id))["use"])
 		await self.client.request("chat.set", {"chatId": chat_id, "title": "Board: plan"})
 		changed = (await self.client.wait_for(topic, lambda f: f.get("kind") == "chat.changed"))[-1]["data"]
 		self.assertEqual(("other", "high"), (changed["model"], changed["defaultEffort"]), "what its next turn starts on: the use's model and effort")
@@ -470,7 +470,7 @@ class ChatTests(ChatCase):
 		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
 		body = self.model.requests()[-1]["body"]
 		self.assertEqual(("other-model", {"reasoning_effort": "high"}), (body["model"], body.get("chat_template_kwargs")), "the use's model at the use's effort")
-		await self.client.request("settings.set", {"tier": "app", "key": "ai.chats.agentEffort", "value": "medium"})
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.chats.effort", "value": "medium"})
 		changed = (await self.client.wait_for(topic, lambda f: f.get("kind") == "chat.changed" and f["data"].get("defaultEffort") == "medium"))[-1]["data"]
 		self.assertEqual("other", changed["model"], "a chat in memory says what it starts on once the settings change")
 		await self.client.request("chat.set", {"chatId": chat_id, "model": "fake", "effort": "low"})
@@ -482,7 +482,9 @@ class ChatTests(ChatCase):
 		with self.assertRaises(RpcFailure) as refused:
 			await self.client.request("chat.create", {"wsId": "w1", "use": "nothing-contributes-this"})
 		self.assertEqual("bad_request", refused.exception.code)
-		self.assertIn("agent", refused.exception.message, "the uses there are named")
+		self.assertIn("chat", refused.exception.message, "the uses there are named")
+		with self.assertRaises(RpcFailure):
+			await self.client.request("chat.create", {"wsId": "w1", "use": "agent"})   # the AI's chats: no use with defaults
 
 	async def test_a_profile_maps_effort_and_other_servers_get_openais_field(self):
 		self.model.post("/_fake/config", {"props": False})

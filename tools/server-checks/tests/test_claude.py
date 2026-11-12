@@ -146,7 +146,7 @@ class ClaudeTurnTests(ClaudeCase):
 	async def test_each_models_own_effort_and_a_uses_default_reach_the_cli(self):
 		"""docs/04 "Effort": the master's refresh asks the CLI the effort it gives each model when a request names none
 		(set_model, get_settings) and aiusage says it (claude.models' defaultEffort) - once per CLI and catalog. A chat of a
-		use (the chats the AI starts) with none of its own runs at the use's effort on the use's model (ai.chats.agent*)."""
+		use (the chats the owner starts) with none of its own runs at the use's effort on the use's model (ai.chats.*)."""
 		await self.use_claude(models={"claude-fable": {"provider": "claude-code", "model": "fable"}})
 		usage = await self.client.request("ai.usage", {"refresh": True})
 		efforts = {m["value"]: m.get("defaultEffort", "") for m in usage["claude"]["models"]}
@@ -156,17 +156,19 @@ class ClaudeTurnTests(ClaudeCase):
 		self.assertEqual(13, asked, "each model once")
 		await self.client.request("ai.usage", {"refresh": True})
 		self.assertEqual(asked, len([m for m in self.received("control_request") if m["request"]["subtype"] == "get_settings"]), "not again for the same CLI and catalog")
-		await self.client.request("settings.set", {"tier": "app", "key": "ai.chats.agentModel", "value": "claude-fable"})
-		await self.client.request("settings.set", {"tier": "app", "key": "ai.chats.agentEffort", "value": "high"})
-		self.script({"blocks": [{"text": "Board."}]}, {"blocks": [{"text": "Mine."}]})
-		chat_id, _ = await self.chat(use="agent")
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.chats.model", "value": "claude-fable"})
+		await self.client.request("settings.set", {"tier": "app", "key": "ai.chats.effort", "value": "high"})
+		self.script({"blocks": [{"text": "By the defaults."}]}, {"blocks": [{"text": "Mine."}]})
+		chat_id, _ = await self.chat()
 		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
 		argv = self.sessions_started()[-1]
 		self.assertEqual(("claude-fable-5-2", "high"), (argv[argv.index("--model") + 1], argv[argv.index("--effort") + 1]), "the use's model, its newest, at the use's effort")
+		for key in ("ai.chats.model", "ai.chats.effort"):
+			await self.client.request("settings.reset", {"tier": "app", "key": key})
 		own, _ = await self.chat()
 		self.assertEqual("finished", (await self.turn(own))["stop"])
 		argv = self.sessions_started()[-1]
-		self.assertEqual("opus", argv[argv.index("--model") + 1], "a chat of your own: the default chain")
+		self.assertEqual("opus", argv[argv.index("--model") + 1], "no use default: the default chain")
 		self.assertNotIn("--effort", argv, "no effort named: the CLI's own")
 
 	async def test_effort_goes_to_the_cli_and_a_new_one_restarts_the_session(self):
@@ -747,10 +749,19 @@ class ClaudeToolTests(ClaudeCase):
 		results = {m["tool_call_id"]: m["content"] for m in self.model.requests()[-1]["body"]["messages"] if m["role"] == "tool"}
 		self.assertIn("there is no model gpt-nothing", results["c3"])
 		self.script({"blocks": [{"text": "Helper on Claude."}]})
-		self.model.queue(call_step("chat_create", {"text": "Rename the variables", "title": "Helper", "model": "claude-opus"}, "c4"), text_step("Started."))
+		self.model.queue(call_step("chat_create", {"text": "Rename the variables", "title": "Helper", "model": "claude-opus", "effort": "high"}, "c4"), text_step("Started."))
 		await self.turn(lead, "hand it out")
 		made = [c for c in (await self.client.request("chat.list", {"wsId": "w1"}))["chats"] if c["title"] == "Helper"][0]
-		self.assertEqual("claude-opus", made["pinnedModel"], "a helper started on the model the lead named")
+		self.assertEqual(("claude-opus", "high", "agent"), (made["pinnedModel"], made.get("effort"), made["use"]), "a helper started on the model and effort the lead chose (owner, 2026-11-11)")
+		# Choosing is the lead's: a call that leaves the model or the effort out is told to choose, one step up.
+		self.model.queue(call_step("chat_create", {"text": "Rename more", "title": "Helper 2", "model": "claude-opus"}, "c5"),
+			call_step("chat_create", {"text": "Rename more", "title": "Helper 3", "effort": "low"}, "c6"), text_step("Done."))
+		await self.turn(lead, "and more")
+		results = {m["tool_call_id"]: m["content"] for m in self.model.requests()[-1]["body"]["messages"] if m["role"] == "tool"}
+		self.assertTrue("effort" in results["c5"] and "one step higher" in results["c5"], results["c5"])
+		self.assertTrue("model" in results["c6"] and "one step stronger" in results["c6"], results["c6"])
+		titles = [c["title"] for c in (await self.client.request("chat.list", {"wsId": "w1"}))["chats"]]
+		self.assertFalse({"Helper 2", "Helper 3"} & set(titles), "no chat started without both")
 
 
 class ClaudeSubscriptionTests(ClaudeCase):

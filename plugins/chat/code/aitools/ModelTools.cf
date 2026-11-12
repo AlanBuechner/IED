@@ -46,6 +46,14 @@ namespace Ai
 		}
 	}
 
+	// What the catalog says of a Claude model (`model` an alias or a full id): its name, what it is for, the efforts it
+	// takes and its own; null before the CLI was asked.
+	static const ClaudeCatalogModel* CatalogEntryOf(Core::StringView model) {
+		for (const ClaudeCatalogModel* entry : ClaudeCatalog())
+			if (entry->m_Value.View() == model || entry->m_Resolved.View() == model) return entry;
+		return nullptr;
+	}
+
 	static void ProfileLine(Core::StringBuilder& out, const ModelProfile* profile) {
 		out.Append("- ");
 		out.Append(profile->m_Name.View());
@@ -64,6 +72,28 @@ namespace Ai
 			out.Append(" (the newest ");
 			out.Append(profile->m_Written.View());
 			out.Append(")");
+		}
+		// What the AI chooses by (chat_create, chat_set_model): what it is for and the efforts it takes.
+		const ClaudeCatalogModel* entry = CatalogEntryOf(profile->m_Model.View());
+		if (entry) {
+			out.Append(" - ");
+			out.Append(entry->m_Label.View());
+			if (!entry->m_Description.IsEmpty()) {
+				out.Append(": ");
+				out.Append(entry->m_Description.View());
+			}
+			if (!entry->m_EffortsSaid || entry->m_Efforts.IsEmpty()) out.Append("; no effort levels (effort default)");
+			else {
+				out.Append("; effort ");
+				for (int64 i = 0; i < entry->m_Efforts.Count(); ++i) {
+					if (i > 0) out.Append("/");
+					out.Append(entry->m_Efforts[i].View());
+				}
+				if (!entry->m_DefaultEffort.IsEmpty()) {
+					out.Append(", its own ");
+					out.Append(entry->m_DefaultEffort.View());
+				}
+			}
 		}
 		out.Append("\n");
 	}
@@ -159,6 +189,11 @@ namespace Ai
 		Chat* chat = Target(chats, self, call, problem);
 		if (!chat) return ToolError((Core::String("chat_set_model: ") + problem.View()).View());
 		chat->m_PinnedModel = Core::String(name);
+		Core::StringView effort = call.m_Args.Member("effort").AsView();
+		if (!effort.IsEmpty()) {
+			if (effort != "default" && !IsEffort(effort)) return ToolError(Core::StringView("chat_set_model: effort is low, medium, high, xhigh, max or default (the model's own)"));
+			chat->m_Effort = effort == "default" ? Core::String() : Core::String(effort);
+		}
 		chats->Changed(chat);
 		Core::StringBuilder said;
 		said.Append(chat == self ? "This chat's" : "That chat's");
@@ -182,7 +217,7 @@ namespace Ai
 	}
 
 	void AddModelTools(ToolRegistry& registry, Chats* chats, Chat* chat) {
-		ToolSpec* usage = ModelTool("ai_usage", "The Claude plan's usage: each window (the 5-hour session, the week, the per-model weeks) - how much is used, how far through it is, its pace (1.0x lasts exactly to the reset) and when it resets - the models of ai.models, and which model pacing picks now. Use it before handing out work to decide which model a chat should use. Example: ai_usage({\"refresh\": true})",
+		ToolSpec* usage = ModelTool("ai_usage", "The Claude plan's usage: each window (the 5-hour session, the week, the per-model weeks) - how much is used, how far through it is, its pace (1.0x lasts exactly to the reset) and when it resets - the models (each with what it is for, the efforts it takes and its own effort), and which model pacing picks now. Use it before handing out work to decide which model and effort a chat should use. Example: ai_usage({\"refresh\": true})",
 			"{\"type\": \"object\", \"properties\": {\"refresh\": {\"type\": \"boolean\", \"description\": \"ask the CLI now rather than use the last answer\"}}, \"additionalProperties\": false}", ToolClass::Read);
 		usage->m_Plan = [](const ToolInvocation& call) -> ToolPlan {
 			ToolPlan plan;
@@ -192,8 +227,8 @@ namespace Ai
 		};
 		usage->m_Run = [chats](const ToolInvocation& call) -> ToolOutcome { return UsageRun(chats, call); };
 		registry.Add(usage);
-		ToolSpec* pin = ModelTool("chat_set_model", "Pin a model of ai.models for a chat's next turns (this chat's, or another chat's by id), over the default chain; \"\" goes back to the default chain. Use a cheaper model for routine work to stretch Claude's usage, the strongest while it is under pace. Example: chat_set_model({\"model\": \"claude-sonnet\", \"chat\": \"c18f2a\"})",
-			"{\"type\": \"object\", \"properties\": {\"model\": {\"type\": \"string\"}, \"chat\": {\"type\": \"string\"}}, \"required\": [\"model\"], \"additionalProperties\": false}", ToolClass::Exec);
+		ToolSpec* pin = ModelTool("chat_set_model", "Pin a model of ai.models for a chat's next turns (this chat's, or another chat's by id), over the default chain; \"\" goes back to the default chain. `effort` sets its effort too (default: the model's own). Choose for the work, one step stronger than you think it needs; ahead of the plan's pace keep routine work off the strongest model. Example: chat_set_model({\"model\": \"claude-sonnet\", \"effort\": \"high\", \"chat\": \"c18f2a\"})",
+			"{\"type\": \"object\", \"properties\": {\"model\": {\"type\": \"string\"}, \"effort\": {\"enum\": [\"low\", \"medium\", \"high\", \"xhigh\", \"max\", \"default\"]}, \"chat\": {\"type\": \"string\"}}, \"required\": [\"model\"], \"additionalProperties\": false}", ToolClass::Exec);
 		pin->m_Plan = [](const ToolInvocation& call) -> ToolPlan {
 			ToolPlan plan;
 			Core::StringView name = call.m_Args.Member("model").AsView();

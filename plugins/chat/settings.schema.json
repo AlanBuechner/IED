@@ -288,18 +288,6 @@
 			"default": "",
 			"x-ied-tiers": ["app", "solution"],
 			"description": "The effort the chats you start run at when they name none: low, medium, high, xhigh or max. Empty: the model's own (Claude Code says what it is for each model)."
-		},
-		"ai.chats.agentModel": {
-			"type": "string",
-			"default": "",
-			"x-ied-tiers": ["app", "solution"],
-			"description": "The model the chats the AI starts (chat_create) run on when they name none: a profile of ai.models, or a version Claude Code offers (claude-opus-4-8). Empty: the default chain (ai.defaultModel). Settings > AI > Defaults sets every use's (docs/04 Defaults by use)."
-		},
-		"ai.chats.agentEffort": {
-			"enum": ["", "low", "medium", "high", "xhigh", "max"],
-			"default": "",
-			"x-ied-tiers": ["app", "solution"],
-			"description": "The effort the chats the AI starts (chat_create) run at when they name none: low, medium, high, xhigh or max. Empty: the model's own (Claude Code says what it is for each model)."
 		}
 	}
 }

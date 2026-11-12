@@ -2828,7 +2828,7 @@ def ai_defaults_by_use(run):
 		page.click(".set-node[data-page='custom:ied.chat.defaults']")
 		page.wait_for_selector(".set-default[data-use='board']")
 		uses = page.eval_on_selector_all(".set-default", "rows => rows.map(r => r.dataset.use)")
-		check(uses[:3] == ["default", "chat", "agent"] and "board" in uses and "profiler" in uses, "the default chain, then every use: %r" % uses)
+		check(uses[:2] == ["default", "chat"] and "board" in uses and "profiler" in uses and "agent" not in uses, "the default chain, then every use - none for the chats the AI starts: %r" % uses)
 		run.wait_text(".set-default[data-use='chat'] select[data-key='ai.chats.effort'] option", "The model's own (Medium)")
 		page.select_option(".set-default[data-use='chat'] select[data-key='ai.chats.effort']", "high")
 		page.wait_for_selector(".set-default[data-use='chat'] .set-default-reset")

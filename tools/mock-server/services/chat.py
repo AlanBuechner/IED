@@ -182,8 +182,7 @@ def usage_window(id, label, utilization, through, length_ms, now, work_week=Fals
 
 ALL_EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 # The uses the plugins contribute (aiUses) and the settings of each one's default model and effort.
-USES = {"chat": ("ai.chats.model", "ai.chats.effort"), "agent": ("ai.chats.agentModel", "ai.chats.agentEffort"),
-	"board": ("board.ai.model", "board.ai.effort"), "profiler": ("profiler.ai.model", "profiler.ai.effort")}
+USES = {"chat": ("ai.chats.model", "ai.chats.effort"), "board": ("board.ai.model", "board.ai.effort"), "profiler": ("profiler.ai.model", "profiler.ai.effort")}
 # aiusage claude.models (ClaudeModels.cf WriteClaudeModels): the catalog the Claude CLI 2.1.317 offers, shortened.
 CLAUDE_MODELS = [
 	{"value": "opus", "resolved": "claude-opus-5-5", "label": "Opus 5.5", "description": "Best for everyday, complex tasks", "family": "opus", "alias": True, "runs": "opus", "newest": True, "efforts": ALL_EFFORTS, "defaultEffort": "medium"},

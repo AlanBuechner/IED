@@ -53,7 +53,7 @@ which only the workspace's tiers know, keep the every-tier default).
 |---|---|
 | `lsp.idleStopMinutes`, `keyboard.bindings` | User |
 | `ai.models`, `ai.permissions`, `ai.maxSteps`, `ai.resumeInterrupted`, `ai.tools.loadAll`, `ai.chats.keepDeletedDays`, `ai.chats.offloadAfterMinutes`, `ai.chats.notify`, `ai.chats.panelRows`, `ai.claude.*` | User |
-| `ai.defaultModel`, `ai.fallbackModel`, `ai.agents`, `ai.chats.model`, `ai.chats.effort`, `ai.chats.agentModel`, `ai.chats.agentEffort`, `ai.edits.*` | User, Solution |
+| `ai.defaultModel`, `ai.fallbackModel`, `ai.agents`, `ai.chats.model`, `ai.chats.effort`, `ai.edits.*` | User, Solution |
 | `board.snap` / `board.ai.model`, `board.ai.effort` | User / User, Solution |
 | `browser.*`, `developer.enabled`, `editor.*`, `gpu.*`, `terminal.*`, `tor.*`, `webfetch.*`, `websearch.*` | User |
 | `c4.toolchain`, `cpp.clangd.path`, `cpp.lldb.path`, `git.path`, `go.path`, `go.gopls.path`, `go.delve.path`, `rust.analyzer.path`, `rust.cargo.path`, `nuke.command`, `nuke.packages.fetchMinutes` | User |

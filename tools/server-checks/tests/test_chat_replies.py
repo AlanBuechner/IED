@@ -62,7 +62,7 @@ class RepliesTests(ChatCase):
 		return started, ended
 
 	def create_helper(self, mode, call_id="c1"):
-		return call_step("chat_create", {"title": "Helper", "text": "Port Ring.h and tell me what changed.", "mode": mode, "model": "helper", "require_reply": True}, call_id)
+		return call_step("chat_create", {"title": "Helper", "text": "Port Ring.h and tell me what changed.", "mode": mode, "model": "helper", "effort": "default", "require_reply": True}, call_id)
 
 	async def test_a_suspended_lead_wakes_with_the_reply_it_required(self):
 		lead_id, topic = await self.chat(mode="agent", permission="auto")

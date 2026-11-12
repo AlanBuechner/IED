@@ -1,7 +1,8 @@
 // defaultssettings.js - Settings > AI > Defaults (docs/04 "Defaults by use"; owner, 2026-11-11: "we should be able to set
 // a default model/effort for things like the chat, planning board, inline chat, etc."): the default chain's first model
-// (ai.defaultModel), then each use the plugins contribute (aiUses: Chats, Chats the AI starts, Planning board, Profiler
-// questions, ...) with the model and effort a chat of it runs on when it names none. A model's own effort is named, not
+// (ai.defaultModel), then each use the plugins contribute (aiUses: Chats, Planning board, Profiler questions, ...) with
+// the model and effort a chat of it runs on when it names none. A chat the AI starts is not among them: it runs on what
+// the AI chose for the job (chat_create's model and effort). A model's own effort is named, not
 // just "Default": Medium, as Claude Code says for Opus 5.5. Each choice is written to the tier being edited (User or
 // Solution), with Reset there and the tier that sets the value in effect when it is another.
 
@@ -12,8 +13,7 @@ import { choicesFrom } from "./modelpicker.js";
 const TIER_NAMES = { app: "User", solution: "Solution", project: "Project" };
 // The chat plugin's own uses, for a window with no workspace (where no plugin's contributions are read).
 const OWN_USES = [
-	{ id: "chat", title: "Chats", description: "The chats you start: New chat, the start page, Ctrl+T.", model: "ai.chats.model", effort: "ai.chats.effort" },
-	{ id: "agent", title: "Chats the AI starts", description: "chat_create's chats when it names no model; a sub-agent runs on its own (ai.agents).", model: "ai.chats.agentModel", effort: "ai.chats.agentEffort" },
+	{ id: "chat", title: "Chats", description: "The chats you start: New chat, the start page, Ctrl+T. A chat the AI starts runs on the model and effort it chose for the job.", model: "ai.chats.model", effort: "ai.chats.effort" },
 ];
 
 function effortName(id) {

@@ -250,7 +250,7 @@ Chats of one workspace talking to each other (`docs/04` "Chats talk to each othe
 | `chat_list()` | read | id, title, mode, state, the first line of each last answer; this chat marked |
 | `chat_read(chat, turns?)` | read | the last turns (at most 5): messages and answers, no tool calls |
 | `chat_send(chat, text, require_reply?)` | exec | starts a turn there or reaches its running turn; subject `chat.send(<id>)`; at most 3 hops. `require_reply`: the other chat owes this one a reply (`docs/04` "Chats waiting on each other"). To a chat that required this one's reply it pays the debt: without `require_reply` it is the reply, outside the 3 hops |
-| `chat_create(text, title?, mode?, model?, require_reply?)` | exec | a new chat started with `text`, on this chat's group and pinned model or `model` (a cheaper one for routine work); subject `chat.create(*)`; `require_reply` as for `chat_send` |
+| `chat_create(text, model, effort, title?, mode?, require_reply?)` | exec | a new chat started with `text`, on the `model` and `effort` (`default`: the model's own) the AI chose for the job - told to go one step stronger than it thinks it needs (`docs/04` "Defaults by use"); a call missing either is refused with the models there are; subject `chat.create(*)`; `require_reply` as for `chat_send` |
 | `chat_wait(chat, seconds?)` | read | until its turn ends (default 120, at most 600 s); returns the answer. A message for this turn stops the wait at once |
 
 ### `models` (built, 2026-10-22; deferred)
@@ -262,7 +262,7 @@ under pace and give routine work a cheaper one (`docs/04` "Pacing", "Switching m
 | Tool | Class | Notes |
 |---|---|---|
 | `ai_usage(refresh?)` | read | Claude Code's version and whether it is on the Claude subscription, the plan; each window (the 5-hour session, the week, the per-model weeks): percent used, when it resets, how far through it is, its pace (over its work days when ai.claude.paceDays is workweek); that a window used up keeps no turn from asking Claude; each `ai.models` profile; each group role whose chain has a Claude model, with every place's pace and state (in use or over its pace) and the model a turn of it uses now (a chat's mode picks the role); this chat's pinned model. `refresh` asks the CLI first. Subject `ai.usage(*)` |
-| `chat_set_model(model, chat?)` | exec | pins a model of `ai.models` for a chat's next turns (this chat's, or another's by id), `""` back to the group's; the current turn keeps its model. An unknown name fails listing the names. Subject `chat.model(<name>)` |
+| `chat_set_model(model, effort?, chat?)` | exec | pins a model of `ai.models` (or a version Claude Code offers) for a chat's next turns (this chat's, or another's by id), `""` back to the default chain, and with `effort` its effort (`default`: the model's own); the current turn keeps its model. An unknown name fails listing the names. Subject `chat.model(<name>)` |
 
 ### `clipboard` (built, 2026-10-21; deferred)
 

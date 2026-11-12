@@ -176,15 +176,28 @@ namespace Ai
 		ChatMode mode = self->m_Mode;
 		if (call.m_Args.Member("mode").IsValid() && !ReadChatMode(call.m_Args.Member("mode").AsView(), mode)) return ToolError(Core::StringView("chat_create: mode must be ask, plan or agent"));
 		Core::StringView title = call.m_Args.Member("title").AsView();
+		// The model and effort are the creator's choice for the job (owner, 2026-11-11: "it should be able to decide the
+		// model and effort that is best for the job ... instructed to over compensate"), never a setting's.
 		Core::StringView model = call.m_Args.Member("model").AsView();
+		Core::StringView effort = call.m_Args.Member("effort").AsView();
 		Core::Array<Core::String> problems;
-		if (!model.IsEmpty() && !FindModel(ReadModels(call.m_Context->Setting(Core::StringView("ai.models"), WsId(call.m_Ws)).View(), problems), model))
-			return ToolError(((Core::String("chat_create: there is no model ") + model) + " in ai.models; ai_usage lists them").View());
+		Core::Array<ModelProfile*> models = ReadModels(call.m_Context->Setting(Core::StringView("ai.models"), WsId(call.m_Ws)).View(), problems);
+		if (model.IsEmpty() || !FindModel(models, model)) {
+			Core::StringBuilder known;
+			for (const ModelProfile* profile : models) {
+				if (!known.IsEmpty()) known.Append(", ");
+				known.Append(profile->m_Name.View());
+			}
+			return ToolError(((model.IsEmpty() ? Core::String("chat_create: name the model the job needs, one step stronger") : (Core::String("chat_create: there is no model ") + model))
+				+ "; they are " + known.View() + " (ai_usage says what each is for)").View());
+		}
+		if (effort.IsEmpty() || (effort != "default" && !IsEffort(effort)))
+			return ToolError(Core::StringView("chat_create: name the effort the job needs, one step higher - low, medium, high, xhigh or max - or default for the model's own (ai_usage says it)"));
 		Chat* made = chats->Create(call.m_Ws, title.IsEmpty() ? Core::StringView(c_NewChatTitle) : title, mode, self->m_Group.View());
-		// A chat the AI starts (docs/04 "Defaults by use"): the model it names, else ai.chats.agentModel, else its creator's.
+		// A chat the AI starts runs on what it chose; no setting's default applies to it (its use, `agent`, has none).
 		made->m_Use = Core::String(c_UseAgent);
-		const bool agentDefault = !DefaultsOfUse(call.m_Context, WsId(call.m_Ws), Core::StringView(c_UseAgent)).m_Model.IsEmpty();
-		made->m_PinnedModel = !model.IsEmpty() ? Core::String(model) : agentDefault ? Core::String() : self->m_PinnedModel;
+		made->m_PinnedModel = Core::String(model);
+		made->m_Effort = effort == "default" ? Core::String() : Core::String(effort);
 		const bool requires = call.m_Args.Member("require_reply").AsBool();
 		if (requires) chats->Owe(made, self, hops, false);
 		chats->Deliver(made, call.m_Args.Member("text").AsView(), self, hops, requires ? "required" : "");
@@ -304,8 +317,8 @@ namespace Ai
 		send->m_Plan = [](const ToolInvocation& call) -> ToolPlan { return ChatPlan(call, "chat.send"); };
 		send->m_Run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return SendRun(chats, chat, call); };
 		registry.Add(send);
-		ToolSpec* create = ChatTool("chat_create", "Start a new chat in this workspace with a message, to hand it part of the work. It uses this chat's model, or `model` (one of ai.models: a cheaper one for routine work stretches Claude's usage). Its message counts in this chat's chain of chats messaging each other (chat_send says how): started from a turn another chat's message began, it may be the chain's last, and then it cannot message this chat back - the result says so - unless require_reply: then it owes this chat a reply, which it can always send, cannot finish before it does, and this chat can suspend until it comes. Example: chat_create({\"title\": \"Port Ring.h\", \"text\": \"Port src/Ring.h to C4 and its tests.\", \"mode\": \"agent\", \"model\": \"claude-sonnet\", \"require_reply\": true})",
-			"{\"type\": \"object\", \"properties\": {\"text\": {\"type\": \"string\", \"minLength\": 1}, \"title\": {\"type\": \"string\"}, \"mode\": {\"enum\": [\"ask\", \"plan\", \"agent\"]}, \"model\": {\"type\": \"string\"}, \"require_reply\": {\"type\": \"boolean\"}}, \"required\": [\"text\"], \"additionalProperties\": false}", ToolClass::Exec);
+		ToolSpec* create = ChatTool("chat_create", "Start a new chat in this workspace with a message, to hand it part of the work. You choose what it runs on: `model` (one of ai.models, or a version Claude Code offers by its id) and `effort` (low, medium, high, xhigh, max, or default - the model's own); ai_usage lists the models, what each is for, the efforts it takes and its own effort. Choose for the job, then go one step stronger - a stronger model or a higher effort than you think it needs - since a chat too weak for its work costs more in wrong turns than the stronger one costs in usage; ahead of the plan's pace, still keep routine work off the strongest model, one step above the cheapest that could do it. Its message counts in this chat's chain of chats messaging each other (chat_send says how): started from a turn another chat's message began, it may be the chain's last, and then it cannot message this chat back - the result says so - unless require_reply: then it owes this chat a reply, which it can always send, cannot finish before it does, and this chat can suspend until it comes. Example: chat_create({\"title\": \"Port Ring.h\", \"text\": \"Port src/Ring.h to C4 and its tests.\", \"mode\": \"agent\", \"model\": \"claude-opus\", \"effort\": \"high\", \"require_reply\": true})",
+			"{\"type\": \"object\", \"properties\": {\"text\": {\"type\": \"string\", \"minLength\": 1}, \"title\": {\"type\": \"string\"}, \"mode\": {\"enum\": [\"ask\", \"plan\", \"agent\"]}, \"model\": {\"type\": \"string\", \"minLength\": 1, \"description\": \"what the job needs, one step stronger\"}, \"effort\": {\"enum\": [\"low\", \"medium\", \"high\", \"xhigh\", \"max\", \"default\"], \"description\": \"what the job needs, one step higher; default: the model's own\"}, \"require_reply\": {\"type\": \"boolean\"}}, \"required\": [\"text\", \"model\", \"effort\"], \"additionalProperties\": false}", ToolClass::Exec);
 		create->m_Plan = [](const ToolInvocation& call) -> ToolPlan { return ChatPlan(call, "chat.create"); };
 		create->m_Run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return CreateRun(chats, chat, call); };
 		registry.Add(create);
