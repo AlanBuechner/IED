@@ -21,7 +21,7 @@ test("model menu: the label says what the chat runs on, by the model's label", (
 	assertEqual(choiceLabel("claude-fable-5-2", choices), "Fable 5.2", "a model, by its label");
 	assertEqual(choiceLabel("qwen", choices), "qwen", "a profile without a label, by its name");
 	assertEqual(choiceLabel("qwen", null), "qwen", "before the models are known");
-	assertEqual(choiceLabel("", choices), "Default", "only while nothing says which");
+	assertEqual([choiceLabel("", null), choiceLabel("", choices)], ["...", "No model"], "never Default: not known yet, or none set up");
 });
 
 test("model menu: the model a chat's next turn starts on, never just Default", () => {

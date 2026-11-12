@@ -38,9 +38,9 @@ export function modelFamilies(models) {
 
 // What the chat runs on, as its button says it: the label of the model its next turn starts on (nextModel), its own or
 // its default's (owner, 2026-11-12: "dont list "default, default" for the model actually say what it is in the chat");
-// Default only while nothing says which.
+// "..." while the models are not known yet, "No model" when none is set up.
 export function choiceLabel(name, choices) {
-	if (!name) return "Default";
+	if (!name) return choices ? "No model" : "...";
 	const model = choices && choices.models ? choices.models.find((m) => m.name === name) : null;
 	return model && model.label ? model.label : name;
 }

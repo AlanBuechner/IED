@@ -164,7 +164,7 @@ test("chat pane: the Model menu shows what the chat runs on, and the next turn's
 		topic.snap(Object.assign(snapshotOf(1), { pinnedModel: "fake", model: "fake" }));
 		assertEqual([modelShown(pane), chipText(pane)], ["fake", "fake"], "the snapshot's pin");
 		topic.evt("chat.changed", summary({ pinnedModel: "", model: "claude-opus" }));
-		assertEqual([modelShown(pane), chipText(pane), effortShown(pane)], ["claude-opus", "claude-opus", "Default"], "no model of its own: the default's model, by name");
+		assertEqual([modelShown(pane), chipText(pane), effortShown(pane)], ["claude-opus", "claude-opus", "..."], "no model of its own: the default's model, by name; its effort not known without the models");
 		topic.evt("chat.changed", summary({ pinnedModel: "fake", model: "fake" }));
 		assertEqual([modelShown(pane), chipText(pane)], ["fake", "fake"], "pinned from the picker or by the AI");
 		topic.evt("turn.start", { turnId: "n1", mode: "agent", model: "fake", group: "default", user: { text: "Go" } });

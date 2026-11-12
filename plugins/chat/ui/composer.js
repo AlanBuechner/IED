@@ -286,7 +286,8 @@ export class Composer {
 		const label = choiceLabel(name, this.choices);
 		// No effort of its own: what the default is - its use's, else the model's own (docs/04 "Effort").
 		const fallback = effortFallback(this.choices, summary.use, model.defaultEffort, name);
-		const effort = effortLabel(summary.effort, fallback);
+		// Its default is not known before the models are: "..." then, never a bare "Default".
+		const effort = this.choices || summary.effort ? effortLabel(summary.effort, fallback) : "...";
 		const use = useOf(this.choices, summary.use);
 		const whose = summary.pinnedModel ? "this chat's own model" : use && use.model === name ? "the default for " + use.title + " (Settings > AI > Defaults)" : "the default chain's model now";
 		return h("button.chat-dd.chat-model-dd", { title: (name ? label + ": " + whose + ". " : "") + "Run this chat on its default or a model, and set its effort", "aria-haspopup": "dialog", on: { click: async (event) => {
