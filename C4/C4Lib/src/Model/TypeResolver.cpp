@@ -363,13 +363,9 @@ namespace Scripting
 		if (local && local->IsPack())
 			return QueryResult<const Type*>::Fail(QueryError::NotAValue, "the pack '" + name + "' must be expanded with '...'");
 		if (local && local->kind == SymbolKind::Type) return QueryResult<const Type*>::Success(local->type);
-		// Unqualified name with a scope context: resolve from that scope (walks up to globals), so a
-		// type declared in the function's namespace is found. Qualified names always walk from root.
-		const SymbolInfo* info = nullptr;
-		if (name.find("::") == Core::String::npos && scopeContext)
-			info = model.m_Symbols->FindVisible(scopeContext, name, unitId);
-		else
-			info = FindVisibleQualified(model, name, unitId);
+		// From the asking scope outward, a qualified name too: `Inner::T()` inside `Outer` constructs the Inner of an
+		// enclosing namespace (BUG-456); a qualified name that scope does not lead to walks from the root.
+		const SymbolInfo* info = FindVisibleQualified(model, name, unitId, scopeContext);
 		if (info && info->kind == SymbolKind::Type)
 		{
 			const Type* t = info->type;

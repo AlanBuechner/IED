@@ -23,6 +23,23 @@ namespace NnHost {
 	namespace Mid::Leaf { int32 Depth() { return 3; } }
 }
 
+// BUG-456: an enclosing namespace names a nested one's type, constant and variable relative to itself, in expressions too.
+namespace NnOuter::Inner {
+	struct Report { public int32 m_Value = 3; }
+	const int32 c_Lanes = 4;
+	int32 s_Count = 6;
+}
+
+namespace NnOuter {
+	int32 RelativeReport() { return Inner::Report().m_Value; }
+	int32 RelativeConstant() { return Inner::c_Lanes; }
+	int32 RelativeVariable() { return Inner::s_Count; }
+	int32 RelativeDeclared() {
+		Inner::Report report = Inner::Report();
+		return report.m_Value;
+	}
+}
+
 void TestNestedNamespaceShorthand() {
 	NnOuter::Inner::Pair p;
 	p.a = 1; p.b = 2;
@@ -30,4 +47,8 @@ void TestNestedNamespaceShorthand() {
 	AssertIntEquals(14, NnOuter::Inner::Deep::SumTwice(p), "three levels, a sibling name unqualified");
 	AssertIntEquals(10, NnOuter::Inner::Reopened(), "the shorthand reopens a namespace");
 	AssertIntEquals(3, NnHost::Mid::Leaf::Depth(), "a shorthand inside a namespace");
+	AssertIntEquals(3, NnOuter::RelativeReport(), "Inner::Report() constructs the nested namespace's type (BUG-456)");
+	AssertIntEquals(4, NnOuter::RelativeConstant(), "Inner::c_Lanes is the nested namespace's constant (BUG-456)");
+	AssertIntEquals(6, NnOuter::RelativeVariable(), "Inner::s_Count is the nested namespace's variable (BUG-456)");
+	AssertIntEquals(3, NnOuter::RelativeDeclared(), "declared and constructed relative (BUG-456)");
 }

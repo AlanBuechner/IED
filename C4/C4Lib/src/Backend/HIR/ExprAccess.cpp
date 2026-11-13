@@ -484,7 +484,7 @@ namespace Scripting
 			// Float64 value but is a FLOAT - emitting it as an Int64-typed constant (ConstantFP on i64) is
 			// invalid IR. Ask for the variable's declared type and fall back to Int64 only if unavailable
 			// (an enum/template-param constant that has no variable symbol).
-		auto vt = m_Ctx.queries().QueryVariable(path, nullptr, m_Ctx.unitId, m_Ctx.enclosingType);
+		auto vt = m_Ctx.queries().QueryVariable(path, nullptr, m_Ctx.unitId, m_Ctx.enclosingType, m_Ctx.scope);
 		const Type* ct;
 		if (vt.Ok() && vt.value.type) ct = vt.value.type;
 		else if (c.value.kind == ConstantValue::Kind::Float64) ct = m_Ctx.queries().TypeStore()->Builtin(TypeKind::Float64);
@@ -514,7 +514,7 @@ namespace Scripting
 		return Value::R(m_Ctx.out->NewNode<ConstantNode>(ct, c.value), ct);
 		}
 
-		auto variable = m_Ctx.queries().QueryVariable(path, nullptr, m_Ctx.unitId, m_Ctx.enclosingType);
+		auto variable = m_Ctx.queries().QueryVariable(path, nullptr, m_Ctx.unitId, m_Ctx.enclosingType, m_Ctx.scope);
 		if (variable.error == QueryError::NotCallable) // the name is no variable: `Ns::Function` decays to its address (BUG-263)
 			if (auto function = FunctionValue(n, path); function.Ok() || function.error != QueryError::NotFound) return function;
 		auto v = m_Ctx.Fail(n, variable);
