@@ -1,0 +1,45 @@
+// services/iedfolder: a folder or a solution opened gets its .ied/ with the skills folder, and what is there stays.
+
+include "services/IedFolder.ch"
+
+static FS::Path IedFolderScratch(const char* name) {
+	Core::StringBuilder folder;
+	folder.Append(name);
+	folder.AppendInt(Platform::UnixTimeNs());
+	FS::Path root = FS::TempDirectory() / folder.View();
+	FS::MakeDirectories(root.CStr());
+	return root;
+}
+
+[test("server.iedfolder")]
+class IedFolderTests {
+	[test("made_when_missing")]
+	public static void TestMade() {
+		FS::Path root = IedFolderScratch("ied-iedfolder-");
+		assert_true(Ied::MakeIedFolder(root).IsEmpty(), "nothing to say");
+		assert_true(FS::IsDirectory((root / ".ied/skills").CStr()), "the skills folder is there");
+		assert_true(!FS::IsDirectory((root / ".ied/local").CStr()), "no per-machine state in the folder");
+		FS::RemoveAll(root.CStr());
+	}
+
+	[test("what_is_there_stays")]
+	public static void TestKept() {
+		FS::Path root = IedFolderScratch("ied-iedfolder-kept-");
+		FS::Path skill = root / ".ied/skills/a/SKILL.md";
+		FS::MakeDirectories(skill.Parent().CStr());
+		FS::WriteFileAtomically(skill.CStr(), (const void*)"x", 1);
+		assert_true(Ied::MakeIedFolder(root).IsEmpty() && Ied::MakeIedFolder(root).IsEmpty(), "again and again, nothing to say");
+		assert_true(FS::FileExists(skill.CStr()), "a skill stays");
+		FS::RemoveAll(root.CStr());
+	}
+
+	[test("a_file_in_the_way")]
+	public static void TestBlocked() {
+		FS::Path root = IedFolderScratch("ied-iedfolder-file-");
+		FS::WriteFileAtomically((root / ".ied").CStr(), (const void*)"x", 1);
+		Core::Array<Core::String> said = Ied::MakeIedFolder(root);
+		assert_eq((int64)1, said.Count(), "said once");
+		assert_true(said[0].View().StartsWith(Core::StringView("could not make ")), said[0].CStr());
+		FS::RemoveAll(root.CStr());
+	}
+}

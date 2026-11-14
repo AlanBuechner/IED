@@ -37,7 +37,7 @@ class TrustTests(ServerTestCase):
 		self.assertEqual({"trusted": True}, await client.request("ws.setTrust", {"wsId": ws["wsId"], "trusted": True}))
 		client.abort()
 		data = self.server.data
-		self.assertFalse(os.path.exists(os.path.join(self.folder, ".ied")), "nothing is written into the repository")
+		self.assertEqual(["skills"], os.listdir(os.path.join(self.folder, ".ied")), "the choice is not written into the repository: its .ied/ has the skills folder alone")
 		client, ws = await self.workspace(data)
 		self.assertTrue(ws["trusted"], "the choice survives a restart")
 		await client.request("ws.setTrust", {"wsId": ws["wsId"], "trusted": False})

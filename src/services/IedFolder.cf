@@ -1,0 +1,15 @@
+include "IedFolder.ch"
+
+namespace Ied
+{
+	const char*[1] c_IedFolders = { "skills" };
+
+	Core::Array<Core::String> MakeIedFolder(const FS::Path& root) {
+		Core::Array<Core::String> said;
+		for (const char* name : c_IedFolders) {
+			FS::Path folder = root / ".ied" / name;
+			if (!FS::IsDirectory(folder.CStr()) && !FS::MakeDirectories(folder.CStr())) said.Push(Core::String("could not make ") + folder.View());
+		}
+		return said;
+	}
+}

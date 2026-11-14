@@ -1,6 +1,6 @@
 """Layouts on disk (docs/10 "layout:<wsId>:<deviceClass>"): a folder's in the app data, keyed by the folder, so opening a
-folder writes nothing into it; a solution's in its .ied/local/layout/; both kept across a restart; a file that is not a
-layout is ignored with a log line."""
+folder writes only its .ied/skills/ into it; a solution's in its .ied/local/layout/; both kept across a restart; a file
+that is not a layout is ignored with a log line."""
 
 import json
 import os
@@ -60,7 +60,9 @@ class LayoutFileTests(ServerTestCase):
 		self.assertEqual(1, await self.store(client, "desktop", DOCUMENT))
 		with open(os.path.join(self.folder_layouts(self.folder), "desktop.json"), encoding="utf-8") as f:
 			self.assertEqual({"revision": 1, "layout": DOCUMENT}, json.load(f))
-		self.assertEqual([], os.listdir(self.folder), "opening a folder writes nothing into it")
+		self.assertEqual([".ied"], os.listdir(self.folder), "opening a folder makes its .ied/")
+		self.assertEqual(["skills"], os.listdir(os.path.join(self.folder, ".ied")), "with the skills folder, and no state of this machine's")
+		self.assertEqual([], os.listdir(os.path.join(self.folder, ".ied", "skills")))
 		self.start(self.folder)
 		client = await self.connect()
 		self.assertEqual({"revision": 1, "layout": DOCUMENT}, await self.stored(client, "desktop"), "kept across a restart")
@@ -76,6 +78,7 @@ class LayoutFileTests(ServerTestCase):
 		with open(os.path.join(self.folder, ".ied", "local", "layout", "phone.json"), encoding="utf-8") as f:
 			self.assertEqual({"revision": 1, "layout": DOCUMENT}, json.load(f))
 		self.assertFalse(os.path.exists(os.path.join(self.data, "app", "workspaces")), "nothing in the app data")
+		self.assertTrue(os.path.isdir(os.path.join(self.folder, ".ied", "skills")), "a solution's .ied/ has the skills folder too")
 
 	async def test_a_file_that_is_not_a_layout_is_ignored(self):
 		layouts = self.folder_layouts(self.folder)

@@ -109,8 +109,8 @@ class TwoWorkspaceTests(ServerTestCase):
 		beta = await self.socket("w2")
 		try:
 			self.assertNotEqual(alpha.welcome["sessionEpoch"], beta.welcome["sessionEpoch"], "two servers, two epochs")
-			self.assertEqual(["a.txt"], [e["name"] for e in (await alpha.request("fs.list", {"wsId": "w1", "path": ""}))["entries"]])
-			self.assertEqual(["b.txt"], [e["name"] for e in (await beta.request("fs.list", {"wsId": "w2", "path": ""}))["entries"]])
+			self.assertEqual([".ied", "a.txt"], [e["name"] for e in (await alpha.request("fs.list", {"wsId": "w1", "path": ""}))["entries"]])
+			self.assertEqual([".ied", "b.txt"], [e["name"] for e in (await beta.request("fs.list", {"wsId": "w2", "path": ""}))["entries"]])
 			self.assertEqual(["w1"], [w["wsId"] for w in (await alpha.request("ws.list"))["workspaces"]], "a workspace server has its own workspace alone")
 			with self.assertRaises(RpcFailure) as other:
 				await alpha.request("fs.list", {"wsId": "w2", "path": ""})
@@ -139,7 +139,7 @@ class TwoWorkspaceTests(ServerTestCase):
 			master.abort()
 		routed = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		try:
-			self.assertEqual(["b.txt"], [e["name"] for e in (await routed.request("fs.list", {"wsId": "w2", "path": ""}))["entries"]], "a wsId goes to its server")
+			self.assertEqual([".ied", "b.txt"], [e["name"] for e in (await routed.request("fs.list", {"wsId": "w2", "path": ""}))["entries"]], "a wsId goes to its server")
 			self.assertIn("claude", await routed.request("ai.usage"), "a master route goes to the master")
 			self.assertEqual({"w1", "w2"}, set(routed.workspaces), "one socket per workspace server")
 		finally:
@@ -192,7 +192,7 @@ class TwoWorkspaceTests(ServerTestCase):
 			os.kill(killed, signal.SIGTERM)
 			await alpha.wait_closed(10)
 			self.assertEqual(1012, alpha.close_code, "the browser's side is told its server went away")
-			self.assertEqual(["b.txt"], [e["name"] for e in (await beta.request("fs.list", {"wsId": "w2", "path": ""}))["entries"]], "the other workspace goes on, on the same socket")
+			self.assertEqual([".ied", "b.txt"], [e["name"] for e in (await beta.request("fs.list", {"wsId": "w2", "path": ""}))["entries"]], "the other workspace goes on, on the same socket")
 			frames = await master.wait_for("server", lambda f: f.get("kind") == "workspace.changed" and f["data"]["wsId"] == "w1" and f["data"]["server"]["state"] == "ready", timeout=60)
 			states = [f["data"]["server"]["state"] for f in frames if f.get("kind") == "workspace.changed" and f["data"]["wsId"] == "w1"]
 			self.assertEqual("restarting", states[0], states)
@@ -203,7 +203,7 @@ class TwoWorkspaceTests(ServerTestCase):
 			again = await self.socket("w1")
 			try:
 				self.assertNotEqual(alpha.welcome["sessionEpoch"], again.welcome["sessionEpoch"], "a new server, a new epoch: the client resumes by snapshot")
-				self.assertEqual(["a.txt"], [e["name"] for e in (await again.request("fs.list", {"wsId": "w1", "path": ""}))["entries"]])
+				self.assertEqual([".ied", "a.txt"], [e["name"] for e in (await again.request("fs.list", {"wsId": "w1", "path": ""}))["entries"]])
 				self.assertEqual(["w1"], [w["wsId"] for w in (await again.request("ws.list"))["workspaces"]], "it keeps its id")
 			finally:
 				again.abort()
@@ -340,7 +340,7 @@ class ResumeAfterKillTests(ChatCase):
 		killed = [w for w in status(self.server)["workspaces"] if w["wsId"] == "w1"][0]["server"]["pid"]
 		os.kill(killed, signal.SIGTERM)
 		await_servers(self.server, 1, check=lambda w: w["wsId"] == "w1" and w["server"]["state"] == "ready" and w["server"]["restarts"] == 1)
-		self.assertEqual(["readme.txt"], [e["name"] for e in (await other.request("fs.list", {"wsId": "w2", "path": ""}))["entries"]])
+		self.assertEqual([".ied", "readme.txt"], [e["name"] for e in (await other.request("fs.list", {"wsId": "w2", "path": ""}))["entries"]])
 		self.assertEqual(before, other.welcome["sessionEpoch"], "the other workspace's server did not restart")
 		self.assertFalse(other.closed.is_set())
 		deadline = time.time() + 30

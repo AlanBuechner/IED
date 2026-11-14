@@ -7,7 +7,7 @@ A **workspace** is what one browser tab views. It is one of:
 | Kind | Opened from | Has `.ied/`? | Notes |
 |---|---|---|---|
 | **Solution** | `*.iedsln` | yes (at the solution root) | Full feature set. |
-| **Folder** | `ied ./`, *Open Folder*, Explorer right-click | created lazily on the first workspace-tier write (setting, skill, trust record stays in app data) | No projects: tree = the folder; toolbar from `.ied/folder.json` if present. |
+| **Folder** | `ied ./`, *Open Folder*, Explorer right-click | yes: `.ied/skills/` is made when it opens (`docs/07` "A workspace's `.ied/`"); its per-machine state and its trust record stay in the app data | No projects: tree = the folder; toolbar from `.ied/folder.json` if present. |
 | **File** | `ied file.txt`, Explorer right-click on a file | no | Opens the file's folder as a hidden lightweight folder workspace, with only that document open and the tree collapsed. |
 | **Federation** | `*.iedfed` or *Add root to workspace* | each member keeps its own `.ied/` | Several solutions/folders in one workspace (see below). |
 

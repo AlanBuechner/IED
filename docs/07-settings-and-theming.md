@@ -11,7 +11,7 @@ Two things: the settings tier model (what lives where, who wins) and the visual 
 | **App** (User) | `%APPDATA%/IED/settings.json` (+ `keybindings.json`) | this owner, all workspaces | model profiles, the programs IED runs (`cpp.clangd.path`, `nuke.command`, `terminal.shell`), keybindings, the editor's look, Claude, web search and Tor, how long things idle |
 | **Solution** | `<solution>/.ied/solution.json` (or `.ied/solutions/<Name>.json` when several solutions share a folder) - committed | this solution on every machine | the AI's defaults by use and default model, what AI edits do (format, diagnostics), sub-agents, which language servers run and clangd's arguments, git's pull mode, the profiler's target frame rate |
 | **Project** | `<solution>/.ied/projects/<Name>.json` - committed | one project | MCP servers; a project-local plugin's settings |
-| Workspace state | `<solution>/.ied/local/` - gitignored; for a folder or file workspace `<app data>/workspaces/<key>/` (opening a folder writes nothing into it; `key` the first 16 hex digits of the SHA-256 of the folder's path compared without case or separator kind). A workspace-relative path under `.ied/local/` names a file there wherever it is - the protocol (`fs.*`, `GET /w/<wsId>/files/`), plugins (`IED::WorkspaceFile`, `docs/26`), the AI and the clients use the one path. What an older server kept of IED's own in a plain folder's `.ied/local/` moves there when the folder opens (a folder holding a solution file keeps the solution's); a build's `lsp-options` stay. A folder made a solution (`docs/03` "Managing projects") keeps its app-data state while it stays open, and that state (chats, layouts, breakpoints, selections, the browser's, captures) moves into the solution's `.ied/local/` when it next opens, what the solution has already kept | this machine | layouts per device class, open documents, toolbar selections, startup project, breakpoints, bookmarks, chats and their media, the browser's pages and shots, GPU and profiler captures |
+| Workspace state | `<solution>/.ied/local/` - gitignored; for a folder or file workspace `<app data>/workspaces/<key>/` (opening a folder writes no state of this machine's into it, only its `.ied/skills/` - see "A workspace's `.ied/`" below; `key` the first 16 hex digits of the SHA-256 of the folder's path compared without case or separator kind). A workspace-relative path under `.ied/local/` names a file there wherever it is - the protocol (`fs.*`, `GET /w/<wsId>/files/`), plugins (`IED::WorkspaceFile`, `docs/26`), the AI and the clients use the one path. What an older server kept of IED's own in a plain folder's `.ied/local/` moves there when the folder opens (a folder holding a solution file keeps the solution's); a build's `lsp-options` stay. A folder made a solution (`docs/03` "Managing projects") keeps its app-data state while it stays open, and that state (chats, layouts, breakpoints, selections, the browser's, captures) moves into the solution's `.ied/local/` when it next opens, what the solution has already kept | this machine | layouts per device class, open documents, toolbar selections, startup project, breakpoints, bookmarks, chats and their media, the browser's pages and shots, GPU and profiler captures |
 
 Rules:
 
@@ -20,6 +20,19 @@ Rules:
 - Validation is visible: invalid values show in the settings window and as Error List entries pointing at the JSON line; the previous valid value stays in effect.
 - Settings files are watched (git pull, hand edits apply live) and written preserving comments.
 - **Secrets never live in settings files**: settings reference `{ "secret": "<name>" }` (Windows Credential Manager) or `{ "env": "VAR" }`.
+
+### A workspace's `.ied/` (2026-11-13)
+
+Owner, 2026-11-13: "opening IED in a folder should still create the .ied folder for skills and scratch pad." A folder or
+a solution the owner opens gets `<root>/.ied/skills/` at once, made by its workspace server when it is missing
+(`src/services/IedFolder.cf`; unit `server.iedfolder`; server checks `test_layouts`, `test_trust`, `test_servers`,
+`test_watching` - made before the folder is watched, so no client hears of it as an outside change), so
+the owner and the AI see where the workspace's own skills go (`docs/04` "Skills"). It is the committed part of `.ied/`
+only: a folder's per-machine state still lives in the app data (the "Workspace state" row above), and trusting a folder
+still writes nothing into it. A file opened on its own (its folder a hidden lightweight workspace) and a folder a plugin
+opens (developer mode's IED source) are left as they are; a folder that cannot take it (read-only, or a file named
+`.ied`) opens all the same, the reason in the IED output. The chat's scratchpad (`features/07` F-CHT-70, not built yet)
+is the other thing the owner named: it keeps its notes in the workspace's `.ied/` when it is built.
 
 ### Which tier a setting belongs in (2026-11-11)
 

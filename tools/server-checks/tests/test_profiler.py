@@ -770,7 +770,7 @@ class ImporterTests(ProfilerServer):
 		self.assertEqual("upper", entry["metadata"]["format"])
 		self.assertTrue(entry["metadata"]["importedFrom"].endswith("steps.up"), entry["metadata"])
 		leftovers = [n for n in os.listdir(os.path.join(local_state(self.data, self.ws), "captures")) if n.startswith(".import-")]
-		self.assertFalse(os.path.exists(os.path.join(self.ws, ".ied")), "a folder's captures live in the app data")
+		self.assertFalse(os.path.exists(os.path.join(self.ws, ".ied", "local")), "a folder's captures live in the app data")
 		self.assertEqual([], leftovers, "the converted file is removed")
 
 	async def test_a_failing_importer_says_why(self):
