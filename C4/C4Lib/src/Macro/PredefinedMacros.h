@@ -16,7 +16,8 @@ namespace Scripting
 	/// `NAME` or `NAME=VALUE` as written after -D; a NAME without a value is 1.
 	MacroDefine ParseMacroDefine(const std::string& text);
 
-	/// The macros every file starts with (docs/language/02 2.5): `TEST` under -test, `PLATFORM_WINDOWS`,
-	/// `ARCH_X64`, `C4_VERSION` and the target's `SIMD_*` macros (D-62), then the -D definitions, which may replace them.
+	/// The macros every file starts with (docs/language/02 2.5): `TEST` under -test, `PLATFORM_WINDOWS` or
+	/// `PLATFORM_LINUX` (the target's system, D-86), `ARCH_X64`, `C4_VERSION` and the target's `SIMD_*` macros (D-62),
+	/// then the -D definitions, which may replace them.
 	std::map<std::string, std::string> PredefinedMacros(bool test, const CpuTarget& target, const std::vector<MacroDefine>& defines);
 }

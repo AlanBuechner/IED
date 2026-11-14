@@ -18,6 +18,8 @@ namespace Scripting
 	public:
 		virtual ~RegionServices() = default;
 		virtual llvm::BasicBlock* CleanupPadFor(size_t index) = 0;
+		/// Linux (D-86): the landingpad an exception raised just above entry `index` lands at.
+		virtual llvm::BasicBlock* LandingPadFor(size_t index) = 0;
 		virtual void EmitNestedBlock(const BlockNode* block) = 0;
 	};
 
@@ -90,8 +92,11 @@ namespace Scripting
 		CleanupStack& Cleanups() { return m_Cleanups; }
 		void SetRegionServices(RegionServices* region) { m_Region = region; }
 		void EmitNestedBlock(const BlockNode* block) { m_Region->EmitNestedBlock(block); }
+		// Windows lowers exceptions to funclets (cleanuppad, catchswitch, catchpad); Linux to landing pads (D-86).
+		bool Funclets() const { return m_MCtx.System() == TargetSystem::Windows; }
 		// Where an exception raised at the current point goes: the innermost cleanup's pad or try's
-		// catchswitch above the floor, or null (unwind to the caller).
+		// catchswitch above the floor (with landing pads, the landingpad of the innermost entry an exception
+		// passes), or null (unwind to the caller).
 		llvm::BasicBlock* UnwindTarget() { return UnwindTargetBelow(m_Cleanups.Depth(), m_Floor); }
 		llvm::BasicBlock* UnwindTargetBelow(size_t index, size_t floor);
 		// The funclet the insert point is in (a catchpad, or the cleanuppad of a cleanup being emitted for

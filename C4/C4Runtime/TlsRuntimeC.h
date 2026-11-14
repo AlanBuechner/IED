@@ -2,10 +2,11 @@
 // TLS behind Bedrock's Net::TcpStream (D-84): a connected TCP socket of NetRuntimeC.h secured with TLS 1.2 or 1.3, as
 // the client (c4_tls_connect: the server's certificate checked against the system's roots, or extra ones the caller
 // trusts, and against the host name) or as the server (c4_tls_accept, proving itself with an identity loaded from a
-// PKCS #12 file). One set of implementation files per OS (Net/Tls*Win32.c: SChannel, its DLLs loaded when TLS is
-// first used). A session or an identity is an int64 handle, -1 for none. A session sends and receives on its socket;
-// the socket stays the caller's to shut down and close, after c4_tls_free. A call that can fail writes why into
-// `error` as NetRuntimeC.h's calls do.
+// PKCS #12 file). One set of implementation files per OS, each loading its libraries when TLS is first used:
+// Net/Tls*Win32.c over SChannel, Net/Tls*Posix.c over OpenSSL 3 or 1.1 (which refuses a TLS 1.2 renegotiation, and
+// learns no revocation status). A session or an identity is an int64 handle, -1 for none. A session sends and
+// receives on its socket; the socket stays the caller's to shut down and close, after c4_tls_free. A call that can
+// fail writes why into `error` as NetRuntimeC.h's calls do.
 //
 // Threads: one send and one receive may run at once on a session (each kind is serialized); c4_tls_free runs alone,
 // once no other call is in it (a socket shut down both ways ends a call that waits).
@@ -34,8 +35,8 @@ enum { kTlsVersionNone = 0, kTlsVersion12 = 12, kTlsVersion13 = 13 };
 int64_t c4_tls_connect(int64_t socket, const c4_tls_client_options* options, int32_t timeoutMs, char* error, int64_t errorCapacity);
 
 // A server's certificate and private key from a PKCS #12 (.pfx) file's bytes and its password (UTF-8, "" for none),
-// or -1 with why. While it is loaded the key is in the user's key store under a name of its own (SChannel reads keys
-// from there); c4_tls_identity_free deletes it.
+// or -1 with why. On Windows, while it is loaded the key is in the user's key store under a name of its own (SChannel
+// reads keys from there) and c4_tls_identity_free deletes it; OpenSSL keeps it in the process.
 int64_t c4_tls_identity_load(const void* pkcs12, int64_t size, const char* password, char* error, int64_t errorCapacity);
 void c4_tls_identity_free(int64_t identity);
 

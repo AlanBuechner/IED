@@ -1,0 +1,414 @@
+include "SharedMirror.ch"
+include "host/Server.ch"
+include "web/Json.ch"
+include "web/Params.ch"
+
+namespace Ied
+{
+	Core::String MirrorBaseUrl(Core::StringView url, Core::String& problem) {
+		Core::StringView text = url.Trimmed();
+		if (!text.StartsWith(Core::StringView("http://")) && !text.StartsWith(Core::StringView("https://"))) {
+			problem = (Core::String("configServer.url '") + text) + "' is not an http:// or https:// URL";
+			return Core::String();
+		}
+		if (text.EndsWith(Core::StringView("/"))) return Core::String(text);
+		return Core::String(text) + "/";
+	}
+
+	Core::String MirrorToken(Core::StringView valueJson, Core::String& problem) {
+		Serialization::DomDoc doc;
+		Serialization::ReadResult read = Serialization::ReadJson(valueJson, doc);
+		Serialization::DomNode value = read.root;
+		if (!read.Ok() || value.Kind() != Serialization::DomKind::Object) {
+			problem = Core::String("configServer.token is not set: { \"env\": \"<variable>\" } names the environment variable that holds a reader token (docs/35)");
+			return Core::String();
+		}
+		Core::StringView variable = value.Member("env").AsView();
+		if (!variable.IsEmpty()) {
+			Core::String token;
+			if (!Platform::TryGetEnvironmentVariable(Core::String(variable).CStr(), token) || token.View().Trimmed().IsEmpty()) {
+				problem = (Core::String("configServer.token: the environment variable ") + variable) + " is not set for the IED server";
+				return Core::String();
+			}
+			return Core::String(token.View().Trimmed());
+		}
+		Core::StringView secret = value.Member("secret").AsView();
+		if (!secret.IsEmpty()) {
+			problem = (Core::String("configServer.token: { \"secret\": \"") + secret) + "\" } needs the secret store, which IED does not have yet (docs/11 \"Secrets\"); use { \"env\": \"<variable>\" }";
+			return Core::String();
+		}
+		problem = Core::String("configServer.token names neither an environment variable (env) nor a secret");
+		return Core::String();
+	}
+
+	FS::Path SharedMirror::SharedFolder() const { return FS::Path(m_Server->m_Config.m_AppDataDir.View()) / "shared"; }
+
+	void SharedMirror::Start() {
+		{
+			Threading::LockGuard guard(m_Lock);
+			m_State = Core::String("off");
+		}
+		FS::RemoveAll((SharedFolder() / c_StagingFolder).CStr());
+		SharedMirror* self = this;
+		Threading::Thread::Run([self]() { self->Run(); }).Detach();
+	}
+
+	void SharedMirror::Wake() {
+		Threading::LockGuard guard(m_Lock);
+		m_Woken = true;
+		m_Wake.NotifyAll();
+	}
+
+	void SharedMirror::Sleep(int64 ms) {
+		Threading::LockGuard guard(m_Lock);
+		const int64 deadline = clock_now_ns() + ms * 1000000;
+		while (!m_Woken) {
+			const int64 left = deadline - clock_now_ns();
+			if (left <= 0) break;
+			m_Wake.WaitFor(m_Lock, left);
+		}
+		m_Woken = false;
+	}
+
+	Core::String SharedMirror::StatusJson() {
+		Threading::LockGuard guard(m_Lock);
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("state", m_State.IsEmpty() ? Core::StringView("off") : m_State.View());
+		json.Field("url", m_Url.View());
+		if (!m_Error.IsEmpty()) json.Field("error", m_Error.View());
+		if (!m_Version.IsEmpty()) json.Field("version", m_Version.View());
+		if (m_SyncedMs > 0) json.IntField("syncedMs", m_SyncedMs);
+		json.IntField("plugins", m_Plugins);
+		json.IntField("skills", m_Skills);
+		json.EndObject();
+		return json.ToString();
+	}
+
+	static bool IsMirrorTrouble(Core::StringView state) { return state == "unreachable" || state == "refused" || state == "failed"; }
+
+	// A new state or error: the server topic hears it, the IED output gets a line, and following that stops (or never
+	// starts) is a notification - once, until it follows again.
+	void SharedMirror::SetStatus(Core::StringView state, Core::StringView url, Core::StringView error) {
+		Core::String before;
+		{
+			Threading::LockGuard guard(m_Lock);
+			if (m_State.View() == state && m_Url.View() == url && m_Error.View() == error) return;
+			before = m_State;
+			m_State = Core::String(state);
+			m_Url = Core::String(url);
+			m_Error = Core::String(error);
+		}
+		Core::String status = StatusJson();
+		Core::StringBuilder line;
+		line.Append("config server ");
+		line.Append(url.IsEmpty() ? Core::StringView("(none)") : url);
+		line.Append(": ");
+		line.Append(state);
+		if (!error.IsEmpty()) {
+			line.Append(" - ");
+			line.Append(error);
+		}
+		m_Server->Log(line.View());
+		Threading::LockGuard guard(m_Server->m_Lock);
+		m_Server->m_Hub.Publish(Core::StringView("server"), "configServer.changed", status.View());
+		if (IsMirrorTrouble(state) && !IsMirrorTrouble(before.View())) {
+			Core::StringBuilder note;
+			note.Append("The config server ");
+			note.Append(url);
+			note.Append(state == "refused" ? " refused IED: " : state == "failed" ? " could not be mirrored: " : " cannot be reached: ");
+			note.Append(error);
+			note.Append(". IED goes on with the shared settings, plugins and skills it mirrored last.");
+			m_Server->m_Presence->Add(Core::StringView("warning"), note.View());
+		}
+	}
+
+	void SharedMirror::Synced(Core::StringView version, int64 plugins, int64 skills) {
+		{
+			Threading::LockGuard guard(m_Lock);
+			m_Version = Core::String(version);
+			m_SyncedMs = Platform::UnixTimeNs() / 1000000;
+			m_Plugins = plugins;
+			m_Skills = skills;
+		}
+		Core::String status = StatusJson();
+		Threading::LockGuard guard(m_Server->m_Lock);
+		m_Server->m_Hub.Publish(Core::StringView("server"), "configServer.changed", status.View());
+	}
+
+	void SharedMirror::Record(const char* event, Core::StringView fields) {
+		Threading::LockGuard guard(m_Server->m_Lock);
+		m_Server->m_Auth->Record(event, fields);
+	}
+
+	static Core::String MirrorSettingText(Server* server, const char* key) {
+		Core::String json = server->m_Settings->Effective(nullptr, Core::StringView(""), Core::StringView(key));
+		Serialization::DomDoc doc;
+		Serialization::ReadResult read = Serialization::ReadJson(json.View(), doc);
+		return read.Ok() && read.root.Kind() == Serialization::DomKind::String ? Core::String(read.root.AsView()) : Core::String();
+	}
+
+	MirrorTarget SharedMirror::Target() {
+		MirrorTarget target;
+		Core::String url;
+		Core::String token;
+		Core::String certificate;
+		{
+			Threading::LockGuard guard(m_Server->m_Lock);
+			url = MirrorSettingText(m_Server, "configServer.url");
+			token = m_Server->m_Settings->Effective(nullptr, Core::StringView(""), Core::StringView("configServer.token"));
+			certificate = MirrorSettingText(m_Server, "configServer.certificate");
+		}
+		if (url.View().Trimmed().IsEmpty()) return target;
+		target.m_Url = MirrorBaseUrl(url.View(), target.m_Problem);
+		if (target.m_Url.IsEmpty()) {
+			target.m_Url = Core::String(url.View().Trimmed());
+			return target;
+		}
+		target.m_Token = MirrorToken(token.View(), target.m_Problem);
+		if (!target.m_Problem.IsEmpty() || certificate.IsEmpty()) return target;
+		FS::File opened = FS::File(certificate.CStr(), "rb");
+		if (!opened.IsOpen()) {
+			target.m_Problem = (Core::String("configServer.certificate ") + certificate.View()) + " cannot be read";
+			return target;
+		}
+		Core::String pem = opened.ReadText();
+		for (int64 i = 0; i < pem.View().ByteLength(); ++i) target.m_Tls.extraRoots.Push((uint8)pem.View().ByteAt(i));
+		return target;
+	}
+
+	static Http::FetchResult AskConfigServer(const MirrorTarget& target, Core::StringView path, int32 timeoutMs) {
+		Http::Request request;
+		request.method = Core::String("GET");
+		request.headers.Set(Core::StringView("Authorization"), (Core::String("Bearer ") + target.m_Token.View()).View());
+		request.headers.Set(Core::StringView("User-Agent"), Core::StringView("ied-server"));
+		return Http::FetchUrl((target.m_Url + path).View(), request, target.m_Tls, timeoutMs);
+	}
+
+	// Why an answer is not the one asked for: its status and the message of a JSON error body.
+	static Core::String UnexpectedAnswer(const Http::FetchResult& got) {
+		Core::StringBuilder why;
+		why.Append("HTTP ");
+		why.AppendInt(got.response.status);
+		Serialization::DomDoc doc;
+		Serialization::ReadResult read = Serialization::ReadJson(got.response.BodyText(), doc);
+		Core::StringView message = read.Ok() ? read.root.Member("message").AsView() : Core::StringView("");
+		if (!message.IsEmpty()) {
+			why.Append(": ");
+			why.Append(message);
+		}
+		return why.ToString();
+	}
+
+	void SharedMirror::Run() {
+		Threading::Thread::SetCurrentName("ied-config-mirror");
+		Core::String since;
+		Core::String following;
+		int64 backoffMs = 1000;
+		for (;;) {
+			MirrorTarget target = Target();
+			if (target.m_Url.View() != following.View()) {
+				following = target.m_Url;
+				since = Core::String();
+				backoffMs = 1000;
+				if (!target.m_Url.IsEmpty()) SetStatus(Core::StringView("connecting"), target.m_Url.View(), Core::StringView(""));
+			}
+			if (target.m_Url.IsEmpty()) {
+				SetStatus(Core::StringView("off"), Core::StringView(""), Core::StringView(""));
+				Sleep(5000);
+				continue;
+			}
+			if (!target.m_Problem.IsEmpty()) {
+				SetStatus(Core::StringView("refused"), target.m_Url.View(), target.m_Problem.View());
+				Sleep(5000);
+				continue;
+			}
+			if (Follow(target, since)) {
+				backoffMs = 1000;
+				continue;
+			}
+			Sleep(backoffMs);
+			backoffMs = backoffMs * 2 > c_MirrorMostBackoffMs ? c_MirrorMostBackoffMs : backoffMs * 2;
+		}
+	}
+
+	// One state request, and the mirror brought up to what it answers; false (the status saying why) when that could
+	// not be done, so the caller waits before it asks again.
+	bool SharedMirror::Follow(const MirrorTarget& target, Core::String& since) {
+		Core::StringBuilder path;
+		path.Append("config/v1/state");
+		if (!since.IsEmpty()) {
+			path.Append("?since=");
+			path.Append(since.View());
+			path.Append("&wait=");
+			path.AppendInt(c_MirrorWaitS);
+		}
+		Http::FetchResult got = AskConfigServer(target, path.View(), (int32)(c_MirrorWaitS * 1000) + c_MirrorSlackMs);
+		if (!got.ok) {
+			SetStatus(Core::StringView("unreachable"), target.m_Url.View(), got.error.View());
+			return false;
+		}
+		if (got.response.status == 401 || got.response.status == 403) {
+			SetStatus(Core::StringView("refused"), target.m_Url.View(), UnexpectedAnswer(got).View());
+			return false;
+		}
+		if (got.response.status != 200) {
+			SetStatus(Core::StringView("unreachable"), target.m_Url.View(), UnexpectedAnswer(got).View());
+			return false;
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(got.response.BodyText(), *doc);
+		Core::StringView version = read.Ok() ? read.root.Member("version").AsView() : Core::StringView("");
+		if (version.IsEmpty()) {
+			SetStatus(Core::StringView("failed"), target.m_Url.View(), Core::StringView("its state is not a config server's (no version)"));
+			return false;
+		}
+		if (version == since.View()) {
+			SetStatus(Core::StringView("following"), target.m_Url.View(), Core::StringView(""));
+			return true;
+		}
+		Core::String problem;
+		if (!Mirror(target, read.root, problem)) {
+			SetStatus(Core::StringView("failed"), target.m_Url.View(), problem.View());
+			return false;
+		}
+		since = Core::String(version);
+		Synced(version, read.root.Member("plugins").Count(), read.root.Member("skills").Count());
+		SetStatus(Core::StringView("following"), target.m_Url.View(), Core::StringView(""));
+		return true;
+	}
+
+	bool SharedMirror::Mirror(const MirrorTarget& target, const Serialization::DomNode& state, Core::String& problem) {
+		FS::MakeDirectories(SharedFolder().CStr());
+		if (!WriteSettings(target, state.Member("settings"), problem)) return false;
+		if (!MirrorKind(target, Core::StringView("plugins"), state.Member("plugins"), "id", problem)) return false;
+		return MirrorKind(target, Core::StringView("skills"), state.Member("skills"), "name", problem);
+	}
+
+	// shared/settings.json: the served settings, said to be the config server's, written when they changed.
+	bool SharedMirror::WriteSettings(const MirrorTarget& target, const Serialization::DomNode& settings, Core::String& problem) {
+		Core::StringBuilder text;
+		text.Append("// The config server's settings (");
+		text.Append(target.m_Url.View());
+		text.Append("), mirrored by IED: the Shared tier, under your own (docs/35). Edits here are replaced.\n");
+		if (settings.Kind() == Serialization::DomKind::Object) Serialization::WriteJson(settings, &text, 2);
+		else text.Append("{}");
+		text.AppendByte('\n');
+		FS::Path file = SharedFolder() / "settings.json";
+		if (FS::FileExists(file.CStr())) {
+			FS::File opened = FS::File(file.CStr(), "rb");
+			if (opened.ReadText().View() == text.View()) return true;
+		}
+		if (FS::WriteFileAtomically(file.CStr(), (const void*)text.View().Data(), text.ByteLength())) return true;
+		problem = Core::String("cannot write ") + file.View();
+		return false;
+	}
+
+	static Core::String MirrorSecurityFields(Core::StringView kind, Core::StringView id, Core::StringView hash, Core::StringView url) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field(kind == "plugins" ? "plugin" : "skill", id);
+		if (!hash.IsEmpty()) json.Field("hash", hash);
+		json.Field("server", url);
+		json.EndObject();
+		Core::StringView members = json.View();
+		return Core::String(members.Substring(1, members.ByteLength() - 2));
+	}
+
+	// shared/<kind>/: each package served whose copy is not whole and current fetched and put in place; each one there
+	// that is no longer served removed. A shared plugin is trusted as the config server is, so its install is in the
+	// security log (docs/11).
+	bool SharedMirror::MirrorKind(const MirrorTarget& target, Core::StringView kind, const Serialization::DomNode& listed, const char* idField, Core::String& problem) {
+		FS::Path folder = SharedFolder() / kind;
+		FS::Path staging = SharedFolder() / c_StagingFolder;
+		FS::MakeDirectories(folder.CStr());
+		Core::HashMap<Core::String, bool> served;
+		for (int64 i = 0; i < listed.Count(); ++i) {
+			Core::StringView id = listed.At(i).Member(idField).AsView();
+			Core::StringView hash = listed.At(i).Member("hash").AsView();
+			if (!IsPackageName(id)) {
+				problem = (Core::String("it serves a package named '") + id) + "', which is no package name";
+				return false;
+			}
+			served.At(Core::String(id)) = true;
+			FS::Path local = folder / id;
+			if (FS::IsDirectory(local.CStr()) && PackageHash(ListPackage(local)).View() == hash) continue;
+			FS::Path into = staging / ((Core::String(kind) + "-") + id).View();
+			if (!Fetch(target, kind, id, hash, into, problem)) return false;
+			Core::String why;
+			if (!SwapFolder(into, local, staging / ((Core::String(".old-") + kind + "-") + id).View(), why)) {
+				problem = why;
+				return false;
+			}
+			if (kind == "plugins") Record("shared-plugin-installed", MirrorSecurityFields(kind, id, hash, target.m_Url.View()).View());
+			m_Server->Log((((Core::String("config server: mirrored ") + kind) + "/") + id).View());
+		}
+		Core::Array<Core::String> stale;
+		{
+			FS::Directory listing = FS::Directory(folder.CStr());
+			for (FS::DirectoryEntry& entry : listing)
+				if (entry.kind == FS::EntryKind::Directory && !served.Contains(entry.name)) stale.Push(entry.name);
+		}
+		for (const Core::String& id : stale) {
+			Core::String why;
+			FS::Path aside = staging / ((Core::String(".gone-") + kind + "-") + id.View()).View();
+			FS::RemoveAll(aside.CStr());
+			FS::MakeDirectories(staging.CStr());
+			if (!FS::Rename((folder / id.View()).CStr(), aside.CStr())) {
+				problem = (((Core::String("shared ") + kind) + "/") + id.View()) + " is no longer served but cannot be removed: a file of it is open";
+				return false;
+			}
+			FS::RemoveAll(aside.CStr());
+			if (kind == "plugins") Record("shared-plugin-removed", MirrorSecurityFields(kind, id.View(), Core::StringView(""), target.m_Url.View()).View());
+			m_Server->Log((((Core::String("config server: removed shared ") + kind) + "/") + id.View()).View());
+		}
+		return true;
+	}
+
+	// One package's files into `into`, each checked against its hash and the whole against `hash`.
+	bool SharedMirror::Fetch(const MirrorTarget& target, Core::StringView kind, Core::StringView id, Core::StringView hash, const FS::Path& into, Core::String& problem) {
+		FS::RemoveAll(into.CStr());
+		FS::MakeDirectories(into.CStr());
+		Core::String base = (((Core::String("config/v1/") + kind) + "/") + id) + "/";
+		Http::FetchResult got = AskConfigServer(target, (base + "files").View(), 60000);
+		if (!got.ok || got.response.status != 200) {
+			problem = ((Core::String("its file list of ") + id) + ": ") + (got.ok ? UnexpectedAnswer(got).View() : got.error.View());
+			return false;
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(got.response.BodyText(), *doc);
+		if (!read.Ok() || read.root.Kind() != Serialization::DomKind::Array) {
+			problem = (Core::String("its file list of ") + id) + " is not a list";
+			return false;
+		}
+		for (int64 i = 0; i < read.root.Count(); ++i) {
+			Core::StringView path = read.root.At(i).Member("path").AsView();
+			Core::String why;
+			if (!IsPackagePath(path, why)) {
+				problem = (((Core::String(id) + ": ") + why.View()));
+				return false;
+			}
+			Http::FetchResult file = AskConfigServer(target, ((base + "file/") + EscapeUrlPath(path).View()).View(), 120000);
+			if (!file.ok || file.response.status != 200) {
+				problem = ((((Core::String(id) + "/") + path) + ": ") + (file.ok ? UnexpectedAnswer(file).View() : file.error.View()));
+				return false;
+			}
+			Core::StringView bytes = file.response.BodyText();
+			if (BytesHash(bytes).View() != read.root.At(i).Member("hash").AsView()) {
+				problem = (((Core::String(id) + "/") + path) + " changed while it was fetched; it is fetched again");
+				return false;
+			}
+			FS::Path written = into / path;
+			FS::MakeDirectories(written.Parent().CStr());
+			if (!FS::WriteFileAtomically(written.CStr(), (const void*)bytes.Data(), bytes.ByteLength())) {
+				problem = Core::String("cannot write ") + written.View();
+				return false;
+			}
+		}
+		if (PackageHash(ListPackage(into)).View() != hash) {
+			problem = (Core::String(id) + " changed while it was fetched; it is fetched again");
+			return false;
+		}
+		return true;
+	}
+}

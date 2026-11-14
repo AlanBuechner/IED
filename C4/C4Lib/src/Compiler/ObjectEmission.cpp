@@ -134,8 +134,12 @@ namespace Scripting
 				return nullptr;
 			}
 			llvm::TargetOptions options;
+			// ELF startup runs .init_array; nothing runs the old .ctors LLVM writes otherwise (clang sets this for Linux).
+			options.UseInitArray = triple.isOSBinFormatELF();
+			// A Linux program is position independent (PIE), as clang builds one by default (D-86).
+			const std::optional<llvm::Reloc::Model> relocation = triple.isOSLinux() ? std::optional(llvm::Reloc::PIC_) : std::nullopt;
 			std::unique_ptr<llvm::TargetMachine> machine(target->createTargetMachine(triple, settings.target->Cpu(),
-				settings.target->LlvmFeatures(), options, std::nullopt, std::nullopt, CodeGenLevel(settings.optLevel)));
+				settings.target->LlvmFeatures(), options, relocation, std::nullopt, CodeGenLevel(settings.optLevel)));
 			module.setDataLayout(machine->createDataLayout());
 			return machine;
 		}

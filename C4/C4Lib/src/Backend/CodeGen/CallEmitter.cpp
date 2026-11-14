@@ -85,6 +85,7 @@ namespace Scripting
 			: ResolveCallee(n, thisArg);
 		const bool mayThrow = !(n->callee && n->callee->isNoexcept);
 		llvm::CallBase* call = m_Ctx.Call(callee.type, callee.target, args, mayThrow);
+		PassOnStack(call);
 		if (destination) return nullptr;
 		return Result(n, call, sret, retType);
 	}
@@ -121,8 +122,26 @@ namespace Scripting
 		{
 			if (!site.args[i]) continue;
 			bool named = i < paramTys.size();
-			args.push_back(EmitArgument(site, i, named ? paramTys[i] : site.args[i]->type, variadic && !named));
+			const Type* type = named ? paramTys[i] : site.args[i]->type;
+			// System V passes an aggregate that goes in memory through `...` on the stack, where va_arg reads it (as C
+			// does): its hidden pointer is byval at this call.
+			if (variadic && !named && m_Ctx.mctx().abi().PassesOnStack(type))
+				m_StackArguments.push_back({ static_cast<unsigned>(args.size()), type });
+			args.push_back(EmitArgument(site, i, type, variadic && !named));
 		}
+	}
+
+	void CallEmitter::PassOnStack(llvm::CallBase* call)
+	{
+		ModuleContext& mc = m_Ctx.mctx();
+		for (const auto& [index, type] : m_StackArguments)
+		{
+			llvm::Type* storage = mc.Lower(type);
+			const uint64_t align = std::max<uint64_t>(8, mc.layout().getABITypeAlign(storage).value());
+			call->addParamAttr(index, llvm::Attribute::getWithByValType(mc.context(), storage));
+			call->addParamAttr(index, llvm::Attribute::getWithAlignment(mc.context(), llvm::Align(align)));
+		}
+		m_StackArguments.clear();
 	}
 
 	llvm::Value* CallEmitter::EmitArgument(const CallSite& site, uint32_t i, const Type* paramType, bool variadicExtra)
@@ -146,9 +165,8 @@ namespace Scripting
 			if (llvm::Value* msvc = LinkedInitializerList(v, paramType)) return msvc;
 		if (!paramType) return v;
 		if (variadicExtra) v = PromoteVariadic(v, paramType);
-		uint32_t intSize = abi.ByValueIntSize(paramType);
-		if (intSize != 0) // aggregate riding in one GPR: reinterpret its bytes as an int of that width
-			return m_Ctx.builder().CreateLoad(llvm::IntegerType::get(mc.context(), intSize * 8), m_Ctx.Materialize(v, mc.Lower(paramType)));
+		if (llvm::Type* registers = abi.RegisterType(paramType)) // an aggregate in registers: its bytes read as their type
+			return m_Ctx.builder().CreateLoad(registers, m_Ctx.Materialize(v, abi.CoercionSlot(mc.Lower(paramType), registers)));
 		if (abi.PassesByHiddenPtr(paramType)) return m_Ctx.Materialize(v, mc.Lower(paramType));
 		return v;
 	}
@@ -237,22 +255,23 @@ namespace Scripting
 	{
 		auto& B = m_Ctx.builder();
 		ModuleContext& mc = m_Ctx.mctx();
-		// A by-value aggregate that returns in a register rides as an integer of its width: unpack it through a
-		// temporary. `materialize` (member access on the result) wants the result's address instead: the sret
-		// slot, or a temporary holding what came back in a register (an integer or a SIMD vector).
-		uint32_t retIntSize = sret || !retType ? 0 : mc.abi().ByValueIntSize(retType);
+		// A by-value aggregate that returns in registers rides as its RegisterType: unpack it through a temporary.
+		// `materialize` (member access on the result) wants the result's address instead: the sret slot, or a
+		// temporary holding what came back in registers (an aggregate's, or a SIMD vector).
+		llvm::Type* registers = sret || !retType ? nullptr : mc.abi().RegisterType(retType);
+		llvm::Type* slot = registers ? mc.abi().CoercionSlot(mc.Lower(retType), registers) : nullptr;
 		if (n->materialize)
 		{
 			if (sret) return sret;
-			llvm::Value* tmp = m_Ctx.EntryAlloca(mc.Lower(retType));
+			llvm::Value* tmp = m_Ctx.EntryAlloca(slot ? slot : mc.Lower(retType));
 			B.CreateStore(call, tmp);
 			return tmp;
 		}
 		llvm::Value* temporary = sret;
-		if (!sret && retIntSize == 0) return call;
+		if (!sret && !registers) return call;
 		if (!sret)
 		{
-			temporary = ResultTemporary(mc.Lower(retType), "tmp");
+			temporary = ResultTemporary(slot, "tmp");
 			B.CreateStore(call, temporary);
 		}
 		llvm::Value* result = B.CreateLoad(mc.Lower(retType), temporary);

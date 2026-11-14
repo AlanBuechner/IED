@@ -10,8 +10,10 @@ description = "The C4 compiler, language server and debug adapter unit tests"
 depends = ["Core", "UnitTesting", "C4Lib", "ObjectDescription", "C4Protocol", "C4LSPLib", "C4DAPLib", "C4"]
 includes = ["${cpp.llvm}/include"]
 defines = { NOMINMAX = "", WIN32_LEAN_AND_MEAN = "" }
-links = ["ntdll.lib", "dbghelp.lib", "shell32.lib"]
 tests = true
+
+[project.system.windows]
+links = ["ntdll.lib", "dbghelp.lib", "shell32.lib"]
 
 [project.driver]
 reflection = true

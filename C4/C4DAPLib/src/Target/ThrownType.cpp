@@ -1,3 +1,4 @@
+#ifdef _WIN32 // the Win32 debugger; Linux's engine is Target/LinuxEngine.h
 #include "Target/ThrownType.h"
 #include <vector>
 
@@ -62,3 +63,4 @@ namespace C4DAP::Target
 		return complete ? TypeDescriptorName(decorated) : "";
 	}
 } // namespace C4DAP::Target
+#endif

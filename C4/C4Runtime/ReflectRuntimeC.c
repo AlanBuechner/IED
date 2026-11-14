@@ -10,7 +10,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
-#include <windows.h>
+#include "PlatformSync.h"
 #include "ReflectABI.h"
 #include "Reflect/ReflectCodeIndex.h"
 #include "Reflect/ReflectIndex.h"
@@ -27,7 +27,7 @@ static const char* function_name(const void* item) { return ((const rt_function*
 typedef struct { uint32_t id; char* tag; c4_unload_fn fn; void* user; } rt_listener;
 
 typedef struct rt_registry {
-    SRWLOCK lock;
+    c4_rwlock lock;
     rt_table types, vars, fns;
     rt_index typeByName, varBySymbol, varByName, fnBySymbol, fnByName;
     rt_groups groups;
@@ -35,23 +35,23 @@ typedef struct rt_registry {
     uint32_t listenerCount, listenerCapacity, nextListenerId;
     rt_code_index code;            // functions by where their code starts, rebuilt when it is stale
     int codeStale;                 // set by every write: registrations and unloads change the functions
-    volatile LONG64 generation;    // counts registrations and removals (c4_reflect_generation)
+    volatile int64_t generation;   // counts registrations and removals (c4_reflect_generation)
 } rt_registry;
 
 // The C ABI carries no registry parameter: this is the process's one registry.
 static rt_registry g_registry = {
-    SRWLOCK_INIT, { 0 }, { 0 }, { 0 },
+    C4_RWLOCK_INIT, { 0 }, { 0 }, { 0 },
     { 0, 0, type_name }, { 0, 0, variable_symbol }, { 0, 0, variable_name }, { 0, 0, function_symbol }, { 0, 0, function_name },
     { 0 }, 0, 0, 0, 1, { 0 }, 0, 0 };
 
-static rt_registry* reading(void) { AcquireSRWLockShared(&g_registry.lock); return &g_registry; }
-static void done_reading(rt_registry* r) { ReleaseSRWLockShared(&r->lock); }
-static rt_registry* writing(void) { AcquireSRWLockExclusive(&g_registry.lock); return &g_registry; }
-static void done_writing(rt_registry* r) { r->codeStale = 1; ReleaseSRWLockExclusive(&r->lock); }
+static rt_registry* reading(void) { c4_rwlock_read(&g_registry.lock); return &g_registry; }
+static void done_reading(rt_registry* r) { c4_rwlock_done_reading(&r->lock); }
+static rt_registry* writing(void) { c4_rwlock_write(&g_registry.lock); return &g_registry; }
+static void done_writing(rt_registry* r) { r->codeStale = 1; c4_rwlock_done_writing(&r->lock); }
 // A write that changed what an identity says: registered or removed records.
-static void done_changing(rt_registry* r) { InterlockedIncrement64(&r->generation); done_writing(r); }
+static void done_changing(rt_registry* r) { __atomic_add_fetch(&r->generation, 1, __ATOMIC_SEQ_CST); done_writing(r); }
 
-uint64_t c4_reflect_generation(void) { return (uint64_t)InterlockedCompareExchange64(&g_registry.generation, 0, 0); }
+uint64_t c4_reflect_generation(void) { return (uint64_t)__atomic_load_n(&g_registry.generation, __ATOMIC_SEQ_CST); }
 
 // ------------------------------------------------------------------ registration
 
@@ -151,6 +151,7 @@ const c4_function_info* c4_reflect_register_function(const char* tag, const c4_f
 
 // The first byte of the function whose code holds `address`, by its unwind data: a chained entry (code the compiler
 // moved apart) leads to its function's primary one. NULL when the code there has none.
+#if defined(_WIN32)
 static const void* code_start(const void* address)
 {
     DWORD64 imageBase = 0;
@@ -166,6 +167,15 @@ static const void* code_start(const void* address)
     }
     return NULL;
 }
+#else
+#include <unwind.h>
+
+// On ELF the function's frame description entry knows where it starts (libgcc's unwinder looks it up).
+static const void* code_start(const void* address)
+{
+    return _Unwind_FindEnclosingFunction((void*)address);
+}
+#endif
 
 // The registry for reading, its code index current: rebuilt under the exclusive lock (which no write then marks
 // stale) whenever a write made it stale, until a reader finds it current.
@@ -176,11 +186,11 @@ static rt_registry* reading_with_code_index(void)
         rt_registry* r = reading();
         if (!r->codeStale) return r;
         done_reading(r);
-        AcquireSRWLockExclusive(&g_registry.lock);
+        c4_rwlock_write(&g_registry.lock);
         if (g_registry.codeStale && rt_code_index_build(&g_registry.code, (const c4_function_info* const*)g_registry.fns.items, g_registry.fns.count))
             g_registry.codeStale = 0;
         const int built = !g_registry.codeStale;
-        ReleaseSRWLockExclusive(&g_registry.lock);
+        c4_rwlock_done_writing(&g_registry.lock);
         if (!built) return 0;
     }
 }

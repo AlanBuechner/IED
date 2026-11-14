@@ -1,4 +1,5 @@
 #pragma once
+#include "Target/SessionTypes.h"
 #include <windows.h>
 #include <cstdint>
 #include <optional>
@@ -40,13 +41,6 @@ namespace C4DAP::Target
 	{
 		std::string name;
 		int64_t value = 0;
-	};
-
-	struct SourcePosition
-	{
-		std::string path;
-		uint32_t line = 0;
-		bool Known() const { return line != 0; }
 	};
 
 	/// An address in the program's code and, where the optimizer inlined calls, which of the inlined functions it

@@ -1,8 +1,9 @@
 #pragma once
 // Child processes behind Bedrock's Process namespace (D-68): started with pipes or under a pseudo console, each in a
-// job object so that killing it ends the processes it started too, read and written and waited for with timeouts.
-// One implementation per OS (Process/*Win32.c). Text is UTF-8. A call that can fail writes the system's message and
-// code into `error` (cut at a whole character to `errorCapacity`), empty on success.
+// job object (on Linux its own session, or the tree found below it) so that killing it ends the processes it started
+// too, read and written and waited for with timeouts. One implementation per OS (Process/*Win32.c; on Linux
+// Process/*Posix.c and TreeLinux.c). Text is UTF-8. A call that can fail writes the system's message and code into
+// `error` (cut at a whole character to `errorCapacity`), empty on success.
 
 #include <stdint.h>
 
@@ -25,8 +26,10 @@ enum { kProcessWaitForever = -1 };
 // Bedrock's Process::StartInfo, flattened.
 typedef struct c4_process_options
 {
-	const char* program;              // a path, or a name looked for as the system does (".exe" added when it has no extension)
-	const char* const* arguments;     // not counting the program; quoted as CommandLineToArgvW reads them back
+	const char* program;              // a path, or a name looked for as the system does (Windows: ".exe" added when it has
+	                                  // no extension; Linux: in PATH, as execvp looks)
+	const char* const* arguments;     // not counting the program; each reaches the child as written (on Windows quoted as
+	                                  // CommandLineToArgvW reads them back)
 	int32_t argumentCount;
 	const char* workingDirectory;     // null or empty: this process's
 	const char* const* environment;   // "NAME=value" sets a variable, "NAME" removes one (names compared as the OS does)
@@ -40,16 +43,17 @@ typedef struct c4_process_options
 	int32_t rows;
 	int32_t killOnClose;              // non-zero: closing the handle ends the child and what it started
 	const char* shellCommand;         // non-empty: instead of a program and arguments, a command line the system's shell
-	                                  // runs as written (cmd.exe /d /s /c "...")
+	                                  // runs as written (cmd.exe /d /s /c "...", /bin/sh -c "...")
 } c4_process_options;
 
-// A started child: its handles, null when it has none of that kind.
+// A started child: its handles, null when it has none of that kind. On Linux `process` is the runtime's state for the
+// child, `job` is null, and the pipes and console are descriptors (Process/ProcessPosix.h).
 typedef struct c4_process
 {
 	void* process;
 	void* job;
 	void* pipes[3];    // the parent's ends: stdin (written), stdout and stderr (read)
-	void* console;     // the pseudo console
+	void* console;     // the pseudo console (a pseudo-terminal's master)
 	uint32_t id;
 } c4_process;
 
@@ -66,7 +70,8 @@ int64_t c4_process_read(c4_process* process, int32_t stream, void* buffer, int64
 int64_t c4_process_read_any(c4_process* process, void* buffer, int64_t capacity, int32_t timeoutMs, int32_t* stream);
 // Closes the parent's end of a pipe: closing stdin is the end of the child's input.
 void c4_process_close_pipe(c4_process* process, int32_t stream);
-// The child's exit code once it has ended (0 to 4294967295), kProcessTimedOut, or -1.
+// The child's exit code once it has ended (0 to 4294967295; on Linux 0 to 255, or 128 + the signal that ended it),
+// kProcessTimedOut, or -1. A child c4_process_kill ended has code 1.
 int64_t c4_process_wait(c4_process* process, int32_t timeoutMs);
 // Ends the child and every process it started. 0 or -1.
 int32_t c4_process_kill(c4_process* process);
@@ -75,7 +80,7 @@ int32_t c4_process_resize(c4_process* process, int32_t columns, int32_t rows);
 // Releases the handles; with killOnClose, whatever still runs in the child's job ends.
 void c4_process_close(c4_process* process);
 
-// What a process uses (Bedrock's Process::Usage, Process/UsageWin32.c).
+// What a process uses (Bedrock's Process::Usage, Process/UsageWin32.c, Process/UsagePosix.c).
 typedef struct c4_process_counters
 {
 	int64_t cpuTimeNs;          // processor time in user and kernel mode so far, every thread's

@@ -3,15 +3,28 @@ include "Server.ch"
 
 namespace Ied
 {
+	// The shared folder itself made or removed (docs/35); the system also says it changed whenever something in it does,
+	// the mirror's staging too, which is nothing to read again.
+	static bool SharedFolderCameOrWent(const TreeChange& change) {
+		return change.m_Kind != TreeChangeKind::Changed && (change.m_Path.View() == "shared" || change.m_Path.View() == "shared/plugins");
+	}
+
+	// The app tier, or the Shared tier's mirror (docs/35).
 	bool TouchesSettings(const ChangeBatch& batch) {
-		for (const TreeChange& change : batch.Changes())
-			if (change.m_Path.View() == "settings.json") return true;
+		for (const TreeChange& change : batch.Changes()) {
+			Core::StringView path = change.m_Path.View();
+			if (path == "settings.json" || path == c_SharedSettings || SharedFolderCameOrWent(change)) return true;
+		}
 		return batch.Overflowed();
 	}
 
+	// App plugins, or the shared ones a config server serves (docs/35).
 	bool TouchesPlugins(const ChangeBatch& batch) {
-		for (const TreeChange& change : batch.Changes())
-			if (change.m_Path.View() == "plugins" || change.m_Path.View().StartsWith(Core::StringView("plugins/"))) return true;
+		for (const TreeChange& change : batch.Changes()) {
+			Core::StringView path = change.m_Path.View();
+			if (path == "plugins" || path.StartsWith(Core::StringView("plugins/"))) return true;
+			if (path.StartsWith(Core::StringView("shared/plugins/")) || SharedFolderCameOrWent(change)) return true;
+		}
 		return batch.Overflowed();
 	}
 

@@ -39,13 +39,16 @@ void* __emutls_get_address(__emutls_control* control);
 // Frees every thread's object of each control (a script's thread_locals as it unloads, after its exits ran).
 void c4_script_tls_release(__emutls_control* const* controls, uint32_t count);
 
-// --- images and throwing (ScriptThrowC.c) ------------------------------------------------------------
+#if defined(_WIN32)
+// --- images and throwing (ScriptThrowWin32.c) ----------------------------------------------------------
 // Where a script's code and data were loaded: the exception tables in it are relative to `base`.
 void c4_script_image_add(const void* base, const void* end);
 void c4_script_image_remove(const void* base);
 // _CxxThrowException for script code: raises the C++ exception with the base of the image holding
-// `throwInfo`, which RtlPcToFileHeader cannot find for a JIT image. Null, null rethrows.
+// `throwInfo`, which RtlPcToFileHeader cannot find for a JIT image. Null, null rethrows. Linux needs none: a script
+// throws with c4_eh_throw (ExceptionsPosix.c), whose tables are relative to their own fields.
 __declspec(noreturn) void c4_script_throw(void* object, const void* throwInfo);
+#endif
 
 #ifdef __cplusplus
 }

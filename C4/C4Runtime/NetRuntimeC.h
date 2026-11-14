@@ -1,8 +1,9 @@
 #pragma once
 // The sockets behind Bedrock's Net namespace (D-65): TCP and UDP over IPv4 and IPv6, name resolution, readiness
-// polling. One implementation file per OS (Net/SocketsWin32.c), so a port adds a file and no caller changes. A socket
-// is an int64 handle, -1 for none. A call that can fail writes the system's message and code into `error` (UTF-8, cut
-// at a whole character to `errorCapacity`, always terminated) and leaves it empty on success.
+// polling. One implementation file per OS (Net/SocketsWin32.c, Net/SocketsPosix.c), so a port adds a file and no caller
+// changes. A socket is an int64 handle, -1 for none. A call that can fail writes the system's message and code into
+// `error` (UTF-8, cut at a whole character to `errorCapacity`, always terminated; the code is the system's own, a
+// WSA error on Windows and errno on Linux) and leaves it empty on success.
 
 #include <stdint.h>
 

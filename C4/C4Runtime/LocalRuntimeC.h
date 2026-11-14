@@ -1,9 +1,10 @@
 #pragma once
 // Local connections behind Bedrock's Net::LocalListener and Net::LocalStream (B67): a channel between one user's
-// processes on one machine, found by name. Named pipes on Windows (Net/LocalPipesWin32.c). No other machine and no other
-// user can use one: the pipe refuses remote clients, its only access entry is the current user, and a connection is
-// refused when the listener runs as anyone else (a name another user claimed first). A pipe is an opaque pointer;
-// counts, kNetTimedOut and kNetError are NetRuntimeC.h's, and so are the error texts.
+// processes on one machine, found by name. Named pipes on Windows (Net/LocalPipesWin32.c); stream sockets in Linux's
+// abstract namespace (Net/LocalPipesPosix.c). No other machine and no other user can use one: on Windows the pipe
+// refuses remote clients and its only access entry is the current user, on Linux the listener drops another user's
+// client; and a connection is refused when the listener runs as anyone else (a name another user claimed first). A
+// pipe is an opaque pointer; counts, kNetTimedOut and kNetError are NetRuntimeC.h's, and so are the error texts.
 
 #include <stdint.h>
 
@@ -26,7 +27,8 @@ c4_local_pipe* c4_local_connect(const char* name, int32_t timeoutMs, int32_t* ti
 int64_t c4_local_send(c4_local_pipe* pipe, const void* data, int64_t size, int32_t timeoutMs);
 int64_t c4_local_receive(c4_local_pipe* pipe, void* buffer, int64_t capacity, int32_t timeoutMs);
 void c4_local_close(c4_local_pipe* pipe);
-// The current user's identity as text - the SID on Windows ("S-1-5-21-..."): its length, or -1.
+// The current user's identity as text - the SID on Windows ("S-1-5-21-..."), the effective user id on Linux ("1000"):
+// its length, or -1.
 int64_t c4_local_user_id(char* out, int64_t capacity);
 
 #ifdef __cplusplus

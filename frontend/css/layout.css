@@ -426,6 +426,9 @@ button.st:hover { background: var(--veil); color: var(--text-0); }
 /* The shown workspace's server (servers.js): blue while it (re)starts, red when it failed. */
 .st-server[data-state="starting"] .ci, .st-server[data-state="restarting"] .ci { color: var(--accent-info); }
 .st-server[data-state="failed"] { color: var(--accent-error); }
+/* The config server followed (docs/35), shown only while it cannot be: a warning, IED going on with its mirror (a phone
+   has no status bar: the notification says it). */
+.st-config .ci { color: var(--accent-warn); }
 
 /* ---------- workspace servers (shell:servers) ---------- */
 .servers-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-sm); }

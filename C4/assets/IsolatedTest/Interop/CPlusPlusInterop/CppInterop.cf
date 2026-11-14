@@ -88,9 +88,15 @@ void TestTypeFidelity() {
 	Check((int32)high == 200, "unsigned char is uint8");
 	int8 low = LowByte();
 	Check((int32)low == -100, "signed char is int8");
+#if defined(PLATFORM_LINUX)
+	const char32* wide = WideHello(); // wchar_t is 32 bits on Linux
+	Check(wide[0] == U'H' && wide[1] == U'i', "wchar_t is char32");
+	Check(WideLength(U"wide") == 4, "a char32 string passes to a wchar_t parameter");
+#else
 	const char16* wide = WideHello();
 	Check(wide[0] == u'H' && wide[1] == u'i', "wchar_t is char16");
 	Check(WideLength(u"wide") == 4, "a char16 string passes to a wchar_t parameter");
+#endif
 }
 
 void TestByValueStruct() {

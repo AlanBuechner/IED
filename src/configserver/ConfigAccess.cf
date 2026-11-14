@@ -1,0 +1,132 @@
+include "ConfigAccess.ch"
+include "web/Json.ch"
+
+namespace Ied
+{
+	const char* ConfigRoleName(ConfigRole role) {
+		if (role == ConfigRole::Admin) return "admin";
+		if (role == ConfigRole::Reader) return "reader";
+		return "none";
+	}
+
+	ConfigRole ConfigRoleOf(Core::StringView name) {
+		if (name == "admin") return ConfigRole::Admin;
+		if (name == "reader") return ConfigRole::Reader;
+		return ConfigRole::None;
+	}
+
+	Core::String TokenDigest(Core::StringView token) { return Crypto::Sha256((const void*)token.Data(), token.ByteLength()).ToHex(); }
+
+	static bool IsHexDigest(Core::StringView text) {
+		if (text.ByteLength() != 64) return false;
+		for (int64 i = 0; i < 64; ++i) {
+			const int32 c = text.ByteAt(i);
+			if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+		}
+		return true;
+	}
+
+	bool ConfigAccess::Load(const FS::Path& file, Core::String& error) {
+		m_Tokens.Clear();
+		if (!FS::FileExists(file.CStr())) return true;
+		FS::File opened = FS::File(file.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJsonc(text.View(), *doc);
+		if (!read.Ok() || read.root.Kind() != Serialization::DomKind::Object) {
+			error = Core::String(file.View()) + ": not a JSON object";
+			return false;
+		}
+		Serialization::DomNode tokens = read.root.Member("tokens");
+		for (int64 i = 0; i < tokens.Count(); ++i) {
+			Serialization::DomNode entry = tokens.At(i);
+			ConfigRole role = ConfigRoleOf(entry.Member("role").AsView());
+			Core::StringView digest = entry.Member("sha256").AsView();
+			if (role == ConfigRole::None || !IsHexDigest(digest)) {
+				error = (Core::String(file.View()) + ": token ") + entry.Member("name").AsView() + " needs a role (reader or admin) and a sha256 of 64 lowercase hex digits";
+				m_Tokens.Clear();
+				return false;
+			}
+			Put(entry.Member("name").AsView(), role, digest, entry.Member("createdMs").AsInt());
+		}
+		return true;
+	}
+
+	ConfigRole ConfigAccess::Check(Core::StringView token, Core::String& name) const {
+		if (token.IsEmpty()) return ConfigRole::None;
+		Core::String sent = TokenDigest(token);
+		ConfigRole found = ConfigRole::None;
+		// Every entry is compared, the same way, whatever matched.
+		for (ConfigToken* entry : m_Tokens)
+			if (Crypto::ConstantTimeEquals((const void*)sent.View().Data(), (const void*)entry->m_Digest.View().Data(), 64) && found == ConfigRole::None) {
+				found = entry->m_Role;
+				name = entry->m_Name;
+			}
+		return found;
+	}
+
+	void ConfigAccess::Put(Core::StringView name, ConfigRole role, Core::StringView digest, int64 createdMs) {
+		for (int64 i = 0; i < m_Tokens.Count(); ++i)
+			if (m_Tokens[i]->m_Name.View() == name) {
+				m_Tokens.RemoveAt(i);
+				break;
+			}
+		ConfigToken* entry = new ConfigToken();
+		entry->m_Name = Core::String(name);
+		entry->m_Role = role;
+		entry->m_Digest = Core::String(digest);
+		entry->m_CreatedMs = createdMs;
+		m_Tokens.Push(entry);
+	}
+
+	Core::String ConfigAccess::Json() const {
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("version", 1);
+		json.Key(Core::StringView("tokens"));
+		json.BeginArray();
+		for (ConfigToken* entry : m_Tokens) {
+			json.BeginObject();
+			json.Field("name", entry->m_Name.View());
+			json.Field("role", ConfigRoleName(entry->m_Role));
+			json.Field("sha256", entry->m_Digest.View());
+			json.IntField("createdMs", entry->m_CreatedMs);
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	bool MintConfigToken(const FS::Path& root, ConfigRole role, Core::StringView name, Core::String& token, Core::String& error) {
+		if (role == ConfigRole::None) {
+			error = Core::String("a token's role is reader or admin");
+			return false;
+		}
+		FS::Path file = root / c_AccessFile;
+		ConfigAccess access;
+		if (!access.Load(file, error)) return false;
+		uint8[32] random;
+		if (!Platform::RandomBytes((void*)&random[0], 32)) {
+			error = Core::String("the system's random generator failed");
+			return false;
+		}
+		Core::StringBuilder text;
+		for (int32 i = 0; i < 32; ++i) text.AppendUIntBase((uint64)random[i], 16, 2);
+		token = text.ToString();
+		access.Put(name, role, TokenDigest(token.View()).View(), Platform::UnixTimeNs() / 1000000);
+		Core::String json = access.Json();
+		FS::MakeDirectories(root.CStr());
+		if (!FS::WriteFileAtomically(file.CStr(), (const void*)json.View().Data(), json.View().ByteLength())) {
+			error = Core::String("cannot write ") + file.View();
+			return false;
+		}
+		return true;
+	}
+
+	Core::StringView BearerToken(Core::StringView header) {
+		Core::StringView text = header.Trimmed();
+		if (text.ByteLength() < 7 || !Http::EqualsIgnoringCase(text.Substring(0, 7), Core::StringView("Bearer "))) return Core::StringView("");
+		return text.Substring(7, text.ByteLength() - 7).Trimmed();
+	}
+}

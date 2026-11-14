@@ -6,6 +6,7 @@ import { h, icon, replace } from "/ui-kit/dom.js";
 import { serverLook, serverTitle, showServerMenu } from "./servers.js";
 
 const CONNECTION_TEXT = { live: "Ready", connecting: "Connecting...", reconnecting: "Reconnecting...", closed: "Offline" };
+const CONFIG_TROUBLE = { unreachable: "cannot be reached", refused: "refuses IED's token", failed: "could not be mirrored" };
 const TRANSIENT_MS = 3000;
 
 export class StatusBar {
@@ -63,8 +64,18 @@ export class StatusBar {
 			...left,
 			h("span.st.grow"),
 			...right,
+			this.configServerItem(),
 			h("span.st", { title: devices + " device(s) connected" }, icon("vm"), devices + (devices === 1 ? " device" : " devices")),
 			h("button.st.st-bell", { title: "Notifications", "aria-label": "Notifications (" + unread + ")", on: { click: (event) => shell.commands.run("shell.showNotifications", { at: event.currentTarget }) } }, icon(unread ? "bell-dot" : "bell"), unread ? String(unread) : ""));
+	}
+
+	// The config server the master follows (docs/35 "The client"): nothing while it follows or none is set; while it
+	// cannot be followed, why, IED going on with what it mirrored last.
+	configServerItem() {
+		const followed = this.shell.server.configServer;
+		if (!followed || !CONFIG_TROUBLE[followed.state]) return null;
+		const title = "Config server " + followed.url + ": " + CONFIG_TROUBLE[followed.state] + (followed.error ? " - " + followed.error : "") + ". IED uses the shared settings, plugins and skills it mirrored last.";
+		return h("span.st.st-config", { dataset: { state: followed.state }, title, "aria-label": title }, icon("warning"), "Config server");
 	}
 
 	// The shown workspace's server (docs/01 "Processes"): its state, the menu that restarts it or lists them all.

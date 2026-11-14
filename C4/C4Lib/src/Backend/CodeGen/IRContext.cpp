@@ -102,6 +102,8 @@ namespace Scripting
 
 	llvm::BasicBlock* IRContext::UnwindTargetBelow(size_t index, size_t floor)
 	{
+		// With landing pads every entry is on an exception's way out: a handler ends its catch there.
+		if (!Funclets()) return index > floor && m_Region ? m_Region->LandingPadFor(index - 1) : nullptr;
 		for (size_t i = index; i-- > floor; )
 		{
 			const CleanupEntry& e = m_Cleanups.At(i);

@@ -48,6 +48,7 @@ compile or link error, 2 on a usage error. A crash of the compiler itself prints
 | `-j <n>`, `--threads <n>` | Threads that lower function bodies and generate code, 1..64 (default: the processors). The program is the same whatever the count ([HIR](../compiler/03-hir.md#lowering-on-several-threads)). |
 | `--partitions <n>` | Assemble the program into `<n>` objects, 1..256 (default: by its size, a power of two up to 128; a whole-program build up to 64); an incremental build emits it into `<n>` partitions (D-81), plus its reflection image's (D-82); `-c` takes none. The link takes the objects from a response file (`<output>.link.rsp`, removed after). |
 | `--incremental` | Optimize each object alone, after the split, for a fast edit loop (D-76): an object whose code is unchanged reuses its cached object without being optimized again, so an edit reoptimizes only the objects it changes. Each object carries copies of the small functions it calls from the others, so those still inline; larger functions do not inline across objects, so the code can be somewhat slower than a whole-program build. At `-O0` the always-inliner and the aggregate copies run on each object alone, which copies only the `inline` functions it calls; `-c` takes none. Nuke's `Debug` and `Development` configurations pass it, `Dist` does not. |
+| `--target <system>` | The system the program runs on (D-86): `windows-x64` (the default on Windows) or `linux-x64`, cross-compiled against the Linux sysroot (`vendor/sysroots/linux-x64`, made by `tools/setup/linux_sysroot.py`; an install's `sysroots/linux-x64`). It decides `PLATFORM_WINDOWS` or `PLATFORM_LINUX`, the object format and calling convention, how exceptions unwind, and the link: a Linux program is a position-independent ELF executable (no `.exe`; `-g` keeps DWARF in it, no `.pdb`) that needs glibc 2.31 or later. A compiler that runs on Linux targets `linux-x64` by default and, with no sysroot in its install or checkout, compiles and links against the system's own glibc (clang's driver finds it), so its programs need that glibc or later. |
 | `-march=<cpu>` | The processor to compile for ([vectors 8](../language/11-vectors-and-swizzling.md#8-the-simd-target), D-62): `x86-64` (the default), `x86-64-v2`, `x86-64-v3`, `x86-64-v4`, any LLVM x86-64 CPU name (`haswell`, `znver4`) or `native` (the building machine). Every function is compiled for it, foreign sources too, and it defines the `SIMD_*` macros. An unknown name is a usage error that lists the levels. |
 | `-m<feature>`, `-mno-<feature>` | Turn one processor feature on or off, with what it implies (`-mavx2` turns on `avx`, `-mno-avx` turns off `avx2` and `fma`): `sse3 ssse3 sse4.1 sse4.2 popcnt avx avx2 fma f16c bmi bmi2 lzcnt avx512f avx512vl avx512bw avx512dq avx512cd pclmul vpclmulqdq`. As in clang they apply after the last `-march`, in order. An unknown feature is a usage error that lists them. |
 | `-fno-strict-aliasing` | Turn off strict aliasing ([types 4.14](../language/04-types.md#414-strict-aliasing), D-64): the IR carries no type-based alias tags, so any load or store may touch any memory, for code that reads a value through a pointer to another type. |
@@ -62,7 +63,7 @@ compile or link error, 2 on a usage error. A crash of the compiler itself prints
 | `-test`, `--test` | Predefine `TEST` and replace the entry point with the generated `[test]` harness. Does not run the exe. See [runtime/03-testing.md](../runtime/03-testing.md). |
 | `-test-json <path>` | With `-test`: the test run writes a JSON summary to `<path>` ([testing](../runtime/03-testing.md#3-the--test-build)). |
 | `-reflect-tag <tag>` | Source tag for reflection registration (the hot-reload unload key). Empty = the main exe. |
-| `--script-host` | Build a script host ([scripting](../runtime/04-scripting.md#3-the-host-build)): the image gets the symbol table scripts link against (`__c4_script_table`) and an accessor per `thread_local`, and `<out>.c4i`, the interface scripts compile against, is written beside the output once the program is built (a failed link keeps the old program's `.c4i`). A program that uses the scripting API without it is an error that names the flag. |
+| `--script-host` | Build a script host ([scripting](../runtime/04-scripting.md#3-the-host-build)): the image gets the symbol table scripts link against (`__c4_script_table`) and an accessor per `thread_local`, and `<out>.c4i`, the interface scripts compile against, is written beside the output once the program is built (a failed link keeps the old program's `.c4i`). A program that uses the scripting API without it is an error that names the flag. The script host library is copied beside the program: `C4Script.dll` on Windows, `C4Script.so` on Linux (linked by its name and found beside the program, `-rpath $ORIGIN`); a `linux-x64` script host is built by the compiler running on Linux, which has the Linux library. |
 | `-gc-stats`, `--gc-stats` | The program prints the GC's statistics to stderr after each collection (`[GC] allocs=... collections=... heapBytes=... liveBytes=... freeBytes=... pauseNs=... lastPauseNs=...`). |
 | `-Werror` | Every warning is an error: the build fails on the first phase that reports one. |
 | `-w` | Warnings are not reported. |
@@ -134,10 +135,15 @@ An install is one folder; copying it anywhere gives a working compiler (design D
   CBind/CBind.exe          the interop binding generator
 ```
 
+A compiler built on Linux (`tools/linux/build.py build C4`, D-86) has the same layout with Linux names: `C4`, no
+LLVM DLLs (it links LLVM's archives), `toolchain/bin/clang` and `ld.lld`, and `toolchain/lib/` with the
+`libLLVM.so.22.1` and `libclang-cpp.so.22.1` that the builder's clang and lld load (apt.llvm.org builds them shared;
+they still need Debian 12's libz3, libxml2, libedit and libffi, which the LLVM packages install), `CBind/CBind`.
+
 | Thing | Where it is found |
 |---|---|
 | Bedrock | `<home>/Bedrock` |
-| clang, lld | `<home>/toolchain/bin`; a development build also finds the repository's `vendor/llvm/bin` above the executable |
+| clang, lld | `<home>/toolchain/bin`; on Windows a development build also finds the repository's `vendor/llvm/bin` above the executable, on Linux `$LLVM_HOME/bin`, else the clang on `PATH` |
 | Runtime sources | `<home>/C4Runtime`; a development build also finds the repository's `C4/C4Runtime/` |
 | CBind | `<home>/CBind/CBind.exe`, else `CBind/CBind.exe` beside the executable's folder (the development build's `build/bin/<config>/CBind/`) |
 | Windows SDK and MSVC runtime | the IED checkout's `vendor/msvc` (`setup.bat` installs it; found above the executable, so a toolchain in the checkout's store finds it too), given to clang, CBind and lld-link; without it, clang and lld-link find an installed Visual Studio and SDK (the newest) |
@@ -146,8 +152,8 @@ When clang or the runtime is missing, `C4.exe` says which folder it looked in an
 `Build.py` stages the whole layout into `bin/<config>/C4/`; `MakeToolchain.py` assembles it, with the tools,
 docs and skills, into a toolchain ([02-nuke.md](02-nuke.md#5-toolchains)).
 
-Target: **x86_64-pc-windows-msvc only**. Linux support is planned (LongTermPlan item 11) and needs the
-GC, the ABI layer and the link step ported.
+Targets: **windows-x64** and **linux-x64** (`--target`, D-86). The compiler itself runs on Windows and on Linux
+(built in `tools/linux/builder`'s container); its debug adapter debugs programs on Windows only so far.
 
 ---
 

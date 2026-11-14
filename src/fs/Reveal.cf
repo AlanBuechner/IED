@@ -2,6 +2,17 @@ include "Reveal.ch"
 
 namespace Ied
 {
+#if defined(PLATFORM_LINUX)
+	// The desktop's file manager by xdg-open: it opens a folder, so a file's folder is what it shows (xdg-open selects
+	// nothing).
+	Process::StartInfo RevealCommand(const FS::Path& target, bool folder) {
+		Process::StartInfo info;
+		info.program = Core::String("xdg-open");
+		info.arguments.Push(Core::String((folder ? target : target.Parent()).View()));
+		info.killOnClose = false;
+		return info;
+	}
+#else
 	static Core::String Backslashes(Core::StringView path) {
 		Core::StringBuilder text;
 		for (int64 i = 0; i < path.ByteLength(); ++i) text.AppendByte(path.ByteAt(i) == '/' ? '\\' : path.ByteAt(i));
@@ -23,4 +34,5 @@ namespace Ied
 		info.killOnClose = false;
 		return info;
 	}
+#endif
 }

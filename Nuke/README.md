@@ -68,7 +68,7 @@ a **project** of the workspace. Commands run in order and each (command, project
 |---|---|
 | `-p, --project NAME` | work on NAME (repeatable; same as naming it as a word) |
 | `-c, --config NAME` | configuration (same as the word) |
-| `-a, --arch NAME` / `-s, --system NAME` | `x64` / `windows` (the only ones today) |
+| `-a, --arch NAME` / `-s, --system NAME` | `x64`; `windows` (the default) or `linux`: a C4 project cross-compiles for Linux from Windows (`C4.exe --target linux-x64`, C4 D-86, no `.exe`), a C/C++ project builds for Linux on Linux (`tools/linux/build.py` runs Nuke in a container) |
 | `-w, --workspace DIR` | the workspace at DIR instead of searching up from the current folder |
 | `--all` | every project of the workspace |
 | `--filter GLOB` | test cases to run (`*` any run of characters, `?` one; without either, a case's or a group's name: `math.vector` runs `math.vector.*`); a filter no case matches is said so |
@@ -156,11 +156,16 @@ scripts = ["nuke_ext.py"]          # extensions whose steps default to this proj
 from = "assets"                    # file or folder, relative to the project
 to = "assets"                      # relative to the bin folder (default: the source's name)
 exclude = ["nuke.toml"]            # of a folder: paths in it or names (globs) left out - and removed from a mirror
+systems = ["windows"]              # only for these systems (default: every one)
 
 [project.config.Dist]              # per-configuration additions
 defines = { SHIP = "1" }
 links = ["dbghelp"]
 compiler-args = []
+
+[project.system.windows]           # per-system additions: windows or linux (--system), same keys as a configuration's
+links = ["ws2_32"]
+compiler-args = ["--script-host"]
 
 [[project.steps]]                  # section 4
 phase = "pre-build"

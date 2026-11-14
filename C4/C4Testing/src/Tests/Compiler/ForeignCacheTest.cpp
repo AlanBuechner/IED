@@ -14,8 +14,12 @@ namespace Testing
 		// Windows' path limit for calls that do not take long paths.
 		constexpr size_t kMaxPath = 260;
 
-		// The spelling of an absolute path that the standard library's calls take past MAX_PATH.
+		// The spelling of an absolute path that the standard library's calls take past MAX_PATH; Linux's take any path.
+#ifdef _WIN32
 		fs::path LongPath(const fs::path& path) { return fs::path(L"\\\\?\\" + path.wstring()); }
+#else
+		fs::path LongPath(const fs::path& path) { return path; }
+#endif
 
 		void Write(const fs::path& path, const std::string& text)
 		{

@@ -14,6 +14,8 @@ namespace Ied
 	void Settings::Init(Server* server) {
 		this.m_Server = server;
 		m_App = new TierFile(Core::StringView("app"), FS::Path(server->m_Config.m_AppDataDir.View()) / "settings.json");
+		m_Shared = new TierFile(Core::StringView("shared"), FS::Path(server->m_Config.m_AppDataDir.View()) / c_SharedSettings);
+		m_Shared->m_Shared = true;
 		Settings* self = this;
 		server->m_Hub.Add(Core::StringView("settings:app"), [self]() -> Core::String { return self->Snapshot(nullptr, Core::StringView("")); });
 		server->m_Rpc.Register("settings.schema", [self](Call& call, const Params& params) -> Core::String { return self->SchemaMethod(call, params); });
@@ -49,10 +51,20 @@ namespace Ied
 			if (entry.key.View().StartsWith(prefix.View())) entry.value->Reload(*known, true);
 	}
 
+	// A config server merges what its plugins publish by the kinds its catalog declares (docs/35).
+	static void TellConfigServer(Server* server, const SettingsCatalog& catalog) {
+		if (!server->m_ConfigServer) return;
+		Core::HashMap<Core::String, MergeKind> kinds;
+		for (SettingInfo* setting : catalog.All()) kinds.At(setting->m_Key) = setting->m_Merge;
+		server->m_ConfigServer->CatalogChanged(kinds);
+	}
+
 	void Settings::Load() {
 		Core::Array<Core::String> problems;
 		m_Catalog.Build(HostSettingsSchema(m_Server), m_Server->m_Plugins->All(), problems);
 		for (const Core::String& problem : problems) m_Server->Log(problem.View());
+		TellConfigServer(m_Server, m_Catalog);
+		m_Shared->Reload(m_Catalog, true);
 		m_App->Reload(m_Catalog, true);
 		for (const Core::KeyValue<Core::String, TierFile*>& entry : m_Solutions) {
 			Workspace* ws = m_Server->m_Workspaces->Get(entry.key.View());
@@ -107,7 +119,9 @@ namespace Ied
 	}
 
 	void Settings::AppFileChanged() {
-		if (m_App->Reload(m_Catalog, false)) PublishAll();
+		const bool shared = m_Shared->Reload(m_Catalog, false);
+		const bool app = m_App->Reload(m_Catalog, false);
+		if (shared || app) PublishAll();
 	}
 
 	TierFile* Settings::SolutionTier(Workspace* ws) const {
@@ -124,12 +138,13 @@ namespace Ied
 
 	// --- Effective values ----------------------------------------------------------------------------------------------
 
-	// The default, then each tier that sets the key, by its merge kind; `source` is the last tier that did.
-	static Core::String Resolve(const SettingInfo* setting, TierFile* app, TierFile* solution, TierFile* project, Core::String& source) {
+	// The default, then each tier that sets the key - Shared, app, solution, project - by its merge kind; `source` is the
+	// last tier that did.
+	static Core::String Resolve(const SettingInfo* setting, TierFile* shared, TierFile* app, TierFile* solution, TierFile* project, Core::String& source) {
 		Core::String value = setting->m_DefaultJson;
 		source = Core::String("default");
-		TierFile*[3] tiers = { app, solution, project };
-		for (int32 i = 0; i < 3; ++i) {
+		TierFile*[4] tiers = { shared, app, solution, project };
+		for (int32 i = 0; i < 4; ++i) {
 			Core::String set;
 			if (!tiers[i] || !tiers[i]->m_Values.TryGet(setting->m_Key, set)) continue;
 			value = MergeJson(value.View(), set.View(), setting->m_Merge);
@@ -142,7 +157,7 @@ namespace Ied
 		SettingInfo* setting = CatalogFor(ws)->Get(key);
 		if (!setting) return Core::String("null");
 		Core::String source;
-		return Resolve(setting, m_App, SolutionTier(ws), ProjectTier(ws, project), source);
+		return Resolve(setting, m_Shared, m_App, SolutionTier(ws), ProjectTier(ws, project), source);
 	}
 
 	// The tiers' states (every project's tier with a workspace's) and the values for `project` (empty: the workspace's).
@@ -153,6 +168,7 @@ namespace Ied
 		json.BeginObject();
 		json.Key(Core::StringView("tiers"));
 		json.BeginObject();
+		json.RawField("shared", m_Shared->StateJson().View());
 		json.RawField("app", m_App->StateJson().View());
 		if (solution) json.RawField("solution", solution->StateJson().View());
 		json.EndObject();
@@ -168,7 +184,7 @@ namespace Ied
 		json.BeginObject();
 		for (SettingInfo* setting : CatalogFor(ws)->All()) {
 			Core::String source;
-			Core::String value = Resolve(setting, m_App, solution, projectTier, source);
+			Core::String value = Resolve(setting, m_Shared, m_App, solution, projectTier, source);
 			json.Key(setting->m_Key.View());
 			json.BeginObject();
 			json.RawField("value", value.View());
@@ -186,6 +202,8 @@ namespace Ied
 	}
 
 	void Settings::PublishAll() {
+		// The app tier may name another config server, or another token: the master's mirror looks now (docs/35).
+		if (m_Server->m_SharedMirror) m_Server->m_SharedMirror->Wake();
 		Publish(nullptr);
 		for (const Core::KeyValue<Core::String, TierFile*>& entry : m_Solutions) Publish(m_Server->m_Workspaces->Get(entry.key.View()));
 	}

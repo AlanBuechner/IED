@@ -3,16 +3,17 @@
 // when its start completes. They are destroyed at exit in the reverse order, as in C++.
 
 #include "PlatformRuntimeC.h"
+#include "PlatformSync.h"
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <windows.h>
 
 // The compiler's guard (Backend/CodeGen/StaticStorage.cpp reads `state` inline: kOnceDone skips the region).
 typedef struct c4_once_guard
 {
-	volatile LONG state;
-	DWORD owner;
+	volatile int32_t state;
+	uint32_t owner;
 } c4_once_guard;
 
 enum { kOnceNotStarted = 0, kOnceDone = 1, kOnceRunning = 2 };
@@ -26,15 +27,15 @@ typedef struct ExitEntry
 
 typedef struct StaticStorage
 {
-	SRWLOCK lock;
-	CONDITION_VARIABLE onceEnded; // a region completed or was abandoned: waiting threads look again
+	c4_lock lock;
+	c4_condition onceEnded; // a region completed or was abandoned: waiting threads look again
 	ExitEntry* exits;
 	size_t exitCount;
 	size_t exitCapacity;
 	int exitHooked;
 } StaticStorage;
 
-static StaticStorage g_storage = { SRWLOCK_INIT, CONDITION_VARIABLE_INIT, NULL, 0, 0, 0 };
+static StaticStorage g_storage = { C4_LOCK_INIT, C4_CONDITION_INIT, NULL, 0, 0, 0 };
 
 void c4_run_exit_destroy(void (*destroy)(void*), void* object); // StaticStorageShim.cpp
 
@@ -47,10 +48,10 @@ static void fatal(const char* message)
 
 int c4_once_begin(c4_once_guard* guard)
 {
-	const DWORD self = GetCurrentThreadId();
+	const uint32_t self = c4_os_thread_id();
 	int run = 0;
 	int reentered = 0;
-	AcquireSRWLockExclusive(&g_storage.lock);
+	c4_lock_take(&g_storage.lock);
 	for (;;)
 	{
 		if (guard->state == kOnceDone) break;
@@ -66,20 +67,20 @@ int c4_once_begin(c4_once_guard* guard)
 			reentered = 1;
 			break;
 		}
-		SleepConditionVariableSRW(&g_storage.onceEnded, &g_storage.lock, INFINITE, 0);
+		c4_condition_wait(&g_storage.onceEnded, &g_storage.lock);
 	}
-	ReleaseSRWLockExclusive(&g_storage.lock);
+	c4_lock_give(&g_storage.lock);
 	if (reentered) fatal("a static local's initialization reached its own declaration again");
 	return run;
 }
 
-static void end_once(c4_once_guard* guard, LONG state)
+static void end_once(c4_once_guard* guard, int32_t state)
 {
-	AcquireSRWLockExclusive(&g_storage.lock);
+	c4_lock_take(&g_storage.lock);
 	guard->owner = 0;
-	InterlockedExchange(&guard->state, state);
-	ReleaseSRWLockExclusive(&g_storage.lock);
-	WakeAllConditionVariable(&g_storage.onceEnded);
+	__atomic_store_n(&guard->state, state, __ATOMIC_SEQ_CST);
+	c4_lock_give(&g_storage.lock);
+	c4_condition_wake_all(&g_storage.onceEnded);
 }
 
 void c4_once_end(c4_once_guard* guard)
@@ -98,17 +99,17 @@ static void run_exit_destroys(void)
 {
 	for (;;)
 	{
-		AcquireSRWLockExclusive(&g_storage.lock);
+		c4_lock_take(&g_storage.lock);
 		if (!g_storage.exitCount)
 		{
 			free(g_storage.exits);
 			g_storage.exits = NULL;
 			g_storage.exitCapacity = 0;
-			ReleaseSRWLockExclusive(&g_storage.lock);
+			c4_lock_give(&g_storage.lock);
 			return;
 		}
 		const ExitEntry entry = g_storage.exits[--g_storage.exitCount];
-		ReleaseSRWLockExclusive(&g_storage.lock);
+		c4_lock_give(&g_storage.lock);
 		c4_run_exit_destroy(entry.destroy, entry.object);
 	}
 }
@@ -125,7 +126,7 @@ static int grow_exits(void)
 
 void c4_at_exit(void (*destroy)(void*), void* object)
 {
-	AcquireSRWLockExclusive(&g_storage.lock);
+	c4_lock_take(&g_storage.lock);
 	if (!g_storage.exitHooked)
 	{
 		atexit(run_exit_destroys);
@@ -138,6 +139,6 @@ void c4_at_exit(void (*destroy)(void*), void* object)
 		g_storage.exits[g_storage.exitCount].object = object;
 		g_storage.exitCount++;
 	}
-	ReleaseSRWLockExclusive(&g_storage.lock);
+	c4_lock_give(&g_storage.lock);
 	if (!room) fatal("out of memory registering an object to destroy at exit");
 }

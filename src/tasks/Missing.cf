@@ -23,12 +23,17 @@ namespace Ied
 	// `file` with one of `extensions` when it has none, else as it is; empty when neither is a file. The extensions come
 	// first, as Windows runs a name: a folder often holds a Unix shell script beside the program (Docker Desktop's
 	// `docker` beside docker.exe, Node's `npm` beside npm.cmd), and the script is not a program Windows starts.
+	// Linux runs a file by its name as it is: there are no extensions to try.
 	static Core::String FileWithExtension(const FS::Path& file, Core::StringView extensions) {
+#if defined(PLATFORM_WINDOWS)
 		if (file.Extension().IsEmpty())
 			for (Core::StringView extension : extensions.Split(';')) {
 				Core::String candidate = Core::String(file.View()) + extension.Trimmed().ToLower().View();
 				if (!extension.Trimmed().IsEmpty() && FS::FileExists(candidate.CStr())) return candidate;
 			}
+#else
+		(void)extensions;
+#endif
 		if (FS::FileExists(file.CStr())) return Core::String(file.View());
 		return Core::String();
 	}
@@ -42,7 +47,7 @@ namespace Ied
 			Core::String here = FileWithExtension(FS::Path(cwd) / program, extensions);
 			if (!here.IsEmpty()) return here;
 		}
-		for (Core::StringView folder : path.Split(';')) {
+		for (Core::StringView folder : path.Split(c_PathListSeparator)) {
 			if (folder.Trimmed().IsEmpty()) continue;
 			Core::String found = FileWithExtension(FS::Path(folder.Trimmed()) / program, extensions);
 			if (!found.IsEmpty()) return found;

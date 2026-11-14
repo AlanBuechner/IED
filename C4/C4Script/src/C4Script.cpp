@@ -7,7 +7,9 @@
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
+#if defined(_WIN32)
 #include <windows.h>
+#endif
 
 struct c4s_host
 {
@@ -33,10 +35,17 @@ namespace
 
 	std::string ExecutableInterface()
 	{
+#if defined(_WIN32)
 		wchar_t buffer[MAX_PATH] = {};
 		const DWORD length = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
 		if (length == 0 || length >= MAX_PATH) return {};
 		return std::filesystem::path(buffer).replace_extension(".c4i").string();
+#else
+		std::error_code ec;
+		const std::filesystem::path executable = std::filesystem::read_symlink("/proc/self/exe", ec);
+		if (ec || executable.empty()) return {};
+		return std::filesystem::path(executable).replace_extension(".c4i").string(); // no extension: <name>.c4i
+#endif
 	}
 
 	void CopyError(const std::string& message, char* error, uint64_t errorSize)

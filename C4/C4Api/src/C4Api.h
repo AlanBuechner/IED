@@ -7,7 +7,9 @@
 
 #include <stdint.h>
 
-#ifdef C4API_EXPORTS
+#if !defined(_WIN32)
+#define C4API __attribute__((visibility("default"))) // C4Api.so on Linux: its exports are its default-visible symbols
+#elif defined(C4API_EXPORTS)
 #define C4API __declspec(dllexport)
 #else
 #define C4API __declspec(dllimport)

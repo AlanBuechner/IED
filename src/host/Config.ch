@@ -3,10 +3,14 @@
 //                [--app-data <folder>] [--control <name>] [--workspace <folder>]... [--test-hooks]
 //                [--idle-timeout <s>] [--outbound-budget-mb <n>] [--coalesce-kb <n>] [--allow-origin <o>]...
 //                [--allow-host <h>]... [--quiet] [--debug-scripts on|off] [--relaunched]
+//                [--config-root <folder>] [--tls-identity <file.p12>]
+//     ied-server --config-root <folder> --config-token reader|admin <name>
 //     ied-server --role workspace --ws-id <wsId> --workspace <path> --master <pipe> --control <pipe> --data <folder>
 //                --app-data <folder> --home <folder> --state <folder> --log <file> [--restarted-after <text>] ...
-// The first is the master (docs/01 "Processes"); the second a workspace server, which only the master starts, with
-// its secret in IED_SERVER_SECRET (docs/11 "Workspace servers").
+// The first is the master (docs/01 "Processes"), with --config-root also a config server (docs/35); the second makes a
+// config server's token, prints it once and ends; the third a workspace server, which only the master starts, with its
+// secret in IED_SERVER_SECRET (docs/11 "Workspace servers"). A --tls-identity's password is IED_TLS_PASSWORD (none
+// when it is not set).
 
 include "bedrock.ch"
 
@@ -40,6 +44,10 @@ namespace Ied
 		public bool m_Quiet;
 		public bool m_Relaunched;                        // started by a server that relaunched (Relaunch.ch): it waits for the pipe and the port
 		public Core::Array<Core::String> m_Arguments;    // as given, for a relaunch
+		public Core::String m_ConfigRoot;                // --config-root: the master is also a config server (docs/35)
+		public Core::String m_ConfigTokenRole;           // --config-token <role> <name>: make that token and end
+		public Core::String m_ConfigTokenName;
+		public Core::String m_TlsIdentity;               // --tls-identity: a PKCS #12 file; the server speaks https
 		// Plugin code as debug scripts, DLLs with PDBs that are never kept in the script cache (C4/docs/runtime/04
 		// section 6.4): 1 on, 0 off, -1 as the server was built (on for a -g build).
 		public int32 m_DebugScripts = -1;
@@ -50,6 +58,8 @@ namespace Ied
 
 	ServerConfig DefaultConfig();
 	bool IsWorkspaceServer(const ServerConfig& config);
+	// --config-root was given: the master serves /config/v1/ (docs/35).
+	bool IsConfigServer(const ServerConfig& config);
 	// --state, or the data folder.
 	Core::String StateFolder(const ServerConfig& config);
 	// --log, or <data>/logs/server.log.
@@ -66,7 +76,8 @@ namespace Ied
 	Core::String ControlName(const ServerConfig& config);
 	// The host a browser opens: the bind address, or loopback when the server listens on every interface.
 	Core::String BrowserHost(const ServerConfig& config);
-	// "http://<host>:<port>/", with "?t=<token>" and "#<fragment>" when they are not empty.
+	// "http://<host>:<port>/" ("https://" with --tls-identity), with "?t=<token>" and "#<fragment>" when they are not
+	// empty.
 	Core::String LaunchUrl(const ServerConfig& config, int32 port, Core::StringView token, Core::StringView fragment);
 	// `config` from the arguments after the program's name; false with `error` saying which one is wrong.
 	bool ParseArguments(const Core::Array<Core::String>& arguments, ServerConfig& config, Core::String& error);

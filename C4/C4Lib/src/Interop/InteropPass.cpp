@@ -99,6 +99,8 @@ namespace Scripting
 			std::getline(f, l); // trailing \n after the stamp line
 			std::getline(f, l);
 			if (l != flags.language) return false;
+			std::getline(f, l);
+			if (l != TargetName(flags.system)) return false;
 
 			auto readCountedList = [&](std::vector<std::string>& out) -> bool {
 				out.clear();
@@ -145,7 +147,8 @@ namespace Scripting
 			const std::optional<FileStamp> h = StampOf(headerAbs), cb = StampOf(cbindExe);
 			if (!h || !cb) return;
 			std::ostringstream f;
-			f << h->modified << " " << h->size << " " << cb->modified << " " << cb->size << "\n" << flags.language << "\n";
+			f << h->modified << " " << h->size << " " << cb->modified << " " << cb->size << "\n" << flags.language << "\n"
+				<< TargetName(flags.system) << "\n";
 			WriteCountedList(f, flags.defines);
 			WriteCountedList(f, flags.includeDirs);
 			WriteCountedList(f, flags.targetFlags);
@@ -339,10 +342,19 @@ namespace Scripting
 			return folder / *std::max_element(versions.begin(), versions.end());
 		}
 
-		// The Windows SDK's header folders, where a header no folder of the program has is looked for last: setup.bat's
-		// kit (Toolchain::WindowsSysroot), else the installed SDK. `extern "c" include "d3d12.h"` needs no include_dir.
-		std::vector<std::string> SdkHeaderFolders()
+		// The system's header folders, where a header no folder of the program has is looked for last: for Linux the
+		// sysroot's; for Windows the SDK's, setup.bat's kit (Toolchain::WindowsSysroot), else the installed SDK.
+		// `extern "c" include "d3d12.h"` or `"stdio.h"` needs no include_dir.
+		std::vector<std::string> SdkHeaderFolders(TargetSystem system)
 		{
+			if (system == TargetSystem::Linux)
+			{
+				// Without a sysroot a compiler that runs on Linux builds against the system's own headers (LinuxSysrootForBuild).
+				const fs::path sysroot = Toolchain::LinuxSysroot();
+				const fs::path root = !sysroot.empty() ? sysroot : HostSystem() == TargetSystem::Linux ? fs::path("/") : fs::path();
+				if (root.empty()) return {};
+				return { Norm((root / "usr" / "include" / "x86_64-linux-gnu").string()), Norm((root / "usr" / "include").string()) };
+			}
 			std::vector<fs::path> roots;
 			if (const fs::path sysroot = Toolchain::WindowsSysroot(); !sysroot.empty()) roots.push_back(sysroot / "Windows Kits" / "10" / "Include");
 			roots.push_back("C:/Program Files (x86)/Windows Kits/10/Include");
@@ -354,7 +366,7 @@ namespace Scripting
 		}
 
 		std::string ResolveHeader(const std::string& headerPath, const std::string& fileDir,
-			const std::vector<std::string>& rootFolders, const std::vector<std::string>& cliIncludeDirs)
+			const std::vector<std::string>& rootFolders, const std::vector<std::string>& cliIncludeDirs, TargetSystem system)
 		{
 			std::string hp = Norm(headerPath);
 			bool isAbs = (hp.size() >= 2 && hp[1] == ':') || (hp.front() == '/');
@@ -367,7 +379,7 @@ namespace Scripting
 			for (const auto& inc : cliIncludeDirs)
 				candidates.push_back(Norm(inc + "/" + hp));
 			if (!isAbs)
-				for (const auto& sdk : SdkHeaderFolders())
+				for (const auto& sdk : SdkHeaderFolders(system))
 					candidates.push_back(Norm(sdk + "/" + hp));
 
 			for (const auto& c : candidates)
@@ -429,7 +441,7 @@ namespace Scripting
 		// C4LSP's analysis) evicting the other's and running CBind over the header again.
 		std::string BindingTag(const std::string& absPath, const BindingFlags& flags)
 		{
-			std::string how = flags.language;
+			std::string how = flags.language + '\n' + TargetName(flags.system);
 			for (const auto* list : { &flags.defines, &flags.includeDirs, &flags.targetFlags })
 			{
 				how += '\n';
@@ -441,9 +453,9 @@ namespace Scripting
 		}
 
 	bool InteropPass::ResolveForeignHeader(const std::string& headerPath, const std::string& fileDir,
-		const std::vector<std::string>& rootFolders, const std::vector<std::string>& cliIncludeDirs, std::string& outAbs)
+		const std::vector<std::string>& rootFolders, const std::vector<std::string>& cliIncludeDirs, TargetSystem system, std::string& outAbs)
 	{
-		outAbs = ResolveHeader(headerPath, fileDir, rootFolders, cliIncludeDirs);
+		outAbs = ResolveHeader(headerPath, fileDir, rootFolders, cliIncludeDirs, system);
 		return !outAbs.empty();
 	}
 
@@ -459,7 +471,19 @@ namespace Scripting
 		for (const auto& d : flags.defines) { Core::String f("-D"); f += d; args.Push(f); }
 		for (const auto& inc : flags.includeDirs) { args.Push("-I"); args.Push(inc); }
 		for (const auto& target : flags.targetFlags) args.Push(target);
-		if (const fs::path sysroot = Toolchain::WindowsSysroot(); !sysroot.empty())
+		if (flags.system == TargetSystem::Linux)
+		{
+			args.Push("--target");
+			args.Push(TargetName(flags.system));
+			if (const fs::path sysroot = Toolchain::LinuxSysroot(); !sysroot.empty())
+			{
+				args.Push("--sysroot");
+				args.Push(sysroot.string().c_str());
+			}
+			args.Push("--resource-dir");
+			args.Push(Toolchain::ClangResourceDirectory().string().c_str());
+		}
+		else if (const fs::path sysroot = Toolchain::WindowsSysroot(); !sysroot.empty())
 		{
 			args.Push("--winsysroot");
 			args.Push(sysroot.string());
@@ -506,7 +530,7 @@ namespace Scripting
 			if (verbose) CORE_INFO("Interop: {0} is up to date", fo.srcPath);
 			return true;
 		}
-		if (!CompileForeignSource(fo.srcPath, fo.objPath, fo.language, defines, includeDirs, fo.targetFlags, fo.compileFlags, verbose))
+		if (!CompileForeignSource(fo.srcPath, fo.objPath, fo.language, defines, includeDirs, fo.system, fo.targetFlags, fo.compileFlags, verbose))
 		{
 			CORE_WARN("Interop: failed to compile foreign source {0}", fo.srcPath);
 			return false;
@@ -517,10 +541,11 @@ namespace Scripting
 
 	InteropPass::Result InteropPass::RunFolder(const std::vector<std::string>& rootFolders,
 		const std::vector<InteropFileInput>& files,
-		const std::vector<std::string>& cliIncludeDirs, const std::string& objDir, const std::vector<std::string>& targetFlags, bool verbose,
+		const std::vector<std::string>& cliIncludeDirs, const std::string& objDir, const CpuTarget& target, bool verbose,
 		bool declarationsOnly, const std::vector<std::string>& compileFlags)
 	{
 		Result result;
+		const std::vector<std::string>& targetFlags = target.Flags();
 		std::string cbindExe = FindCBindExe();
 
 		for (const auto& f : files)
@@ -546,7 +571,7 @@ namespace Scripting
 			// when the SDK path is given in the config block rather than on the CLI).
 			std::vector<std::string> allInc = cliIncludeDirs;
 			for (const auto& inc : d.includeDirs) allInc.push_back(inc);
-			if (!ResolveForeignHeader(d.path, fileDir, f.folders.empty() ? rootFolders : f.folders, allInc, absPath))
+			if (!ResolveForeignHeader(d.path, fileDir, f.folders.empty() ? rootFolders : f.folders, allInc, target.System(), absPath))
 			{
 				CORE_WARN("Interop: cannot resolve extern path '{0}' in {1}", d.path, name);
 				result.errors.push_back(
@@ -570,7 +595,7 @@ namespace Scripting
 						"' referenced in " + name + ". Install the CBind tool next to the compiler.");
 					continue;
 				}
-				const BindingFlags flags{ d.language, d.defines, includeDirs, targetFlags };
+				const BindingFlags flags{ d.language, d.defines, includeDirs, targetFlags, target.System() };
 				const std::string bindingTag = BindingTag(absPath, flags);
 				std::string outFile = Norm(objDir + "/" + bindingTag + ".c4bind");
 				bool haveBindings = false;
@@ -619,6 +644,7 @@ namespace Scripting
 						fo.defines = d.defines;
 						fo.targetFlags = targetFlags;
 						fo.compileFlags = compileFlags;
+						fo.system = target.System();
 						// The shim #includes the header by filename - make sure its directory is on
 						// the include path even when no explicit include_dirs were given.
 						std::string headerDir = Norm(fs::path(absPath).parent_path().string());
@@ -643,6 +669,7 @@ namespace Scripting
 					fo.includeDirs = includeDirs;
 					fo.targetFlags = targetFlags;
 					fo.compileFlags = compileFlags;
+					fo.system = target.System();
 					if (!declarationsOnly)
 					{
 						if (!CompileForeign(fo, verbose))

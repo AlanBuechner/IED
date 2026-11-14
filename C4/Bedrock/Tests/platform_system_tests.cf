@@ -70,7 +70,11 @@ class SystemTests {
 		assert_true(Platform::ProcessId() > 0 && Platform::ProcessId() == Platform::ProcessId(), "one id for the process");
 		FS::Path exe = Platform::ExecutablePath();
 		assert_true(exe.IsAbsolute(), "the executable's path is absolute");
+#if defined(PLATFORM_LINUX)
+		assert_true(exe.Extension().IsEmpty() && !exe.FileName().IsEmpty(), "and names a program");
+#else
 		assert_true(exe.Extension() == Core::StringView(".exe"), "and names a program");
+#endif
 		assert_true(FS::FileExists(exe.CStr()), "which exists");
 	}
 

@@ -1,9 +1,11 @@
 #include "FileIoTest.h"
 #include "Compiler/FileIo.h"
+#include <llvm/Support/Process.h>
 #include <filesystem>
+#include <fstream>
 #include <optional>
-#include <process.h>
 #include <string>
+#ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -11,6 +13,7 @@
 #define NOMINMAX
 #endif
 #include <Windows.h>
+#endif
 
 namespace Testing
 {
@@ -23,11 +26,15 @@ namespace Testing
 		constexpr size_t kMaxPath = 260;
 
 		// This process's own: test runs at the same time never share it.
-		fs::path Root() { return fs::temp_directory_path() / ("c4_file_io_test_" + std::to_string(_getpid())); }
+		fs::path Root() { return fs::temp_directory_path() / ("c4_file_io_test_" + std::to_string(llvm::sys::Process::getProcessId())); }
 
 		// The spelling of an absolute path that the standard library's calls take past MAX_PATH, written out (what
-		// ExtendedPath must give).
+		// ExtendedPath must give); Linux's take any path as it is.
+#ifdef _WIN32
 		fs::path LongPath(const fs::path& path) { return fs::path(L"\\\\?\\" + path.wstring()); }
+#else
+		fs::path LongPath(const fs::path& path) { return path; }
+#endif
 
 		// A fresh folder deep enough that a file's path in it is longer than MAX_PATH.
 		fs::path DeepFolder()
@@ -100,6 +107,7 @@ namespace Testing
 		RemoveRoot();
 	}
 
+#ifdef _WIN32
 	void FileIoTest::AFileInUseIsSetAsideAndReplaced()
 	{
 		RemoveRoot();
@@ -140,4 +148,40 @@ namespace Testing
 		TEST_ASSERT(PlainPath(L"C:\\plain") == fs::path(L"C:\\plain"));
 		TEST_ASSERT(PathText(fs::path(L"C:\\caf\u00e9")) == "C:\\caf\xc3\xa9");
 	}
+#else
+	void FileIoTest::AFileInUseIsReplacedByANewFile()
+	{
+		RemoveRoot();
+		fs::create_directories(Root());
+		const std::string from = PathText(Root() / "C4Script.new");
+		const std::string to = PathText(Root() / "C4Script.so");
+		TEST_ASSERT(WriteFileBytes(to, "old library"));
+		TEST_ASSERT(WriteFileBytes(from, "new library"));
+		const auto later = fs::last_write_time(Root() / "C4Script.so") + std::chrono::seconds(5);
+		fs::last_write_time(Root() / "C4Script.new", later);
+		std::ifstream held(to, std::ios::binary); // what a program that loaded it has open
+		TEST_ASSERT(held.is_open());
+		TEST_ASSERT(!UpdateFile(from, to));
+		TEST_ASSERT_EQ(ReadFileBytes(to), std::string("new library"));
+		std::string kept((std::istreambuf_iterator<char>(held)), std::istreambuf_iterator<char>());
+		TEST_ASSERT_EQ(kept, std::string("old library")); // the program's file was not written under it
+		std::size_t files = 0;
+		for (const auto& entry : fs::directory_iterator(Root()))
+			files += entry.is_regular_file() ? 1 : 0;
+		TEST_ASSERT_EQ(files, std::size_t(2)); // the source and the replaced file: no partial copy left
+		TEST_ASSERT(!UpdateFile(from, to)); // again, over a file nothing holds
+		TEST_ASSERT_EQ(ReadFileBytes(to), std::string("new library"));
+		RemoveRoot();
+	}
+
+	void FileIoTest::ExtendedPathsAreAbsoluteAndNormal()
+	{
+		TEST_ASSERT(ExtendedPath("/a/b/../c//d") == fs::path("/a/c/d"));
+		TEST_ASSERT(ExtendedPath("relative/x") == (fs::current_path() / "relative" / "x").lexically_normal());
+		TEST_ASSERT(ExtendedPath(Root()) == Root().lexically_normal());
+		TEST_ASSERT(PlainPath("/a/c") == fs::path("/a/c"));
+		TEST_ASSERT(PlainPath(ExtendedPath("/plain")) == fs::path("/plain"));
+		TEST_ASSERT(PathText(fs::path("/caf\xc3\xa9")) == "/caf\xc3\xa9");
+	}
+#endif
 } // namespace Testing

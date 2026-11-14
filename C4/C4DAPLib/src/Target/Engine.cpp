@@ -1,3 +1,4 @@
+#ifdef _WIN32 // the Win32 debugger; Linux's engine is Target/LinuxEngine.h
 #include "Target/Engine.h"
 #include "Target/WideText.h"
 
@@ -211,3 +212,4 @@ namespace C4DAP::Target
 		ContinueDebugEvent(event.dwProcessId, event.dwThreadId, status);
 	}
 } // namespace C4DAP::Target
+#endif

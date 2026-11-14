@@ -210,7 +210,9 @@ namespace Scripting
 
 	ScriptHost::~ScriptHost()
 	{
+#if defined(_WIN32)
 		if (!m_DllFolder.empty()) RemoveScriptDllFolder(m_DllFolder);
+#endif
 	}
 
 	std::unique_ptr<ScriptHost> ScriptHost::Open(const std::string& interfacePath, const void* table, GuardedCall guard, std::string* error)
@@ -324,9 +326,16 @@ namespace Scripting
 
 	std::unique_ptr<LinkedScript> ScriptHost::Link(ScriptCode code, const ScriptCompileOptions& options, std::string* generated, std::string* error)
 	{
+#if defined(_WIN32)
 		if (!code.module || !Debugged(options)) return LinkScript(std::move(code), TableFor(options), m_Index.target, generated, error);
 		std::call_once(m_DllFolderMade, [this] { m_DllFolder = ScriptDllFolder(m_DllRoot); });
 		return LinkScriptDll(std::move(code), TableFor(options), m_Index.target, { m_DllFolder, ScriptDllName(options.name, ++m_DllLoads) }, error);
+#else
+		// Linux links a debug script in memory too, its DWARF with it: section 6.4 (DLLs and PDBs) is Windows. A fault in
+		// it is named by its function, as a DLL's is.
+		if (code.module && Debugged(options)) code.debugName = options.name.empty() ? std::string("script") : options.name;
+		return LinkScript(std::move(code), TableFor(options), m_Index.target, generated, error);
+#endif
 	}
 
 	std::unique_ptr<Script> ScriptHost::Compile(const ScriptCompileOptions& options)

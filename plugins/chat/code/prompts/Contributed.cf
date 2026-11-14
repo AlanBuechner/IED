@@ -59,6 +59,8 @@ namespace Ai
 			else folders.Push(Folder(folder, Who(given).View(), PluginShown(given, given.m_Entry.AsView()).View(), !WorkspaceOwns(ws, given)));
 		}
 		folders.Push(Folder(FS::Path(IED::AppFolder().View()) / "skills", Core::StringView("app"), Core::StringView(""), false));
+		// A config server's skills, mirrored by the master (docs/35): after the owner's own, and replaced at each sync.
+		folders.Push(Folder(FS::Path(IED::AppFolder().View()) / "shared" / "skills", Core::StringView("shared"), Core::StringView(""), true));
 		return ReadSkills(folders, problems);
 	}
 

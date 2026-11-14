@@ -7,6 +7,7 @@
 #include "Core/Vector.h"
 #include "Core/SparseMap.h"
 #include "Core/Logging/Log.h"
+#include <atomic>
 #include <memory>
 #include <concepts>
 #include <functional>
@@ -35,18 +36,27 @@
 	#define PLATFORM_ANDROID
 	#error "Android is not sapported"
 #elif defined(__linux__)
-	#define PLATFORM_LINUX
-	#error "Linux is not sapported"
+	#if defined(__x86_64__)
+		#define PLATFORM_LINUX
+	#else
+		#error "only x64 Linux is sapported"
+	#endif
 #else
 	#error "Unknown Platform!"
 #endif
 
+#if defined(PLATFORM_WINDOWS)
+	#define CORE_DEBUG_BREAK() __debugbreak()
+#else
+	#define CORE_DEBUG_BREAK() __builtin_debugtrap()
+#endif
+
 #ifdef ENABLE_ASSERTS
-#define CORE_ASSERT_FUNC(x, func, msg, ...) {if(!(x)) {CORE_ERROR((std::string("Assertion Failed: ") + (msg)).c_str(), __VA_ARGS__); func;}}
-	#define CORE_ASSERT(x, msg, ...) CORE_ASSERT_FUNC(x, __debugbreak(), msg, __VA_ARGS__)
-	#define CORE_ASSERT_BREAK(x, msg, ...) CORE_ASSERT_FUNC(x, break, msg, __VA_ARGS__)
-	#define CORE_ASSERT_CONTINUE(x, msg, ...) CORE_ASSERT_FUNC(x, continue, msg, __VA_ARGS__)
-	#define CORE_ASSERT_RETURN(x, msg, ...) CORE_ASSERT_FUNC(x, return, msg, __VA_ARGS__)
+#define CORE_ASSERT_FUNC(x, func, msg, ...) {if(!(x)) {CORE_ERROR((std::string("Assertion Failed: ") + (msg)).c_str() __VA_OPT__(,) __VA_ARGS__); func;}}
+	#define CORE_ASSERT(x, msg, ...) CORE_ASSERT_FUNC(x, CORE_DEBUG_BREAK(), msg __VA_OPT__(,) __VA_ARGS__)
+	#define CORE_ASSERT_BREAK(x, msg, ...) CORE_ASSERT_FUNC(x, break, msg __VA_OPT__(,) __VA_ARGS__)
+	#define CORE_ASSERT_CONTINUE(x, msg, ...) CORE_ASSERT_FUNC(x, continue, msg __VA_OPT__(,) __VA_ARGS__)
+	#define CORE_ASSERT_RETURN(x, msg, ...) CORE_ASSERT_FUNC(x, return, msg __VA_OPT__(,) __VA_ARGS__)
 #else
 	#define CORE_ASSERT_FUNC(...)
 	#define CORE_ASSERT(...)

@@ -6,6 +6,9 @@
 include "bedrock.ch"
 include "gpu.ch"
 
+// Windows only: Gpu is Direct3D 12's. Linux's tests of this area are to come (C4 D-86).
+#if defined(PLATFORM_WINDOWS)
+
 const char* kMissingCaptureLibrary = "c4_gpu_no_such_library.dll";
 
 bool Mentions(const char* text, const char* part) { return Core::StringView(text).IndexOf(Core::StringView(part)) >= 0; }
@@ -90,3 +93,4 @@ class CaptureTests {
 		assert_true(!capture.Load(kMissingCaptureLibrary) && Mentions(capture.Error(), "(error 126)"), "a later load reports its own reason");
 	}
 }
+#endif

@@ -1,5 +1,6 @@
-// Settings (docs/07 "Settings on the wire"): the app tier file and each workspace's solution tier file, read again when
-// they change, the effective value of every setting per workspace, the "settings:app" and "settings:<wsId>" topics
+// Settings (docs/07 "Settings on the wire"): the app tier file, the Shared tier under it (what a config server serves,
+// mirrored into <app data>/shared/settings.json, docs/35; read only) and each workspace's solution tier file, read again
+// when they change, the effective value of every setting per workspace, the "settings:app" and "settings:<wsId>" topics
 // and the settings.* methods. Every member runs with the server lock held.
 
 include "TierFile.ch"
@@ -25,7 +26,7 @@ namespace Ied
 		public void PluginsChanged(Workspace* ws);
 		// A file of a workspace changed on disk (from its watcher): the tier file is read again if it is one.
 		public void WorkspaceFileChanged(Workspace* ws, Core::StringView path);
-		// The app tier file changed on disk.
+		// The app tier file or the Shared tier's mirror changed on disk.
 		public void AppFileChanged();
 		// The effective value of `key` for `ws` (null: the app tier alone) and a project of it (empty: none), JSON.
 		public Core::String Effective(Workspace* ws, Core::StringView project, Core::StringView key);
@@ -58,10 +59,13 @@ namespace Ied
 		private SettingsCatalog m_Catalog;                                // the global plugins' settings: the app tier
 		private Core::HashMap<Core::String, SettingsCatalog*> m_Catalogs;   // wsId -> with its local plugins' settings too
 		private TierFile* m_App;
+		private TierFile* m_Shared;                                   // under the app tier: <app data>/shared/settings.json
 		private Core::HashMap<Core::String, TierFile*> m_Solutions;   // wsId -> its solution tier
 		private Core::HashMap<Core::String, TierFile*> m_Projects;    // "<wsId>/<project>" -> its project tier
 	}
 
+	// "<app data>/shared/settings.json": the Shared tier, the master's mirror of a config server's settings (docs/35).
+	const char* c_SharedSettings = "shared/settings.json";
 	// "<root>/.ied/solution.json": a workspace's solution tier (a folder workspace's too).
 	const char* c_SolutionSettings = ".ied/solution.json";
 	// "<root>/.ied/projects/<Name>.json": a project's tier.

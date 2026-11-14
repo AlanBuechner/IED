@@ -530,6 +530,7 @@ namespace Ied
 				Threading::LockGuard guard(m_Server->m_Lock);
 				instance->m_Problem = Core::String("the new build did not compile, the previous one runs:\n") + fresh->Diagnostics();
 				instance->m_Digest = digest;
+				instance->m_Settled = instance->m_Builds;
 				PublishCodeDiagnostics(m_Server, instance, Core::StringView(fresh->Diagnostics()));
 				m_Server->Log((((Core::String("plugin ") + instance->m_PluginId.View()) + ": ") + instance->m_Problem.View()).View());
 				m_Server->m_Plugins->CodeChanged(instance);
@@ -558,6 +559,7 @@ namespace Ied
 		if (entry.IsValid()) InvokeCode(instance, entry, nullptr, (void*)context, problem);
 		Threading::LockGuard guard(m_Server->m_Lock);
 		if (instance->m_Stopping) return;
+		instance->m_Settled = instance->m_Builds;
 		instance->m_Digest = Core::String(digest);
 		instance->m_State = problem.IsEmpty() ? CodeState::Active : CodeState::Failed;
 		instance->m_Problem = problem;
@@ -581,6 +583,7 @@ namespace Ied
 	void CodeRuntime::Failed(CodeInstance* instance, Core::StringView problem, Core::StringView digest) {
 		Threading::LockGuard guard(m_Server->m_Lock);
 		if (instance->m_Stopping) return;
+		instance->m_Settled = instance->m_Builds;
 		instance->m_State = CodeState::Failed;
 		instance->m_Problem = Core::String(problem);
 		instance->m_Digest = Core::String(digest);
@@ -773,6 +776,8 @@ namespace Ied
 		json.Field("state", CodeStateName(instance->m_State));
 		if (!instance->m_Problem.IsEmpty()) json.Field("problem", instance->m_Problem.View());
 		json.IntField("builds", instance->m_Builds);
+		// A build queued or compiling: a running build's state stays as it was until the new one takes over or fails.
+		if (instance->m_BuildQueued || instance->m_Settled < instance->m_Builds) json.BoolField("building", true);
 		if (!instance->m_Builtin && instance->m_Script && instance->m_Script->Cached()) json.BoolField("cached", true);
 		if (!instance->m_Builtin && instance->m_Script && m_Host != nullptr && m_Host->IsOpen() && m_Host->DebugScripts()) json.BoolField("debug", true);
 		json.EndObject();

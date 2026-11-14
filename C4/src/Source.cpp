@@ -34,6 +34,9 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <cstdlib>
+#include <llvm/Support/Signals.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -156,7 +159,7 @@ namespace
 		bool RunBackend()
 		{
 			llvm::LLVMContext& ctx = *new llvm::LLVMContext;
-			Scripting::CodeGenDriver& driver = *new Scripting::CodeGenDriver(ctx);
+			Scripting::CodeGenDriver& driver = *new Scripting::CodeGenDriver(ctx, m_Options.target.System());
 
 			// The entry point the generated main calls: a -test run drives the test harness (the compiler
 			// emits a synthetic main that runs every [test] function), otherwise the user's main.
@@ -401,7 +404,7 @@ namespace
 			// Foreign sources build at the program's optimization level, with its debug information (BUG-285).
 			std::vector<std::string> foreignFlags = { "-O" + std::to_string(m_Options.optLevel) };
 			if (m_Options.debugInfo) foreignFlags.push_back("-g");
-			m_Interop = Scripting::InteropPass::RunFolder(rootFolders, inputs, cliIncludes, objDir, m_Options.target.Flags(), m_Options.verbose,
+			m_Interop = Scripting::InteropPass::RunFolder(rootFolders, inputs, cliIncludes, objDir, m_Options.target, m_Options.verbose,
 				false, foreignFlags);
 
 			// A broken foreign C/C++ file (unresolvable path, CBind rejection, failed compile) must fail
@@ -494,6 +497,7 @@ namespace
 	};
 }
 
+#ifdef _WIN32
 // The faulting thread's frames from the fault's own context, outward, by each function's unwind data (the filter runs
 // on top of the exception's dispatch, where a capture of the current stack finds nothing of the fault, BUG-394).
 static void ReportFaultingStack(CONTEXT context, uintptr_t base)
@@ -528,12 +532,49 @@ static LONG WINAPI ReportInternalError(EXCEPTION_POINTERS* ep)
 	return EXCEPTION_EXECUTE_HANDLER;
 }
 
+static void InstallCrashReport(const char*)
+{
+	SetUnhandledExceptionFilter(ReportInternalError);
+}
+
+// The process ends without its libraries' shutdown.
+static void EndProcess(int code)
+{
+	TerminateProcess(GetCurrentProcess(), static_cast<UINT>(code));
+}
+#else
+static void ReportInternalError(void*)
+{
+	fprintf(stderr, "C4: internal compiler error: the compiler crashed; its stack:\n");
+}
+
+static void AskForReport(void*)
+{
+	fprintf(stderr, "Please report it with the program that triggered it.\n");
+}
+
+// A crash of the compiler itself is reported as one, with the faulting thread's stack by LLVM's signal handler
+// (symbolized when llvm-symbolizer is on PATH), between these two lines.
+static void InstallCrashReport(const char* program)
+{
+	llvm::sys::AddSignalHandler(ReportInternalError, nullptr);
+	llvm::sys::PrintStackTraceOnErrorSignal(program);
+	llvm::sys::AddSignalHandler(AskForReport, nullptr);
+}
+
+// The process ends without its libraries' shutdown: no static destructors, no atexit handlers.
+static void EndProcess(int code)
+{
+	std::_Exit(code);
+}
+#endif
+
 // The exit code of a command line C4.exe cannot run: bad options or no input.
 constexpr int kUsageError = 2;
 
 int main(int argc, char** argv)
 {
-	SetUnhandledExceptionFilter(ReportInternalError);
+	InstallCrashReport(argv[0]);
 
 	const Scripting::CompileOptions opts = Scripting::ParseArgs(argc, argv);
 	if (!opts.error.empty())
@@ -567,6 +608,6 @@ int main(int argc, char** argv)
 	std::cout.flush();
 	std::cerr.flush();
 	std::fflush(nullptr);
-	TerminateProcess(GetCurrentProcess(), static_cast<UINT>(code));
+	EndProcess(code);
 	return code;
 }

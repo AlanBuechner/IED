@@ -163,12 +163,19 @@ namespace C4Plugin
 
 	Core::Array<Core::String> CommandCandidates(Core::StringView name, Core::StringView path) {
 		Core::Array<Core::String> candidates;
+#if defined(PLATFORM_LINUX)
+		for (Core::StringView raw : path.Split(':')) {
+			Core::StringView folder = Unquoted(raw);
+			if (folder.IsEmpty()) continue;
+			candidates.Push(Joined(folder, name));
+#else
 		for (Core::StringView raw : path.Split(';')) {
 			Core::StringView folder = Unquoted(raw);
 			if (folder.IsEmpty()) continue;
 			candidates.Push(Joined(folder, (Core::String(name) + ".cmd").View()));
 			candidates.Push(Joined(folder, (Core::String(name) + ".bat").View()));
 			candidates.Push(Joined(folder, name));
+#endif
 		}
 		return candidates;
 	}

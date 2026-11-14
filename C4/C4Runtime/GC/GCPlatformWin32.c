@@ -15,6 +15,8 @@ static void* map_at(void* address, size_t size)
 	return VirtualAlloc(address, size, MEM_RESERVE | MEM_COMMIT | MEM_WRITE_WATCH, PAGE_READWRITE);
 }
 
+int gc_os_tracks_writes(void) { return 1; }
+
 void gc_os_forget_writes(void* base, size_t size)
 {
 	ResetWriteWatch(base, size);

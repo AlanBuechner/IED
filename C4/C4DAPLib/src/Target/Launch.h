@@ -1,18 +1,11 @@
 #pragma once
 #include "Target/OutputPipes.h"
+#include "Target/SessionTypes.h"
 #include <string>
 #include <vector>
 
 namespace C4DAP::Target
 {
-	struct LaunchOptions
-	{
-		std::string program;
-		std::vector<std::string> args;
-		std::string cwd;
-		bool stopOnEntry = false;
-	};
-
 	/// The command line Windows hands the program: each argument quoted so the C runtime splits it back the same.
 	std::wstring CommandLine(const std::string& program, const std::vector<std::string>& args);
 

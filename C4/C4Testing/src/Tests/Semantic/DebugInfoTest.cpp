@@ -85,15 +85,20 @@ namespace Testing
 		}
 	}
 
+	// CodeView for a Windows program (its PDB), DWARF 5 for a Linux one (in the program, D-86): the host's system here.
 	void DebugInfoTest::TheModuleIsCodeView()
 	{
-		bool codeView = false, version = false, hashes = false;
+		bool codeView = false, version = false, hashes = false, dwarf = false, onLinux = false;
 		TEST_ASSERT(WithModule(true, [&](llvm::Module& m) {
+			onLinux = m.getTargetTriple().isOSLinux();
 			codeView = m.getModuleFlag("CodeView") != nullptr;
 			version = m.getModuleFlag("Debug Info Version") != nullptr;
 			hashes = m.getModuleFlag("CodeViewGHash") != nullptr; // the objects carry their types' hashes for the link
+			dwarf = m.getModuleFlag("Dwarf Version") != nullptr;
 		}));
-		TEST_ASSERT(codeView && version && hashes);
+		TEST_ASSERT(version);
+		if (onLinux) TEST_ASSERT(dwarf && !codeView && !hashes);
+		else TEST_ASSERT(codeView && hashes && !dwarf);
 		TEST_PASSED();
 	}
 
@@ -274,7 +279,7 @@ namespace Testing
 	{
 		bool any = true;
 		TEST_ASSERT(WithModule(false, [&](llvm::Module& m) {
-			any = m.getModuleFlag("CodeView") != nullptr;
+			any = m.getModuleFlag("CodeView") != nullptr || m.getModuleFlag("Dwarf Version") != nullptr;
 			for (llvm::Function& fn : m) any = any || fn.getSubprogram() != nullptr;
 		}));
 		TEST_ASSERT(!any);

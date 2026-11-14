@@ -17,6 +17,7 @@ LANGUAGE = "cpp"
 SOURCE_EXTENSIONS = (".c", ".cpp")
 SKIPPED_FOLDERS = {"bin", "bin-int", "__pycache__"}
 OUTPUT_EXTENSIONS = {"executable": ".exe", "static": ".lib", "dynamic": ".dll"}
+LINUX_OUTPUT_EXTENSIONS = {"executable": "", "static": ".a", "dynamic": ".so"}
 TRAVELLING = ("static", "prebuilt")   # the libraries whose include folders and links reach what depends on them
 
 
@@ -37,11 +38,13 @@ class Target:
 	reflection: bool
 	copies: tuple          # (file or folder, where in the bin folder, what of a folder is left out)
 	tests: bool
+	system: str = "windows"
 
 	@property
 	def output(self):
 		"""The file the link makes; None for a prebuilt library."""
-		return f"{self.bin_dir}/{self.name}{OUTPUT_EXTENSIONS[self.kind]}" if self.kind in OUTPUT_EXTENSIONS else None
+		extensions = LINUX_OUTPUT_EXTENSIONS if self.system == "linux" else OUTPUT_EXTENSIONS
+		return f"{self.bin_dir}/{self.name}{extensions[self.kind]}" if self.kind in extensions else None
 
 	@property
 	def is_library(self):
@@ -98,9 +101,11 @@ def define_flags(defines):
 	return tuple(name if value == "" else f"{name}={value}" for name, value in defines.items())
 
 
-def automatic_defines(name, configuration):
+def automatic_defines(name, configuration, system="windows"):
 	"""What every C++ compile defines: the configuration's name (DEVELOPMENT), Unicode Windows APIs, no CRT
-	deprecation warnings, and the project's name."""
+	deprecation warnings, and the project's name; on Linux the configuration's and the project's names."""
+	if system == "linux":
+		return (configuration.name.upper(), f"PROJECT_NAME={name}")
 	return (configuration.name.upper(), "_UNICODE", "UNICODE", "_CRT_SECURE_NO_WARNINGS", f"PROJECT_NAME={name}")
 
 
@@ -109,9 +114,10 @@ def target(ctx):
 	spec, expand = ctx.project, ctx.expand
 	options = read_options(spec)
 	override = _override(spec, ctx.configuration.name)
+	for_system = _system_override(spec, ctx.system)
 	kind = "executable" if spec.kind == "executable" else options.library
 	sources = tuple(expand(entry) for entry in spec.sources)
-	defines = {**spec.defines, **override.get("defines", {}), **ctx.configuration.defines}
+	defines = {**spec.defines, **override.get("defines", {}), **for_system.get("defines", {}), **ctx.configuration.defines}
 	return Target(
 		name=spec.name,
 		dir=norm(spec.dir),
@@ -121,13 +127,16 @@ def target(ctx):
 		sources=source_files(sources, spec.dir),
 		includes=source_folders(sources, spec.dir) + tuple(absolute(expand(i), spec.dir) for i in spec.includes),
 		system_includes=tuple(absolute(expand(i), spec.dir) for i in options.system_includes),
-		defines=define_flags(defines) + automatic_defines(spec.name, ctx.configuration),
-		compiler_args=tuple(expand(a) for a in spec.compiler_args + tuple(override.get("compiler_args", ()))),
-		links=tuple(expand(link) for link in spec.links + tuple(override.get("links", ()))),
+		defines=define_flags(defines) + automatic_defines(spec.name, ctx.configuration, ctx.system),
+		compiler_args=tuple(expand(a) for a in spec.compiler_args + tuple(override.get("compiler_args", ())) +
+			tuple(for_system.get("compiler_args", ()))),
+		links=tuple(expand(link) for link in spec.links + tuple(override.get("links", ())) + tuple(for_system.get("links", ()))),
 		linker_args=tuple(expand(a) for a in options.linker_args),
 		reflection=options.reflection,
-		copies=tuple((absolute(expand(copy.source), spec.dir), copy.dest, tuple(getattr(copy, "exclude", ()))) for copy in spec.copies),
+		copies=tuple((absolute(expand(copy.source), spec.dir), copy.dest, tuple(getattr(copy, "exclude", ()))) for copy in spec.copies
+			if not getattr(copy, "systems", ()) or ctx.system in copy.systems),
 		tests=spec.tests is True,
+		system=ctx.system,
 	)
 
 
@@ -137,6 +146,14 @@ def _override(spec, config_name):
 		if name.lower() == config_name.lower():
 			return {"defines": override.defines, "compiler_args": override.compiler_args, "links": override.links}
 	return {}
+
+
+def _system_override(spec, system):
+	"""The project's [project.system.<name>] additions for the system it is built for."""
+	override = getattr(spec, "system_overrides", {}).get(system)
+	if override is None:
+		return {}
+	return {"defines": override.defines, "compiler_args": override.compiler_args, "links": override.links}
 
 
 def libraries(ctx):
@@ -196,4 +213,4 @@ def find_library(entry, folder, library_dirs):
 		path = os.path.join(directory, entry)
 		if os.path.isfile(path):
 			return norm(path)
-	raise ValueError(f"link {entry} is not in the project's folder, the Windows SDK, MSVC, the LLVM release or PATH")
+	raise ValueError(f"link {entry} is not in the project's folder, the system's or the LLVM release's libraries, or PATH")

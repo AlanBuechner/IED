@@ -16,7 +16,24 @@ def response_file_command(command, path):
 	return [command[0], "--rsp-quoting=posix", f"@{path}"]
 
 
+def linux_link_command(toolchain, configuration, target, objects, libraries):
+	"""A Linux target: an archive by llvm-ar; a program or a shared library by clang's driver as g++ links (libstdc++),
+	with lld, finding its shared libraries beside itself ($ORIGIN). A shared library is named by its file (its soname):
+	what links it by path then needs it by that name, not by the path it was built at."""
+	if target.kind == "static":
+		return [toolchain.archiver, "rcs", target.output] + list(objects)
+	command = [toolchain.clang, "--driver-mode=g++", "--target=" + toolchain.target, "-fuse-ld=lld", "-Wl,-rpath,$ORIGIN"]
+	if target.kind != "executable":
+		command += ["-shared", "-fPIC", "-Wl,-soname," + os.path.basename(target.output)]
+	if configuration.debug_info:
+		command.append("-g")
+	command += ["-o", target.output] + list(objects) + ["-Wl,--start-group"] + list(libraries) + ["-Wl,--end-group"]
+	return command + list(target.linker_args) + ["-lpthread", "-ldl", "-lm"]
+
+
 def link_command(toolchain, configuration, target, objects, libraries):
+	if toolchain.linux:
+		return linux_link_command(toolchain, configuration, target, objects, libraries)
 	command = [toolchain.clang, "-target", toolchain.target]
 	if target.kind == "executable":
 		command.append("-fuse-ld=lld")
@@ -72,6 +89,8 @@ def link(toolchain, configuration, target, objects, libraries, log):
 	if not needs_link(target, command, objects, libraries, argsfile):
 		return 0, False
 	os.makedirs(target.bin_dir, exist_ok=True)
+	if toolchain.linux and target.kind == "static" and os.path.isfile(target.output):
+		os.remove(target.output)   # llvm-ar adds to an archive: the old objects would stay
 	if target.kind != "static":
 		aside = move_aside_if_running(target.output)
 		if aside:

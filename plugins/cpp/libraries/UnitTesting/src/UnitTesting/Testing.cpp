@@ -2,8 +2,11 @@
 #include "TestFilter.h"
 #include "BenchmarkFilter.h"
 #include <cstdio>
+#include <cstdlib>
 #include <iostream>
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 namespace Testing
 {
@@ -136,7 +139,11 @@ namespace Testing
 		std::cout << GetRunawayTestCount() << " test(s) still running past their timeout: the run ends without them" << std::endl;
 		std::cout.flush();
 		std::fflush(stdout);
+#ifdef _WIN32
 		TerminateProcess(GetCurrentProcess(), 1);
+#else
+		std::_Exit(1); // without waiting for the runaway threads or the libraries' shutdown
+#endif
 	}
 
 }

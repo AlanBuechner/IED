@@ -1,18 +1,20 @@
 // The HTTP side (docs/10, docs/11): GET /ws becomes a protocol session; /healthz; uploads and blobs; the web client's
 // files, plugin files, /ui-kit/, /codicons/ and /vendor/; /api/auth/*. Every request's Host must be a loopback name or the bind
 // address (DNS rebinding), unless the server listens on every interface; /ws, uploads and auth POSTs also check Origin.
-// Everything but /healthz, /api/auth/* and the login page's files needs a session (AuthGate). Text bodies go gzipped
-// to a client that accepts it (Http::CompressResponse).
+// Everything but /healthz, /api/auth/*, the login page's files and the master's /config/ (the config API, docs/35,
+// with tokens of its own: configserver/ConfigApi.ch) needs a session (AuthGate). Text bodies go gzipped to a client that
+// accepts it (Http::CompressResponse).
 
 include "Session.ch"
 include "AuthGate.ch"
+include "configserver/ConfigApi.ch"
 
 namespace Ied
 {
 	class Front
 	{
 		[operator("create")] public void Init() {}
-		[operator("create")] public void Init(Server* server) { this.m_Server = server; m_Gate = AuthGate(server); }
+		[operator("create")] public void Init(Server* server) { this.m_Server = server; m_Gate = AuthGate(server); m_Config = ConfigApi(server); }
 
 		// On a connection's thread.
 		public void Handle(const Http::Request& request, Http::Response& response);
@@ -44,6 +46,7 @@ namespace Ied
 
 		private Server* m_Server;
 		private AuthGate m_Gate;
+		private ConfigApi m_Config;
 	}
 
 	// A path's percent escapes decoded; false for a malformed one.

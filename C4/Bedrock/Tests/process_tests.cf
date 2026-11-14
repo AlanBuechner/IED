@@ -6,6 +6,9 @@
 
 include "bedrock.ch"
 
+// Windows only: It runs Windows' own programs (cmd, findstr, ping, tasklist) and a pseudo console. Linux's tests of this area are to come (C4 D-86).
+#if defined(PLATFORM_WINDOWS)
+
 const int32 kProcessWaitMs = 20000;
 
 static Process::StartInfo Cmd(const char* command) {
@@ -390,3 +393,4 @@ class ProcessTerminalTests {
 		shell.Close();
 	}
 }
+#endif

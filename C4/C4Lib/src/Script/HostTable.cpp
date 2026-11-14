@@ -97,25 +97,40 @@ namespace Scripting
 			auto* type = llvm::FunctionType::get(llvm::Type::getVoidTy(module.getContext()), false);
 			llvm::Function::Create(type, llvm::GlobalValue::ExternalLinkage, name, module);
 		}
+
+		bool ForLinux(const llvm::Module& module) { return module.getTargetTriple().isOSLinux(); }
+
+		std::vector<const char*> EntryPointsFor(bool forLinux)
+		{
+			std::vector<const char*> names = {
+				// what codegen calls (Backend/CodeGen)
+				"c4_alloc", "c4_alloc_noscan", "c4_alloc_typed", "c4_alloc_typed_noscan", "c4_free", "c4_gc_register_finalizer", "c4_dynamic_cast", "c4_instance_of", "c4_purecall",
+				"c4_noexcept_violation", "c4_once_begin", "c4_once_end", "c4_once_abandon", "c4_thread_once_abandon", "c4_thread_once_reentered",
+				"c4_reflect_register_image",
+				// the test harness and assertions, for a script's tests
+				"c4_test_configure", "c4_test_selected", "c4_test_begin", "c4_test_now_ns", "c4_test_run_case", "c4_test_case_done",
+				"c4_test_summary", "c4_test_fail_count", "c4_assert_true_at", "c4_assert_eq_at", "c4_assert_feq_at", "c4_assert_se_at",
+				// script support (C4Runtime/ScriptRuntimeC.h) and what the script host asks of the GC and reflection
+				"c4_script_module_create", "c4_script_at_exit", "c4_script_thread_at_exit", "c4_script_module_finish",
+				"c4_script_module_destroy", "__emutls_get_address", "c4_script_tls_release",
+				"c4_gc_add_root_table", "c4_gc_remove_root_table", "c4_gc_drop_finalizers_in", "c4_gc_forget_types_in", "c4_reflect_unload_source",
+				"c4_reflect_notify_unload", "c4_reflect_remove_source",
+			};
+			// how a script throws and catches: the image-relative MSVC tables on Windows (C4Runtime/Script/ScriptThrowWin32.c),
+			// landing pads on Linux (C4Runtime/ExceptionsPosix.c)
+			if (forLinux)
+				names.insert(names.end(), { "__c4_personality_v0", "c4_eh_allocate", "c4_eh_throw", "c4_eh_rethrow", "c4_eh_begin_catch", "c4_eh_end_catch" });
+			else
+				names.insert(names.end(), { "__CxxFrameHandler3", "c4_script_image_add", "c4_script_image_remove", "c4_script_throw" });
+			return names;
+		}
 	}
 
-	const std::vector<const char*>& ScriptRuntimeEntryPoints()
+	const std::vector<const char*>& ScriptRuntimeEntryPoints(bool forLinux)
 	{
-		static const std::vector<const char*> kNames = {
-			// what codegen calls (Backend/CodeGen)
-			"c4_alloc", "c4_alloc_noscan", "c4_alloc_typed", "c4_alloc_typed_noscan", "c4_free", "c4_gc_register_finalizer", "c4_dynamic_cast", "c4_instance_of", "c4_purecall",
-			"c4_noexcept_violation", "c4_once_begin", "c4_once_end", "c4_once_abandon", "c4_thread_once_abandon", "c4_thread_once_reentered",
-			"c4_reflect_register_image", "__CxxFrameHandler3",
-			// the test harness and assertions, for a script's tests
-			"c4_test_configure", "c4_test_selected", "c4_test_begin", "c4_test_now_ns", "c4_test_run_case", "c4_test_case_done",
-			"c4_test_summary", "c4_test_fail_count", "c4_assert_true_at", "c4_assert_eq_at", "c4_assert_feq_at", "c4_assert_se_at",
-			// script support (C4Runtime/ScriptRuntimeC.h) and what the script host asks of the GC and reflection
-			"c4_script_module_create", "c4_script_at_exit", "c4_script_thread_at_exit", "c4_script_module_finish",
-			"c4_script_module_destroy", "__emutls_get_address", "c4_script_tls_release", "c4_script_image_add", "c4_script_image_remove",
-			"c4_script_throw", "c4_gc_add_root_table", "c4_gc_remove_root_table", "c4_gc_drop_finalizers_in", "c4_gc_forget_types_in", "c4_reflect_unload_source",
-			"c4_reflect_notify_unload", "c4_reflect_remove_source",
-		};
-		return kNames;
+		static const std::vector<const char*> kWindows = EntryPointsFor(false);
+		static const std::vector<const char*> kLinux = EntryPointsFor(true);
+		return forLinux ? kLinux : kWindows;
 	}
 
 	void EmitThreadLocalAccessors(llvm::Module& module)
@@ -175,8 +190,9 @@ namespace Scripting
 	std::vector<std::string> HostSymbols(llvm::Module& module, const std::vector<std::string>& alsoListed)
 	{
 		std::unordered_set<std::string> always(alsoListed.begin(), alsoListed.end());
-		for (const char* name : ScriptRuntimeEntryPoints()) always.insert(name);
-		for (const char* name : ScriptRuntimeEntryPoints()) DeclareIfMissing(module, name); // in a fixed order: the table's
+		const std::vector<const char*>& entryPoints = ScriptRuntimeEntryPoints(ForLinux(module));
+		for (const char* name : entryPoints) always.insert(name);
+		for (const char* name : entryPoints) DeclareIfMissing(module, name); // in a fixed order: the table's
 		for (const std::string& name : alsoListed) DeclareIfMissing(module, name);
 		std::vector<std::string> names;
 		llvm::DenseSet<llvm::StringRef> seen; // the values' own names, which outlive the walk
@@ -190,7 +206,8 @@ namespace Scripting
 	std::vector<HostEntry> HostEntries(const std::vector<llvm::Module*>& partitions, const std::vector<std::string>& alsoListed)
 	{
 		std::unordered_set<std::string> always(alsoListed.begin(), alsoListed.end());
-		for (const char* name : ScriptRuntimeEntryPoints()) always.insert(name);
+		const std::vector<const char*>& entryPoints = ScriptRuntimeEntryPoints(!partitions.empty() && ForLinux(*partitions.front()));
+		for (const char* name : entryPoints) always.insert(name);
 		std::vector<HostEntry> entries;
 		llvm::DenseSet<llvm::StringRef> seen; // the values' own names and the listed ones, which outlive the walk
 		auto add = [&](llvm::GlobalValue& value, bool first) {
@@ -213,7 +230,7 @@ namespace Scripting
 		auto addMissing = [&](llvm::StringRef name) {
 			if (seen.insert(name).second) entries.push_back({ name.str(), name.str(), true, false });
 		};
-		for (const char* name : ScriptRuntimeEntryPoints()) addMissing(name);
+		for (const char* name : entryPoints) addMissing(name);
 		for (const std::string& name : alsoListed) addMissing(name);
 		return entries;
 	}

@@ -173,6 +173,7 @@
   },
   "TestingFramework/FailureBeforeACrash": {
     "exit": -1073741819,
+    "linuxExit": 139,
     "mustContain": ["FAIL: main.cf:7: what failed first", "an access violation"],
     "reason": "An assertion goes on after failing, so a crash can follow it: the failure is flushed at once, or a redirected log loses it and blames the crash."
   },

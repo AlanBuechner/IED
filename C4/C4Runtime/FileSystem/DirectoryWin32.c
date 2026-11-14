@@ -1,35 +1,11 @@
-// Directories, rename and the current directory behind the fs_* builtins (Bedrock's FS::Directory and
-// friends). Paths are UTF-8 on every platform; on Windows they go to the wide API (PathRuntimeC.h).
+// Directories, rename and the current directory behind the fs_* builtins (Bedrock's FS::Directory and friends).
+// Paths are UTF-8; they go to the wide API (PathRuntimeC.h).
 
-#include "FileSystemRuntimeC.h"
+#include "FileSystemWin32.h"
 #include "PathRuntimeC.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-
-#ifdef _WIN32
-#include "FileSystem/FileSystemWin32.h"
-
-wchar_t* c4_utf8_to_wide(const char* text)
-{
-	if (!text) return NULL;
-	int units = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, NULL, 0);
-	if (units <= 0) return NULL;
-	wchar_t* wide = (wchar_t*)malloc((size_t)units * sizeof(wchar_t));
-	if (wide && MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, wide, units) != units)
-	{
-		free(wide);
-		return NULL;
-	}
-	return wide;
-}
-
-int64_t c4_wide_to_utf8(const wchar_t* wide, char* out, int64_t cap)
-{
-	int bytes = WideCharToMultiByte(CP_UTF8, 0, wide, -1, NULL, 0, NULL, NULL);
-	if (bytes > 0 && out && cap >= bytes) WideCharToMultiByte(CP_UTF8, 0, wide, -1, out, bytes, NULL, NULL);
-	return bytes > 0 ? (int64_t)bytes - 1 : -1;
-}
 
 static DWORD Attributes(const char* path)
 {
@@ -203,120 +179,3 @@ void c4_fs_directory_close(void* handle)
 	if (dir->find != INVALID_HANDLE_VALUE) FindClose(dir->find);
 	free(dir);
 }
-
-#else
-#include <dirent.h>
-#include <fcntl.h>
-#include <stdio.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
-int32_t c4_fs_is_directory(const char* path)
-{
-	struct stat st;
-	return path && stat(path, &st) == 0 && S_ISDIR(st.st_mode) ? 1 : 0;
-}
-
-int32_t c4_fs_is_link(const char* path)
-{
-	struct stat st;
-	return path && lstat(path, &st) == 0 && S_ISLNK(st.st_mode) ? 1 : 0;
-}
-
-int32_t c4_fs_make_directory(const char* path) { return path && mkdir(path, 0777) == 0 ? 0 : -1; }
-
-int32_t c4_fs_remove_directory(const char* path) { return path && rmdir(path) == 0 ? 0 : -1; }
-
-int32_t c4_fs_rename(const char* from, const char* to) { return from && to && rename(from, to) == 0 ? 0 : -1; }
-
-// The rename, then the folder that holds `to` synced, so the new name is on the disk when it returns.
-int32_t c4_fs_replace(const char* from, const char* to)
-{
-	if (!from || !to || rename(from, to) != 0) return -1;
-	const char* slash = strrchr(to, '/');
-	char folder[4096];
-	size_t length = slash ? (size_t)(slash - to) : 0;
-	if (length >= sizeof(folder)) return -1;
-	memcpy(folder, to, length);
-	folder[length] = 0;
-	int fd = open(length ? folder : ".", O_RDONLY);
-	if (fd < 0) return -1;
-	int synced = fsync(fd);
-	close(fd);
-	return synced == 0 ? 0 : -1;
-}
-
-static int64_t TextToOut(const char* text, char* out, int64_t cap)
-{
-	int64_t length = (int64_t)strlen(text);
-	if (out && cap > length) memcpy(out, text, (size_t)length + 1);
-	return length;
-}
-
-int64_t c4_fs_current_directory(char* out, int64_t cap)
-{
-	char buffer[4096];
-	return getcwd(buffer, sizeof(buffer)) ? TextToOut(buffer, out, cap) : -1;
-}
-
-int64_t c4_fs_temp_directory(char* out, int64_t cap)
-{
-	const char* dir = getenv("TMPDIR");
-	return TextToOut(dir && *dir ? dir : "/tmp", out, cap);
-}
-
-typedef struct C4Directory
-{
-	DIR* dir;
-	char* path;
-	struct dirent* pending;
-} C4Directory;
-
-void* c4_fs_directory_open(const char* path)
-{
-	DIR* opened = path && *path ? opendir(path) : NULL;
-	if (!opened) return NULL;
-	C4Directory* dir = (C4Directory*)calloc(1, sizeof(C4Directory));
-	if (!dir) { closedir(opened); return NULL; }
-	dir->dir = opened;
-	dir->path = strdup(path);
-	return dir;
-}
-
-static int32_t EntryKind(const C4Directory* dir, const struct dirent* entry)
-{
-	char full[4096];
-	struct stat st;
-	snprintf(full, sizeof(full), "%s/%s", dir->path, entry->d_name);
-	if (lstat(full, &st) != 0) return kEntryFile;
-	if (S_ISLNK(st.st_mode)) return kEntryLink;
-	return S_ISDIR(st.st_mode) ? kEntryDirectory : kEntryFile;
-}
-
-int32_t c4_fs_directory_next(void* handle, char* name, int32_t cap, int32_t* kind)
-{
-	C4Directory* dir = (C4Directory*)handle;
-	if (!dir || !name || cap <= 0) return -1;
-	for (;;)
-	{
-		struct dirent* entry = dir->pending ? dir->pending : readdir(dir->dir);
-		dir->pending = NULL;
-		if (!entry) return 0;
-		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
-		size_t length = strlen(entry->d_name);
-		if ((int64_t)length + 1 > cap) { dir->pending = entry; return -1; }
-		memcpy(name, entry->d_name, length + 1);
-		if (kind) *kind = EntryKind(dir, entry);
-		return (int32_t)length;
-	}
-}
-
-void c4_fs_directory_close(void* handle)
-{
-	C4Directory* dir = (C4Directory*)handle;
-	if (!dir) return;
-	closedir(dir->dir);
-	free(dir->path);
-	free(dir);
-}
-#endif

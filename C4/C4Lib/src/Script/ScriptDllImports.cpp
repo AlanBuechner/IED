@@ -1,4 +1,7 @@
 #include "Script/ScriptDllImports.h"
+// Debug scripts linked into DLLs with PDBs (docs/runtime/04 section 6.4) are Windows': a Linux host links every script in
+// memory (ScriptHost::Link), a debug script with its DWARF in the JIT image.
+#if defined(_WIN32) // whole file
 #include "Script/ScriptSymbols.h"
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/GlobalAlias.h>
@@ -271,3 +274,4 @@ namespace Scripting
 		return true;
 	}
 } // namespace Scripting
+#endif

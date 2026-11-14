@@ -44,6 +44,10 @@ class CopySpec:
 	source: str
 	dest: str
 	exclude: tuple = ()             # of a folder: paths in it or names, globs allowed, left out (fsutil.excluded)
+	systems: tuple = ()             # empty: every system; else the systems a build copies it for ("windows", "linux")
+
+	def applies_to(self, system):
+		return not self.systems or system in self.systems
 
 
 @dataclass(frozen=True)
@@ -75,6 +79,7 @@ class ProjectSpec:
 	copies: tuple = ()
 	steps: tuple = ()
 	config_overrides: dict = field(default_factory=dict)
+	system_overrides: dict = field(default_factory=dict)   # [project.system.<name>]: added when building for that system
 	scripts: tuple = ()
 	language: str = ""              # the project's language: "c4" by default for executable and module; another one
 	                                # builds through its driver (languages.py), a custom project's is for IDEs only
@@ -532,6 +537,7 @@ def _project(t, folder, path, dependencies=()):
 		copies=tuple(_copy(c) for c in t.tables("copy")),
 		steps=tuple(_step(s, path) for s in t.tables("steps")),
 		config_overrides=dict(_override(name, o) for name, o in t.subtables("config")),
+		system_overrides=dict(_system_override(name, o, path) for name, o in t.subtables("system")),
 		scripts=t.strings("scripts"),
 		driver_options=driver,
 		dependencies=tuple(dependencies),
@@ -554,10 +560,14 @@ def _copy(t):
 	source = t.string("from")
 	dest = t.string("to")
 	exclude = t.strings("exclude")
+	systems = t.strings("systems")
 	t.done()
 	if not source:
 		raise NukeError(f"{t.file}: {t.where} needs 'from' (a file or folder, relative to the project)")
-	return CopySpec(source, dest if dest is not None else os.path.basename(source.rstrip("/\\")), tuple(exclude))
+	unknown = [s for s in systems if s not in ("windows", "linux")]
+	if unknown:
+		raise NukeError(f"{t.file}: {t.where}.systems names no system: {unknown[0]} (windows, linux)")
+	return CopySpec(source, dest if dest is not None else os.path.basename(source.rstrip("/\\")), tuple(exclude), tuple(systems))
 
 
 def _override(name, t):
@@ -568,6 +578,12 @@ def _override(name, t):
 	)
 	t.done()
 	return name, spec
+
+
+def _system_override(name, t, path):
+	if name not in ("windows", "linux"):
+		raise NukeError(f"{path}: [project.system.{name}] names no system (windows, linux)")
+	return _override(name, t)
 
 
 def _step(t, path):

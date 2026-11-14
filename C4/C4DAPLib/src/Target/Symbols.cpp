@@ -1,3 +1,4 @@
+#ifdef _WIN32 // the Win32 debugger; Linux's engine is Target/LinuxEngine.h
 #include "Target/Symbols.h"
 #include "Target/WideText.h"
 #include <oaidl.h> // VARIANT, which an enumerator's value comes in
@@ -459,3 +460,4 @@ namespace C4DAP::Target
 		return values;
 	}
 } // namespace C4DAP::Target
+#endif

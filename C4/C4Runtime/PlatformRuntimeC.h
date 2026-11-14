@@ -148,6 +148,13 @@ void c4_report_faults(void);
 // `out` (terminated; what fits): its length. In a catch handler it runs on the stack of the throw, so the frames go on
 // from where the exception was thrown. It reads the PDBs the first time: for reports, not a hot path.
 int64_t c4_stack_text(char* out, int64_t capacity, int32_t skip);
+#ifdef __linux__
+// Gives the calling thread a stack of its own for fault reports (Platform/CrashReportLinux.c): Linux runs a signal
+// handler on the stack that faulted unless the thread has another, so without one a stack overflow ends the process
+// unreported. c4_thread_attach calls it for each thread that runs C4 code; the stack goes when the thread ends.
+// Windows needs none.
+void c4_crash_attach_thread(void);
+#endif
 
 // --- time (Platform/TimeWin32.c) ----------------------------------------------------------------------
 // The high-resolution counter (QueryPerformanceCounter): monotonic, `c4_time_tick_frequency` ticks per second.

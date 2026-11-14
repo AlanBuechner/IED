@@ -1,6 +1,9 @@
 # Assembles a C4 toolchain - the install Nuke compiles C4 projects with - from a Nuke build of this folder's projects:
 #
-#   python MakeToolchain.py --out <dir> [--config Development] [--bin <the configuration's build/bin folder>]
+#   python MakeToolchain.py --out <dir> [--config Development] [--system windows|linux] [--bin <the configuration's build/bin folder>]
+#
+# (the Windows layout below; a Linux toolchain names its programs without .exe, its shared libraries .so with no import
+# library, and has toolchain/bin/{clang,ld.lld} with the LLVM libraries they load in toolchain/lib)
 #
 #   <dir>/
 #     toolchain.json        name, version (C4.exe --version), git commit, modified flag, build time
@@ -42,19 +45,46 @@ TOOLCHAIN_VARIABLE = "${c4.toolchain}"
 
 sys.path.insert(0, HERE)  # Nuke runs this isolated (python -I), which leaves the script's own folder out
 from ApiDigest import write_digest
-COMPILER_FILES = (".exe", ".dll", ".pdb")
 COMPILER_FOLDERS = ("Bedrock", "C4Runtime", "toolchain")
-TOOLS = {
-	"CBind": ("CBind", ["CBind.exe", "CBind.pdb"]),
-	"C4Script": ("C4Script", ["C4Script.dll", "C4Script.lib"]),
-	"C4Api": ("C4Api", ["C4Api.dll", "C4Api.lib", "C4Api.pdb"]),
-	"tools/C4LSP": ("C4LSP", ["C4LSP.exe", "C4LSP.pdb"]),
-	"tools/C4DAP": ("C4DAP", ["C4DAP.exe", "C4DAP.pdb"]),
-}
-LSP_DLLS = ("libclang.dll", "LLVM-C.dll", "LTO.dll")
 HEADERS = {"C4Api/C4Api.h": "C4Api/src/C4Api.h"}   # destination -> source, relative to this folder
-REQUIRED = ["C4.exe", "Bedrock/bedrock.ch", "C4Runtime", "toolchain/bin/clang.exe", "toolchain/bin/lld-link.exe", "toolchain/bin/llvm-rc.exe",
-	"CBind/CBind.exe", "C4Script/C4Script.dll", "C4Api/C4Api.dll", "C4Api/C4Api.lib", "C4Api/C4Api.h", "ied/ied-plugin.json", "docs/library/bedrock-api.md", "ied/docs/library/bedrock-api.md"]
+REQUIRED_EVERYWHERE = ["Bedrock/bedrock.ch", "C4Runtime", "C4Api/C4Api.h", "ied/ied-plugin.json", "docs/library/bedrock-api.md",
+	"ied/docs/library/bedrock-api.md"]
+
+
+class Layout:
+	"""What a toolchain for one system holds: the compiler's file and its companions beside it, each tool's files, and the
+	files whose absence means a tool did not build."""
+
+	def __init__(self, compiler, compiler_files, tools, lsp_libraries, required):
+		self.compiler = compiler              # the compiler's file name
+		self.compiler_files = compiler_files  # (exact names, extensions) of the files beside the compiler that ship
+		self.tools = tools                    # destination folder -> (project, file names)
+		self.lsp_libraries = lsp_libraries    # the compiler's libraries the language server loads beside itself
+		self.required = [compiler] + required + REQUIRED_EVERYWHERE
+
+	def ships_beside_compiler(self, name):
+		names, extensions = self.compiler_files
+		return name in names or name.lower().endswith(extensions)
+
+
+LAYOUTS = {
+	"windows": Layout("C4.exe", ((), (".exe", ".dll", ".pdb")), {
+		"CBind": ("CBind", ["CBind.exe", "CBind.pdb"]),
+		"C4Script": ("C4Script", ["C4Script.dll", "C4Script.lib"]),
+		"C4Api": ("C4Api", ["C4Api.dll", "C4Api.lib", "C4Api.pdb"]),
+		"tools/C4LSP": ("C4LSP", ["C4LSP.exe", "C4LSP.pdb"]),
+		"tools/C4DAP": ("C4DAP", ["C4DAP.exe", "C4DAP.pdb"]),
+	}, ("libclang.dll", "LLVM-C.dll", "LTO.dll"), ["toolchain/bin/clang.exe", "toolchain/bin/lld-link.exe", "toolchain/bin/llvm-rc.exe",
+		"CBind/CBind.exe", "C4Script/C4Script.dll", "C4Api/C4Api.dll", "C4Api/C4Api.lib"]),
+	# Linux programs carry their DWARF; a shared library has no import library. The compiler links LLVM statically.
+	"linux": Layout("C4", (("C4",), (".so",)), {
+		"CBind": ("CBind", ["CBind"]),
+		"C4Script": ("C4Script", ["C4Script.so"]),
+		"C4Api": ("C4Api", ["C4Api.so"]),
+		"tools/C4LSP": ("C4LSP", ["C4LSP"]),
+		"tools/C4DAP": ("C4DAP", ["C4DAP"]),
+	}, (), ["toolchain/bin/clang", "toolchain/bin/ld.lld", "CBind/CBind", "C4Script/C4Script.so", "C4Api/C4Api.so"]),
+}
 DIGEST = "library/bedrock-api.md"  # under docs/, made by MakeToolchain from the shipped Bedrock
 DOCS = [
 	"01-what-is-c4.md",
@@ -144,27 +174,28 @@ def shipped_docs(repo, digest):
 	return docs
 
 
-def plan(build, repo, digest):
+def plan(build, repo, digest, layout):
 	"""destination (relative to the toolchain) -> source file."""
 	files = {}
 	compiler = os.path.join(build, "C4")
 	for name in sorted(os.listdir(compiler)):
-		if os.path.isfile(os.path.join(compiler, name)) and name.lower().endswith(COMPILER_FILES):
+		if os.path.isfile(os.path.join(compiler, name)) and layout.ships_beside_compiler(name):
 			files[name] = os.path.join(compiler, name)
 	for folder in COMPILER_FOLDERS:
 		for rel in files_below(os.path.join(compiler, folder)):
 			files[os.path.join(folder, rel)] = os.path.join(compiler, folder, rel)
-	for dest, (project, names) in TOOLS.items():
+	for dest, (project, names) in layout.tools.items():
 		for name in names:
 			source = os.path.join(build, project, name)
 			if os.path.isfile(source):
 				files[os.path.join(dest, name)] = source
 	for dest, source in HEADERS.items():
 		files[dest] = os.path.join(repo, *source.split("/"))
-	if os.path.isfile(os.path.join(build, "C4LSP", "C4LSP.exe")):
-		for dll in LSP_DLLS:
-			if os.path.isfile(os.path.join(compiler, dll)):
-				files[os.path.join("tools", "C4LSP", dll)] = os.path.join(compiler, dll)
+	lsp_project, lsp_files = layout.tools["tools/C4LSP"]
+	if os.path.isfile(os.path.join(build, lsp_project, lsp_files[0])):
+		for library in layout.lsp_libraries:
+			if os.path.isfile(os.path.join(compiler, library)):
+				files[os.path.join("tools", "C4LSP", library)] = os.path.join(compiler, library)
 	for doc, source in shipped_docs(repo, digest).items():
 		files[os.path.join("docs", *doc.split("/"))] = source
 		files[os.path.join("ied", "docs", *doc.split("/"))] = source  # the plugin's aiDocs folder
@@ -222,11 +253,11 @@ def version_of(compiler):
 	return output[-1] if output else None
 
 
-def metadata(out, configuration):
+def metadata(out, configuration, layout):
 	status = git("status", "--porcelain", "--", ".")
 	return {
 		"name": "c4",
-		"version": version_of(os.path.join(out, "C4.exe")),
+		"version": version_of(os.path.join(out, layout.compiler)),
 		"commit": git("rev-parse", "HEAD"),
 		"dirty": bool(status) if status is not None else None,
 		"configuration": configuration,
@@ -251,19 +282,27 @@ def main(argv):
 	parser = argparse.ArgumentParser(description="Assemble a C4 toolchain from a Nuke build of the compiler")
 	parser.add_argument("--out", required=True, help="the toolchain folder to create or refresh")
 	parser.add_argument("--config", default="Development", help="the configuration that was built")
-	parser.add_argument("--bin", help="the build's bin folder of that configuration (default: <repository>/build/bin/<config>-windows-x64)")
+	parser.add_argument("--system", default="windows", choices=sorted(LAYOUTS), help="the system the compiler was built for")
+	parser.add_argument("--bin", help="the build's bin folder of that configuration (default: <repository>/build/bin/<config>-<system>-x64)")
 	options = parser.parse_args(argv)
-	build = os.path.abspath(options.bin or os.path.join(REPOSITORY, "build", "bin", f"{options.config}-windows-x64"))
-	if not os.path.isfile(os.path.join(build, "C4", "C4.exe")):
+	layout = LAYOUTS[options.system]
+	build = os.path.abspath(options.bin or os.path.join(REPOSITORY, "build", "bin", f"{options.config}-{options.system}-x64"))
+	if not os.path.isfile(os.path.join(build, "C4", layout.compiler)):
 		print(f"MakeToolchain: no compiler build at {build}/C4 (build it first: nuke build C4 {options.config})")
 		return 1
 	out = os.path.abspath(options.out)
-	copied, removed = mirror(plan(build, HERE, bedrock_digest(build)), out)
-	missing = [f for f in REQUIRED if not os.path.exists(os.path.join(out, *f.split("/")))]
+	if options.system != "windows" and os.path.isfile(os.path.join(out, LAYOUTS["windows"].compiler)):
+		# A checkout shared with Windows (tools/linux/builder mounts it): Nuke's store keeps one toolchain per version,
+		# and this one is the Windows compiler's, which a Linux build must not replace.
+		print(f"MakeToolchain: {out} holds the Windows toolchain, which a {options.system} build leaves as it is; the "
+			f"{options.system} compiler is a complete install in {build}/C4 (run it there, or set C4_HOME to it)")
+		return 0
+	copied, removed = mirror(plan(build, HERE, bedrock_digest(build), layout), out)
+	missing = [f for f in layout.required if not os.path.exists(os.path.join(out, *f.split("/")))]
 	if missing:
 		print(f"MakeToolchain: {out} is incomplete, missing {', '.join(missing)} (did every tool build?)")
 		return 1
-	fields = metadata(out, options.config)
+	fields = metadata(out, options.config, layout)
 	write_metadata(out, fields, copied or removed)
 	print(f"MakeToolchain: c4 {fields['version']} -> {out} ({copied} file(s) copied, {removed} removed)")
 	return 0

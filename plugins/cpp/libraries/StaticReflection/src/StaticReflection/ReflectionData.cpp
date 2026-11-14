@@ -27,11 +27,17 @@ namespace Reflection
 			}
 			else if (tokens.front() == "=") {
 				tokens.pop(); // remove "="
+				// the value, none when the string ends at the "=" (the last attribute's value is the last token: nothing
+				// after it is read)
+				Core::String value;
+				if (!tokens.empty() && tokens.front() != ",") {
+					value = tokens.front();
+					tokens.pop();
+				}
 				if (name != "")
-					attrs.Push({ Attribute::Prop, name, tokens.front() });
-				tokens.pop(); // remove value
+					attrs.Push({ Attribute::Prop, name, value });
 				// remove ","
-				if (tokens.front() == ",")
+				if (!tokens.empty() && tokens.front() == ",")
 					tokens.pop();
 			}
 		}

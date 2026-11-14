@@ -85,7 +85,7 @@ A text pass that runs before lexing, once per file:
   evaluates conditions, `MacroExpander` / `MacroSubstitution` expand (`#`, `##`, `__FILE__`, `__LINE__`).
 - Errors and warnings come back per file (`FileResult::diagnostics`); `CompilerInstance::AddMacroDiagnostics`
   places them at their sources, and `GetAllDiagnostics` lists them first (CLI and LSP alike).
-- Predefined: `PredefinedMacros(test, -D defines)` - `TEST`, `PLATFORM_WINDOWS`, `ARCH_X64`, `C4_VERSION`.
+- Predefined: `PredefinedMacros(test, -D defines)` - `TEST`, `PLATFORM_WINDOWS` or `PLATFORM_LINUX` (the target's system, D-86), `ARCH_X64`, `C4_VERSION`.
 - The default library folder is a root of the pass too, so Bedrock may use `#if`.
 - `-export-macros` writes each file's final table as `<name>.c4macro`.
 - Language-level rules are in [../language/02-preprocessor.md](../language/02-preprocessor.md).

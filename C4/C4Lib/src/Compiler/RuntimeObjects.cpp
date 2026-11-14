@@ -7,27 +7,29 @@
 #include <functional>
 #include <algorithm>
 #include <iostream>
+#include <llvm/Support/Process.h>
+#include <optional>
 #include <system_error>
 #include <thread>
-#include <process.h>
 
 namespace Scripting
 {
 	namespace
 	{
 		constexpr const char* kOptimization = "-O2";
-		constexpr const char* kObjectFolder = "O2";
+		constexpr const char* kWindowsObjectFolder = "O2";
+		constexpr const char* kLinuxObjectFolder = "linux-x64-O2";
 		constexpr uint64_t kContentSeed = 14695981039346656037ull; // FNV-1a
 		constexpr uint64_t kContentPrime = 1099511628211ull;
 
 		// Objects are cached per install (keyed by its runtime folder), so two C4 installs never link each
 		// other's objects, and an install folder that cannot be written still builds.
-		fs::path ObjectFolder(const fs::path& runtime)
+		fs::path ObjectFolder(const fs::path& runtime, TargetSystem system)
 		{
 			const std::string key = fs::absolute(runtime).lexically_normal().generic_string();
 			char hex[17];
 			std::snprintf(hex, sizeof(hex), "%016llx", (unsigned long long)std::hash<std::string>{}(key));
-			return fs::temp_directory_path() / "c4_runtime" / hex / kObjectFolder;
+			return fs::temp_directory_path() / "c4_runtime" / hex / (system == TargetSystem::Linux ? kLinuxObjectFolder : kWindowsObjectFolder);
 		}
 
 		// The files under `root` with one of `extensions`, in path order, as they read. Walked by the extended spelling,
@@ -62,12 +64,22 @@ namespace Scripting
 			return key;
 		}
 
-		// The MSVC and SDK headers the sources compile with: the kit's folder and setup's record of what it installed there
-		// (none without a kit, for an installed Visual Studio's). Another kit compiles every source again.
-		uint64_t SysrootKey(const fs::path& sysroot, uint64_t seed)
+		// The headers the sources compile with: the MSVC and SDK kit's folder and setup's record of what it installed there
+		// (none without a kit, for an installed Visual Studio's), or the Linux sysroot's and its record of the packages it
+		// holds. Another kit or sysroot compiles every source again.
+		uint64_t SysrootKey(const fs::path& sysroot, TargetSystem system, uint64_t seed)
 		{
 			if (sysroot.empty()) return seed;
-			return RuntimeContentKey(Bytes(sysroot / ".setup.json"), RuntimeContentKey(sysroot.generic_string(), seed));
+			const char* record = system == TargetSystem::Linux ? "sysroot.txt" : ".setup.json";
+			return RuntimeContentKey(Bytes(sysroot / record), RuntimeContentKey(sysroot.generic_string(), seed));
+		}
+
+		// The sysroot the runtime compiles against for `system`: nothing (with the reason printed) when a build for Linux
+		// has none (LinuxSysrootForBuild).
+		std::optional<fs::path> SysrootOf(TargetSystem system)
+		{
+			if (system == TargetSystem::Linux) return LinuxSysrootForBuild();
+			return Toolchain::WindowsSysroot();
 		}
 
 		std::string ObjectStem(const std::string& relativeSource)
@@ -92,13 +104,14 @@ namespace Scripting
 
 		// Compiles into a private file first and renames it into place, so a parallel compiler process never
 		// links a half-written object.
-		bool Compile(const fs::path& root, const fs::path& source, const fs::path& object, bool verbose)
+		bool Compile(const fs::path& root, const fs::path& source, const fs::path& object, TargetSystem system, const fs::path& sysroot,
+			bool verbose)
 		{
 			const std::string clang = ClangPath();
 			if (clang.empty()) return false;
-			const fs::path partial = object.string() + "." + std::to_string(_getpid()) + ".tmp";
+			const fs::path partial = object.string() + "." + std::to_string(llvm::sys::Process::getProcessId()) + ".tmp";
 			const std::vector<std::string> args = RuntimeCompileCommand(clang, root.string(), source.string(), partial.string(),
-				Toolchain::WindowsSysroot().string());
+				system, sysroot.string());
 			if (verbose)
 			{
 				std::string line = "Compiling C4 runtime:";
@@ -121,13 +134,32 @@ namespace Scripting
 		return Toolchain::Runtime().string();
 	}
 
-	std::vector<std::string> RuntimeCompileCommand(const std::string& clang, const std::string& runtimeRoot,
-		const std::string& source, const std::string& output, const std::string& windowsSysroot)
+	bool RuntimeSourceIsFor(const std::string& relativeSource, TargetSystem system)
 	{
-		std::vector<std::string> args = { clang, "-c", "-target", "x86_64-pc-windows-msvc", kOptimization, "-mstackrealign",
-			"-Werror", "-D_CRT_SECURE_NO_WARNINGS", "-I", runtimeRoot };
-		const std::vector<std::string> sysroot = WindowsSysrootFlags(windowsSysroot);
-		args.insert(args.end(), sysroot.begin(), sysroot.end());
+		const std::string stem = fs::path(relativeSource).stem().string();
+		auto named = [&stem](const char* suffix) {
+			const size_t length = std::char_traits<char>::length(suffix);
+			return stem.size() > length && stem.compare(stem.size() - length, length, suffix) == 0;
+		};
+		if (system == TargetSystem::Linux) return !named("Win32");
+		return !named("Posix") && !named("Linux");
+	}
+
+	std::vector<std::string> RuntimeCompileCommand(const std::string& clang, const std::string& runtimeRoot,
+		const std::string& source, const std::string& output, TargetSystem system, const std::string& sysroot)
+	{
+		std::vector<std::string> args = { clang, "-c", "-target", TargetTriple(system), kOptimization, "-Werror", "-I", runtimeRoot };
+		if (system == TargetSystem::Linux)
+		{
+			args.insert(args.end(), { "-fPIC", "-D_GNU_SOURCE" });
+			if (!sysroot.empty()) args.push_back("--sysroot=" + sysroot);
+		}
+		else
+		{
+			args.insert(args.end(), { "-mstackrealign", "-D_CRT_SECURE_NO_WARNINGS" });
+			const std::vector<std::string> kit = WindowsSysrootFlags(sysroot);
+			args.insert(args.end(), kit.begin(), kit.end());
+		}
 		if (fs::path(source).extension() == ".cpp") args.push_back("-std=c++20");
 		args.push_back(source);
 		args.push_back("-o");
@@ -135,7 +167,7 @@ namespace Scripting
 		return args;
 	}
 
-	bool EnsureRuntimeObjects(bool verbose, Core::Vector<Core::String>& objects)
+	bool EnsureRuntimeObjects(bool verbose, TargetSystem system, Core::Vector<Core::String>& objects)
 	{
 		const fs::path root = Toolchain::Runtime();
 		if (root.empty())
@@ -144,9 +176,11 @@ namespace Scripting
 				"folder that holds C4.exe, Bedrock/, C4Runtime/ and toolchain/)" << std::endl;
 			return false;
 		}
-		const fs::path objectDir = ObjectFolder(root);
+		const std::optional<fs::path> sysroot = SysrootOf(system);
+		if (!sysroot) return false;
+		const fs::path objectDir = ObjectFolder(root, system);
 		CreateFolders(PathText(objectDir));
-		const uint64_t headersKey = SysrootKey(Toolchain::WindowsSysroot(), HeadersKey(root));
+		const uint64_t headersKey = SysrootKey(*sysroot, system, HeadersKey(root));
 		struct Missing
 		{
 			fs::path source;
@@ -157,6 +191,7 @@ namespace Scripting
 		for (const fs::path& source : FilesUnder(root, { ".c", ".cpp" }))
 		{
 			const std::string relative = RelativeName(source, root);
+			if (!RuntimeSourceIsFor(relative, system)) continue;
 			const fs::path object = objectDir / RuntimeObjectName(relative, RuntimeContentKey(Bytes(source), headersKey));
 			if (!FileExists(PathText(object))) missing.push_back({ source, object, ObjectStem(relative) });
 			objects.Push(Core::String(object.string().c_str()));
@@ -164,7 +199,7 @@ namespace Scripting
 		// A toolchain's first build compiles every source: one clang each, at once.
 		std::vector<char> failed(missing.size(), 0);
 		ParallelFor(missing.size(), std::max(1u, std::thread::hardware_concurrency()), [&](size_t i) {
-			if (!Compile(root, missing[i].source, missing[i].object, verbose)) failed[i] = 1;
+			if (!Compile(root, missing[i].source, missing[i].object, system, *sysroot, verbose)) failed[i] = 1;
 			else RemoveOtherVersions(objectDir, missing[i].stem, missing[i].object);
 		});
 		for (size_t i = 0; i < missing.size(); ++i)

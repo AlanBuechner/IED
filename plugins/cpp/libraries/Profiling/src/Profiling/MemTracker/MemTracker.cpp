@@ -8,6 +8,17 @@ Core::MemStats Core::MemStats::s_MemStats;
 #include "Profiling/Itp.h"
 
 #include <new>
+#include <malloc.h>
+
+// The bytes the heap gave `ptr`: what it was asked for on Windows, at least that with glibc (counted alike both ways).
+inline uint64 AllocationSize(void* ptr)
+{
+#if defined(_WIN32)
+	return _msize(ptr);
+#else
+	return malloc_usable_size(ptr);
+#endif
+}
 
 inline void* new_internal(size_t size)
 {
@@ -16,7 +27,7 @@ inline void* new_internal(size_t size)
 	{
 		Core::GetMemStats().numAllocations++;
 		Core::GetMemStats().totalAllocations++;
-		Core::GetMemStats().allocatedBytes += size;
+		Core::GetMemStats().allocatedBytes += AllocationSize(ptr);
 
 #if ENABLE_PROFILING
 		itp_alloc(ptr, size, 0);
@@ -32,9 +43,9 @@ inline void delete_internal(void* ptr)
 {
 	if (ptr != nullptr)
 	{
-		uint64 size = _msize(ptr);
+		uint64 size = AllocationSize(ptr);
 		if (size > Core::GetMemStats().allocatedBytes)
-			__debugbreak();
+			CORE_DEBUG_BREAK();
 
 		Core::GetMemStats().numAllocations--;
 		Core::GetMemStats().totalFrees++;

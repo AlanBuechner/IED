@@ -5,7 +5,13 @@
 
 include "bedrock.ch"
 
+#if defined(PLATFORM_LINUX)
+const int64 kAccessViolation = 139;          // 128 + SIGSEGV: the report hands the signal on, which ends the process
+const char* kAccessViolationText = "an access violation (SIGSEGV) writing address 0x0";
+#else
 const int64 kAccessViolation = 3221225477;   // 0xC0000005, the exit code of a process a fault ended
+const char* kAccessViolationText = "an access violation (0xC0000005) writing address 0x0";
+#endif
 
 struct Boom
 {
@@ -109,9 +115,9 @@ int32 main(int32 argc, char8** argv) {
 	bool ok = Reported("throw", 1, "an exception was thrown and not caught", true);
 	Core::String thrown = ReadLog(Platform::ExecutablePath().Parent() / "throw.log");
 	ok = Holds(thrown.View(), Core::StringView("\"thrower\""), "throw", "the crash log") && ok;
-	ok = Reported("fault", kAccessViolation, "an access violation (0xC0000005) writing address 0x0", true) && ok;
+	ok = Reported("fault", kAccessViolation, kAccessViolationText, true) && ok;
 	ok = Reported("unlogged", 1, "an exception was thrown and not caught", false) && ok;
-	ok = Reported("test-fault", kAccessViolation, "an access violation (0xC0000005) writing address 0x0", false) && ok;
+	ok = Reported("test-fault", kAccessViolation, kAccessViolationText, false) && ok;
 	ok = Caught() && ok;
 	if (ok) printf("crash reports: ok\n");
 	return ok ? 0 : 1;

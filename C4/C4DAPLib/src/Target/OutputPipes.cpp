@@ -1,3 +1,4 @@
+#ifdef _WIN32 // the Win32 debugger; Linux's engine is Target/LinuxEngine.h
 #include "Target/OutputPipes.h"
 #include <chrono>
 
@@ -100,3 +101,4 @@ namespace C4DAP::Target
 		Join(m_Err);
 	}
 } // namespace C4DAP::Target
+#endif

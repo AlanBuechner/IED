@@ -1,7 +1,9 @@
 #include "Parser/Consumer/PrettyPrintConsumer.h"
 #include <iostream>
-#include <windows.h>
 #include <string>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace Scripting
 {
@@ -9,15 +11,17 @@ namespace Scripting
 	{
 	}
 
-	/// Ensure the Windows console uses UTF-8 code page so box-drawing characters render.
+	/// Ensure the Windows console uses UTF-8 code page so box-drawing characters render (a Linux terminal reads UTF-8).
 	static void EnsureConsoleUtf8()
 	{
+#ifdef _WIN32
 		static bool initialized = false;
 		if (!initialized)
 		{
 			SetConsoleOutputCP(65001); // UTF-8
 			initialized = true;
 		}
+#endif
 	}
 
 	void PrettyPrintConsumer::HandleTranslationUnit(const Ref<AstNode>& root)

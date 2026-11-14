@@ -3,10 +3,11 @@
 // instead (StaticStorageRuntimeC.c), so they end in the reverse order of every start, among the globals'.
 
 #include "PlatformRuntimeC.h"
+#include "PlatformSync.h"
+#include "StartupC.h"
 #include "ThreadRuntimeC.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <windows.h>
 
 enum { kFirstExitCapacity = 16 };
 
@@ -24,7 +25,7 @@ typedef struct ThreadExits
 } ThreadExits;
 
 static _Thread_local ThreadExits t_exits;
-static DWORD g_mainThread;
+static uint32_t g_mainThread;
 
 void c4_at_exit(void (*destroy)(void*), void* object);                   // StaticStorageRuntimeC.c
 void c4_run_exit_destroy(void (*destroy)(void*), void* object);          // StaticStorageShim.cpp
@@ -38,12 +39,12 @@ static void fatal(const char* message)
 // The thread that runs the C runtime's initializers is the main thread.
 static int note_main_thread(void)
 {
-	g_mainThread = GetCurrentThreadId();
+	g_mainThread = c4_os_thread_id();
 	return 0;
 }
-__attribute__((section(".CRT$XIU"), used)) static int (*const g_noteMainThread)(void) = note_main_thread;
+C4_AT_STARTUP(note_main_thread);
 
-bool c4_thread_is_main(void) { return GetCurrentThreadId() == g_mainThread; }
+bool c4_thread_is_main(void) { return c4_os_thread_id() == g_mainThread; }
 
 static int grow(ThreadExits* exits)
 {

@@ -188,12 +188,12 @@ namespace Testing
 			"const int64 Backwards = 1 >> -1;\n"
 			"const double Infinite = 1.0 / 0.0;\n"
 			"int32 main() { return 0; }\n");
-		TEST_ASSERT_EQ(program.Int("Quotient"), INT64_MIN);
+		TEST_ASSERT_EQ(program.Int("Quotient"), int64(INT64_MIN));
 		TEST_ASSERT_EQ(program.Int("Remainder"), int64(0));
-		TEST_ASSERT_EQ(program.Int("Overflow"), INT64_MIN);
+		TEST_ASSERT_EQ(program.Int("Overflow"), int64(INT64_MIN));
 		TEST_ASSERT_EQ(program.Int("Product"), int64(-2));
-		TEST_ASSERT_EQ(program.Int("NegatedMin"), INT64_MIN);
-		TEST_ASSERT_EQ(program.Int("TopBit"), INT64_MIN);
+		TEST_ASSERT_EQ(program.Int("NegatedMin"), int64(INT64_MIN));
+		TEST_ASSERT_EQ(program.Int("TopBit"), int64(INT64_MIN));
 		TEST_ASSERT(Contains(program.Of("Wide").message.c_str(), "shift count 64 is outside 0 to 63"));
 		TEST_ASSERT(Contains(program.Of("Backwards").message.c_str(), "shift count -1 is outside 0 to 63"));
 		TEST_ASSERT(Contains(program.Of("Infinite").message.c_str(), "division by zero"));

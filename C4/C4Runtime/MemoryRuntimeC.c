@@ -5,27 +5,37 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Each block counts as native memory at its size: the size asked for, which _msize gives back at the free.
+// Each block counts as native memory at its size, the same at its allocation and its free. MSVC's _msize gives back
+// the size asked for; glibc knows only the size it gave (malloc_usable_size, at least that), so a Linux block counts
+// at that size both times, whatever size the caller passes to the sized free.
+#if defined(_WIN32)
+static size_t taken_size(void* block, size_t asked) { (void)block; return asked; }
+static size_t given_size(void* block, size_t asked) { return asked ? asked : _msize(block); }
+#else
+static size_t taken_size(void* block, size_t asked) { (void)asked; return malloc_usable_size(block); }
+static size_t given_size(void* block, size_t asked) { (void)asked; return malloc_usable_size(block); }
+#endif
+
 void* c4_raw_alloc(size_t size)
 {
 	const size_t bytes = size ? size : 1;
 	void* block = malloc(bytes);
-	if (block) c4_gc_native_taken(bytes);
+	if (block) c4_gc_native_taken(taken_size(block, bytes));
 	return block;
 }
 
 void c4_raw_free(void* ptr)
 {
 	if (!ptr) return;
-	c4_gc_native_given(_msize(ptr));
+	c4_gc_native_given(given_size(ptr, 0));
 	free(ptr);
 }
 
-// The same for a block whose size the caller knows (what it asked c4_raw_alloc for): no heap lookup.
+// The same for a block whose size the caller knows (what it asked c4_raw_alloc for): no heap lookup on Windows.
 void c4_raw_free_sized(void* ptr, size_t size)
 {
 	if (!ptr) return;
-	c4_gc_native_given(size ? size : 1);
+	c4_gc_native_given(given_size(ptr, size ? size : 1));
 	free(ptr);
 }
 

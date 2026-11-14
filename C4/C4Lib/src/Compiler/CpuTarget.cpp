@@ -52,7 +52,9 @@ namespace Scripting
 			return out;
 		}
 
-		// Every feature `cpu` has, with the ones each of them implies.
+		// Every feature `cpu` has, with the ones each of them implies. SSE2 always: every x86-64 processor has it (the ABI
+		// passes floats in its registers), but some LLVM releases leave it out of a CPU's list (22.1.8's x86-64, pentium4
+		// and core2, which the Linux builder's LLVM is; 22.1.0 lists it).
 		std::map<std::string, bool> FeaturesOf(const std::string& cpu)
 		{
 			llvm::SmallVector<llvm::StringRef, 64> names;
@@ -63,6 +65,8 @@ namespace Scripting
 				features[name] = true;
 				llvm::X86::updateImpliedFeatures(name, true, features);
 			}
+			features["sse2"] = true;
+			llvm::X86::updateImpliedFeatures("sse2", true, features);
 			return ToMap(features);
 		}
 
@@ -142,7 +146,14 @@ namespace Scripting
 		}
 	}
 
-	CpuTarget::CpuTarget() : m_Cpu(kBaselineCpu), m_Features(FeaturesOf(kBaselineCpu)) {}
+	CpuTarget::CpuTarget() : m_System(HostSystem()), m_Cpu(kBaselineCpu), m_Features(FeaturesOf(kBaselineCpu)) {}
+
+	CpuTarget CpuTarget::On(TargetSystem system) const
+	{
+		CpuTarget target = *this;
+		target.m_System = system;
+		return target;
+	}
 
 	bool CpuTarget::IsTargetFlag(const std::string& arg)
 	{

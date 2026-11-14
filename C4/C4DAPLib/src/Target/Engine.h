@@ -1,9 +1,13 @@
 #pragma once
+#ifndef _WIN32
+#include "Target/LinuxEngine.h"
+#else
 #include "Target/Frames.h"
 #include "Target/Launch.h"
 #include "Target/OutputPipes.h"
 #include "Target/Patches.h"
 #include "Target/Process.h"
+#include "Target/SessionTypes.h"
 #include "Target/SourceBreakpoints.h"
 #include "Target/Step.h"
 #include "Target/Symbols.h"
@@ -19,56 +23,6 @@
 
 namespace C4DAP::Target
 {
-	enum class StopReason { Entry, Breakpoint, Step, Pause, Exception };
-
-	struct StopInfo
-	{
-		StopReason reason = StopReason::Pause;
-		DWORD thread = 0;
-		std::vector<uint32_t> breakpoints;
-		std::string description;
-	};
-
-	/// What the engine reports, on the engine's thread.
-	struct EngineEvents
-	{
-		std::function<void(const StopInfo&)> stopped;
-		std::function<void(DWORD thread, bool started)> thread;
-		std::function<void(const BoundBreakpoint&)> breakpointChanged;
-		std::function<void(const char* category, const std::string& text)> output;
-		std::function<void(uint32_t exitCode)> exited;
-		/// The program's process exists (its id), so a client can watch what it uses.
-		std::function<void(DWORD processId)> processStarted;
-	};
-
-	struct ThreadInfo
-	{
-		DWORD id = 0;
-		std::string name;
-	};
-
-	struct FrameInfo
-	{
-		uint32_t id = 0;
-		std::string name;
-		SourcePosition position;
-		std::string instructionPointer; // the frame's pc: inlined calls share their caller's
-	};
-
-	struct VariableInfo
-	{
-		std::string name;
-		std::string value;
-		std::string type;
-		uint32_t reference = 0; // non-zero: the value has children
-	};
-
-	struct EvaluateResult
-	{
-		std::string error; // non-empty: no value
-		VariableInfo value;
-	};
-
 	/// One debug session: the program, its symbols, breakpoints and steps, and the frames and values of the current
 	/// stop (docs/tools/03-editor-lsp-dap.md, "The debugger"). Single-threaded: every call is made on the thread
 	/// that launched the program, which is the one Windows sends its debug events to.
@@ -204,3 +158,4 @@ namespace C4DAP::Target
 		size_t m_InlinedLeftOut = 0; // of the calls inlined at the stopped thread's pc, those its stop shows it outside of
 	};
 } // namespace C4DAP::Target
+#endif

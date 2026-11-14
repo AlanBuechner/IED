@@ -149,10 +149,7 @@ namespace Testing
 			switch (result)
 			{
 			case InvocationResult::SehCrash:
-				if (!crashInfo.description.empty())
-					std::cout << "Crashed: SEH " << crashInfo.description << std::endl;
-				else
-					std::cout << "Crashed: SEH exception" << std::endl;
+				std::cout << "Crashed: " << CrashSummary(crashInfo) << std::endl;
 				break;
 			case InvocationResult::StdException:
 				std::cout << "Crashed: unhandled standard exception" << std::endl;

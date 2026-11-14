@@ -463,6 +463,10 @@ class HttpClientTests {
 		Core::String gone = Core::String("http://") + closed.LocalAddress().ToString().View() + Core::StringView("/");
 		closed.Close();
 		Http::FetchResult refused = Http::Get(gone.View(), kHttpWaitMs);
+#if defined(PLATFORM_LINUX)
+		assert_true(!refused.ok && HttpContains(refused.error.View(), "(error 111)"), "a refused connection says so"); // ECONNREFUSED
+#else
 		assert_true(!refused.ok && HttpContains(refused.error.View(), "10061"), "a refused connection says so");
+#endif
 	}
 }

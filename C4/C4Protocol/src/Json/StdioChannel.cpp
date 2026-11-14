@@ -3,6 +3,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <cerrno>
 #include <unistd.h>
 #endif
 
@@ -42,7 +43,9 @@ namespace Json
 			return false;
 		m_Reader.Append(buffer, got);
 #else
-		const ssize_t got = ::read(0, buffer, sizeof(buffer));
+		ssize_t got = 0;
+		do got = ::read(0, buffer, sizeof(buffer));
+		while (got < 0 && errno == EINTR);
 		if (got <= 0)
 			return false;
 		m_Reader.Append(buffer, static_cast<size_t>(got));
@@ -67,6 +70,8 @@ namespace Json
 		while (sent < framed.size())
 		{
 			const ssize_t written = ::write(1, framed.data() + sent, framed.size() - sent);
+			if (written < 0 && errno == EINTR)
+				continue;
 			if (written <= 0)
 				return;
 			sent += static_cast<size_t>(written);

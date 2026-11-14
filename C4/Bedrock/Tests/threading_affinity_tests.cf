@@ -4,6 +4,9 @@
 
 include "bedrock.ch"
 
+// Windows only: It keeps the process to fewer processors with the Windows API (GetProcessAffinityMask and the like). Linux's tests of this area are to come (C4 D-86).
+#if defined(PLATFORM_WINDOWS)
+
 const int32 kFewProcessors = 3;
 
 [link("GetCurrentProcess")] void* GetCurrentProcess() noexcept;
@@ -110,3 +113,4 @@ class AffinityTests {
 		assert_eq(LessTheMakers(cores), (int64)pinned.FrameWorkerCount(), "pinned: the cores it may run on less the maker's");
 	}
 }
+#endif

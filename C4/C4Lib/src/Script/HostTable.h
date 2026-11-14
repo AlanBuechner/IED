@@ -15,8 +15,9 @@ namespace llvm
 namespace Scripting
 {
 	/// The runtime entry points script code may call although its host never did (docs/runtime/04 section 3.1):
-	/// the table lists them whatever the host uses.
-	const std::vector<const char*>& ScriptRuntimeEntryPoints();
+	/// the table lists them whatever the host uses. They differ by system: Windows scripts throw through
+	/// c4_script_throw and the MSVC personality, Linux scripts through c4_eh_throw and __c4_personality_v0 (D-86).
+	const std::vector<const char*>& ScriptRuntimeEntryPoints(bool forLinux);
 
 	/// An accessor `__c4_tls_<symbol>` for every thread_local global of `module`: it returns the calling thread's
 	/// address of the variable, so a script, which cannot reach the host's native thread storage, names it.

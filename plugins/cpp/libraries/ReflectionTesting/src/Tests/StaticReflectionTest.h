@@ -24,5 +24,10 @@ namespace Testing
 
 		TEST_FUNC(StaticReflection)
 		void TestStaticClassBackwardCompatibility();
+
+		// The HeaderTool's attribute strings end in a value ("reflect-class,GROUP = Testing"): the parser read the token
+		// after it, past the end of its queue (a crash with libstdc++ on Linux).
+		TEST_FUNC(StaticReflection)
+		void TestAttributeStringsEndingInAValueOrAnEquals();
 	};
 }

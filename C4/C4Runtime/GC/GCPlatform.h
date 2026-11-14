@@ -1,5 +1,5 @@
 #pragma once
-// The operating-system services the collector uses. GCPlatformWin32.c implements them; a port adds one file.
+// The operating-system services the collector uses. GCPlatformWin32.c and GCPlatformPosix.c implement them.
 
 #include <stddef.h>
 #include <stdint.h>
@@ -7,6 +7,10 @@
 // `size` bytes of committed, zeroed memory aligned to `align` (a power of two), with its written pages tracked (D-79).
 // NULL when the OS refuses.
 void* gc_os_map(size_t size, size_t align);
+
+// Whether the system tracks written pages (Windows' MEM_WRITE_WATCH): without it the collector never marks
+// concurrently (D-79), since every page would be a rescan.
+int gc_os_tracks_writes(void);
 
 // Written-page tracking over one mapping: forget what was written so far; or report every page written since the
 // last report or forget, forgetting each as it is reported (a write while this runs is reported now or next time).

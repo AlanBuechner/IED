@@ -11,7 +11,8 @@
 namespace
 {
 	// The server analyzes one program after another for as long as it runs, each hundreds of megabytes it lets go:
-	// the heap hands freed memory back to the system rather than keeping it for a peak it may never see again.
+	// the heap hands freed memory back to the system rather than keeping it for a peak it may never see again. glibc's
+	// heap does by itself, and the server trims it after an analysis goes (LspServer's ReturnFreedMemory).
 	void ReturnFreedHeapMemory()
 	{
 #ifdef _WIN32

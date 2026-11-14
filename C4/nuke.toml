@@ -4,6 +4,10 @@
 # library, the runtime's sources, and the clang, lld-link and llvm-rc it compiles and links C4 programs with, with
 # clang's own headers. A Development build also refreshes the "dev" toolchain in the shared store, so C4 workspaces
 # pinned to toolchain = "dev" use the compiler built here.
+#
+# On Linux (tools/linux/builder, C4 D-86) the compiler links LLVM's archives through C4Lib, and its toolchain/ holds
+# the builder's clang and ld.lld with the LLVM and clang libraries they load from toolchain/lib (apt.llvm.org builds them
+# as shared libraries); they still need Debian 12's libz3, libxml2, libedit and libffi, which the LLVM packages pull in.
 [project]
 name = "C4"
 kind = "executable"
@@ -13,6 +17,8 @@ description = "The C4 compiler"
 depends = ["C4Lib", "Core", "Reflection", "ObjectDescription", "Profiling", "UnitTesting", "C4LSP", "C4DAP", "CBind", "C4Script", "C4Api"]
 includes = ["${cpp.llvm}/include"]
 defines = { NOMINMAX = "", WIN32_LEAN_AND_MEAN = "" }
+
+[project.system.windows]
 links = ["kernel32.lib", "user32.lib", "comdlg32.lib", "shell32.lib", "bcrypt.lib", "ntdll.lib",
 	"${cpp.llvm}/lib/LLVM*.lib", "!LLVM-C.lib", "${cpp.llvm}/lib/Remarks.lib", "${cpp.llvm}/lib/LTO.lib"]
 
@@ -21,12 +27,15 @@ reflection = true
 
 [[project.copy]]
 from = "${cpp.llvm}/bin/LLVM-C.dll"
+systems = ["windows"]
 
 [[project.copy]]
 from = "${cpp.llvm}/bin/libclang.dll"
+systems = ["windows"]
 
 [[project.copy]]
 from = "${cpp.llvm}/bin/LTO.dll"
+systems = ["windows"]
 
 [[project.copy]]
 from = "Bedrock"
@@ -38,14 +47,37 @@ from = "C4Runtime"
 [[project.copy]]
 from = "${cpp.llvm}/bin/clang.exe"
 to = "toolchain/bin/clang.exe"
+systems = ["windows"]
 
 [[project.copy]]
 from = "${cpp.llvm}/bin/lld-link.exe"
 to = "toolchain/bin/lld-link.exe"
+systems = ["windows"]
 
 [[project.copy]]
 from = "${cpp.llvm}/bin/llvm-rc.exe"
 to = "toolchain/bin/llvm-rc.exe"
+systems = ["windows"]
+
+[[project.copy]]
+from = "${cpp.llvm}/bin/clang"
+to = "toolchain/bin/clang"
+systems = ["linux"]
+
+[[project.copy]]
+from = "${cpp.llvm}/bin/ld.lld"
+to = "toolchain/bin/ld.lld"
+systems = ["linux"]
+
+[[project.copy]]
+from = "${cpp.llvm}/lib/libLLVM.so.22.1"
+to = "toolchain/lib/libLLVM.so.22.1"
+systems = ["linux"]
+
+[[project.copy]]
+from = "${cpp.llvm}/lib/libclang-cpp.so.22.1"
+to = "toolchain/lib/libclang-cpp.so.22.1"
+systems = ["linux"]
 
 [[project.copy]]
 from = "${cpp.llvm}/lib/clang"
@@ -56,7 +88,7 @@ name = "dev-toolchain"
 phase = "post-build"
 configs = ["Development"]
 description = "refresh the dev toolchain"
-run = ["${python}", "MakeToolchain.py", "--config", "${config}", "--bin", "${bin.root}", "--out", "${toolchains}/c4/dev"]
+run = ["${python}", "MakeToolchain.py", "--config", "${config}", "--system", "${system}", "--bin", "${bin.root}", "--out", "${toolchains}/c4/dev"]
 
 # --- nuke gates: every suite the compiler must pass (docs/tools/05-test-suites.md) ---------------------------
 

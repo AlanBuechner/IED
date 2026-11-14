@@ -5,6 +5,7 @@
 #include "Core/Vector.h"
 #include "Macro/PredefinedMacros.h"
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -22,7 +23,8 @@ namespace Scripting
 		/// One or more input paths (files or folders). All registered folders form the shared include
 	/// path, so headers resolve across every input folder (multi-source-folder support).
 	Core::Vector<Core::String> inputs;
-	Core::String outputFile = "output.exe";
+	Core::String outputFile; // -o; ParseArgs names it output.exe (output for Linux) when -o does not
+	std::string targetSystem; // --target <windows-x64|linux-x64>: empty for the host's system (D-86)
 	Core::Vector<Core::String> includeDirs;
 	Core::String projectsFile; // --projects <file>: the build description (docs/language/15-projects.md)
 	bool debugInfo = false; // -g: CodeView in the objects, a .pdb beside the executable
@@ -72,16 +74,25 @@ namespace Scripting
 	// (Toolchain::WindowsSysroot) instead of an installed Visual Studio; none when it is empty.
 	std::vector<std::string> WindowsSysrootFlags(const std::string& sysroot);
 
+	// The sysroot a build for Linux compiles and links against: Toolchain::LinuxSysroot, else, for a compiler that runs on
+	// Linux, an empty path (clang's driver takes the system's own glibc). Nothing, after printing where it was looked for,
+	// for a compiler that runs on Windows without one.
+	std::optional<fs::path> LinuxSysrootForBuild();
+
+	// clang's driver argument for `sysroot` (LinuxSysrootForBuild): --sysroot, or none for the system's own.
+	std::vector<std::string> LinuxSysrootFlags(const fs::path& sysroot);
+
 	/// What clang's driver would hand lld-link for one argument of a link's libraries: `-l<name>` is `<name>.lib`,
 	/// `-L<dir>` a search folder, `-Wl,a,b` its arguments; an object, a library or a resource file goes as it is.
 	std::vector<std::string> LinkerArguments(const std::string& argument);
 
-	// Compile a foreign C/C++ source file to an object file using the bundled clang.
+	// Compile a foreign C/C++ source file to an object file for `system` using the bundled clang (for Linux against the
+	// Linux sysroot, position independent).
 	// language is "c" or "c++"; defines/includeDirs are passed as -D / -I flags, targetFlags (D-62) and compileFlags (the
 	// build's -O and -g, BUG-285) as written. clang also writes the headers it read to `<objPath>.d`.
 	bool CompileForeignSource(const Core::String& srcPath, const Core::String& objPath,
 		const Core::String& language, const Core::Vector<Core::String>& defines,
-		const Core::Vector<Core::String>& includeDirs, const std::vector<std::string>& targetFlags,
+		const Core::Vector<Core::String>& includeDirs, TargetSystem system, const std::vector<std::string>& targetFlags,
 		const std::vector<std::string>& compileFlags, bool verbose);
 
 	// Run an external tool directly (no shell), inheriting stdout/stderr so its output streams live.
@@ -93,14 +104,18 @@ namespace Scripting
 	bool LinkWithLLD(const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& libraries,
 		const Core::String& outputPath, Subsystem subsystem, bool verbose);
 
-	// Run an executable, streaming its output live and returning its exit code (no error noise - a
-	// non-zero exit is expected for failing test runs). Returns false only if it couldn't be started.
-	bool RunExecutable(const Core::String& exePath, int& outExitCode);
+	// Link the objects, the runtime's objects and the libraries (paths, -l / -L / -Wl arguments) into a Linux x64
+	// executable (D-86): a position-independent program against the Linux sysroot's glibc, with GCC's runtime linked in,
+	// by clang and ld.lld. A runtime object is linked only when the program uses it (as an archive's member is), and a
+	// system library only when something links against it.
+	bool LinkElf(const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& runtime, const Core::Vector<Core::String>& libraries,
+		const Core::String& outputPath, bool verbose);
 
 	// Remove a file if it exists (no-op on failure)
 	void RemoveIfExists(const std::string& path);
 
-	// Run an external tool, capturing stdout/stderr. Returns the exit code (-1 on spawn failure).
+	// Run an external tool, capturing stdout/stderr. Returns the exit code (-1 on spawn failure). RunTool and this are
+	// the system's: Compiler/ToolProcessWindows.cpp and Compiler/ToolProcessPosix.cpp.
 	bool RunToolWithOutput(const Core::Vector<Core::String>& args, int& exitCode,
 		std::string& outStdout, std::string& outStderr);
 }

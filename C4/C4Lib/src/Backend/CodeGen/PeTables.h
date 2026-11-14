@@ -13,6 +13,10 @@ namespace Scripting
 		/// trunc(&g - &__ImageBase): what an RTTI or EH table stores for a reference to `g`.
 		llvm::Constant* ImageRelative(llvm::Module& m, llvm::GlobalValue* g);
 
+		/// An ELF image has no __ImageBase (D-86): every ImageRelative reference in `m`'s tables becomes relative to its
+		/// own field, trunc(&g - &field), which the runtime reads as `(char*)&field + field`. Zero stays zero (null).
+		void AnchorAtFields(llvm::Module& m);
+
 		/// A read-only table shared by name across object files (linkonce_odr in its own comdat).
 		llvm::GlobalVariable* Shared(llvm::Module& m, const std::string& name, llvm::Constant* init, const char* section);
 

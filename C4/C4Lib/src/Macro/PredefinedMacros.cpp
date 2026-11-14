@@ -13,7 +13,7 @@ namespace Scripting
 	std::map<std::string, std::string> PredefinedMacros(bool test, const CpuTarget& target, const std::vector<MacroDefine>& defines)
 	{
 		std::map<std::string, std::string> macros = target.Macros();
-		macros["PLATFORM_WINDOWS"] = "1";
+		macros[target.System() == TargetSystem::Linux ? "PLATFORM_LINUX" : "PLATFORM_WINDOWS"] = "1";
 		macros["ARCH_X64"] = "1";
 		macros["C4_VERSION"] = std::to_string(CompilerVersion::Encoded);
 		if (test) macros["TEST"] = "1";

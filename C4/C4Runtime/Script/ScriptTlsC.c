@@ -10,7 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <windows.h>
+#include "PlatformSync.h"
 
 typedef struct ThreadSlots
 {
@@ -19,7 +19,7 @@ typedef struct ThreadSlots
 	struct ThreadSlots* next;  // every thread's slots, for releasing a variable everywhere
 } ThreadSlots;
 
-static SRWLOCK g_lock = SRWLOCK_INIT;
+static c4_lock g_lock = C4_LOCK_INIT;
 static ThreadSlots* g_threads;
 static uintptr_t g_nextIndex = 1;
 static uintptr_t* g_freeIndexes;
@@ -32,10 +32,22 @@ static void fatal(const char* message)
 	c4_fatal(message);
 }
 
+#if defined(_WIN32)
+static void* aligned_object(size_t size, size_t align) { return _aligned_malloc(size, align); }
+static void free_aligned_object(void* object) { _aligned_free(object); }
+#else
+static void* aligned_object(size_t size, size_t align)
+{
+	void* object = NULL;
+	return posix_memalign(&object, align, size) == 0 ? object : NULL;
+}
+static void free_aligned_object(void* object) { free(object); }
+#endif
+
 static void free_object(void* object)
 {
 	c4_gc_unregister_region(object);
-	_aligned_free(object);
+	free_aligned_object(object);
 }
 
 static uintptr_t take_index(void)
@@ -62,12 +74,12 @@ static void give_back_index(uintptr_t index)
 static void release_thread(void* item)
 {
 	ThreadSlots* slots = (ThreadSlots*)item;
-	AcquireSRWLockExclusive(&g_lock);
+	c4_lock_take(&g_lock);
 	for (ThreadSlots** link = &g_threads; *link; link = &(*link)->next)
 		if (*link == slots) { *link = slots->next; break; }
 	for (size_t i = 0; i < slots->capacity; i++)
 		if (slots->objects[i]) free_object(slots->objects[i]);
-	ReleaseSRWLockExclusive(&g_lock);
+	c4_lock_give(&g_lock);
 	free(slots->objects);
 	free(slots);
 	t_slots = NULL;
@@ -78,10 +90,10 @@ static ThreadSlots* this_thread_slots(void)
 	if (t_slots) return t_slots;
 	ThreadSlots* slots = (ThreadSlots*)calloc(1, sizeof(ThreadSlots));
 	if (!slots) fatal("out of memory for a script thread_local");
-	AcquireSRWLockExclusive(&g_lock);
+	c4_lock_take(&g_lock);
 	slots->next = g_threads;
 	g_threads = slots;
-	ReleaseSRWLockExclusive(&g_lock);
+	c4_lock_give(&g_lock);
 	t_slots = slots;
 	c4_thread_at_exit(release_thread, slots);
 	return slots;
@@ -91,14 +103,14 @@ static uintptr_t index_of(__emutls_control* control)
 {
 	uintptr_t index = __atomic_load_n(&control->index, __ATOMIC_ACQUIRE);
 	if (index) return index;
-	AcquireSRWLockExclusive(&g_lock);
+	c4_lock_take(&g_lock);
 	index = control->index;
 	if (!index)
 	{
 		index = take_index();
 		__atomic_store_n(&control->index, index, __ATOMIC_RELEASE);
 	}
-	ReleaseSRWLockExclusive(&g_lock);
+	c4_lock_give(&g_lock);
 	return index;
 }
 
@@ -106,7 +118,7 @@ static void* new_object(const __emutls_control* control)
 {
 	const size_t align = control->align > sizeof(void*) ? control->align : sizeof(void*);
 	const size_t size = control->size ? control->size : 1;
-	void* object = _aligned_malloc(size, align);
+	void* object = aligned_object(size, align);
 	if (!object) fatal("out of memory for a script thread_local");
 	if (control->value) memcpy(object, control->value, control->size);
 	else memset(object, 0, size);
@@ -118,7 +130,7 @@ static void* make_object(__emutls_control* control, uintptr_t index)
 {
 	ThreadSlots* slots = this_thread_slots();
 	void* object = new_object(control);
-	AcquireSRWLockExclusive(&g_lock);
+	c4_lock_take(&g_lock);
 	if (index > slots->capacity)
 	{
 		size_t capacity = slots->capacity ? slots->capacity : 8;
@@ -130,7 +142,7 @@ static void* make_object(__emutls_control* control, uintptr_t index)
 		slots->capacity = capacity;
 	}
 	slots->objects[index - 1] = object;
-	ReleaseSRWLockExclusive(&g_lock);
+	c4_lock_give(&g_lock);
 	return object;
 }
 
@@ -144,7 +156,7 @@ void* __emutls_get_address(__emutls_control* control)
 
 void c4_script_tls_release(__emutls_control* const* controls, uint32_t count)
 {
-	AcquireSRWLockExclusive(&g_lock);
+	c4_lock_take(&g_lock);
 	for (uint32_t c = 0; c < count; c++)
 	{
 		const uintptr_t index = controls[c] ? controls[c]->index : 0;
@@ -158,5 +170,5 @@ void c4_script_tls_release(__emutls_control* const* controls, uint32_t count)
 		controls[c]->index = 0;
 		give_back_index(index);
 	}
-	ReleaseSRWLockExclusive(&g_lock);
+	c4_lock_give(&g_lock);
 }

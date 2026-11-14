@@ -1,12 +1,11 @@
 #pragma once
+#include "Target/SessionTypes.h"
 #include "Target/Symbols.h"
 #include <windows.h>
 #include <cstdint>
 
 namespace C4DAP::Target
 {
-	enum class StepKind { Over, Into, Out };
-
 	/// What the stepping thread looks like between two instructions.
 	struct ThreadState
 	{

@@ -8,6 +8,7 @@
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h>
 #include <llvm/ExecutionEngine/SectionMemoryManager.h>
+#include <llvm/TargetParser/Triple.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -15,9 +16,11 @@
 #include <llvm/Target/TargetMachine.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <vector>
+#if defined(_WIN32)
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -25,11 +28,74 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#else
+#include <llvm/ExecutionEngine/JITLink/JITLink.h>
+#include <llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h>
+#endif
 
 namespace Scripting
 {
 	namespace
 	{
+#if !defined(_WIN32)
+		// A script loaded anywhere in the address space reaches what it does not define - the host's code and data, a
+		// layer's - through the GOT and stubs JITLink builds: no declaration is dso_local (nor hidden, which implies it),
+		// so the code never names one by a 32-bit PC-relative offset, which cannot span that distance (D-86).
+		void ReachDeclarationsIndirectly(llvm::Module& module)
+		{
+			for (llvm::GlobalValue& value : module.global_values())
+			{
+				if (!value.isDeclaration()) continue;
+				if (auto* function = llvm::dyn_cast<llvm::Function>(&value); function && function->isIntrinsic()) continue;
+				value.setVisibility(llvm::GlobalValue::DefaultVisibility);
+				value.setDSOLocal(false);
+			}
+		}
+
+		// A debug script's functions where JITLink placed them, to name a fault's place by.
+		struct ScriptFunction
+		{
+			uint64 start = 0;
+			uint64 size = 0;
+			std::string name;
+		};
+		using ScriptFunctions = std::vector<ScriptFunction>;
+
+		// Where JITLink placed the script's blocks, once they have their addresses: its image, against which a fault's
+		// place is told (script+0x...), as the memory manager's block is on Windows; and a debug script's functions.
+		class ImageBounds : public llvm::orc::LinkGraphLinkingLayer::Plugin
+		{
+		public:
+			ImageBounds(std::shared_ptr<ScriptImage> image, std::shared_ptr<ScriptFunctions> functions)
+				: m_Image(std::move(image)), m_Functions(std::move(functions)) {}
+
+			void modifyPassConfig(llvm::orc::MaterializationResponsibility&, llvm::jitlink::LinkGraph&, llvm::jitlink::PassConfiguration& config) override
+			{
+				config.PostAllocationPasses.push_back([image = m_Image, functions = m_Functions](llvm::jitlink::LinkGraph& graph) -> llvm::Error {
+					for (llvm::jitlink::Block* block : graph.blocks())
+					{
+						const uintptr_t low = static_cast<uintptr_t>(block->getAddress().getValue());
+						const uintptr_t high = low + static_cast<uintptr_t>(block->getSize());
+						if (image->low == 0 || low < image->low) image->low = low;
+						if (high > image->high) image->high = high;
+					}
+					if (functions)
+						for (llvm::jitlink::Symbol* symbol : graph.defined_symbols())
+							if (symbol->isCallable() && symbol->hasName() && symbol->getSize() > 0)
+								functions->push_back({ symbol->getAddress().getValue(), symbol->getSize(), (*symbol->getName()).str() });
+					return llvm::Error::success();
+				});
+			}
+			llvm::Error notifyFailed(llvm::orc::MaterializationResponsibility&) override { return llvm::Error::success(); }
+			llvm::Error notifyRemovingResources(llvm::orc::JITDylib&, llvm::orc::ResourceKey) override { return llvm::Error::success(); }
+			void notifyTransferringResources(llvm::orc::JITDylib&, llvm::orc::ResourceKey, llvm::orc::ResourceKey) override {}
+
+		private:
+			std::shared_ptr<ScriptImage> m_Image;
+			std::shared_ptr<ScriptFunctions> m_Functions;
+		};
+#endif
+
 		using ImageFn = void (*)(const void*, const void*);
 		using ImageRemoveFn = void (*)(const void*);
 
@@ -55,9 +121,10 @@ namespace Scripting
 			HostSymbolTable m_Host; // its own copy: the layers it names stay as long as this script's JIT
 		};
 
+#if defined(_WIN32)
 		// One block per object, code first, within reach of its data (the image-relative tables need it). Its .pdata
 		// is registered against the block's lowest address, the base RuntimeDyld resolves image-relative relocations
-		// against; the block is the script's image for its throws (C4Runtime/Script/ScriptThrowC.c).
+		// against; the block is the script's image for its throws (C4Runtime/Script/ScriptThrowWin32.c).
 		class ScriptMemoryManager : public llvm::SectionMemoryManager
 		{
 		public:
@@ -133,6 +200,7 @@ namespace Scripting
 			call->setTailCallKind(llvm::CallInst::TCK_MustTail);
 			B.CreateRet(call);
 		}
+#endif
 
 		// The asm parser too: a script's asm blocks, and a debug script's import thunks, are assembled with its code.
 		void InitializeTarget()
@@ -163,7 +231,11 @@ namespace Scripting
 		llvm::Error AddCode(llvm::orc::LLJIT& jit, ScriptCode code)
 		{
 			if (!code.module) return jit.addObjectFile(llvm::MemoryBuffer::getMemBufferCopy(code.object, "cached script"));
+#if defined(_WIN32)
 			AddPersonalityThunk(*code.module);
+#else
+			ReachDeclarationsIndirectly(*code.module);
+#endif
 			return jit.addIRModule(llvm::orc::ThreadSafeModule(std::move(code.module), std::move(code.context)));
 		}
 
@@ -175,6 +247,12 @@ namespace Scripting
 			builder.setCPU(target.Cpu());
 			builder.getFeatures().AddFeature(target.LlvmFeatures()); // the whole `+a,-b` list, as clang passes it
 			builder.getOptions().EmulatedTLS = true;
+#if !defined(_WIN32)
+			// JITLink places a script anywhere in the address space: position-independent code reaches the host's code
+			// and data through the GOT and stubs it builds, never by a 32-bit absolute address (D-86).
+			builder.setRelocationModel(llvm::Reloc::PIC_);
+			builder.setCodeModel(llvm::CodeModel::Small);
+#endif
 			return builder;
 		}
 
@@ -203,9 +281,35 @@ namespace Scripting
 
 			const ScriptImage& Image() const override { return *m_Image; }
 
+#if !defined(_WIN32)
+			// A debug script's place by its function, as its DLL's PDB tells it on Windows.
+			std::string Describe(uint64 address) const override
+			{
+				if (!m_Functions) return "";
+				for (const ScriptFunction& function : *m_Functions)
+					if (address >= function.start && address < function.start + function.size)
+					{
+						char offset[24];
+						std::snprintf(offset, sizeof(offset), "+0x%llx", static_cast<unsigned long long>(address - function.start));
+						return m_Name + "!" + function.name + offset;
+					}
+				return "";
+			}
+
+			void Name(std::string name, std::shared_ptr<ScriptFunctions> functions)
+			{
+				m_Name = std::move(name);
+				m_Functions = std::move(functions);
+			}
+#endif
+
 		private:
 			std::unique_ptr<llvm::orc::LLJIT> m_Jit;
 			std::shared_ptr<ScriptImage> m_Image;
+#if !defined(_WIN32)
+			std::string m_Name;
+			std::shared_ptr<ScriptFunctions> m_Functions;
+#endif
 		};
 	}
 
@@ -284,26 +388,36 @@ namespace Scripting
 		std::string* error)
 	{
 		auto image = std::make_shared<ScriptImage>();
-		const ImageFn add = host.Function<ImageFn>("c4_script_image_add");
-		const ImageRemoveFn remove = host.Function<ImageRemoveFn>("c4_script_image_remove");
 		KeptObject kept(generated);
-		auto jit = llvm::orc::LLJITBuilder()
-			.setJITTargetMachineBuilder(MachineBuilder(target, code.optimize))
+		llvm::orc::LLJITBuilder builder;
+		builder.setJITTargetMachineBuilder(MachineBuilder(target, code.optimize))
 			.setCompileFunctionCreator([&kept](llvm::orc::JITTargetMachineBuilder builder) -> llvm::Expected<std::unique_ptr<llvm::orc::IRCompileLayer::IRCompiler>> {
 				auto machine = builder.createTargetMachine();
 				if (!machine) return machine.takeError();
 				return std::make_unique<llvm::orc::TMOwningSimpleCompiler>(std::move(*machine), &kept);
-			})
-			.setObjectLinkingLayerCreator([&](llvm::orc::ExecutionSession& session) -> llvm::Expected<std::unique_ptr<llvm::orc::ObjectLayer>> {
-				auto layer = std::make_unique<llvm::orc::RTDyldObjectLinkingLayer>(session, [image, add, remove](const llvm::MemoryBuffer&) {
-					return std::make_unique<ScriptMemoryManager>(image, add, remove);
-				});
-				layer->setOverrideObjectFlagsWithResponsibilityFlags(true); // COFF objects mark too little as exported
-				layer->setAutoClaimResponsibilityForObjectSymbols(true);
-				return std::move(layer);
-			})
-			.create();
+			});
+#if defined(_WIN32)
+		const ImageFn add = host.Function<ImageFn>("c4_script_image_add");
+		const ImageRemoveFn remove = host.Function<ImageRemoveFn>("c4_script_image_remove");
+		builder.setObjectLinkingLayerCreator([&](llvm::orc::ExecutionSession& session) -> llvm::Expected<std::unique_ptr<llvm::orc::ObjectLayer>> {
+			auto layer = std::make_unique<llvm::orc::RTDyldObjectLinkingLayer>(session, [image, add, remove](const llvm::MemoryBuffer&) {
+				return std::make_unique<ScriptMemoryManager>(image, add, remove);
+			});
+			layer->setOverrideObjectFlagsWithResponsibilityFlags(true); // COFF objects mark too little as exported
+			layer->setAutoClaimResponsibilityForObjectSymbols(true);
+			return std::move(layer);
+		});
+#endif
+		// On Linux ORC's own linker for ELF (JITLink) loads the object and registers its .eh_frame, so a script's
+		// exceptions unwind through its frames with the host's personality (C4Runtime/ExceptionsPosix.c).
+		auto jit = builder.create();
 		if (!jit) { Fail(error, "the JIT does not start: " + llvm::toString(jit.takeError())); return nullptr; }
+#if !defined(_WIN32)
+		const std::string debugName = code.debugName;
+		auto functions = debugName.empty() ? nullptr : std::make_shared<ScriptFunctions>();
+		if (auto* linking = llvm::dyn_cast<llvm::orc::ObjectLinkingLayer>(&(*jit)->getObjLinkingLayer()))
+			linking->addPlugin(std::make_shared<ImageBounds>(image, functions));
+#endif
 		auto sessionErrors = std::make_shared<std::string>(); // ORC reports a failed resolution here, not only in the lookup's error
 		(*jit)->getExecutionSession().setErrorReporter([sessionErrors](llvm::Error e) { *sessionErrors += llvm::toString(std::move(e)) + "\n"; });
 		llvm::orc::JITDylib& library = (*jit)->getMainJITDylib();
@@ -322,6 +436,10 @@ namespace Scripting
 			Fail(error, "the script does not link: " + (sessionErrors->empty() ? why : *sessionErrors));
 			return nullptr;
 		}
-		return std::make_unique<JitScript>(std::move(*jit), image);
+		auto linked = std::make_unique<JitScript>(std::move(*jit), image);
+#if !defined(_WIN32)
+		if (functions) linked->Name(debugName, functions);
+#endif
+		return linked;
 	}
 } // namespace Scripting

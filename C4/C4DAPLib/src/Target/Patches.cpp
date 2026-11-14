@@ -1,3 +1,4 @@
+#ifdef _WIN32 // the Win32 debugger; Linux's engine is Target/LinuxEngine.h
 #include "Target/Patches.h"
 
 namespace C4DAP::Target
@@ -51,3 +52,4 @@ namespace C4DAP::Target
 		std::erase_if(m_Patches, [base, size](const auto& patch) { return patch.first >= base && patch.first - base < size; });
 	}
 } // namespace C4DAP::Target
+#endif

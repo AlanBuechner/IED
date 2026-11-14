@@ -1,4 +1,5 @@
 #include "FunctionCallNode.h"
+#include "Parser/Nodes/Declarations/NamespaceQualifiedNameNode.h" // the template arguments the destructor releases
 #include "Core/StringFormat.h"
 
 namespace Scripting

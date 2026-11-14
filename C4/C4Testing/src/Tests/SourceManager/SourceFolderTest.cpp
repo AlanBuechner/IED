@@ -1,7 +1,7 @@
 #include "SourceFolderTest.h"
 #include "SourceManager/SourceManager.h"
 #include "Compiler/FileIo.h"
-#include <process.h>
+#include <llvm/Support/Process.h>
 
 namespace Testing
 {
@@ -16,7 +16,7 @@ namespace Testing
 			fs::path root;
 
 			explicit Folder(const char* name)
-				: root(fs::temp_directory_path() / (std::string("c4_folder_") + name + "_" + std::to_string(_getpid())))
+				: root(fs::temp_directory_path() / (std::string("c4_folder_") + name + "_" + std::to_string(llvm::sys::Process::getProcessId())))
 			{
 				std::error_code ec;
 				fs::remove_all(ExtendedPath(root), ec);

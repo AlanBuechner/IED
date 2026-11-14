@@ -20,7 +20,9 @@ namespace Scripting
 		uint64_t FlagsKey(const ForeignObject& fo, const std::string& compiler)
 		{
 			uint64_t key = Mix(0, CompilerIdentity(compiler));
-			key = Mix(key, Toolchain::WindowsSysroot().generic_string());   // the MSVC and SDK kit it compiles against
+			key = Mix(key, TargetName(fo.system));
+			// The MSVC and SDK kit, or the Linux sysroot, it compiles against.
+			key = Mix(key, (fo.system == TargetSystem::Linux ? Toolchain::LinuxSysroot() : Toolchain::WindowsSysroot()).generic_string());
 			key = Mix(key, fo.srcPath);
 			key = Mix(key, fo.language);
 			for (const auto& list : { &fo.defines, &fo.includeDirs, &fo.targetFlags, &fo.compileFlags })

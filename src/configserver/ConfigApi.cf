@@ -1,0 +1,200 @@
+include "ConfigApi.ch"
+include "host/Server.ch"
+include "web/AuthGate.ch"
+include "web/Front.ch"
+
+namespace Ied
+{
+	static void ApiRefuse(Http::Response& response, int32 status, const char* code, Core::StringView message) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("error", code);
+		json.Field("message", message);
+		json.EndObject();
+		AnswerJson(response, status, json.View());
+	}
+
+	static void ApiAnswer(Http::Response& response, const ConfigOutcome& outcome) { AnswerJson(response, outcome.m_Status, outcome.m_Json.View()); }
+
+	static bool ApiMethodIs(const Http::Request& request, const char* method, Http::Response& response) {
+		if (request.method.View() == method) return true;
+		response.headers.Set(Core::StringView("Allow"), Core::StringView(method));
+		ApiRefuse(response, 405, "method_not_allowed", (Core::String("use ") + method).View());
+		return false;
+	}
+
+	static bool ApiAdmin(ConfigRole role, Http::Response& response) {
+		if (role == ConfigRole::Admin) return true;
+		ApiRefuse(response, 403, "forbidden", Core::StringView("that needs an admin token; this one reads"));
+		return false;
+	}
+
+	// `text`'s first '/'-separated part, with `rest` what follows it.
+	static Core::StringView PathHead(Core::StringView text, Core::StringView& rest) {
+		const int64 slash = text.IndexOf('/', 0);
+		if (slash < 0) {
+			rest = Core::StringView("");
+			return text;
+		}
+		rest = text.Substring(slash + 1, text.ByteLength() - slash - 1);
+		return text.Substring(0, slash);
+	}
+
+	bool ConfigApi::Handle(const Http::Request& request, Http::Response& response) {
+		Core::StringView path = request.path.View();
+		if (!path.StartsWith(Core::StringView("/config/"))) return false;
+		response.headers.Set(Core::StringView("Cache-Control"), Core::StringView("no-store"));
+		ConfigServer* config = m_Server->m_ConfigServer;
+		if (!config) {
+			ApiRefuse(response, 404, "not_found", Core::StringView("this IED server is not a config server (ied-server --config-root <folder>, docs/35)"));
+			return true;
+		}
+		if (!path.StartsWith(Core::StringView(c_ConfigApiPrefix))) {
+			ApiRefuse(response, 404, "not_found", Core::StringView("the config API is /config/v1/"));
+			return true;
+		}
+		const Core::String* header = request.headers.Find(Core::StringView("Authorization"));
+		Core::String who;
+		ConfigRole role = config->Check(BearerToken(header ? header->View() : Core::StringView("")), who);
+		if (role == ConfigRole::None) {
+			response.headers.Set(Core::StringView("WWW-Authenticate"), Core::StringView("Bearer realm=\"ied-config\""));
+			ApiRefuse(response, 401, "unauthenticated", Core::StringView("the config API needs a token it knows: Authorization: Bearer <token> (ied-server --config-root <folder> --config-token reader|admin <name>)"));
+			return true;
+		}
+		Core::StringView rest = path.Substring(Core::StringView(c_ConfigApiPrefix).ByteLength(), path.ByteLength());
+		Route(config, rest, role, who.View(), request, response);
+		return true;
+	}
+
+	static int64 StateWaitMs(const Http::Request& request) {
+		Core::StringView text = QueryValue(request.query.View(), Core::StringView("wait"));
+		int64 seconds = 30;
+		if (!text.IsEmpty() && !Core::ParseInt64(text, seconds)) seconds = 30;
+		if (seconds < 0) seconds = 0;
+		return seconds * 1000;
+	}
+
+	void ConfigApi::Route(ConfigServer* config, Core::StringView rest, ConfigRole role, Core::StringView who, const Http::Request& request, Http::Response& response) {
+		if (rest == "state") {
+			if (!ApiMethodIs(request, "GET", response)) return;
+			Core::StringView since = QueryValue(request.query.View(), Core::StringView("since"));
+			AnswerJson(response, 200, config->State(since, StateWaitMs(request)).View());
+			return;
+		}
+		if (rest == "settings") {
+			if (!ApiAdmin(role, response)) return;
+			if (request.method.View() == "GET") {
+				Core::String text = config->SettingsText();
+				response.SetText(Core::StringView("application/json"), text.View());
+				return;
+			}
+			if (!ApiMethodIs(request, "PUT", response)) return;
+			ApiAnswer(response, config->ReplaceSettings(request.BodyText(), who));
+			return;
+		}
+		if (rest == c_ServerPluginsKind) {
+			if (!ApiAdmin(role, response) || !ApiMethodIs(request, "GET", response)) return;
+			AnswerJson(response, 200, ServerPluginsJson(config).View());
+			return;
+		}
+		Package(config, rest, role, who, request, response);
+	}
+
+	// <kind>/<id>[/files | /file/<path> | /stage[/<path>] | /commit]
+	void ConfigApi::Package(ConfigServer* config, Core::StringView rest, ConfigRole role, Core::StringView who, const Http::Request& request, Http::Response& response) {
+		Core::StringView after;
+		Core::StringView kind = PathHead(rest, after);
+		Core::StringView action;
+		Core::StringView id = PathHead(after, action);
+		FS::Path folder = config->KindFolder(kind);
+		if (folder.IsEmpty() || id.IsEmpty()) {
+			ApiRefuse(response, 404, "not_found", Core::StringView("no such config API path (docs/35)"));
+			return;
+		}
+		Core::StringView tail;
+		Core::StringView verb = PathHead(action, tail);
+		// A server plugin is no client's: only an admin sees its files.
+		const bool reads = verb == "files" || verb == "file";
+		if (reads && kind == c_ServerPluginsKind && !ApiAdmin(role, response)) return;
+		if (verb.IsEmpty()) {
+			if (!ApiAdmin(role, response) || !ApiMethodIs(request, "DELETE", response)) return;
+			ApiAnswer(response, config->Remove(kind, id, who));
+		}
+		else if (verb == "files" && tail.IsEmpty()) {
+			if (!ApiMethodIs(request, "GET", response)) return;
+			if (!IsPackageName(id) || !FS::IsDirectory((folder / id).CStr())) {
+				ApiRefuse(response, 404, "not_found", (((Core::String("no ") + kind) + "/") + id).View());
+				return;
+			}
+			AnswerJson(response, 200, PackageFilesJson(ListPackage(folder / id)).View());
+		}
+		else if (verb == "file") {
+			if (!ApiMethodIs(request, "GET", response)) return;
+			Core::String decoded;
+			Core::String why;
+			if (!PercentDecode(tail, decoded) || !IsPackageName(id) || !IsPackagePath(decoded.View(), why)) {
+				ApiRefuse(response, 400, "bad_request", why.IsEmpty() ? Core::StringView("malformed path") : why.View());
+				return;
+			}
+			FS::Path file = folder / id / decoded.View();
+			if (!FS::FileExists(file.CStr())) {
+				ApiRefuse(response, 404, "not_found", (Core::String("no file ") + decoded.View()).View());
+				return;
+			}
+			FS::File opened = FS::File(file.CStr(), "rb");
+			Core::String bytes = opened.ReadText();
+			response.SetText(Core::StringView("application/octet-stream"), bytes.View());
+		}
+		else if (verb == "stage") {
+			if (!ApiAdmin(role, response)) return;
+			if (tail.IsEmpty()) {
+				if (!ApiMethodIs(request, "DELETE", response)) return;
+				ApiAnswer(response, config->ClearStage(kind, id));
+				return;
+			}
+			if (!ApiMethodIs(request, "PUT", response)) return;
+			Core::String decoded;
+			if (!PercentDecode(tail, decoded)) {
+				ApiRefuse(response, 400, "bad_request", Core::StringView("malformed path"));
+				return;
+			}
+			ApiAnswer(response, config->Stage(kind, id, decoded.View(), request.BodyText()));
+		}
+		else if (verb == "commit" && tail.IsEmpty()) {
+			if (!ApiAdmin(role, response) || !ApiMethodIs(request, "POST", response)) return;
+			ApiAnswer(response, config->Commit(kind, id, request.BodyText(), who));
+		}
+		else ApiRefuse(response, 404, "not_found", Core::StringView("no such config API path (docs/35)"));
+	}
+
+	// {plugins: [{id, version, state, problems, code?: {state, problem?, builds}, diagnostics, published}]}: each server
+	// plugin as the plugin host has it - whether it loaded, its code compiled and runs - and what it published.
+	Core::String ConfigApi::ServerPluginsJson(ConfigServer* config) {
+		Threading::LockGuard guard(m_Server->m_Lock);
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("plugins"));
+		json.BeginArray();
+		for (Plugin* plugin : m_Server->m_Plugins->All()) {
+			Manifest* manifest = plugin->m_Manifest;
+			if (manifest->m_Source != PluginSource::Server) continue;
+			json.BeginObject();
+			json.Field("id", manifest->m_Id.View());
+			json.Field("version", manifest->m_Version.View());
+			json.Field("state", PluginStateName(plugin->m_State));
+			json.Key(Core::StringView("problems"));
+			json.BeginArray();
+			for (const Core::String& problem : manifest->m_Problems) json.String(problem.View());
+			json.EndArray();
+			CodeInstance* instance = m_Server->m_Code->For(plugin, nullptr);
+			if (instance) json.RawField("code", m_Server->m_Code->SummaryJson(instance).View());
+			json.Field("diagnostics", instance ? instance->m_Problem.View() : Core::StringView(""));
+			json.RawField("published", config->PublishedJson(manifest->m_Id.View()).View());
+			json.EndObject();
+		}
+		json.EndArray();
+		json.Field("settingsProblem", config->SettingsProblem().View());
+		json.EndObject();
+		return json.ToString();
+	}
+}

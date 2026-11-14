@@ -21,8 +21,12 @@ METADATA_FILE = "toolchain.json"
 STORE_ENV = "NUKE_TOOLCHAINS"
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$")
 OPTION = re.compile(r"(?<![\w-])(--?[A-Za-z][\w.=-]*)")
-# What a C4 install must hold to compile and link a program (the compiler finds the rest relative to itself).
-REQUIRED = ("C4.exe", "Bedrock/bedrock.ch", "C4Runtime", "toolchain/bin/clang.exe", "toolchain/bin/lld-link.exe")
+# The compiler's file in an install for the system Nuke runs on: a Windows install's C4.exe, a Linux install's C4 (C4 D-86).
+COMPILER = "C4.exe" if os.name == "nt" else "C4"
+# What a C4 install must hold to compile and link a program (the compiler finds the rest relative to itself): its
+# clang and linker, lld-link for Windows programs, ld.lld for Linux ones.
+REQUIRED = (COMPILER, "Bedrock/bedrock.ch", "C4Runtime") + (
+	("toolchain/bin/clang.exe", "toolchain/bin/lld-link.exe") if os.name == "nt" else ("toolchain/bin/clang", "toolchain/bin/ld.lld"))
 
 
 def nuke_folder():
@@ -53,10 +57,10 @@ class Toolchain:
 	command: tuple = None            # how to start the compiler; tests substitute a stub
 
 	def compiler_command(self):
-		return list(self.command) if self.command else [fsutil.join(self.dir, "C4.exe")]
+		return list(self.command) if self.command else [fsutil.join(self.dir, COMPILER)]
 
 	def compiler_path(self):
-		return self.compiler_command()[-1] if self.command else fsutil.join(self.dir, "C4.exe")
+		return self.compiler_command()[-1] if self.command else fsutil.join(self.dir, COMPILER)
 
 
 	def accepts(self, option):
@@ -102,12 +106,12 @@ def read_metadata(folder):
 def probe_version(folder):
 	"""The version `C4.exe --version` reports ("C4 0.1.0" -> "0.1.0")."""
 	try:
-		result = subprocess.run([os.path.join(folder, "C4.exe"), "--version"], capture_output=True, text=True, timeout=60)
+		result = subprocess.run([os.path.join(folder, COMPILER), "--version"], capture_output=True, text=True, timeout=60)
 	except (OSError, subprocess.TimeoutExpired) as error:
-		raise NukeError(f"cannot run {folder}/C4.exe --version: {error}") from None
+		raise NukeError(f"cannot run {folder}/{COMPILER} --version: {error}") from None
 	match = re.search(r"(\d+\.\d+\.\d+\S*)", result.stdout)
 	if result.returncode != 0 or not match:
-		raise NukeError(f"{folder}/C4.exe --version printed no version (exit {result.returncode}): {result.stdout.strip()}")
+		raise NukeError(f"{folder}/{COMPILER} --version printed no version (exit {result.returncode}): {result.stdout.strip()}")
 	return match.group(1)
 
 

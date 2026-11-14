@@ -1,4 +1,7 @@
 #include "Win.h"
+
+#if defined(PLATFORM_WINDOWS)
+
 #include <cassert>
 #include <ShellAPI.h>
 
@@ -14,8 +17,6 @@ std::wstring TranslateError(HRESULT hr)
 	LocalFree(pMsgBuf);
 	return errorString;
 }
-
-#if defined(PLATFORM_WINDOWS)
 
 namespace Platform
 {
@@ -124,6 +125,8 @@ namespace Platform
 		// clean up and return
 		if (bSuccess)
 		{
+			// The command's exit code once it has one: reading its output to the end does not mean it has ended.
+			WaitForSingleObject(piProcInfo.hProcess, INFINITE);
 			DWORD code = 0;
 			GetExitCodeProcess(piProcInfo.hProcess, &code);
 

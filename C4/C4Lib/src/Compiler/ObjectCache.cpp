@@ -10,10 +10,16 @@
 #include <cstdio>
 #include <set>
 #include <system_error>
+#ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#else
+#include <cerrno>
+#include <limits>
+#include <signal.h>
+#endif
 
 namespace Scripting
 {
@@ -30,11 +36,17 @@ namespace Scripting
 
 		bool IsAlive(unsigned long pid)
 		{
+#ifdef _WIN32
 			HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, pid);
 			if (process == nullptr) return GetLastError() == ERROR_ACCESS_DENIED; // there, but not ours to open
 			const bool running = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
 			CloseHandle(process);
 			return running;
+#else
+			// Only a positive pid names one process: kill() takes 0 and negative ones for process groups.
+			if (pid == 0 || pid > static_cast<unsigned long>(std::numeric_limits<pid_t>::max())) return false;
+			return kill(static_cast<pid_t>(pid), 0) == 0 || errno == EPERM; // EPERM: there, but not ours to signal
+#endif
 		}
 
 		const char* const kClaimPrefix = ".claim.";

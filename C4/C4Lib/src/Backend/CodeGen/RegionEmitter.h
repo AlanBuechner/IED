@@ -22,6 +22,7 @@ namespace Scripting
 		/// A noexcept function's body: an exception that would leave it stops the program.
 		void EmitNoexceptBody(const BlockNode* root);
 		llvm::BasicBlock* CleanupPadFor(size_t index) override;
+		llvm::BasicBlock* LandingPadFor(size_t index) override;
 		void EmitNestedBlock(const BlockNode* block) override { EmitBlock(block); }
 
 	private:
@@ -46,6 +47,22 @@ namespace Scripting
 		void EmitTryCatch(const TryNode* n);
 		void EmitHandler(const TryNode::CatchClause& clause, llvm::CatchSwitchInst* dispatch, llvm::BasicBlock* handlerBlock, llvm::BasicBlock* join);
 		void EmitThrow(const ThrowNode* n);
+
+		// Landing pads (Linux, D-86; RegionLandingPads.cpp). An exception lands at the landingpad of the innermost entry
+		// it passes, which lists the clauses of every try on its way out, then takes each entry's step in turn (EhStepOf):
+		// a cleanup runs, a handler ends its catch, a try's dispatch picks a clause by the selector. Below the last entry
+		// it resumes unwinding in the caller.
+		void EmitLandingPadTry(const TryNode* n);
+		void EmitLandingPadNoexceptBody(const BlockNode* root);
+		void EmitLandingPadThrow(const ThrowNode* n);
+		llvm::BasicBlock* EhStepOf(size_t index);
+		llvm::BasicBlock* EhStepBelow(size_t index, size_t floor);
+		void EmitDispatch(const CleanupEntry& entry, size_t index);
+		llvm::BasicBlock* ResumeBlock();
+		llvm::Value* ExceptionSlot();
+		llvm::Value* SelectorSlot();
+		llvm::Function* EhRuntime(const char* name, llvm::Type* result, std::vector<llvm::Type*> params, bool raises = false);
+		void EndCatch();
 
 		// Scope exit. ExitCleanups emits the exit of every entry above `depth` at the insert point (the stack is
 		// unchanged afterwards); EndScope does the same for a scope that is closing and pops its entries.
@@ -79,5 +96,8 @@ namespace Scripting
 		std::unordered_map<uint32, Label> m_Labels;
 		llvm::BasicBlock* m_FinalReturn = nullptr;
 		llvm::Type* m_StagedType = nullptr; // what the returns stage in the return slot; null when nothing is
+		llvm::Value* m_ExceptionSlot = nullptr; // landing pads: the exception in flight and its selector
+		llvm::Value* m_SelectorSlot = nullptr;
+		llvm::BasicBlock* m_Resume = nullptr;
 	};
 } // namespace Scripting

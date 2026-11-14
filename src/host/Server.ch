@@ -32,6 +32,8 @@ include "dap/Service.ch"
 include "tools/Service.ch"
 include "projects/Templates.ch"
 include "projects/Manage.ch"
+include "configserver/ConfigServer.ch"
+include "configserver/SharedMirror.ch"
 
 namespace Ied
 {
@@ -96,6 +98,8 @@ namespace Ied
 		public WorkspaceServers* m_Servers;   // the master's
 		public Proxy* m_Proxy;                // the master's
 		public MasterLink* m_Master;          // a workspace server's; null in the master
+		public ConfigServer* m_ConfigServer;  // the master's with --config-root (docs/35); null otherwise
+		public SharedMirror* m_SharedMirror;  // the master's: follows the config server configServer.url names
 		public int64 m_StartedMs;
 	}
 

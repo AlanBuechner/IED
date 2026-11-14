@@ -35,6 +35,22 @@ class ProjectManifestTests(unittest.TestCase):
 		self.assertTrue(project.steps[0].applies_to("dist"))
 		self.assertFalse(project.steps[0].applies_to("Debug"))
 
+	def test_system_tables_and_copies_for_a_system(self):
+		project = parse({"project": {
+			"system": {"windows": {"links": ["ws2_32"], "compiler-args": ["--script-host"]}, "linux": {"defines": {"POSIX": "1"}}},
+			"copy": [{"from": "clang.exe", "systems": ["windows"]}, {"from": "data"}],
+		}}).project
+		self.assertEqual(project.system_overrides["windows"].links, ("ws2_32",))
+		self.assertEqual(project.system_overrides["windows"].compiler_args, ("--script-host",))
+		self.assertEqual(project.system_overrides["linux"].defines, {"POSIX": "1"})
+		self.assertTrue(project.copies[0].applies_to("windows"))
+		self.assertFalse(project.copies[0].applies_to("linux"))
+		self.assertTrue(project.copies[1].applies_to("linux"))
+		with self.assertRaisesRegex(NukeError, r"names no system"):
+			parse({"project": {"system": {"macos": {}}}})
+		with self.assertRaisesRegex(NukeError, r"names no system"):
+			parse({"project": {"copy": [{"from": "a", "systems": ["beos"]}]}})
+
 	def test_unknown_key_is_an_error_with_a_suggestion(self):
 		with self.assertRaisesRegex(NukeError, r"unknown key project\.dependz \(did you mean 'depends'\?\)"):
 			parse({"project": {"dependz": []}})

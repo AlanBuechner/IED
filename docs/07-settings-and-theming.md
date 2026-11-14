@@ -8,6 +8,7 @@ Two things: the settings tier model (what lives where, who wins) and the visual 
 
 | Tier | Location | Scope | Examples |
 |---|---|---|---|
+| **Shared** (read only) | `<app data>/shared/settings.json`: the master's mirror of the config server `configServer.url` names (`docs/35`) | every IED of the owner's that follows that server | the local models' profiles (`ai.models`, kept current by a server plugin), defaults the owner wants everywhere |
 | **App** (User) | `%APPDATA%/IED/settings.json` (+ `keybindings.json`) | this owner, all workspaces | model profiles, the programs IED runs (`cpp.clangd.path`, `nuke.command`, `terminal.shell`), keybindings, the editor's look, Claude, web search and Tor, how long things idle |
 | **Solution** | `<solution>/.ied/solution.json` (or `.ied/solutions/<Name>.json` when several solutions share a folder) - committed | this solution on every machine | the AI's defaults by use and default model, what AI edits do (format, diagnostics), sub-agents, which language servers run and clangd's arguments, git's pull mode, the profiler's target frame rate |
 | **Project** | `<solution>/.ied/projects/<Name>.json` - committed | one project | MCP servers; a project-local plugin's settings |
@@ -16,10 +17,11 @@ Two things: the settings tier model (what lives where, who wins) and the visual 
 Rules:
 
 - Every setting declares allowed tiers and a merge kind (replace / deep-merge object / append list) in its schema (`x-ied-tiers`, `x-ied-merge`). The effective value is computed per resource (the project owning a file).
-- Security-relevant settings can only be *tightened* by repo tiers (a cloned repo cannot widen AI permissions or egress beyond the owner's app tier).
+- The **Shared** tier lies under the App tier (default < Shared < App < Solution < Project, 2026-11-13): it may set what the App tier may, except a setting whose schema says `"x-ied-shared": false` (where IED finds its config server, `configServer.*`); a key no plugin of this machine declares is no problem there (the config server serves every machine). It is never written by `settings.set`: the config server's own `settings.json`, and what its server plugins publish, are its source (`docs/35`).
+- Security-relevant settings can only be *tightened* by repo tiers (a cloned repo cannot widen AI permissions or egress beyond the owner's app tier). Not built yet for any tier, the Shared one included.
 - Validation is visible: invalid values show in the settings window and as Error List entries pointing at the JSON line; the previous valid value stays in effect.
 - Settings files are watched (git pull, hand edits apply live) and written preserving comments.
-- **Secrets never live in settings files**: settings reference `{ "secret": "<name>" }` (Windows Credential Manager) or `{ "env": "VAR" }`.
+- **Secrets never live in settings files**: settings reference `{ "secret": "<name>" }` (Windows Credential Manager) or `{ "env": "VAR" }`. As built, only `{ "env": "VAR" }` is read (the IED server's environment: `ai.models` API keys, `configServer.token`); the secret store is not built (`docs/11` "Secrets"), and a `{ "secret": ... }` reference says so where it is used.
 
 ### A workspace's `.ied/` (2026-11-13)
 
@@ -65,6 +67,7 @@ which only the workspace's tiers know, keep the every-tier default).
 | Setting | Tiers |
 |---|---|
 | `lsp.idleStopMinutes`, `keyboard.bindings` | User |
+| `configServer.url`, `configServer.token`, `configServer.certificate` (`docs/35`) | User, never Shared |
 | `ai.models`, `ai.permissions`, `ai.maxSteps`, `ai.resumeInterrupted`, `ai.tools.loadAll`, `ai.chats.keepDeletedDays`, `ai.chats.offloadAfterMinutes`, `ai.chats.notify`, `ai.chats.panelRows`, `ai.claude.*` | User |
 | `ai.defaultModel`, `ai.fallbackModel`, `ai.agents`, `ai.chats.model`, `ai.chats.effort`, `ai.edits.*` | User, Solution |
 | `board.snap` / `board.ai.model`, `board.ai.effort` | User / User, Solution |
@@ -87,7 +90,8 @@ any of them.
 
 - `default`;
 - `x-ied-tiers` (the tiers it may be set in; default all - a built-in setting always names them, "Which tier a setting belongs in");
-- `x-ied-merge`: `replace` (the default), `merge` (objects are merged member by member, deeper tiers winning) or `append` (lists are concatenated, app first).
+- `x-ied-merge`: `replace` (the default), `merge` (objects are merged member by member, deeper tiers winning) or `append` (lists are concatenated, app first);
+- `x-ied-shared: false` when a config server may not set it in the Shared tier (`docs/35`; default true).
 
 A key claimed by two plugins belongs to the first one loaded; the second gets a plugin problem. The app tier knows the settings of global plugins (built-in and app). A workspace's tiers also know those of its loaded project-local plugins, so a repository's language plugin brings its settings with it once the workspace is trusted.
 
@@ -95,11 +99,12 @@ A key claimed by two plugins belongs to the first one loaded; the second gets a 
 
 | Tier | File |
 |---|---|
+| `shared` | `<app data>/shared/settings.json`: written by the master's mirror of a config server only (`docs/35`) |
 | `app` | `<app data>/settings.json` |
 | `solution` | `<workspace root>/.ied/solution.json` (a folder workspace's tier too) |
 | `project` | `<solution root>/.ied/projects/<Name>.json` (with solutions) |
 
-**The effective value** of a key for a workspace starts from its `default`, then applies app, solution and project in that order, each by the key's merge kind.
+**The effective value** of a key for a workspace starts from its `default`, then applies shared, app, solution and project in that order, each by the key's merge kind.
 
 **Problems** are kept per tier file, each with its line:
 
@@ -110,7 +115,7 @@ A key claimed by two plugins belongs to the first one loaded; the second gets a 
 
 An invalid value is ignored and the last valid value from the same file stays in effect. It is never silently defaulted.
 
-**Live.** Tier files are watched: the app file by its own watcher, a workspace's by the workspace's. A change re-reads the file, bumps its revision and publishes `settings.changed`.
+**Live.** Tier files are watched: the app and shared files by the app data's watcher, a workspace's by the workspace's. A change re-reads the file, bumps its revision and publishes `settings.changed`.
 
 **Writing** edits the file's text in place: a member's value is replaced, a new member goes after the last one, and a reset removes the member with its comma. The file's comments and layout survive. Writes are revision-checked: a write naming an old revision gets `conflict {revision}`.
 
@@ -125,12 +130,12 @@ An invalid value is ignored and the last valid value from the same file stays in
 Topics are `settings:app` and `settings:<wsId>`. The snapshot is:
 
 ```
-{tiers: {app, solution: {file, revision, problems: [{line, key?, message}]}},
+{tiers: {shared, app, solution: {file, revision, problems: [{line, key?, message}]}},
  projects: {<Name>: <tier state>},
  values: {<key>: {value, source}}}
 ```
 
-`source` is `default` or the tier that last set the key. `settings.changed` carries the same.
+`source` is `default` or the tier that last set the key (`shared` included; the settings window says "Shared"). `settings.changed` carries the same. `settings.set` and `settings.reset` take no `shared` tier.
 
 ## The settings window
 

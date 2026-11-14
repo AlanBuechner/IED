@@ -12,7 +12,7 @@ enum
 int gc_concurrent_wanted(const GCState* gc)
 {
 	const int64_t threshold = gc->concurrent.threshold;
-	return threshold >= 0 && (int64_t)gc_heap_live_bytes(&gc->heap) >= threshold;
+	return gc_os_tracks_writes() && threshold >= 0 && (int64_t)gc_heap_live_bytes(&gc->heap) >= threshold;
 }
 
 int gc_concurrent_busy(const GCState* gc)

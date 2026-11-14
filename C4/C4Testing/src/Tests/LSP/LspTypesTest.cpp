@@ -43,7 +43,12 @@ namespace Testing
 
 	void LspTypesTest::TestUriRoundTripNormalizesSeparators()
 	{
+		// A path as the system spells it: back to it from the URI, separators and all.
+#ifdef _WIN32
 		const std::string original = "C:\\Work\\Game\\src\\Main.cf";
+#else
+		const std::string original = "/work/Game/src/Main.cf";
+#endif
 		std::string uri = DocumentUri::ToUri(original);
 		std::string back = DocumentUri::FromUri(uri);
 		TEST_ASSERT_EQ(back, original);

@@ -1,0 +1,138 @@
+include "ConfigPackages.ch"
+include "web/Json.ch"
+
+namespace Ied
+{
+	Core::String BytesHash(Core::StringView bytes) { return Crypto::Sha256((const void*)bytes.Data(), bytes.ByteLength()).ToHex(); }
+
+	static void CollectPackageFiles(const FS::Path& folder, Core::StringView prefix, Core::Array<Core::String>& into) {
+		FS::Directory listing = FS::Directory(folder.CStr());
+		for (FS::DirectoryEntry& entry : listing) {
+			Core::String relative = prefix.IsEmpty() ? entry.name : (Core::String(prefix) + "/") + entry.name.View();
+			if (entry.kind == FS::EntryKind::Directory) CollectPackageFiles(folder / entry.name.View(), relative.View(), into);
+			else if (entry.kind == FS::EntryKind::File) into.Push(relative);
+		}
+	}
+
+	Core::Array<PackageFile*> ListPackage(const FS::Path& folder) {
+		Core::Array<PackageFile*> files;
+		if (!FS::IsDirectory(folder.CStr())) return files;
+		Core::Array<Core::String> paths;
+		CollectPackageFiles(folder, Core::StringView(""), paths);
+		paths.Sort();
+		for (const Core::String& path : paths) {
+			FS::File opened = FS::File((folder / path.View()).CStr(), "rb");
+			if (!opened.IsOpen()) continue;
+			Core::String bytes = opened.ReadText();
+			PackageFile* file = new PackageFile();
+			file->m_Path = path;
+			file->m_Size = bytes.View().ByteLength();
+			file->m_Hash = BytesHash(bytes.View());
+			files.Push(file);
+		}
+		return files;
+	}
+
+	Core::String PackageHash(const Core::Array<PackageFile*>& files) {
+		Crypto::Sha256Builder digest;
+		for (PackageFile* file : files) {
+			Core::StringBuilder line;
+			line.Append(file->m_Path.View());
+			line.AppendByte(0);
+			line.AppendInt(file->m_Size);
+			line.AppendByte(0);
+			line.Append(file->m_Hash.View());
+			line.AppendByte('\n');
+			digest.Add((const void*)line.View().Data(), line.View().ByteLength());
+		}
+		return digest.Finish().ToHex();
+	}
+
+	Core::String PackageFilesJson(const Core::Array<PackageFile*>& files) {
+		JsonWriter json;
+		json.BeginArray();
+		for (PackageFile* file : files) {
+			json.BeginObject();
+			json.Field("path", file->m_Path.View());
+			json.IntField("size", file->m_Size);
+			json.Field("hash", file->m_Hash.View());
+			json.EndObject();
+		}
+		json.EndArray();
+		return json.ToString();
+	}
+
+	static bool IsPackageNameByte(int32 c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-'; }
+
+	bool IsPackageName(Core::StringView name) {
+		if (name.IsEmpty() || name.ByteLength() > 128 || name.ByteAt(0) == '.') return false;
+		for (int64 i = 0; i < name.ByteLength(); ++i)
+			if (!IsPackageNameByte(name.ByteAt(i))) return false;
+		return true;
+	}
+
+	bool IsPackagePath(Core::StringView path, Core::String& why) {
+		if (path.IsEmpty() || path.ByteLength() > 1024) {
+			why = Core::String("a file's path is 1 to 1024 bytes");
+			return false;
+		}
+		int64 start = 0;
+		for (int64 i = 0; i <= path.ByteLength(); ++i) {
+			if (i < path.ByteLength() && path.ByteAt(i) != '/') {
+				const int32 c = path.ByteAt(i);
+				if (c < 32 || c == 127 || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|') {
+					why = (Core::String("'") + path) + "' holds a character a file's name may not";
+					return false;
+				}
+				continue;
+			}
+			Core::StringView part = path.Substring(start, i - start);
+			if (part.IsEmpty() || part == "." || part == "..") {
+				why = (Core::String("'") + path) + "' is not a plain relative path";
+				return false;
+			}
+			if (start == 0 && part == c_StagingFolder) {
+				why = Core::String("a package's files are not under .staging");
+				return false;
+			}
+			start = i + 1;
+		}
+		return true;
+	}
+
+	bool SwapFolder(const FS::Path& staging, const FS::Path& target, const FS::Path& aside, Core::String& why) {
+		FS::RemoveAll(aside.CStr());
+		FS::MakeDirectories(aside.Parent().CStr());
+		FS::MakeDirectories(target.Parent().CStr());
+		const bool had = FS::IsDirectory(target.CStr());
+		if (had && !FS::Rename(target.CStr(), aside.CStr())) {
+			why = (Core::String("the package in place (") + target.View()) + ") cannot be moved aside: a file of it is open";
+			return false;
+		}
+		if (!FS::Rename(staging.CStr(), target.CStr())) {
+			if (had) FS::Rename(aside.CStr(), target.CStr());
+			why = Core::String("the new package cannot be moved to ") + target.View();
+			return false;
+		}
+		FS::RemoveAll(aside.CStr());
+		return true;
+	}
+
+	static bool IsPlainUrlByte(int32 c) {
+		return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' || c == '~' || c == '/';
+	}
+
+	Core::String EscapeUrlPath(Core::StringView path) {
+		Core::StringBuilder out;
+		for (int64 i = 0; i < path.ByteLength(); ++i) {
+			const int32 c = path.ByteAt(i);
+			if (IsPlainUrlByte(c)) {
+				out.AppendByte(c);
+				continue;
+			}
+			out.AppendByte('%');
+			out.AppendUIntBase((uint64)(c & 255), 16, 2);
+		}
+		return out.ToString();
+	}
+}

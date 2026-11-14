@@ -141,7 +141,11 @@ class NetTcpTests {
 		listener.Close();
 		Net::TcpStream stream = Net::TcpStream::Connect(gone, kNetWaitMs);
 		assert_true(!stream.IsOpen() && !stream.TimedOut(), "no one listens: refused, not timed out");
+#if defined(PLATFORM_LINUX)
+		assert_true(NetContains(stream.Error(), "(error 111)"), "with the system's reason"); // ECONNREFUSED
+#else
 		assert_true(NetContains(stream.Error(), "(error 10061)"), "with the system's reason");
+#endif
 		assert_true(!Net::TcpStream::Connect(Net::Address(), kNetWaitMs).IsOpen(), "an address that is not valid");
 		assert_true(!Net::TcpStream::Connect(Net::Address::Loopback(0), kNetWaitMs).IsOpen(), "port 0 is no one's");
 	}
@@ -189,7 +193,11 @@ class NetTcpTests {
 		first.Listen(Net::Address::Loopback(0));
 		Net::TcpListener second;
 		assert_true(!second.Listen(first.LocalAddress()) && !second.IsOpen(), "a second listener on a busy port fails");
+#if defined(PLATFORM_LINUX)
+		assert_true(NetContains(second.Error(), "(error 98)"), "with the system's reason"); // EADDRINUSE
+#else
 		assert_true(NetContains(second.Error(), "(error 100"), "with the system's reason");
+#endif
 		assert_true(!second.Listen(Net::Address()), "an address that is not valid");
 	}
 

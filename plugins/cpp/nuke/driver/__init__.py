@@ -23,11 +23,15 @@ def implicit_depends(spec):
 
 def variables(ctx):
 	llvm = toolchains.llvm_folder(settings.read_settings(ctx.settings), ctx.workspace_dir, toolchains.checkout_llvm(ctx.nuke_home))
-	return {"llvm": llvm, "clang": f"{llvm}/bin/clang.exe"}
+	return {"llvm": llvm, "clang": f"{llvm}/bin/{toolchains.clang_name()}"}
+
+
+def _executable(ctx, name):
+	return name if ctx.system == "linux" else f"{name}.exe"
 
 
 def program(ctx):
-	return f"{ctx.project.name}.exe" if ctx.project.kind == "executable" else None
+	return _executable(ctx, ctx.project.name) if ctx.project.kind == "executable" else None
 
 
 def has_tests(ctx):
@@ -36,7 +40,7 @@ def has_tests(ctx):
 
 def test(ctx):
 	"""Runs the project's test program (built first: the package asks for build-before-test) with -filter=<glob>."""
-	argv = [f"{ctx.bin_dir}/{ctx.project.name}.exe"] + ([f"-filter={ctx.test_filter}"] if ctx.test_filter else []) + list(ctx.args)
+	argv = [f"{ctx.bin_dir}/{_executable(ctx, ctx.project.name)}"] + ([f"-filter={ctx.test_filter}"] if ctx.test_filter else []) + list(ctx.args)
 	return ctx.run(argv, cwd=os.path.join(ctx.root, ctx.project.working_dir), check=False)
 
 
@@ -52,7 +56,7 @@ def _build(ctx):
 	if target.kind == "prebuilt":
 		_check_prebuilt(target)
 		return []
-	toolchain = toolchains.resolve(settings.read_settings(ctx.settings), ctx.workspace_dir, ctx.expand, ctx.nuke_home)
+	toolchain = toolchains.resolve(settings.read_settings(ctx.settings), ctx.workspace_dir, ctx.expand, ctx.nuke_home, ctx.system)
 	libraries = [model.target(dependency) for dependency in model.libraries(ctx)]
 	_check_object_names(ctx, target)
 	_prepare_folders(target, ctx.log)
@@ -175,6 +179,6 @@ def _remove_stale_objects(target, log):
 	for name in os.listdir(target.int_dir):
 		stem, extension = os.path.splitext(name)
 		path = os.path.join(target.int_dir, name)
-		if extension in (".obj", ".d", ".args") and stem.lower() not in expected and os.path.isfile(path):
+		if extension in (".obj", ".o", ".d", ".args") and stem.lower() not in expected and os.path.isfile(path):
 			os.remove(path)
 			log.line(f"{target.name}: removed the stale {name}")

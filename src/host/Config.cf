@@ -33,9 +33,24 @@ namespace Ied
 		return false;
 	}
 
+	// --config-token <role> <name>: the two values after it.
+	static bool ParseConfigToken(const Core::Array<Core::String>& arguments, int64& i, ServerConfig& config, Core::String& error) {
+		Core::StringView option = arguments[i].View();
+		if (i + 2 >= arguments.Count()) return Fail(error, option, "takes a role (reader or admin) and a name");
+		Core::StringView role = arguments[i + 1].View();
+		Core::StringView name = arguments[i + 2].View();
+		if (role != "reader" && role != "admin") return Fail(error, option, "takes a role, reader or admin, then a name");
+		if (name.Trimmed().IsEmpty()) return Fail(error, option, "takes a name after its role (what the token is for: a machine, a tool)");
+		config.m_ConfigTokenRole = Core::String(role);
+		config.m_ConfigTokenName = Core::String(name.Trimmed());
+		i += 2;
+		return true;
+	}
+
 	// One option and its value (when it takes one) at `i`; `i` moves past them.
 	static bool ParseOption(const Core::Array<Core::String>& arguments, int64& i, ServerConfig& config, Core::String& error) {
 		Core::StringView option = arguments[i].View();
+		if (option == "--config-token") return ParseConfigToken(arguments, i, config, error);
 		if (option == "--test-hooks") { config.m_TestHooks = true; return true; }
 		if (option == "--quiet") { config.m_Quiet = true; return true; }
 		if (option == "--relaunched") { config.m_Relaunched = true; return true; }
@@ -61,6 +76,8 @@ namespace Ied
 		else if (option == "--workspace") config.m_Workspaces.Push(Core::String(value));
 		else if (option == "--allow-origin") config.m_AllowOrigins.Push(Core::String(value));
 		else if (option == "--allow-host") config.m_AllowHosts.Push(Core::String(value));
+		else if (option == "--config-root") config.m_ConfigRoot = Core::String(value);
+		else if (option == "--tls-identity") config.m_TlsIdentity = Core::String(value);
 		else if (option == "--debug-scripts") {
 			if (value != "on" && value != "off") return Fail(error, option, "is on or off");
 			config.m_DebugScripts = value == "on" ? 1 : 0;
@@ -81,6 +98,14 @@ namespace Ied
 		config.m_Arguments = arguments;
 		for (int64 i = 0; i < arguments.Count(); ++i)
 			if (!ParseOption(arguments, i, config, error)) return false;
+		if (!config.m_ConfigTokenRole.IsEmpty() && config.m_ConfigRoot.IsEmpty()) {
+			error = Core::String("--config-token needs --config-root: the config server's folder, whose access.json keeps the token's hash");
+			return false;
+		}
+		if (IsConfigServer(config) && IsWorkspaceServer(config)) {
+			error = Core::String("--config-root is the master's (docs/35): a workspace server serves no configuration");
+			return false;
+		}
 		if (!IsWorkspaceServer(config)) return true;
 		if (config.m_WsId.IsEmpty() || config.m_MasterControl.IsEmpty() || config.m_Workspaces.Count() != 1) {
 			error = Core::String("--role workspace needs --ws-id, --master and one --workspace (only the master starts one)");
@@ -94,6 +119,8 @@ namespace Ied
 	}
 
 	bool IsWorkspaceServer(const ServerConfig& config) { return config.m_Role == ServerRole::Workspace; }
+
+	bool IsConfigServer(const ServerConfig& config) { return !config.m_ConfigRoot.IsEmpty(); }
 
 	Core::String StateFolder(const ServerConfig& config) { return config.m_StateDir.IsEmpty() ? DataFolder(config) : config.m_StateDir; }
 
@@ -110,10 +137,24 @@ namespace Ied
 		return text.ToString();
 	}
 
+#if defined(PLATFORM_LINUX)
+	// A per-user folder on Linux (the XDG base directories): $<variable>, else $HOME/<fallback>, with "ied" in it.
+	static Core::String XdgFolder(const char* variable, const char* fallback) {
+		Core::String base;
+		if (!Platform::TryGetEnvironmentVariable(variable, base) || base.IsEmpty())
+			base = Core::String((FS::Path(Platform::GetEnvironmentVariable("HOME").View()) / fallback).View());
+		return Core::String((FS::Path(base.View()) / "ied").View());
+	}
+#endif
+
 	Core::String DataFolder(const ServerConfig& config) {
 		if (!config.m_DataDir.IsEmpty()) return config.m_DataDir;
 		if (config.m_TestHooks) return Core::String((FS::TempDirectory() / (Core::String("ied-data-") + RandomHex(6).View()).View()).View());
+#if defined(PLATFORM_LINUX)
+		return XdgFolder("XDG_STATE_HOME", ".local/state");
+#else
 		return Core::String((FS::Path(Platform::GetEnvironmentVariable("LOCALAPPDATA").View()) / "IED").View());
+#endif
 	}
 
 	Core::String HomeFolder(const ServerConfig& config) {
@@ -134,7 +175,11 @@ namespace Ied
 	Core::String AppDataFolder(const ServerConfig& config) {
 		if (!config.m_AppDataDir.IsEmpty()) return config.m_AppDataDir;
 		if (config.m_TestHooks) return Core::String((FS::Path(DataFolder(config).View()) / "app").View());
+#if defined(PLATFORM_LINUX)
+		return XdgFolder("XDG_CONFIG_HOME", ".config");
+#else
 		return Core::String((FS::Path(Platform::GetEnvironmentVariable("APPDATA").View()) / "IED").View());
+#endif
 	}
 
 	Core::String ControlName(const ServerConfig& config) {
@@ -152,7 +197,7 @@ namespace Ied
 
 	Core::String LaunchUrl(const ServerConfig& config, int32 port, Core::StringView token, Core::StringView fragment) {
 		Core::StringBuilder url;
-		url.Append("http://");
+		url.Append(config.m_TlsIdentity.IsEmpty() ? "http://" : "https://");
 		url.Append(BrowserHost(config).View());
 		url.AppendByte(':');
 		url.AppendInt(port);

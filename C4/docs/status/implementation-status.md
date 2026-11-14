@@ -28,7 +28,7 @@ DifferentialTest (150 programs against clang), the concurrent-GC step (Bedrock, 
 | `#define` / function-like / variadic macros, `#undef` | **Implemented** | | [preprocessor](../language/02-preprocessor.md) |
 | `#if` family, `#` / `##`, `\` continuation, `#error` / `#warning` / `#pragma`, calls across lines | **Implemented** | | [preprocessor](../language/02-preprocessor.md) |
 | Literals: integer suffixes and C typing, octal, `char8` / `char16` / `char32` characters and strings, the full escape set, adjacent strings | **Implemented** | | [lexical](../language/03-lexical-structure.md) |
-| Predefined macros, `-D` | **Implemented** | `TEST`, `PLATFORM_WINDOWS`, `ARCH_X64`, `C4_VERSION`, `__FILE__`, `__LINE__` | [preprocessor](../language/02-preprocessor.md#26-predefined-macros) |
+| Predefined macros, `-D` | **Implemented** | `TEST`, `PLATFORM_WINDOWS` / `PLATFORM_LINUX`, `ARCH_X64`, `C4_VERSION`, `__FILE__`, `__LINE__` | [preprocessor](../language/02-preprocessor.md#26-predefined-macros) |
 
 ### Types and objects
 | Feature | Status | Notes | Page |

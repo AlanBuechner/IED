@@ -1,5 +1,6 @@
 # The debug adapter (DAP requests and events, the debugger over the Win32 debug API and DbgHelp) as a library, so C4DAP
-# and C4Testing link the same code.
+# and C4Testing link the same code. On Linux the adapter speaks DAP but its debugger is not there yet: a launch fails
+# saying so (src/Target/LinuxEngine.cpp).
 [project]
 name = "C4DAPLib"
 kind = "library"
@@ -8,4 +9,6 @@ group = "C4"
 description = "The C4 debug adapter as a library"
 depends = ["Core", "ObjectDescription", "C4Protocol"]
 defines = { NOMINMAX = "", WIN32_LEAN_AND_MEAN = "" }
+
+[project.system.windows]
 links = ["dbghelp.lib"]

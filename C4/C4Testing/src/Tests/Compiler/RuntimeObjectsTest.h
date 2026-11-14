@@ -18,6 +18,10 @@ namespace Testing
 		TEST_FUNC(Compiler.Runtime)
 		void SourcesTakeTheWindowsSysroot();
 		TEST_FUNC(Compiler.Runtime)
+		void LinuxSourcesTakeTheLinuxSysroot();
+		TEST_FUNC(Compiler.Runtime)
+		void EachSystemCompilesItsOwnPlatformFiles();
+		TEST_FUNC(Compiler.Runtime)
 		void ChangedBytesNameAnotherObject();
 		TEST_FUNC(Compiler.Runtime)
 		void AChangedHeaderRenamesEveryObject();

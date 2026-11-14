@@ -103,6 +103,16 @@ The test runners and benchmarks expect the compiler at `build/bin/Development-wi
 build finds clang, the runtime and Bedrock beside itself, else in the repository a few folders up (`vendor/llvm`,
 `C4/C4Runtime`, `C4/Bedrock`; `Toolchain.cpp`).
 
+**On Linux** (D-86) the same projects build natively in `tools/linux/builder`'s container (Debian 12, LLVM 22 from
+apt.llvm.org): `python -I tools/linux/build.py build C4 -j 3` from the repository root writes
+`build/bin/Development-linux-x64/C4/C4` with its install beside it (the builder's clang, ld.lld and the LLVM libraries
+they load), and `build C4Testing` the unit tests, run from `C4/` as on Windows. Platform code goes behind
+`#ifdef _WIN32` or in files named for the system (the driver compiles every source of a project): the libraries'
+`Core/Platform/Linux/`, `UnitTesting/CrashHandlerPosix.cpp` (fault signals caught per test thread),
+`C4Lib/src/Compiler/ToolProcess{Windows,Posix}.cpp`, and C4DAPLib's `Target/LinuxEngine.h`, whose launch fails
+saying there is no Linux debugger yet. The C++ libraries' `uint64` is `long long` while `uint64_t` is `long` on Linux:
+spell a test's expected value in the type the code returns (`int64(INT64_MIN)`).
+
 ---
 
 ## 3. Toolchains from this build
@@ -111,8 +121,11 @@ C4 projects do not use `build/bin/` directly: they build with a toolchain from t
 `<repository root>/toolchains/c4/` ([02-nuke.md](02-nuke.md#5-toolchains)).
 
 - **`dev`**: every Development `nuke build` of `C4` runs
-  `MakeToolchain.py --config Development --bin <build/bin/Development-windows-x64> --out <store>/c4/dev`, so workspaces
-  pinned to `toolchain = "dev"` build with the compiler of this tree's latest Development build.
+  `MakeToolchain.py --config Development --system <system> --bin <build/bin/Development-<system>-x64> --out <store>/c4/dev`,
+  so workspaces pinned to `toolchain = "dev"` build with the compiler of this tree's latest Development build. A Linux
+  build leaves a store folder that holds the Windows toolchain as it is (the checkout the container mounts is
+  Windows'): Nuke's store keeps one toolchain per version, and its Linux compiler stays a complete install in
+  `build/bin/Development-linux-x64/C4`.
 - **A numbered version**: `nuke install-c4` builds, assembles a toolchain with `MakeToolchain.py` and installs it
   as the version in `C4Lib/src/Compiler/Version.h`. Installed versions never change, so bump the version first.
 - **By hand**: `python MakeToolchain.py --out <dir> [--config Development] [--bin <folder>]` assembles a toolchain

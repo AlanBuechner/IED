@@ -1,3 +1,4 @@
+#ifdef _WIN32 // the Win32 debugger; Linux's engine is Target/LinuxEngine.h
 #include "Target/Engine.h"
 #include "Target/Expression.h"
 #include "Target/ScalarText.h"
@@ -182,3 +183,4 @@ namespace C4DAP::Target
 		return result;
 	}
 } // namespace C4DAP::Target
+#endif

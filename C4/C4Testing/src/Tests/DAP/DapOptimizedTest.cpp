@@ -1,3 +1,4 @@
+#ifdef _WIN32 // the Win32 debugger's internals (C4DAPLib Target/), which Linux has none of yet
 #include "DapOptimizedTest.h"
 #include "DapTestSupport.h"
 #include "Target/Frames.h"
@@ -218,3 +219,4 @@ namespace Testing
 		TEST_PASSED();
 	}
 } // namespace Testing
+#endif

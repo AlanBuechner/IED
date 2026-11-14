@@ -5,6 +5,7 @@
 #include "Backend/CodeGen/DebugInfo.h"
 #include <llvm/Transforms/Utils/ModuleUtils.h>
 #include "Backend/CodeGen/GcRoots.h"
+#include "Backend/CodeGen/PeTables.h"
 #include "Backend/CodeGen/TargetAttributes.h"
 #include "Backend/CodeGen/VectorAlignment.h"
 #include "Backend/CodeGen/VtableEmitter.h"
@@ -35,7 +36,7 @@
 
 namespace Scripting
 {
-	CodeGenDriver::CodeGenDriver(llvm::LLVMContext& ctx) : m_Context(ctx), m_MCtx(ctx), m_Emitter(m_MCtx) {}
+	CodeGenDriver::CodeGenDriver(llvm::LLVMContext& ctx, TargetSystem system) : m_Context(ctx), m_MCtx(ctx, system), m_Emitter(m_MCtx) {}
 
 	const std::string& CodeGenDriver::ReflectionImageKey()
 	{
@@ -582,7 +583,7 @@ namespace Scripting
 	void CodeGenDriver::SplitInto(unsigned count, bool onlyAlwaysInline)
 	{
 		m_Others.clear();
-		for (unsigned i = 1; i < count; ++i) m_Others.push_back(std::make_unique<PartitionEmitter>());
+		for (unsigned i = 1; i < count; ++i) m_Others.push_back(std::make_unique<PartitionEmitter>(m_MCtx.System()));
 		m_OnlyAlwaysInline = onlyAlwaysInline;
 	}
 
@@ -770,6 +771,8 @@ namespace Scripting
 			AlignVectorAccesses(partition.module());
 			ApplyTarget(partition.module(), model.Target());
 			ApplyFunctionTargets(partition, model);
+			// A script anchors its tables after its own passes (ScriptCompiler: KeepImageOffsetsInImage first).
+			if (partition.System() == TargetSystem::Linux && !m_Script) PeTables::AnchorAtFields(partition.module());
 			if (DebugInfo* debug = partition.Debug()) debug->Finish();
 		});
 	}

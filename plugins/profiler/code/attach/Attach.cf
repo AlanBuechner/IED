@@ -3,6 +3,7 @@
 include "Attach.ch"
 include "api/Plugin.ch"
 
+#if defined(PLATFORM_WINDOWS)
 // The system's process snapshot (kernel32's Toolhelp): PROCESSENTRY32W in its x64 layout.
 struct ToolhelpProcessEntry
 {
@@ -22,6 +23,7 @@ struct ToolhelpProcessEntry
 [link("Process32FirstW")] int32 ToolhelpFirst(void* snapshot, ToolhelpProcessEntry* entry) noexcept;
 [link("Process32NextW")] int32 ToolhelpNext(void* snapshot, ToolhelpProcessEntry* entry) noexcept;
 [link("CloseHandle")] int32 ToolhelpClose(void* handle) noexcept;
+#endif
 
 namespace Profiler
 {
@@ -35,6 +37,59 @@ namespace Profiler
 		return n;
 	}
 
+#if defined(PLATFORM_LINUX)
+	static bool AllDigits(Core::StringView text) {
+		if (text.IsEmpty()) return false;
+		for (int64 i = 0; i < text.ByteLength(); ++i)
+			if (text.Data()[i] < '0' || text.Data()[i] > '9') return false;
+		return true;
+	}
+
+	static int64 NumberOf(Core::StringView text) {
+		int64 n = 0;
+		for (int64 i = 0; i < text.ByteLength() && text.Data()[i] >= '0' && text.Data()[i] <= '9'; ++i) n = n * 10 + (text.Data()[i] - '0');
+		return n;
+	}
+
+	static Core::String ReadProcFile(Core::StringView pid, const char* name) {
+		Core::String path = (Core::String("/proc/") + pid) + name;
+		FS::File opened = FS::File(path.CStr(), "rb");
+		return opened.IsOpen() ? opened.ReadText() : Core::String();
+	}
+
+	// /proc/<pid>/stat is "<pid> (<name>) <state> <parent> ...": the name may hold spaces and parentheses, so the
+	// fields after it are found from its last ')'. The program is the file name of its first argument (any user's
+	// process shows it; /proc/<pid>/exe only our own), else that name.
+	Core::Array<SystemProcess*> SystemProcesses() {
+		Core::Array<SystemProcess*> processes;
+		for (FS::DirectoryEntry& entry : FS::Directory("/proc")) {
+			Core::StringView pid = entry.name.View();
+			if (!AllDigits(pid)) continue;
+			Core::String stat = ReadProcFile(pid, "/stat");
+			const int64 open = stat.View().IndexOf('(');
+			int64 close = -1;
+			for (int64 i = stat.View().ByteLength() - 1; i > open && open >= 0; --i)
+				if (stat.View().Data()[i] == ')') {
+					close = i;
+					break;
+				}
+			if (close < 0 || close + 4 >= stat.View().ByteLength()) continue;
+			SystemProcess* process = new SystemProcess();
+			process->m_Pid = NumberOf(pid);
+			process->m_ParentPid = NumberOf(stat.View().Substring(close + 4, stat.View().ByteLength() - close - 4));
+			Core::String arguments = ReadProcFile(pid, "/cmdline");
+			int64 first = arguments.View().IndexOf((char)0);
+			Core::StringView program = first < 0 ? arguments.View() : arguments.View().Substring(0, first);
+			int64 slash = -1;
+			for (int64 i = 0; i < program.ByteLength(); ++i)
+				if (program.Data()[i] == '/') slash = i;
+			if (slash >= 0) program = program.Substring(slash + 1, program.ByteLength() - slash - 1);
+			process->m_Exe = program.IsEmpty() ? Core::String(stat.View().Substring(open + 1, close - open - 1)) : Core::String(program);
+			processes.Push(process);
+		}
+		return processes;
+	}
+#else
 	Core::Array<SystemProcess*> SystemProcesses() {
 		Core::Array<SystemProcess*> processes;
 		void* snapshot = ToolhelpSnapshot(c_SnapProcesses, 0);
@@ -52,6 +107,7 @@ namespace Profiler
 		ToolhelpClose(snapshot);
 		return processes;
 	}
+#endif
 
 	static SystemProcess* ProcessOf(const Core::Array<SystemProcess*>& processes, int64 pid) {
 		for (SystemProcess* process : processes)
@@ -59,11 +115,34 @@ namespace Profiler
 		return nullptr;
 	}
 
+	// The names of the local pipes listening now: Windows' pipe folder; on Linux the abstract sockets the kernel lists in
+	// /proc/net/unix ("@c4-local/<name>", C4Runtime's LocalPipesPosix.c), the path the last field of a line.
+	static Core::Array<Core::String> LocalPipeNames() {
+		Core::Array<Core::String> names;
+#if defined(PLATFORM_LINUX)
+		FS::File opened = FS::File("/proc/net/unix", "rb");
+		Core::String table = opened.IsOpen() ? opened.ReadText() : Core::String();
+		Core::StringView marker = Core::StringView("@c4-local/");
+		Core::StringView rest = table.View();
+		while (!rest.IsEmpty()) {
+			int64 end = rest.IndexOf('\n');
+			if (end < 0) end = rest.ByteLength();
+			Core::StringView line = rest.Substring(0, end).Trimmed();
+			const int64 at = line.IndexOf(marker);
+			if (at >= 0) names.Push(Core::String(line.Substring(at + marker.ByteLength(), line.ByteLength() - at - marker.ByteLength())));
+			rest = end < rest.ByteLength() ? rest.Substring(end + 1, rest.ByteLength() - end - 1) : Core::StringView("");
+		}
+#else
+		for (FS::DirectoryEntry& entry : FS::Directory("\\\\.\\pipe\\")) names.Push(Core::String(entry.name.View()));
+#endif
+		return names;
+	}
+
 	Core::Array<int64> AttachPipePids() {
 		Core::Array<int64> pids;
 		Core::StringView prefix = Core::StringView(c_AttachPipePrefix);
-		for (FS::DirectoryEntry& entry : FS::Directory("\\\\.\\pipe\\")) {
-			Core::StringView name = entry.name.View();
+		for (const Core::String& pipeName : LocalPipeNames()) {
+			Core::StringView name = pipeName.View();
 			if (!name.StartsWith(prefix)) continue;
 			int64 pid = 0;
 			bool digits = name.ByteLength() > prefix.ByteLength();

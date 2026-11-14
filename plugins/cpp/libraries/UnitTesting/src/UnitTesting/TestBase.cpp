@@ -10,8 +10,14 @@
 #include <exception>
 #include <mutex>
 #include <atomic>
+#ifdef _WIN32
 #include <process.h>
 #include <windows.h>
+#else
+#include <cerrno>
+#include <pthread.h>
+#include <time.h>
+#endif
 #include "CrashHandler.h"
 
 namespace Testing
@@ -105,11 +111,9 @@ namespace Testing
 		bool timedOut{false};
 	};
 
-	/// Thread entry point for running a single test.
-	static unsigned int __stdcall TestThreadProc(void* arg)
+	/// Runs a single test on the calling thread (its own: TestThreadProc).
+	static void RunTestOnThisThread(TestThreadData* data)
 	{
-		TestThreadData* data = static_cast<TestThreadData*>(arg);
-
 		CrashInfo crashInfo{};
 		auto invocationResult = InvokeWithCrashHandling([data] {
 			data->func->Invoke(data->ownerInstance, {});
@@ -118,17 +122,95 @@ namespace Testing
 		data->result = invocationResult;
 		if (invocationResult == InvocationResult::SehCrash)
 			data->crashInfo = crashInfo;
-		
-		data->completed.store(true, std::memory_order_release);
 
+		data->completed.store(true, std::memory_order_release);
+	}
+
+	static constexpr unsigned kTestThreadStackBytes = 8 * 1024 * 1024; // isolates deep recursion and stack overflows
+
+	/// How a test's thread went: whether it started, whether it ran past its timeout, and the code a crash ended it with
+	/// (Windows: an SEH exception's; 0 when it ended by itself, or on Linux, where a crash returns to the invocation).
+	struct TestThreadOutcome
+	{
+		bool started = false;
+		bool timedOut = false;
+		uint32 exitCode = 0;
+	};
+
+#ifdef _WIN32
+	/// Thread entry point for running a single test.
+	static unsigned int __stdcall TestThreadProc(void* arg)
+	{
+		RunTestOnThisThread(static_cast<TestThreadData*>(arg));
 		return 0;
 	}
 
+	/// Runs the test on a thread of its own and waits at most `timeoutMs` for it; a thread past that is left running.
+	static TestThreadOutcome RunOnTestThread(TestThreadData* data, uint32 timeoutMs)
+	{
+		HANDLE threadHandle = reinterpret_cast<HANDLE>(_beginthreadex(nullptr, kTestThreadStackBytes, TestThreadProc, data, 0, nullptr));
+		if (threadHandle == nullptr)
+			return {};
+
+		// Wait for the thread to complete with a timeout. If it dies from an unrecoverable exception
+		// (like stack overflow) or hangs in an infinite loop, we detect it here.
+		TestThreadOutcome outcome;
+		outcome.started = true;
+		outcome.timedOut = WaitForSingleObject(threadHandle, timeoutMs) == WAIT_TIMEOUT;
+
+		// Get the exit code of the dead thread to detect SEH crashes.
+		DWORD exitCode = 0;
+		GetExitCodeThread(threadHandle, &exitCode);
+		CloseHandle(threadHandle);
+		outcome.exitCode = exitCode == STILL_ACTIVE ? 0 : exitCode;
+		return outcome;
+	}
+#else
+	/// Thread entry point for running a single test.
+	static void* TestThreadProc(void* arg)
+	{
+		RunTestOnThisThread(static_cast<TestThreadData*>(arg));
+		return nullptr;
+	}
+
+	/// Runs the test on a thread of its own and waits at most `timeoutMs` for it; a thread past that is left running
+	/// (detached, so nothing waits for it).
+	static TestThreadOutcome RunOnTestThread(TestThreadData* data, uint32 timeoutMs)
+	{
+		pthread_attr_t attributes;
+		pthread_attr_init(&attributes);
+		pthread_attr_setstacksize(&attributes, kTestThreadStackBytes);
+		pthread_t thread;
+		const int created = pthread_create(&thread, &attributes, TestThreadProc, data);
+		pthread_attr_destroy(&attributes);
+		if (created != 0)
+			return {};
+
+		timespec deadline{};
+		clock_gettime(CLOCK_REALTIME, &deadline);
+		deadline.tv_sec += timeoutMs / 1000;
+		deadline.tv_nsec += static_cast<long>(timeoutMs % 1000) * 1000000L;
+		if (deadline.tv_nsec >= 1000000000L)
+		{
+			deadline.tv_sec += 1;
+			deadline.tv_nsec -= 1000000000L;
+		}
+
+		TestThreadOutcome outcome;
+		outcome.started = true;
+		outcome.timedOut = pthread_timedjoin_np(thread, nullptr, &deadline) == ETIMEDOUT;
+		if (outcome.timedOut)
+			pthread_detach(thread);
+		return outcome;
+	}
+#endif
+
 	/// Run a single test with full crash isolation.
 	/// Each test runs in its own thread with 8MB stack so:
-	/// - SEH crashes (access violations, etc.) kill only the child thread; parent detects via GetExitCodeThread
-	/// - Stack overflows kill only the child thread; parent detects via WaitForSingleObject
-	/// - Hung tests are terminated after their timeout
+	/// - crashes (SEH access violations, etc.; on Linux fault signals) end only the child thread's test; the parent sees
+	///   the code in the thread's exit code (Windows) or the test's result (Linux)
+	/// - Stack overflows likewise
+	/// - Hung tests are left running past their timeout and reported
 	/// Returns true if the test passed, false otherwise.
 
 	bool RunSingleTest(const TestEntry& entry, uint32 indent, uint32 nameFieldWidth)
@@ -145,17 +227,8 @@ namespace Testing
 		threadData->func = entry.func;
 		threadData->ownerInstance = entry.ownerInstance;
 
-		// Use _beginthreadex with 8MB stack to isolate deep recursion and stack overflows.
-		HANDLE threadHandle = reinterpret_cast<HANDLE>(_beginthreadex(
-			nullptr,
-			8 * 1024 * 1024, // 8 MB stack
-			TestThreadProc,
-			threadData,
-			0,
-			nullptr
-		));
-
-		if (threadHandle == nullptr)
+		const TestThreadOutcome outcome = RunOnTestThread(threadData, entry.timeoutMs);
+		if (!outcome.started)
 		{
 			delete threadData;
 			s_TotalTests++;
@@ -166,20 +239,12 @@ namespace Testing
 			return false;
 		}
 
-		// Wait for the thread to complete with a timeout. If it dies from an unrecoverable exception
-		// (like stack overflow) or hangs in an infinite loop, we detect it here.
-		DWORD waitResult = WaitForSingleObject(threadHandle, entry.timeoutMs);
-
-		bool timedOut = (waitResult == WAIT_TIMEOUT);
+		const bool timedOut = outcome.timedOut;
 		// A test past its timeout is left running, never terminated: a thread killed while it holds the heap's lock (or any
 		// other) deadlocks every later allocation. It keeps its data and instance; the run ends the process at the end
 		// (EndRunWithoutRunaways) instead of waiting for it.
 		if (timedOut) s_RunawayTests++;
-
-		// Get the exit code of the dead thread to detect SEH crashes.
-		DWORD exitCode = 0;
-		GetExitCodeThread(threadHandle, &exitCode);
-		CloseHandle(threadHandle);
+		const uint32 exitCode = outcome.exitCode;
 
 		bool passed = false;
 
@@ -209,10 +274,7 @@ namespace Testing
 				switch (threadData->result)
 				{
 				case InvocationResult::SehCrash:
-					if (!threadData->crashInfo.description.empty())
-						std::cout << "Crashed: SEH " << threadData->crashInfo.description << std::endl;
-					else
-						std::cout << "Crashed: SEH exception" << std::endl;
+					std::cout << "Crashed: " << CrashSummary(threadData->crashInfo) << std::endl;
 					break;
 				case InvocationResult::StdException:
 					std::cout << "Crashed: unhandled standard exception" << std::endl;
@@ -238,7 +300,7 @@ namespace Testing
 			Logging::Logger::SetConsoleColor(Logging::Logger::Error);
 			if (timedOut)
 				std::cout << "Crashed: test timed out after " << entry.timeoutMs / 1000 << "s" << std::endl;
-			else if (exitCode != 0 && exitCode != STILL_ACTIVE)
+			else if (exitCode != 0)
 			{
 				// Thread died from an SEH exception. Format the code.
 				std::ostringstream oss;

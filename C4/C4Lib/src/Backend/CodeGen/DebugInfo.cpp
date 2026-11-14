@@ -16,6 +16,7 @@ namespace Scripting
 	{
 		constexpr uint64 kBitsPerByte = 8;
 		constexpr uint64 kPointerBits = 64;
+		constexpr uint32 kDwarfVersion = 5; // gdb 10 and later read it (Debian 11's)
 
 		// `name` as the program spells it from outside `scope`: "Ns::Type::name".
 		std::string ScopedName(const Scope* scope, const Core::String& name)
@@ -51,10 +52,15 @@ namespace Scripting
 	DebugInfo::DebugInfo(llvm::Module& module, std::unordered_map<uint32, std::string> sourcePaths)
 		: m_Module(module), m_Builder(module), m_SourcePaths(std::move(sourcePaths))
 	{
-		module.addModuleFlag(llvm::Module::Warning, "CodeView", 1);
-		// Each object carries its types' global hashes (`.debug$H`), made once when a partition is assembled, which the
-		// link would otherwise compute for every object on every build.
-		module.addModuleFlag(llvm::Module::Warning, "CodeViewGHash", 1);
+		if (module.getTargetTriple().isOSLinux())
+			module.addModuleFlag(llvm::Module::Warning, "Dwarf Version", kDwarfVersion); // ELF: DWARF in the program (D-86)
+		else
+		{
+			module.addModuleFlag(llvm::Module::Warning, "CodeView", 1);
+			// Each object carries its types' global hashes (`.debug$H`), made once when a partition is assembled, which the
+			// link would otherwise compute for every object on every build.
+			module.addModuleFlag(llvm::Module::Warning, "CodeViewGHash", 1);
+		}
 		module.addModuleFlag(llvm::Module::Warning, "Debug Info Version", llvm::DEBUG_METADATA_VERSION);
 		uint32 first = 0;
 		for (const auto& [unit, path] : m_SourcePaths)

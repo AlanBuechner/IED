@@ -1,5 +1,5 @@
 // C4 strings are UTF-8; Windows takes text in UTF-16, so every path, name or value the runtime hands the OS goes
-// through here (FileSystemRuntimeC.c, IORuntimeC.c, Platform/).
+// through here (FileSystem/PathTextWin32.c; used by FileSystem/, IORuntimeC.c, Platform/).
 #pragma once
 
 #ifdef _WIN32

@@ -214,7 +214,9 @@ namespace Testing
 		TEST_ASSERT(script.module->getFunction("c4_at_exit") == nullptr);
 		TEST_ASSERT(script.module->getFunction("c4_script_at_exit") != nullptr);
 		TEST_ASSERT(script.module->getFunction("_CxxThrowException") == nullptr);
-		TEST_ASSERT(Calls(*script.module->getFunction("Fail_0"), "c4_script_throw"));
+		// Windows: the throw names the script's image (c4_script_throw); Linux: c4_eh_throw, whose tables are field-relative
+		const bool forLinux = script.module->getTargetTriple().isOSLinux();
+		TEST_ASSERT(Calls(*script.module->getFunction("Fail_0"), forLinux ? "c4_eh_throw" : "c4_script_throw"));
 		TEST_PASSED();
 	}
 

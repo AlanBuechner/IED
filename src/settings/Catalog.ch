@@ -22,6 +22,7 @@ namespace Ied
 		public Core::Array<Core::String> m_Tiers;
 		public MergeKind m_Merge;
 		public Core::String m_Page;
+		public bool m_Shareable;              // a config server may set it (docs/35): not `"x-ied-shared": false`
 	}
 
 	class SettingsCatalog

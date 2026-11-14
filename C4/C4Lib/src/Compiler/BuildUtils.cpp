@@ -14,7 +14,6 @@
 #include <cstring>
 #include <cstdlib>
 #include <unordered_map>
-#include <windows.h>
 
 namespace Scripting
 {
@@ -58,9 +57,17 @@ namespace Scripting
 		// A compiled resource file (llvm-rc or rc.exe output) goes to the linker as it is.
 		bool IsResourceFile(const std::string& v) { return fs::path(v).extension() == ".res"; }
 
-		// The objects and libraries a link takes, as lld-link's arguments, one quoted argument a line, in a response
-		// file at `path`; forward slashes, which neither quoting convention escapes.
-		bool WriteLinkInputs(const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& libraries, const std::string& path)
+		bool EndsWithIgnoringCase(const std::string& text, const std::string& suffix)
+		{
+			return text.size() >= suffix.size() && std::equal(suffix.begin(), suffix.end(), text.end() - suffix.size(),
+				[](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); });
+		}
+
+		// The objects and libraries a link takes, one quoted argument a line, in a response file at `path`; forward slashes,
+		// which neither quoting convention escapes. lld-link's arguments for Windows; for Linux the clang driver's, which
+		// reads -l, -L and -Wl as they are written.
+		bool WriteLinkInputs(const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& libraries, const std::string& path,
+			TargetSystem system)
 		{
 			std::string text;
 			auto add = [&text](std::string argument) {
@@ -69,7 +76,8 @@ namespace Scripting
 			};
 			for (const Core::String& object : objects) add(object.c_str());
 			for (const Core::String& library : libraries)
-				for (const std::string& argument : LinkerArguments(library.c_str())) add(argument);
+				if (system == TargetSystem::Linux) add(library.c_str());
+				else for (const std::string& argument : LinkerArguments(library.c_str())) add(argument);
 			if (WriteFileBytes(path, text)) return true;
 			std::cerr << "error: cannot write the link's inputs to " << path << std::endl;
 			return false;
@@ -78,7 +86,7 @@ namespace Scripting
 		const std::vector<Option>& Options()
 		{
 			static const std::vector<Option> options = {
-				{ { "-o" }, "<path>", "Output executable (default output.exe)", [](CompileOptions& o, const std::string& v) { o.outputFile = v; } },
+				{ { "-o" }, "<path>", "Output executable (default output.exe, or output for Linux)", [](CompileOptions& o, const std::string& v) { o.outputFile = v; } },
 				{ { "-I" }, "<dir>", "A project this one builds with: its sources compile and its headers resolve", [](CompileOptions& o, const std::string& v) {
 					o.includeDirs.Push(v); o.inputs.Push(v); }, true },
 				{ { "--projects" }, "<file>", "Build the projects a description names, each with its own settings", [](CompileOptions& o, const std::string& v) {
@@ -93,6 +101,8 @@ namespace Scripting
 					[](CompileOptions& o, const std::string& v) { o.partitions = ParseCount(v, "--partitions", o, kMaxPartitions); } },
 				{ { "--incremental" }, nullptr, "Optimize each object alone: an edit reoptimizes only the objects it changes, inlining across objects only small functions",
 					[](CompileOptions& o, const std::string&) { o.incremental = true; } },
+				{ { "--target" }, "<windows-x64|linux-x64>", "The system the program runs on (default: the one the compiler runs on)",
+					[](CompileOptions& o, const std::string& v) { o.targetSystem = v; } },
 				{ { "-march=" }, "<cpu>", "The processor to compile for: x86-64 (default), x86-64-v2/v3/v4, native or an LLVM CPU name",
 					[](CompileOptions& o, const std::string& v) { o.targetFlags.push_back("-march=" + v); }, true },
 				{ { "-m" }, "<feature>", "Turn a processor feature on (-mavx2) or off (-mno-avx2): sse3 ssse3 sse4.1 sse4.2 popcnt avx avx2 fma f16c bmi bmi2 lzcnt avx512f avx512vl avx512bw avx512dq avx512cd",
@@ -152,12 +162,33 @@ namespace Scripting
 			if (opts.compileOnly && opts.incremental) opts.error = "--incremental needs a link: -c writes one object";
 		}
 
-		// The target the -march / -m flags select (D-62), or the reason they select none.
+		// The target --target and the -march / -m flags select (D-62, D-86), or the reason they select none. A program
+		// for Linux is named without .exe unless -o names it.
 		void ResolveTarget(CompileOptions& opts)
 		{
+			TargetSystem system = HostSystem();
+			if (!opts.targetSystem.empty())
+			{
+				const std::optional<TargetSystem> named = TargetFromName(opts.targetSystem);
+				if (!named)
+				{
+					opts.error = "--target takes " + TargetNames() + ", not '" + opts.targetSystem + "'";
+					return;
+				}
+				system = *named;
+			}
 			std::string why;
-			if (std::optional<CpuTarget> target = CpuTarget::FromFlags(opts.targetFlags, why)) opts.target = *target;
-			else opts.error = why;
+			const std::optional<CpuTarget> target = CpuTarget::FromFlags(opts.targetFlags, why);
+			if (!target)
+			{
+				opts.error = why;
+				return;
+			}
+			opts.target = target->On(system);
+			if (opts.outputFile.empty()) opts.outputFile = Core::String("output") + ExecutableExtension(system);
+			// A Linux script host links the script host library built for Linux, which only a compiler running there has.
+			if (system == TargetSystem::Linux && opts.scriptHost && HostSystem() != TargetSystem::Linux)
+				opts.error = "--script-host for linux-x64 needs the Linux script host library: build the program with the compiler on Linux";
 		}
 	}
 
@@ -217,6 +248,21 @@ namespace Scripting
 		return { "-Xmicrosoft-windows-sys-root", sysroot };
 	}
 
+	std::optional<fs::path> LinuxSysrootForBuild()
+	{
+		const fs::path sysroot = Toolchain::LinuxSysroot();
+		if (!sysroot.empty() || HostSystem() == TargetSystem::Linux) return sysroot;
+		std::cerr << "error: the Linux sysroot was not found: C4 looks in <C4 home>/sysroots/linux-x64 (the IED checkout's "
+			"tools/setup/linux_sysroot.py makes vendor/sysroots/linux-x64)" << std::endl;
+		return std::nullopt;
+	}
+
+	std::vector<std::string> LinuxSysrootFlags(const fs::path& sysroot)
+	{
+		if (sysroot.empty()) return {};
+		return { "--sysroot=" + sysroot.generic_string() };
+	}
+
 	std::vector<std::string> LinkerArguments(const std::string& argument)
 	{
 		if (argument.rfind("-Wl,", 0) == 0)
@@ -234,94 +280,35 @@ namespace Scripting
 		if (argument.rfind("-l", 0) == 0)
 		{
 			const std::string name = argument.substr(2);
-			const bool named = name.size() >= 4 && _stricmp(name.c_str() + name.size() - 4, ".lib") == 0;
-			return { named ? name : name + ".lib" };
+			return { EndsWithIgnoringCase(name, ".lib") ? name : name + ".lib" };
 		}
 		if (argument.rfind("-L", 0) == 0) return { "-libpath:" + argument.substr(2) };
 		return { argument };
 	}
 
-	bool RunTool(const std::vector<std::string>& args)
-	{
-		std::wstring cmdLine;
-		for (size_t i = 0; i < args.size(); ++i)
-		{
-			if (i > 0) cmdLine += L" ";
-			cmdLine += L"\"";
-			for (unsigned char c : args[i])
-				cmdLine += (wchar_t)c;
-			cmdLine += L"\"";
-		}
-
-		std::wstring mutableCmd = cmdLine;
-
-		STARTUPINFOW si = {};
-		si.cb = sizeof(si);
-		PROCESS_INFORMATION pi = {};
-		if (!CreateProcessW(nullptr, mutableCmd.data(), nullptr, nullptr, TRUE, 0, nullptr, nullptr, &si, &pi))
-		{
-			std::cerr << "error: Failed to start process (code " << GetLastError() << ")" << std::endl;
-			return false;
-		}
-
-		CloseHandle(pi.hThread);
-		DWORD waitResult = WaitForSingleObject(pi.hProcess, INFINITE);
-		if (waitResult == WAIT_FAILED)
-		{
-			std::cerr << "error: Failed to wait for process" << std::endl;
-			CloseHandle(pi.hProcess);
-			return false;
-		}
-
-		DWORD exitCode = 0;
-		GetExitCodeProcess(pi.hProcess, &exitCode);
-		CloseHandle(pi.hProcess);
-
-		if (exitCode != 0)
-		{
-			std::cerr << "error: Process failed with exit code " << exitCode << std::endl;
-			return false;
-		}
-		return true;
-	}
-
-	// Run an executable, streaming its output live and returning its exit code (no error noise - a
-	// non-zero exit is expected for failing test runs). Returns false only if it couldn't be started.
-	bool RunExecutable(const Core::String& exePath, int& outExitCode)
-	{
-		std::wstring cmdLine = L"\"" + std::wstring(exePath.begin(), exePath.end()) + L"\"";
-		STARTUPINFOW si = {};
-		si.cb = sizeof(si);
-		PROCESS_INFORMATION pi = {};
-		if (!CreateProcessW(nullptr, const_cast<wchar_t*>(cmdLine.data()), nullptr, nullptr, TRUE, 0,
-			nullptr, nullptr, &si, &pi))
-		{
-			std::cerr << "error: Failed to start test executable (code " << GetLastError() << ")" << std::endl;
-			return false;
-		}
-		CloseHandle(pi.hThread);
-		DWORD waitResult = WaitForSingleObject(pi.hProcess, INFINITE);
-		DWORD exitCode = 0;
-		if (waitResult != WAIT_FAILED)
-			GetExitCodeProcess(pi.hProcess, &exitCode);
-		CloseHandle(pi.hProcess);
-		outExitCode = (int)exitCode;
-		return true;
-	}
-
 	bool CompileForeignSource(const Core::String& srcPath, const Core::String& objPath,
 		const Core::String& language, const Core::Vector<Core::String>& defines,
-		const Core::Vector<Core::String>& includeDirs, const std::vector<std::string>& targetFlags,
+		const Core::Vector<Core::String>& includeDirs, TargetSystem system, const std::vector<std::string>& targetFlags,
 		const std::vector<std::string>& compileFlags, bool verbose)
 	{
 		const std::string clangPath = ClangPath();
 		if (clangPath.empty()) return false;
 
-		std::vector<std::string> args = {
-			clangPath, "-c", "-target", "x86_64-pc-windows-msvc", "-mstackrealign", "-MD", "-MF", std::string(objPath.c_str()) + ".d"
-		};
-		const std::vector<std::string> sysroot = WindowsSysrootFlags(Toolchain::WindowsSysroot().string());
-		args.insert(args.end(), sysroot.begin(), sysroot.end());
+		std::vector<std::string> args = { clangPath, "-c", "-target", TargetTriple(system), "-MD", "-MF", std::string(objPath.c_str()) + ".d" };
+		if (system == TargetSystem::Linux)
+		{
+			const std::optional<fs::path> sysroot = LinuxSysrootForBuild();
+			if (!sysroot) return false;
+			const std::vector<std::string> flags = LinuxSysrootFlags(*sysroot);
+			args.push_back("-fPIC");
+			args.insert(args.end(), flags.begin(), flags.end());
+		}
+		else
+		{
+			args.push_back("-mstackrealign");
+			const std::vector<std::string> sysroot = WindowsSysrootFlags(Toolchain::WindowsSysroot().string());
+			args.insert(args.end(), sysroot.begin(), sysroot.end());
+		}
 		args.insert(args.end(), targetFlags.begin(), targetFlags.end());
 		args.insert(args.end(), compileFlags.begin(), compileFlags.end());
 		args.push_back(language == "c++" ? "-std=c++20" : "-std=c11");
@@ -370,7 +357,7 @@ namespace Scripting
 		// (Toolchain::WindowsSysroot), else finds them on its own (or through LIB when that is set), and one process less starts. The objects and libraries go in a response file:
 		// a split program's object paths outgrow a Windows command line (32,767 characters).
 		const std::string inputs = std::string(outputPath.c_str()) + ".link.rsp";
-		if (!WriteLinkInputs(objects, libraries, inputs)) return false;
+		if (!WriteLinkInputs(objects, libraries, inputs, TargetSystem::Windows)) return false;
 		std::vector<std::string> args = { lld.string(), "-nologo", "-out:" + std::string(outputPath.c_str()), "-defaultlib:libcmt",
 			"-defaultlib:oldnames" };
 		if (const fs::path builtins = Toolchain::ClangRuntimeLibraries(); !builtins.empty()) args.push_back("-libpath:" + builtins.string());
@@ -395,74 +382,39 @@ namespace Scripting
 		return linked;
 	}
 
-	void RemoveIfExists(const std::string& path) { RemoveFile(path); }
-
-	bool RunToolWithOutput(const Core::Vector<Core::String>& args, int& exitCode,
-		std::string& outStdout, std::string& outStderr)
+	bool LinkElf(const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& runtime, const Core::Vector<Core::String>& libraries,
+		const Core::String& outputPath, bool verbose)
 	{
-		outStdout.clear();
-		outStderr.clear();
-		exitCode = -1;
-
-		HANDLE outRead = INVALID_HANDLE_VALUE, outWrite = INVALID_HANDLE_VALUE;
-		HANDLE errRead = INVALID_HANDLE_VALUE, errWrite = INVALID_HANDLE_VALUE;
-		SECURITY_ATTRIBUTES sa = {};
-		sa.nLength = sizeof(sa);
-		sa.bInheritHandle = TRUE;
-		if (!CreatePipe(&outRead, &outWrite, &sa, 0)) { outStderr = "FAIL pipe1"; return false; }
-		if (!CreatePipe(&errRead, &errWrite, &sa, 0)) { CloseHandle(outRead); CloseHandle(outWrite); outStderr = "FAIL pipe2"; return false; }
-
-		std::wstring cmdLine;
-		for (size_t i = 0; i < args.Count(); ++i)
+		const std::string clang = ClangPath();
+		if (clang.empty()) return false;
+		const std::optional<fs::path> sysroot = LinuxSysrootForBuild();
+		if (!sysroot) return false;
+		// clang's driver as g++ links: glibc's startup files and libraries from the sysroot (or the system's), GCC's C++
+		// runtime linked in, ld.lld beside clang. The unwinder is GCC's shared one (libgcc_s.so.1, which every glibc system
+		// has: glibc itself loads it), one for the program, the libraries it loads and the script frames a script host
+		// registers with it, so an exception unwinds through all of them.
+		const std::string inputs = std::string(outputPath.c_str()) + ".link.rsp";
+		Core::Vector<Core::String> lazy = objects;
+		lazy.Push("-Wl,--start-lib");
+		for (const Core::String& object : runtime) lazy.Push(object);
+		lazy.Push("-Wl,--end-lib");
+		if (!WriteLinkInputs(lazy, libraries, inputs, TargetSystem::Linux)) return false;
+		std::vector<std::string> args = { clang, "--driver-mode=g++", "--target=" + std::string(TargetTriple(TargetSystem::Linux)) };
+		const std::vector<std::string> sysrootFlags = LinuxSysrootFlags(*sysroot);
+		args.insert(args.end(), sysrootFlags.begin(), sysrootFlags.end());
+		args.insert(args.end(), { "-fuse-ld=lld", "-pie", "-static-libstdc++", "-shared-libgcc",
+			"-o", outputPath.c_str(), "@" + inputs, "-Wl,--as-needed", "-lpthread", "-ldl", "-lm" });
+		if (verbose)
 		{
-			if (i > 0) cmdLine += L" ";
-			cmdLine += L"\"";
-			for (unsigned char c : std::string(args[i].c_str()))
-				cmdLine += (wchar_t)c;
-			cmdLine += L"\"";
+			std::cout << "Linking: ";
+			for (const auto& a : args) std::cout << a << " ";
+			std::cout << std::endl;
 		}
-		std::wstring mutableCmd = cmdLine;
-
-		STARTUPINFOW si = {};
-		si.cb = sizeof(si);
-		si.dwFlags = STARTF_USESTDHANDLES;
-		si.hStdOutput = outWrite;
-		si.hStdError = errWrite;
-
-		PROCESS_INFORMATION pi = {};
-		DWORD spawnErr = 0;
-		if (!CreateProcessW(nullptr, mutableCmd.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
-			nullptr, nullptr, &si, &pi))
-		{
-			spawnErr = GetLastError();
-			CloseHandle(outRead); CloseHandle(outWrite);
-			CloseHandle(errRead); CloseHandle(errWrite);
-			std::string narrow;
-			for (wchar_t c : cmdLine) narrow += (char)c;
-			outStderr = "CreateProcessW failed (Win32 error " + std::to_string(spawnErr) + ") cmd=" + narrow;
-			return false;
-		}
-		CloseHandle(pi.hThread);
-		CloseHandle(outWrite);
-		CloseHandle(errWrite);
-
-		auto readAll = [](HANDLE h, std::string& out) {
-			char buf[4096]; DWORD n = 0;
-			while (ReadFile(h, buf, sizeof(buf), &n, nullptr) && n > 0)
-				out.append(buf, n);
-		};
-		readAll(outRead, outStdout);
-		readAll(errRead, outStderr);
-		CloseHandle(outRead);
-		CloseHandle(errRead);
-
-		DWORD waitResult = WaitForSingleObject(pi.hProcess, INFINITE);
-		DWORD code = 0;
-		if (waitResult != WAIT_FAILED)
-			GetExitCodeProcess(pi.hProcess, &code);
-		CloseHandle(pi.hProcess);
-		exitCode = static_cast<int>(code);
-		return true;
+		const bool linked = RunTool(args);
+		RemoveFile(inputs);
+		return linked;
 	}
+
+	void RemoveIfExists(const std::string& path) { RemoveFile(path); }
 
 } // namespace Scripting

@@ -3,6 +3,8 @@
 
 #if defined(PLATFORM_WINDOWS)
 #include "Core/Platform/Windows/Win.h"
+#else
+#include <unistd.h>
 #endif
 
 namespace Logging
@@ -62,6 +64,12 @@ namespace Logging
 		uint32 colorCodes[] = { 15, 10, 14, 12 };
 		static HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
 		SetConsoleTextAttribute(hConsole, colorCodes[(uint32)level]);
+#else
+		// the same colors as ANSI escapes [default, bright green, bright yellow, bright red], only on a terminal
+		static const bool s_Terminal = isatty(STDOUT_FILENO) != 0;
+		const char* escapes[] = { "\033[0m", "\033[92m", "\033[93m", "\033[91m" };
+		if (s_Terminal)
+			std::cout << escapes[(uint32)level];
 #endif
 	}
 }

@@ -25,6 +25,11 @@ namespace Scripting
 		size_t floor = 0;                         // the unwind floor in effect when it was pushed
 		llvm::BasicBlock* ehPad = nullptr;        // Cleanup, Abandon: its cleanuppad block, created on first need
 		llvm::BasicBlock* returnPath = nullptr;   // Cleanup, Handler: its exit on every return's way out, made on first need
+		// Landing pads (Linux, D-86): the landingpad an exception raised just above this entry lands at, made on first
+		// need; ehPad is then the entry's own step of the exception's way out (its cleanup, a handler's end, a try's
+		// dispatch). A Try lists its clauses: each one's TypeDescriptor (null for `catch (...)`) and its handler block.
+		llvm::BasicBlock* landingPad = nullptr;
+		std::vector<std::pair<llvm::Constant*, llvm::BasicBlock*>> catches;
 
 		bool HasPad() const { return kind == Kind::Cleanup || kind == Kind::Abandon; }
 	};

@@ -1,3 +1,4 @@
+#ifdef _WIN32 // the Win32 debugger; Linux's engine is Target/LinuxEngine.h
 #include "Target/Step.h"
 
 namespace C4DAP::Target
@@ -60,3 +61,4 @@ namespace C4DAP::Target
 		return WithinLine(now);
 	}
 } // namespace C4DAP::Target
+#endif

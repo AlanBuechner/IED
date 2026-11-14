@@ -1,11 +1,14 @@
 #pragma once
-// The script host's C API (docs/runtime/04): C4Script.dll compiles, links and loads C4 scripts into a program built
-// with --script-host. Bedrock's Scripting namespace (Bedrock/Scripting/scripting.ch) is its C4 face. Strings are
-// UTF-8 and owned by the DLL; a returned one stays valid until the object it came from is destroyed.
+// The script host's C API (docs/runtime/04): C4Script.dll (libC4Script.so on Linux) compiles, links and loads C4
+// scripts into a program built with --script-host. Bedrock's Scripting namespace (Bedrock/Scripting/scripting.ch) is its
+// C4 face. Strings are UTF-8 and owned by the library; a returned one stays valid until the object it came from is
+// destroyed.
 
 #include <stdint.h>
 
-#ifdef C4SCRIPT_EXPORTS
+#if !defined(_WIN32)
+#define C4SCRIPT_API __attribute__((visibility("default")))
+#elif defined(C4SCRIPT_EXPORTS)
 #define C4SCRIPT_API __declspec(dllexport)
 #else
 #define C4SCRIPT_API __declspec(dllimport)
@@ -21,7 +24,7 @@ typedef struct c4s_script c4s_script;
 // What stopped a guarded call (C4Runtime's c4_script_fault).
 typedef struct c4s_fault
 {
-	uint32_t code;     // the exception code (EXCEPTION_ACCESS_VIOLATION, ...)
+	uint32_t code;     // the exception code (EXCEPTION_ACCESS_VIOLATION, ...); Linux gives a signal the code Windows would
 	uint32_t write;    // an access violation: 1 for a write, 8 for an execution, 0 for a read
 	uint64_t address;  // the faulting instruction
 	uint64_t target;   // an access violation: the address it touched

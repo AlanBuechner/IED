@@ -1,5 +1,6 @@
-// AppDataWatch: the app data folder watched (docs/07 "Live", docs/02 "Lifecycle"): a changed settings.json is read
-// again, and a change under plugins/ re-runs the plugin lifecycle, so app plugins load, change and go without a restart.
+// AppDataWatch: the app data folder watched (docs/07 "Live", docs/02 "Lifecycle"): a changed settings.json (or the
+// Shared tier's shared/settings.json, docs/35) is read again, and a change under plugins/ (or shared/plugins/) re-runs
+// the plugin lifecycle, so app and shared plugins load, change and go without a restart.
 
 include "fs/Watching.ch"
 

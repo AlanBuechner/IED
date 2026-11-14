@@ -76,11 +76,15 @@ class Session:
 		"""A project whose language's package asks for it is built, with what it depends on, before its tests run."""
 		return project.is_driven and self.workspace.language_package(project.language).build_before_test
 
+	def executable(self, name):
+		"""A program's file name on the session's system: `.exe` on Windows, none on Linux."""
+		return name if self.system == "linux" else f"{name}.exe"
+
 	def output(self, project):
-		"""The file `nuke run` starts: a C4 executable's .exe, the program a driven project's driver names in its bin
-		folder, or a custom project's `output` (None if it has none)."""
+		"""The file `nuke run` starts: a C4 executable (`.exe` on Windows), the program a driven project's driver names in
+		its bin folder, or a custom project's `output` (None if it has none)."""
 		if project.is_c4:
-			return fsutil.join(self.bin_dir(project), f"{project.name}.exe")
+			return fsutil.join(self.bin_dir(project), self.executable(project.name))
 		if project.is_driven:
 			name = self.driver(project).program(self.driver_context(project))
 			return fsutil.join(self.bin_dir(project), name) if name else None
@@ -90,7 +94,7 @@ class Session:
 		return fsutil.norm(path if os.path.isabs(path) else os.path.join(project.dir, path))
 
 	def test_output(self, project):
-		return fsutil.join(self.bin_dir(project), f"{project.name}-tests.exe")
+		return fsutil.join(self.bin_dir(project), self.executable(f"{project.name}-tests"))
 
 	def c4_modules(self, project):
 		return graph.c4_modules(self.workspace, project)

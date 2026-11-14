@@ -169,6 +169,8 @@ namespace
 	{
 #if defined(_WIN32)
 		return GetCurrentThreadId();
+#elif defined(__linux__)
+		return (uint64_t)gettid();
 #else
 		return (uint64_t)std::hash<std::thread::id>{}(std::this_thread::get_id());
 #endif
@@ -563,6 +565,10 @@ namespace
 		char path[MAX_PATH] = {};
 		GetModuleFileNameA(nullptr, path, MAX_PATH);
 		std::string name = path;
+#elif defined(__linux__)
+		char path[4096] = {};
+		const ssize_t length = readlink("/proc/self/exe", path, sizeof(path) - 1);
+		std::string name = length > 0 ? std::string(path, (size_t)length) : std::string("program");
 #else
 		std::string name = "program";
 #endif

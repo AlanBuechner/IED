@@ -11,8 +11,13 @@ description = "The C4 script host DLL"
 depends = ["C4Lib", "Core", "Reflection", "ObjectDescription", "Profiling"]
 includes = ["${cpp.llvm}/include"]
 defines = { NOMINMAX = "", WIN32_LEAN_AND_MEAN = "", C4SCRIPT_EXPORTS = "" }
+
+[project.system.windows]
 links = ["ntdll.lib", "kernel32.lib", "user32.lib", "advapi32.lib", "shell32.lib", "bcrypt.lib", "ole32.lib", "version.lib",
 	"${cpp.llvm}/lib/LLVM*.lib", "!LLVM-C.lib", "${cpp.llvm}/lib/Remarks.lib", "!LTO.lib", "${cpp.llvm}/lib/lldCOFF.lib", "${cpp.llvm}/lib/lldCommon.lib", "dbghelp.lib"]
+
+[project.system.linux]
+links = ["${cpp.llvm}/lib/liblldCOFF.a", "${cpp.llvm}/lib/liblldCommon.a"]
 
 [project.driver]
 library = "dynamic"

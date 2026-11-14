@@ -4,9 +4,9 @@ namespace C4DAP::Server
 {
 	namespace
 	{
-		DWORD ThreadOf(const Json::Value& request)
+		Target::ThreadId ThreadOf(const Json::Value& request)
 		{
-			return static_cast<DWORD>(request.Member("arguments").Member("threadId").GetInt());
+			return static_cast<Target::ThreadId>(request.Member("arguments").Member("threadId").GetInt());
 		}
 
 		Json::Value BreakpointBody(const Target::BoundBreakpoint& breakpoint)
@@ -68,7 +68,7 @@ namespace C4DAP::Server
 
 	void DapServer::StepThread(const Json::Value& request, Target::StepKind kind)
 	{
-		const DWORD thread = ThreadOf(request);
+		const Target::ThreadId thread = ThreadOf(request);
 		m_Debuggee->Call([this, &request, kind, thread](Target::Engine& engine) {
 			Respond(request, Json::Value::MakeObject());
 			engine.Step(kind, thread);

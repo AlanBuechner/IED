@@ -1,4 +1,5 @@
 #pragma once
+#ifdef _WIN32 // the Win32 debugger's internals (C4DAPLib Target/), which Linux has none of yet
 #include "UnitTesting/TestBase.h"
 #include "UnitTesting/TestAssertions.h"
 
@@ -39,3 +40,4 @@ namespace Testing
 		void OutOfAnInlinedCallEndsWhereItDoes();
 	};
 } // namespace Testing
+#endif

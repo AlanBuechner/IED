@@ -117,12 +117,20 @@ namespace Scripting
 		// A --script-host program loads C4Script.dll on its first call into it (the link delay-loads it): loaded here
 		// first, a missing one is this error, not a crash in that call. Loaded by its full path beside the program, so
 		// another build's C4Script.dll on PATH is never the one used (BUG-341); the delayed load then finds this module
-		// already loaded under its name.
-		FS::Path beside = Platform::ExecutablePath().Parent() / "C4Script.dll";
+		// already loaded under its name. A Linux program loaded C4Script.so beside itself as it started ($ORIGIN), so
+		// this finds it loaded.
+#if defined(PLATFORM_LINUX)
+		const char* libraryName = "C4Script.so";
+#else
+		const char* libraryName = "C4Script.dll";
+#endif
+		FS::Path beside = Platform::ExecutablePath().Parent() / libraryName;
 		Platform::Library library(beside.CStr());
 		if (!library.IsOpen())
 		{
-			Core::String why("the script host library C4Script.dll does not load from ");
+			Core::String why("the script host library ");
+			why.Append(Core::StringView(libraryName));
+			why.Append(Core::StringView(" does not load from "));
 			why.Append(beside.View());
 			why.Append(Core::StringView(" ("));
 			why.Append(Core::StringView(library.Error()));

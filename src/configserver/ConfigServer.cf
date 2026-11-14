@@ -1,0 +1,676 @@
+include "ConfigServer.ch"
+include "host/Server.ch"
+include "settings/Merge.ch"
+include "web/Json.ch"
+include "web/Params.ch"
+
+namespace Ied
+{
+	void ConfigServer::Init(Server* server, const FS::Path& root) {
+		this.m_Server = server;
+		this.m_Root = root;
+	}
+
+	static ConfigOutcome ConfigAnswer(int32 status, Core::StringView json) {
+		ConfigOutcome outcome;
+		outcome.m_Status = status;
+		outcome.m_Json = Core::String(json);
+		return outcome;
+	}
+
+	static ConfigOutcome ConfigRefusal(int32 status, const char* code, Core::StringView message) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("error", code);
+		json.Field("message", message);
+		json.EndObject();
+		return ConfigAnswer(status, json.View());
+	}
+
+	static ConfigOutcome ConfigProblems(int32 status, const char* code, Core::StringView message, const Core::Array<Core::String>& problems) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("error", code);
+		json.Field("message", message);
+		json.Key(Core::StringView("problems"));
+		json.BeginArray();
+		for (const Core::String& problem : problems) json.String(problem.View());
+		json.EndArray();
+		json.EndObject();
+		return ConfigAnswer(status, json.View());
+	}
+
+	static Core::String ConfigFileText(const FS::Path& file) {
+		if (!FS::FileExists(file.CStr())) return Core::String();
+		FS::File opened = FS::File(file.CStr(), "rb");
+		return opened.ReadText();
+	}
+
+	// "plugins/.staging/x" and the like: a deploy at work, which no one is told of.
+	static bool IsStagingPath(Core::StringView path) {
+		const int64 slash = path.IndexOf('/', 0);
+		Core::StringView first = slash < 0 ? path : path.Substring(0, slash);
+		if (first == c_StagingFolder) return true;
+		if (slash < 0) return false;
+		Core::StringView rest = path.Substring(slash + 1, path.ByteLength() - slash - 1);
+		const int64 next = rest.IndexOf('/', 0);
+		return (next < 0 ? rest : rest.Substring(0, next)) == c_StagingFolder;
+	}
+
+	bool ConfigServer::Start(Core::String& error) {
+		FS::MakeDirectories(m_Root.CStr());
+		if (!FS::IsDirectory(m_Root.CStr())) {
+			error = (Core::String("the config folder ") + m_Root.View()) + " cannot be made";
+			return false;
+		}
+		const char*[3] kinds = { c_PluginsKind, c_SkillsKind, c_ServerPluginsKind };
+		for (int32 i = 0; i < 3; ++i) {
+			FS::MakeDirectories((m_Root / kinds[i]).CStr());
+			// A deploy cut off by a stop leaves its staging behind: no one will commit it now.
+			FS::RemoveAll((m_Root / kinds[i] / c_StagingFolder).CStr());
+		}
+		FS::MakeDirectories((m_Root / "published").CStr());
+		LoadAccess();
+		Rescan();
+		ConfigServer* self = this;
+		if (!m_Watch.Start(m_Root, [self](const ChangeBatch& batch) { self->Watched(batch); }, error)) return false;
+		Core::StringBuilder line;
+		line.Append("config server: serving ");
+		line.Append(m_Root.View());
+		line.Append(", version ");
+		line.Append(Version().View().Substring(0, 12));
+		m_Server->Log(line.View());
+		return true;
+	}
+
+	void ConfigServer::Stop() {
+		Threading::LockGuard guard(m_Lock);
+		m_Stopping = true;
+		m_Changed.NotifyAll();
+	}
+
+	void ConfigServer::LoadAccess() {
+		Core::String error;
+		int64 count = 0;
+		{
+			Threading::LockGuard guard(m_Lock);
+			if (!m_Access.Load(m_Root / c_AccessFile, error)) {
+				m_Server->Log((Core::String("config server: no token is accepted: ") + error.View()).View());
+				return;
+			}
+			count = m_Access.Count();
+		}
+		if (count == 0) m_Server->Log(Core::StringView("config server: access.json lists no token yet; every request is refused (ied-server --config-root <folder> --config-token reader|admin <name>)"));
+	}
+
+	void ConfigServer::Watched(const ChangeBatch& batch) {
+		bool access = batch.Overflowed();
+		bool served = batch.Overflowed();
+		bool code = batch.Overflowed();
+		for (const TreeChange& change : batch.Changes()) {
+			Core::StringView path = change.m_Path.View();
+			if (IsStagingPath(path)) continue;
+			if (path == c_AccessFile) {
+				access = true;
+				continue;
+			}
+			if (path == c_ServerPluginsKind || path.StartsWith(Core::StringView("server-plugins/"))) code = true;
+			served = true;
+		}
+		if (access) LoadAccess();
+		if (served) Rescan();
+		if (code) ReloadServerPlugins();
+	}
+
+	// Server plugins load, change and go as app plugins do (docs/26 "Hot reload"): the plugin host reads them again.
+	void ConfigServer::ReloadServerPlugins() {
+		Threading::LockGuard guard(m_Server->m_Lock);
+		m_Server->m_Plugins->Load();
+	}
+
+	void ConfigServer::Record(const char* event, Core::StringView fields) {
+		Threading::LockGuard guard(m_Server->m_Lock);
+		m_Server->m_Auth->Record(event, fields);
+	}
+
+	void ConfigServer::CatalogChanged(const Core::HashMap<Core::String, MergeKind>& kinds) {
+		Threading::LockGuard guard(m_Lock);
+		m_Kinds = kinds;
+	}
+
+	ConfigRole ConfigServer::Check(Core::StringView token, Core::String& name) {
+		Threading::LockGuard guard(m_Lock);
+		return m_Access.Check(token, name);
+	}
+
+	Core::String ConfigServer::Version() {
+		Threading::LockGuard guard(m_Lock);
+		return m_Version;
+	}
+
+	Core::String ConfigServer::SettingsProblem() {
+		Threading::LockGuard guard(m_Lock);
+		return m_SettingsProblem;
+	}
+
+	Core::String ConfigServer::State(Core::StringView since, int64 waitMs) {
+		Threading::LockGuard guard(m_Lock);
+		if (!since.IsEmpty()) {
+			const int64 wait = waitMs < 0 ? 0 : waitMs > c_LongestStateWaitMs ? c_LongestStateWaitMs : waitMs;
+			const int64 deadline = clock_now_ns() + wait * 1000000;
+			while (!m_Stopping && since == m_Version.View()) {
+				const int64 left = deadline - clock_now_ns();
+				if (left <= 0) break;
+				m_Changed.WaitFor(m_Lock, left);
+			}
+		}
+		return m_StateJson;
+	}
+
+	// --- What is served ------------------------------------------------------------------------------------------------
+
+	Core::String MergePublished(Core::StringView base, const Core::Array<Core::String>& published, const Core::HashMap<Core::String, MergeKind>& kinds) {
+		Core::Array<Core::String> keys;
+		Core::HashMap<Core::String, Core::String> values;
+		Serialization::DomDoc baseDoc;
+		Serialization::ReadResult read = Serialization::ReadJson(base, baseDoc);
+		for (int64 i = 0; read.Ok() && i < read.root.Count(); ++i) {
+			Core::String key = Core::String(read.root.KeyAt(i));
+			if (!values.Contains(key)) keys.Push(key);
+			values.At(key) = NodeJson(read.root.ValueAt(i));
+		}
+		for (const Core::String& text : published) {
+			Serialization::DomDoc doc;
+			Serialization::ReadResult given = Serialization::ReadJson(text.View(), doc);
+			for (int64 i = 0; given.Ok() && i < given.root.Count(); ++i) {
+				Core::String key = Core::String(given.root.KeyAt(i));
+				Core::String value = NodeJson(given.root.ValueAt(i));
+				Core::String before;
+				if (!values.TryGet(key, before)) {
+					keys.Push(key);
+					values.At(key) = value;
+					continue;
+				}
+				MergeKind kind = MergeKind::Replace;
+				kinds.TryGet(key, kind);
+				values.At(key) = MergeJson(before.View(), value.View(), kind);
+			}
+		}
+		JsonWriter json;
+		json.BeginObject();
+		for (const Core::String& key : keys) {
+			Core::String value;
+			values.TryGet(key, value);
+			json.Key(key.View());
+			json.Raw(value.View());
+		}
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String StateVersion(Core::StringView settings, const Core::Array<ServedPackage*>& plugins, const Core::Array<ServedPackage*>& skills) {
+		Core::StringBuilder all;
+		all.Append("settings\n");
+		all.Append(settings);
+		all.Append("\nplugins\n");
+		for (ServedPackage* package : plugins) {
+			all.Append(package->m_Id.View());
+			all.AppendByte(0);
+			all.Append(package->m_Hash.View());
+			all.AppendByte('\n');
+		}
+		all.Append("skills\n");
+		for (ServedPackage* package : skills) {
+			all.Append(package->m_Id.View());
+			all.AppendByte(0);
+			all.Append(package->m_Hash.View());
+			all.AppendByte('\n');
+		}
+		return BytesHash(all.View());
+	}
+
+	// settings.json, then each published/<plugin>.json in name order; a settings.json that does not read is served as it
+	// last read, with the problem kept.
+	Core::String ConfigServer::ServedSettings(Core::String& problem) {
+		Core::String base;
+		Core::String text = ConfigFileText(m_Root / "settings.json");
+		if (text.View().Trimmed().IsEmpty()) base = Core::String("{}");
+		else {
+			Serialization::DomDoc* doc = new Serialization::DomDoc();
+			Serialization::ReadResult read = Serialization::ReadJsonc(text.View(), *doc);
+			if (read.Ok() && read.root.Kind() == Serialization::DomKind::Object) base = NodeJson(read.root);
+			else {
+				Core::StringBuilder why;
+				why.Append("settings.json is not a JSON object");
+				if (!read.Ok()) {
+					why.Append(": ");
+					why.Append(read.error);
+					why.Append(" (line ");
+					why.AppendInt(read.line);
+					why.AppendByte(')');
+				}
+				why.Append("; its last valid content is served");
+				problem = why.ToString();
+			}
+		}
+		Core::Array<Core::String> names;
+		FS::Path folder = m_Root / "published";
+		if (FS::IsDirectory(folder.CStr())) {
+			FS::Directory listing = FS::Directory(folder.CStr());
+			for (FS::DirectoryEntry& entry : listing)
+				if (entry.kind == FS::EntryKind::File && entry.name.View().EndsWith(Core::StringView(".json"))) names.Push(entry.name);
+		}
+		names.Sort();
+		Core::Array<Core::String> published;
+		for (const Core::String& name : names) {
+			Serialization::DomDoc* doc = new Serialization::DomDoc();
+			Serialization::ReadResult read = Serialization::ReadJsonc(ConfigFileText(folder / name.View()).View(), *doc);
+			if (read.Ok() && read.root.Kind() == Serialization::DomKind::Object) published.Push(NodeJson(read.root));
+			else if (problem.IsEmpty()) problem = (Core::String("published/") + name.View()) + " is not a JSON object; it is left out";
+		}
+		Core::HashMap<Core::String, MergeKind> kinds;
+		{
+			Threading::LockGuard guard(m_Lock);
+			if (base.IsEmpty()) base = m_SettingsJson.IsEmpty() ? Core::String("{}") : m_SettingsJson;
+			else m_SettingsJson = base;
+			kinds = m_Kinds;
+		}
+		return MergePublished(base.View(), published, kinds);
+	}
+
+	static Core::Array<ServedPackage*> ScanPackages(const FS::Path& folder, bool plugins) {
+		Core::Array<ServedPackage*> found;
+		if (!FS::IsDirectory(folder.CStr())) return found;
+		Core::Array<Core::String> names;
+		FS::Directory listing = FS::Directory(folder.CStr());
+		for (FS::DirectoryEntry& entry : listing)
+			if (entry.kind == FS::EntryKind::Directory && IsPackageName(entry.name.View())) names.Push(entry.name);
+		names.Sort();
+		for (const Core::String& name : names) {
+			Core::Array<PackageFile*> files = ListPackage(folder / name.View());
+			if (files.IsEmpty()) continue;
+			ServedPackage* package = new ServedPackage();
+			package->m_Id = name;
+			package->m_Hash = PackageHash(files);
+			if (plugins) {
+				Serialization::DomDoc* doc = new Serialization::DomDoc();
+				Serialization::ReadResult read = Serialization::ReadJsonc(ConfigFileText(folder / name.View() / "ied-plugin.json").View(), *doc);
+				if (read.Ok()) package->m_Version = Core::String(read.root.Member("version").AsView());
+			}
+			found.Push(package);
+		}
+		return found;
+	}
+
+	void ConfigServer::Rescan() {
+		Threading::LockGuard scan(m_ScanLock);
+		Core::String problem;
+		Core::String settings = ServedSettings(problem);
+		Core::Array<ServedPackage*> plugins = ScanPackages(m_Root / c_PluginsKind, true);
+		Core::Array<ServedPackage*> skills = ScanPackages(m_Root / c_SkillsKind, false);
+		Core::String version = StateVersion(settings.View(), plugins, skills);
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("version", version.View());
+		json.RawField("settings", settings.View());
+		json.Key(Core::StringView("plugins"));
+		json.BeginArray();
+		for (ServedPackage* package : plugins) {
+			json.BeginObject();
+			json.Field("id", package->m_Id.View());
+			json.Field("version", package->m_Version.View());
+			json.Field("hash", package->m_Hash.View());
+			json.EndObject();
+		}
+		json.EndArray();
+		json.Key(Core::StringView("skills"));
+		json.BeginArray();
+		for (ServedPackage* package : skills) {
+			json.BeginObject();
+			json.Field("name", package->m_Id.View());
+			json.Field("hash", package->m_Hash.View());
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		bool newProblem = false;
+		{
+			Threading::LockGuard guard(m_Lock);
+			newProblem = !problem.IsEmpty() && problem.View() != m_SettingsProblem.View();
+			m_SettingsProblem = problem;
+			if (version.View() == m_Version.View()) {
+				if (newProblem) m_Server->Log((Core::String("config server: ") + problem.View()).View());
+				return;
+			}
+			m_Version = version;
+			m_StateJson = json.ToString();
+			m_Changed.NotifyAll();
+		}
+		if (newProblem) m_Server->Log((Core::String("config server: ") + problem.View()).View());
+		Core::StringBuilder line;
+		line.Append("config server: version ");
+		line.Append(version.View().Substring(0, 12));
+		line.Append(" (");
+		line.AppendInt(plugins.Count());
+		line.Append(plugins.Count() == 1 ? " plugin, " : " plugins, ");
+		line.AppendInt(skills.Count());
+		line.Append(skills.Count() == 1 ? " skill)" : " skills)");
+		m_Server->Log(line.View());
+	}
+
+	// --- Deploying -----------------------------------------------------------------------------------------------------
+
+	FS::Path ConfigServer::KindFolder(Core::StringView kind) const {
+		if (kind == c_PluginsKind || kind == c_SkillsKind || kind == c_ServerPluginsKind) return m_Root / kind;
+		return FS::Path();
+	}
+
+	static bool BadPackageName(Core::StringView kind, Core::StringView id, FS::Path folder, ConfigOutcome& refused) {
+		if (folder.IsEmpty()) {
+			refused = ConfigRefusal(404, "not_found", ((Core::String("no package kind '") + kind) + "' (plugins, skills or server-plugins)").View());
+			return true;
+		}
+		if (!IsPackageName(id)) {
+			refused = ConfigRefusal(400, "bad_request", ((Core::String("'") + id) + "' is not a package name: letters, digits, '.', '_' and '-', not starting with '.'").View());
+			return true;
+		}
+		return false;
+	}
+
+	ConfigOutcome ConfigServer::Stage(Core::StringView kind, Core::StringView id, Core::StringView path, Core::StringView bytes) {
+		FS::Path folder = KindFolder(kind);
+		ConfigOutcome refused;
+		if (BadPackageName(kind, id, folder, refused)) return refused;
+		Core::String why;
+		if (!IsPackagePath(path, why)) return ConfigRefusal(400, "bad_request", why.View());
+		FS::Path file = folder / c_StagingFolder / id / path;
+		{
+			Threading::LockGuard writing(m_WriteLock);
+			FS::MakeDirectories(file.Parent().CStr());
+			if (!FS::WriteFileAtomically(file.CStr(), (const void*)bytes.Data(), bytes.ByteLength()))
+				return ConfigRefusal(500, "unavailable", (Core::String("cannot write ") + file.View()).View());
+		}
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("path", path);
+		json.IntField("size", bytes.ByteLength());
+		json.Field("hash", BytesHash(bytes).View());
+		json.EndObject();
+		return ConfigAnswer(200, json.View());
+	}
+
+	ConfigOutcome ConfigServer::ClearStage(Core::StringView kind, Core::StringView id) {
+		FS::Path folder = KindFolder(kind);
+		ConfigOutcome refused;
+		if (BadPackageName(kind, id, folder, refused)) return refused;
+		Threading::LockGuard writing(m_WriteLock);
+		if (FS::RemoveAll((folder / c_StagingFolder / id).CStr()) < 0) return ConfigRefusal(409, "conflict", Core::StringView("the staged files cannot all be removed (one is open?)"));
+		return ConfigAnswer(200, Core::StringView("{}"));
+	}
+
+	// What a package must hold to be one: a plugin its manifest, with the id it is deployed as (a server plugin's code
+	// is C4); a skill its SKILL.md.
+	static void CheckPackageContent(Core::StringView kind, Core::StringView id, const FS::Path& folder, Core::Array<Core::String>& problems) {
+		if (kind == c_SkillsKind) {
+			if (!FS::FileExists((folder / "SKILL.md").CStr())) problems.Push(Core::String("a skill holds SKILL.md"));
+			return;
+		}
+		FS::Path manifest = folder / "ied-plugin.json";
+		if (!FS::FileExists(manifest.CStr())) {
+			problems.Push(Core::String("a plugin holds ied-plugin.json"));
+			return;
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJsonc(ConfigFileText(manifest).View(), *doc);
+		if (!read.Ok() || read.root.Kind() != Serialization::DomKind::Object) {
+			problems.Push(Core::String("ied-plugin.json is not a JSON object"));
+			return;
+		}
+		if (read.root.Member("id").AsView() != id)
+			problems.Push((((Core::String("ied-plugin.json says id '") + read.root.Member("id").AsView()) + "'; it is deployed as '") + id) + "'");
+		if (kind == c_ServerPluginsKind && read.root.Member("runtime").Member("kind").AsView() != "c4")
+			problems.Push(Core::String("a server plugin runs C4 code: its runtime.kind is \"c4\""));
+	}
+
+	static Core::String DeployFields(Core::StringView kind, Core::StringView id, Core::StringView hash, Core::StringView who) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("kind", kind);
+		json.Field("id", id);
+		if (!hash.IsEmpty()) json.Field("hash", hash);
+		json.Field("by", who);
+		json.EndObject();
+		Core::StringView members = json.View();
+		return Core::String(members.Substring(1, members.ByteLength() - 2));
+	}
+
+	// The staged list as the request gives it: path -> hash; false with the problems.
+	static bool ReadStagedList(Core::StringView listJson, Core::HashMap<Core::String, Core::String>& listed, Core::Array<Core::String>& problems) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(listJson, *doc);
+		if (!read.Ok() || read.root.Kind() != Serialization::DomKind::Array) {
+			problems.Push(Core::String("the body is the staged files' list: [{\"path\": ..., \"hash\": <SHA-256, hex>}]"));
+			return false;
+		}
+		for (int64 i = 0; i < read.root.Count(); ++i) {
+			Core::StringView path = read.root.At(i).Member("path").AsView();
+			Core::String why;
+			if (!IsPackagePath(path, why)) problems.Push(why);
+			else listed.At(Core::String(path)) = Core::String(read.root.At(i).Member("hash").AsView());
+		}
+		return problems.IsEmpty();
+	}
+
+	// Whether the staged files are exactly the listed ones, with those hashes.
+	static void CompareStaged(const Core::Array<PackageFile*>& staged, const Core::HashMap<Core::String, Core::String>& listed, Core::Array<Core::String>& problems) {
+		Core::HashMap<Core::String, bool> seen;
+		for (PackageFile* file : staged) {
+			Core::String hash;
+			seen.At(file->m_Path) = true;
+			if (!listed.TryGet(file->m_Path, hash)) problems.Push(file->m_Path + ": staged, not in the list");
+			else if (hash.View() != file->m_Hash.View()) problems.Push(((file->m_Path + ": staged with hash ") + file->m_Hash.View()) + ", the list says " + hash.View());
+		}
+		for (const Core::KeyValue<Core::String, Core::String>& entry : listed)
+			if (!seen.Contains(entry.key)) problems.Push(entry.key + ": in the list, not staged");
+		if (staged.IsEmpty() && listed.IsEmpty()) problems.Push(Core::String("nothing is staged"));
+	}
+
+	ConfigOutcome ConfigServer::Commit(Core::StringView kind, Core::StringView id, Core::StringView listJson, Core::StringView who) {
+		FS::Path folder = KindFolder(kind);
+		ConfigOutcome refused;
+		if (BadPackageName(kind, id, folder, refused)) return refused;
+		Core::HashMap<Core::String, Core::String> listed;
+		Core::Array<Core::String> problems;
+		if (!ReadStagedList(listJson, listed, problems)) return ConfigProblems(400, "bad_request", Core::StringView("the list does not read"), problems);
+		FS::Path staging = folder / c_StagingFolder / id;
+		FS::Path target = folder / id;
+		Core::String hash;
+		Core::String previous;
+		{
+			Threading::LockGuard writing(m_WriteLock);
+			Core::Array<PackageFile*> staged = ListPackage(staging);
+			CompareStaged(staged, listed, problems);
+			if (!problems.IsEmpty()) return ConfigProblems(409, "conflict", Core::StringView("the staged files are not the list"), problems);
+			CheckPackageContent(kind, id, staging, problems);
+			if (!problems.IsEmpty()) return ConfigProblems(400, "bad_request", Core::StringView("the staged files are not a package of that kind"), problems);
+			hash = PackageHash(staged);
+			if (FS::IsDirectory(target.CStr())) previous = PackageHash(ListPackage(target));
+			Core::String why;
+			if (!SwapFolder(staging, target, folder / c_StagingFolder / (Core::String(".old-") + id).View(), why)) return ConfigRefusal(409, "conflict", why.View());
+		}
+		Record("config-deployed", DeployFields(kind, id, hash.View(), who).View());
+		m_Server->Log((((((Core::String("config server: deployed ") + kind) + "/") + id) + " by ") + who).View());
+		Rescan();
+		if (kind == c_ServerPluginsKind) ReloadServerPlugins();
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("kind", kind);
+		json.Field("id", id);
+		json.Field("hash", hash.View());
+		json.Field("previous", previous.View());
+		json.BoolField("unchanged", hash.View() == previous.View());
+		json.Field("version", Version().View());
+		json.EndObject();
+		return ConfigAnswer(200, json.View());
+	}
+
+	ConfigOutcome ConfigServer::Remove(Core::StringView kind, Core::StringView id, Core::StringView who) {
+		FS::Path folder = KindFolder(kind);
+		ConfigOutcome refused;
+		if (BadPackageName(kind, id, folder, refused)) return refused;
+		FS::Path target = folder / id;
+		{
+			Threading::LockGuard writing(m_WriteLock);
+			if (!FS::IsDirectory(target.CStr())) return ConfigRefusal(404, "not_found", (((Core::String("no ") + kind) + "/") + id).View());
+			FS::Path aside = folder / c_StagingFolder / (Core::String(".old-") + id).View();
+			FS::RemoveAll(aside.CStr());
+			FS::MakeDirectories(aside.Parent().CStr());
+			if (!FS::Rename(target.CStr(), aside.CStr())) return ConfigRefusal(409, "conflict", Core::StringView("the package cannot be moved away: a file of it is open"));
+			FS::RemoveAll(aside.CStr());
+			if (kind == c_ServerPluginsKind) FS::RemoveFile((m_Root / "published" / (Core::String(id) + ".json").View()).CStr());
+		}
+		Record("config-removed", DeployFields(kind, id, Core::StringView(""), who).View());
+		m_Server->Log((((((Core::String("config server: removed ") + kind) + "/") + id) + " by ") + who).View());
+		Rescan();
+		if (kind == c_ServerPluginsKind) ReloadServerPlugins();
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("kind", kind);
+		json.Field("id", id);
+		json.Field("version", Version().View());
+		json.EndObject();
+		return ConfigAnswer(200, json.View());
+	}
+
+	ConfigOutcome ConfigServer::ReplaceSettings(Core::StringView text, Core::StringView who) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJsonc(text, *doc);
+		if (!read.Ok() || read.root.Kind() != Serialization::DomKind::Object) {
+			Core::StringBuilder why;
+			why.Append("settings.json is a JSON object (comments allowed)");
+			if (!read.Ok()) {
+				why.Append(": ");
+				why.Append(read.error);
+				why.Append(" (line ");
+				why.AppendInt(read.line);
+				why.AppendByte(')');
+			}
+			return ConfigRefusal(400, "bad_request", why.View());
+		}
+		{
+			Threading::LockGuard writing(m_WriteLock);
+			FS::Path file = m_Root / "settings.json";
+			if (!FS::WriteFileAtomically(file.CStr(), (const void*)text.Data(), text.ByteLength()))
+				return ConfigRefusal(500, "unavailable", (Core::String("cannot write ") + file.View()).View());
+		}
+		JsonWriter fields;
+		fields.BeginObject();
+		fields.Field("by", who);
+		fields.EndObject();
+		Core::StringView members = fields.View();
+		Record("config-settings-replaced", members.Substring(1, members.ByteLength() - 2));
+		m_Server->Log((Core::String("config server: settings.json replaced by ") + who).View());
+		Rescan();
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("version", Version().View());
+		json.EndObject();
+		return ConfigAnswer(200, json.View());
+	}
+
+	Core::String ConfigServer::SettingsText() {
+		Core::String text = ConfigFileText(m_Root / "settings.json");
+		return text.IsEmpty() ? Core::String("{}") : text;
+	}
+
+	// --- Published values (IED::Shared) --------------------------------------------------------------------------------
+
+	Core::String ConfigServer::PublishedJson(Core::StringView plugin) {
+		if (!IsPackageName(plugin)) return Core::String("{}");
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJsonc(ConfigFileText(m_Root / "published" / (Core::String(plugin) + ".json").View()).View(), *doc);
+		return read.Ok() && read.root.Kind() == Serialization::DomKind::Object ? NodeJson(read.root) : Core::String("{}");
+	}
+
+	bool ConfigServer::WritePublished(Core::StringView plugin, Core::StringView json, Core::String& problem) {
+		FS::Path file = m_Root / "published" / (Core::String(plugin) + ".json").View();
+		FS::MakeDirectories(file.Parent().CStr());
+		if (json == "{}") {
+			FS::RemoveFile(file.CStr());
+			return true;
+		}
+		if (FS::WriteFileAtomically(file.CStr(), (const void*)json.Data(), json.ByteLength())) return true;
+		problem = Core::String("cannot write ") + file.View();
+		return false;
+	}
+
+	// `current` (a JSON object) with `key` set to `valueJson`, or removed when it is empty; members keep their order.
+	static Core::String PublishedWith(Core::StringView current, Core::StringView key, Core::StringView valueJson) {
+		Serialization::DomDoc doc;
+		Serialization::ReadResult read = Serialization::ReadJson(current, doc);
+		JsonWriter json;
+		json.BeginObject();
+		bool set = false;
+		for (int64 i = 0; read.Ok() && i < read.root.Count(); ++i) {
+			if (read.root.KeyAt(i) == key) {
+				if (!valueJson.IsEmpty()) {
+					json.Key(key);
+					json.Raw(valueJson);
+				}
+				set = true;
+				continue;
+			}
+			json.Key(read.root.KeyAt(i));
+			json.Raw(NodeJson(read.root.ValueAt(i)).View());
+		}
+		if (!set && !valueJson.IsEmpty()) {
+			json.Key(key);
+			json.Raw(valueJson);
+		}
+		json.EndObject();
+		return json.ToString();
+	}
+
+	bool ConfigServer::Publish(Core::StringView plugin, Core::StringView key, Core::StringView valueJson, Core::String& problem) {
+		if (key.Trimmed().IsEmpty()) {
+			problem = Core::String("a published setting needs its key");
+			return false;
+		}
+		if (!IsPackageName(plugin)) {
+			problem = (Core::String("plugin id '") + plugin) + "' cannot name a published file";
+			return false;
+		}
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(valueJson, *doc);
+		if (!read.Ok()) {
+			problem = ((Core::String("the value of ") + key) + " is not JSON: ") + read.error;
+			return false;
+		}
+		Core::String value = NodeJson(read.root);
+		{
+			Threading::LockGuard writing(m_WriteLock);
+			Core::String current = PublishedJson(plugin);
+			Core::String edited = PublishedWith(current.View(), key, value.View());
+			if (edited.View() == current.View()) return true;
+			if (!WritePublished(plugin, edited.View(), problem)) return false;
+		}
+		Rescan();
+		return true;
+	}
+
+	bool ConfigServer::Unpublish(Core::StringView plugin, Core::StringView key, Core::String& problem) {
+		if (!IsPackageName(plugin)) {
+			problem = (Core::String("plugin id '") + plugin) + "' cannot name a published file";
+			return false;
+		}
+		{
+			Threading::LockGuard writing(m_WriteLock);
+			Core::String current = PublishedJson(plugin);
+			Core::String edited = PublishedWith(current.View(), key, Core::StringView(""));
+			if (edited.View() == current.View()) return true;
+			if (!WritePublished(plugin, edited.View(), problem)) return false;
+		}
+		Rescan();
+		return true;
+	}
+}

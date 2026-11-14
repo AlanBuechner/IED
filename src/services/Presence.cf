@@ -76,6 +76,8 @@ namespace Ied
 			json.IntField("pid", (int64)Platform::ProcessId());
 			json.IntField("startedMs", m_Server->m_StartedMs);
 			json.EndObject();
+			// The config server followed (docs/35 "The client"); `configServer.changed` when it changes.
+			if (m_Server->m_SharedMirror) json.RawField("configServer", m_Server->m_SharedMirror->StatusJson().View());
 		}
 		Core::String workspaces = m_Server->m_Workspaces->SummariesJson();
 		json.RawField("workspaces", workspaces.View());

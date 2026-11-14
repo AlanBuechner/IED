@@ -11,7 +11,10 @@ group = "C4"
 description = "The C4 compiler's C API: C4Api.dll over C4Lib"
 depends = ["C4Lib", "Core", "Reflection", "ObjectDescription", "Profiling"]
 defines = { NOMINMAX = "", WIN32_LEAN_AND_MEAN = "", C4API_EXPORTS = "" }
+
 # C4Lib's links come with it; LTO.lib would import LTO.dll, which a tool should not need beside it. ntdll: LLVMSupport.
+# On Linux C4Lib's LLVM archives are all it needs (C4Api.so).
+[project.system.windows]
 links = ["ntdll.lib", "!LTO.lib"]
 
 [project.driver]

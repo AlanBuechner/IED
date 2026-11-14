@@ -8,7 +8,10 @@ namespace Ied
 	const char* c_HostApiVersion = "1.0.0";   // what an "ied.api" range is checked against
 	const char* c_ManifestFile = "ied-plugin.json";
 
-	enum class PluginSource { BuiltIn, App, Project }
+	// Where a plugin comes from (docs/26 section 7): Shared is a config server's client plugin, mirrored into
+	// <app data>/shared/plugins/ (docs/35); Server a config server's own server plugin, <config root>/server-plugins/,
+	// whose code runs in the master alone.
+	enum class PluginSource { BuiltIn, App, Project, Shared, Server }
 
 	class Dependency
 	{

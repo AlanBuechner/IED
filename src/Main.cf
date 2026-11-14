@@ -59,12 +59,76 @@ static bool Prepare(Ied::Server* server, const Net::Address& at) {
 		Fail(server, error.View());
 		return false;
 	}
+	// A config server's clients sign in with its tokens (docs/35): without a password its web client is reached only with
+	// a launch token, which no other machine gets.
+	const bool configServer = server->m_ConfigServer != nullptr;
 	if (!at.IsLoopback() && !server->m_Auth->HasPassword()) {
-		Fail(server, Core::StringView("listening beyond this machine needs an owner password: set one from a loopback session first (docs/11)"));
-		return false;
+		if (!configServer) {
+			Fail(server, Core::StringView("listening beyond this machine needs an owner password: set one from a loopback session first (docs/11)"));
+			return false;
+		}
+		server->Log(Core::StringView("config server beyond this machine: its API needs its tokens; the web client signs in from another machine only once an owner password is set (docs/11)"));
 	}
 	server->m_Plugins->Load();
+	if (configServer && !server->m_ConfigServer->Start(error)) {
+		Fail(server, (Core::String("the config server cannot start: ") + error.View()).View());
+		return false;
+	}
 	server->m_Auth->Record("start", (Core::String("\"address\":") + Ied::JsonString(at.ToString().View()).View()).View());
+	return true;
+}
+
+// --config-token reader|admin <name>: a config server's token, made, printed once and kept only as its SHA-256
+// (docs/35); the server does not start.
+static int32 MakeConfigToken(const Ied::ServerConfig& config) {
+	Core::String token;
+	Core::String error;
+	if (!Ied::MintConfigToken(FS::Path(config.m_ConfigRoot.View()), Ied::ConfigRoleOf(config.m_ConfigTokenRole.View()), config.m_ConfigTokenName.View(), token, error)) {
+		Fail(error.View());
+		return 1;
+	}
+	Platform::WriteOutput((token + "\n").View());
+	Core::StringBuilder said;
+	said.Append("ied-server: a ");
+	said.Append(config.m_ConfigTokenRole.View());
+	said.Append(" token named '");
+	said.Append(config.m_ConfigTokenName.View());
+	said.Append("' (one made before with that name no longer works). It is shown only now: ");
+	said.Append(config.m_ConfigRoot.View());
+	said.Append("/access.json keeps its SHA-256 alone.\n");
+	Platform::WriteError(said.View());
+	Ied::SecurityLog log((FS::Path(Ied::DataFolder(config).View()) / "logs" / "security.log").View());
+	FS::MakeDirectories((FS::Path(Ied::DataFolder(config).View()) / "logs").CStr());
+	Ied::JsonWriter fields;
+	fields.BeginObject();
+	fields.Field("name", config.m_ConfigTokenName.View());
+	fields.Field("role", config.m_ConfigTokenRole.View());
+	fields.Field("root", config.m_ConfigRoot.View());
+	fields.EndObject();
+	Core::StringView members = fields.View();
+	log.Record(Platform::UnixTimeNs() / 1000000, "config-token-made", members.Substring(1, members.ByteLength() - 2));
+	return 0;
+}
+
+// --tls-identity: the server's certificate and key from a PKCS #12 file, its password IED_TLS_PASSWORD (taken out of
+// the environment, so nothing the server starts inherits it).
+static bool UseTls(Http::Server* http, const Ied::ServerConfig& config, Core::String& error) {
+	if (config.m_TlsIdentity.IsEmpty()) return true;
+	Core::String password;
+	Platform::TryGetEnvironmentVariable("IED_TLS_PASSWORD", password);
+	Platform::RemoveEnvironmentVariable("IED_TLS_PASSWORD");
+	FS::File opened = FS::File(config.m_TlsIdentity.CStr(), "rb");
+	if (!opened.IsOpen()) {
+		error = (Core::String("--tls-identity ") + config.m_TlsIdentity.View()) + " cannot be read";
+		return false;
+	}
+	Core::String bytes = opened.ReadText();
+	Net::TlsIdentity identity = Net::TlsIdentity::FromPkcs12((const void*)bytes.View().Data(), bytes.View().ByteLength(), password.View());
+	if (!identity.IsLoaded()) {
+		error = (Core::String("--tls-identity: ") + identity.Error());
+		return false;
+	}
+	http->UseTls(take(identity));
 	return true;
 }
 
@@ -181,6 +245,7 @@ int32 main(int32 argc, char8** argv) {
 		Fail(Core::StringView("a workspace server is started by its master, which gives it its secret (docs/11)"));
 		return 2;
 	}
+	if (!config.m_ConfigTokenRole.IsEmpty()) return MakeConfigToken(config);
 	// Named once: a test-hooks server's pipe is a random one of its own, and its workspace servers are told the same.
 	config.m_ControlName = Ied::ControlName(config);
 	Net::Address at = BindAddress(config);
@@ -191,7 +256,11 @@ int32 main(int32 argc, char8** argv) {
 	Http::Server* http = new Http::Server();
 	Ied::Server* server = new Ied::Server(config);
 	Platform::SetCrashLog(server->m_LogFile.File().View());
-	Ied::Control* control = new Ied::Control(server, [http]() { http->Stop(); });
+	Ied::Control* control = new Ied::Control(server, [http, server]() {
+		// A config server's waiting state requests answer now, so the HTTP server's connections end.
+		if (server->m_ConfigServer) server->m_ConfigServer->Stop();
+		http->Stop();
+	});
 	if (!ClaimPipe(control, config, error)) {
 		Fail(server, (Core::String("another ied-server runs for this user (") + error.View() + "); `ied status` tells which").View());
 		return Launch::c_AnotherServerExit;
@@ -199,6 +268,10 @@ int32 main(int32 argc, char8** argv) {
 	if (!Prepare(server, at)) return 2;
 	AwaitRoutes(server);
 	Ied::Front* front = new Ied::Front(server);
+	if (!UseTls(http, config, error)) {
+		Fail(server, error.View());
+		return 2;
+	}
 	if (!ListenHttp(http, at, config)) {
 		Fail(server, Core::StringView(http->Error()));
 		return 1;
@@ -210,6 +283,8 @@ int32 main(int32 argc, char8** argv) {
 		Threading::LockGuard guard(server->m_Lock);
 		server->m_Servers->Begin();
 	}
+	// Following a config server never holds the start up: it runs on a thread of its own (docs/35 "The client").
+	if (server->m_SharedMirror) server->m_SharedMirror->Start();
 	AnnounceStart(server);
 	server->m_LogFile.Write((Core::String("listening: ") + ListeningUrl(config, server->m_Port).View()).View());
 	RefreshGeneratedSolutions(server);

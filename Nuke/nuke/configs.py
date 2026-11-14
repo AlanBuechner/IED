@@ -5,7 +5,7 @@ from dataclasses import dataclass, field, replace
 from .errors import NukeError
 
 ARCHITECTURES = {"x64": "x64", "x86_64": "x64", "amd64": "x64"}
-SYSTEMS = {"windows": "windows", "win": "windows"}
+SYSTEMS = {"windows": "windows", "win": "windows", "linux": "linux"}
 
 
 @dataclass(frozen=True)
@@ -65,5 +65,5 @@ def require_architecture(word):
 
 def require_system(word):
 	if word.lower() not in SYSTEMS:
-		raise NukeError(f"unknown system '{word}' (known: windows)")
+		raise NukeError(f"unknown system '{word}' (known: windows, linux)")
 	return SYSTEMS[word.lower()]

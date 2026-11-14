@@ -198,8 +198,13 @@ class VirtualMemoryTests {
 		uint8* bytes = Bytes(code, 0);
 		// mov eax, 42; ret
 		bytes[0] = 0xB8; bytes[1] = 42; bytes[2] = 0; bytes[3] = 0; bytes[4] = 0; bytes[5] = 0xC3;
+#if defined(PLATFORM_LINUX)
+		// lea eax, [rdi + 1]; ret (the first argument is in rdi: System V)
+		bytes[16] = 0x8D; bytes[17] = 0x47; bytes[18] = 0x01; bytes[19] = 0xC3;
+#else
 		// lea eax, [rcx + 1]; ret (the first argument is in rcx)
 		bytes[16] = 0x8D; bytes[17] = 0x41; bytes[18] = 0x01; bytes[19] = 0xC3;
+#endif
 		assert_true(Platform::Protect(code, page, Platform::Protection::ReadExecute), "make it code");
 		Platform::FlushInstructionCache(code, page);
 		funcptr<int32()> answer = (funcptr<int32()>)code;

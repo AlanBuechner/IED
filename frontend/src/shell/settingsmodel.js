@@ -120,8 +120,9 @@ export function matches(key, entry, query) {
 	return words.every((word) => text.includes(word));
 }
 
-// "User" for app, "Solution", "Project", "Default".
+// "User" for app, "Solution", "Project", "Shared" (the config server's, docs/35: read only, so no tier button), "Default".
 export function sourceLabel(source) {
+	if (source === "shared") return "Shared";
 	const tier = TIERS.find(([id]) => id === source);
 	return tier ? tier[1] : "Default";
 }

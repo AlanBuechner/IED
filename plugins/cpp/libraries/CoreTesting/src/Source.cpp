@@ -25,6 +25,7 @@
 #include "Tests/Core/BitFlagsTest.h"
 #include "Tests/Core/UUIDTest.h"
 #include "Tests/Core/TimeTest.h"
+#include "Tests/Core/PlatformTest.h"
 
 #include "Benchmarks/CoreBenchmarks.h"
 

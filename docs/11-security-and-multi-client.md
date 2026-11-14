@@ -81,7 +81,24 @@ A device object is `{"id", "name", "kind", "created", "lastSeen"}`, with times i
 
 **Test hook.** `testhooks.mintToken {ttlMs}` returns `{"token"}`, a launch token that dies after `ttlMs` (security tests).
 
-**Audit events** (`logs/security.log`): `start` (bind address), `token-exchanged`, `login`, `login-failed`, `locked-out`, `logout`, `device-revoked`, `password-set`.
+**Audit events** (`logs/security.log`): `start` (bind address), `token-exchanged`, `login`, `login-failed`, `locked-out`, `logout`, `device-revoked`, `password-set`; a config server's `config-token-made` (by `--config-token`: the name and role), `config-deployed`, `config-removed`, `config-settings-replaced` (with the admin token's name); a client's `shared-plugin-installed`, `shared-plugin-removed` (the plugin, its hash, the config server).
+
+### Config server tokens (2026-11-13)
+
+A config server (`ied-server --config-root`, `docs/35`) serves `/config/v1/` to other IEDs and to the owner's deploy
+tool, never to a browser, so it has credentials of its own: **bearer tokens**, `Authorization: Bearer <token>` on every
+request. A token is 32 random bytes as 64 hex digits, made on the config server's machine (`ied-server --config-root
+<folder> --config-token reader|admin <name>`), printed once on stdout, and kept only as its SHA-256 in the folder's
+`access.json`, compared in constant time; making one again under a name revokes the old one, and a running server reads
+`access.json` again when it changes. A **reader** (a client IED) reads the state and the shared packages; an **admin**
+also stages, commits and removes packages, replaces the settings and reads the server plugins' state. No token or an
+unknown one is 401, a reader's write 403. The config API skips the Host and Origin checks above: a page cannot send the
+header to another origin, and DNS rebinding gains nothing without the token. A config server may listen beyond loopback
+without an owner password - its tokens are its credentials - and its web client then signs in from another machine only
+once a password is set. `--tls-identity <file.p12>` (password in `IED_TLS_PASSWORD`, taken out of the environment)
+makes the whole server https. A client keeps its reader token out of its settings (`configServer.token` names an
+environment variable) and trusts the config server as it trusts what it configured: the plugins it shares load without an
+approval of their own, recorded in the security log.
 
 ### Workspace servers: only what the master authorized
 
@@ -155,7 +172,7 @@ Declared in the manifest (`docs/02`), shown before enabling, enforced at the plu
 
 ## Secrets
 
-- Stored in Windows Credential Manager (DPAPI), under `IED/<name>`; settings hold references (`{"secret": "anthropic-key"}`) or env references (`{"env": "ANTHROPIC_API_KEY"}`).
+- Stored in Windows Credential Manager (DPAPI), under `IED/<name>`; settings hold references (`{"secret": "anthropic-key"}`) or env references (`{"env": "ANTHROPIC_API_KEY"}`). Not built yet (F-SET-30): what reads a reference today reads `{"env": ...}` from the IED server's environment, and a `{"secret": ...}` reference fails saying the store is missing (`configServer.token`, `docs/35`), never falling back to plain text.
 - Never sent to clients (settings UI shows `******` + "replace"), never written to logs, trajectories, tool results or diagnostics bundles (a redaction filter over every outbound text sink matches known secret values).
 
 ## Multi-client concurrency rules

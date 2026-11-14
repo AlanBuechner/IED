@@ -12,9 +12,7 @@
 #include <unordered_map>
 #include "Features/Diagnostics.h"
 #include "Features/Tidy.h"
-#ifdef _WIN32
-#include <malloc.h> // _heapmin
-#endif
+#include <malloc.h> // _heapmin on Windows, malloc_trim on Linux (glibc)
 
 namespace C4LSP::Server
 {
@@ -45,6 +43,8 @@ namespace C4LSP::Server
 		{
 #ifdef _WIN32
 			_heapmin();
+#else
+			malloc_trim(0);
 #endif
 		}
 

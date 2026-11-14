@@ -1,0 +1,4 @@
+{
+	"DebugScripts": "Windows' debug scripts: each a DLL with a PDB, read through DbgHelp (docs/runtime/04 section 6.4); a Linux host links its debug scripts in memory",
+	"MissingLibrary":"Windows delay-loads C4Script.dll, so a host without it starts and says why; Linux has no delay-loading: the loader refuses a program without its C4Script.so (D-86)"
+}

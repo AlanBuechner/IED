@@ -466,7 +466,7 @@ void CompilationSession::RunPreprocessPhase()
 		std::string objDir = (fs::temp_directory_path() / "c4_lsp_interop").string();
 		fs::create_directories(objDir);
 
-		auto interop = Scripting::InteropPass::RunFolder(BuildPreprocessRoots(), texts, m_IncludePaths, objDir, m_Target.Flags(), false, true);
+		auto interop = Scripting::InteropPass::RunFolder(BuildPreprocessRoots(), texts, m_IncludePaths, objDir, m_Target, false, true);
 
 		std::unordered_map<std::string, const Scripting::MacroPass::FileResult*> macroOf;
 		for (const auto& mr : macroResults) macroOf[mr.absPath] = &mr;

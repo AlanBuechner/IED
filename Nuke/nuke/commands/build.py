@@ -42,6 +42,8 @@ def copy_files(session, project):
 	for module in session.c4_modules(project):
 		values = session.variables(module)
 		for copy in module.copies:
+			if not copy.applies_to(session.system):
+				continue
 			source = fsutil.join(module.dir, expand(copy.source, values))
 			dest = fsutil.join(destination_root, expand(copy.dest, values))
 			if os.path.isdir(source):

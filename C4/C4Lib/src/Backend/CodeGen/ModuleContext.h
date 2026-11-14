@@ -4,6 +4,7 @@
 #include "Model/SymbolTable.h"
 #include "Backend/CodeGen/Abi.h"
 #include "Backend/CodeGen/AliasTags.h"
+#include "Compiler/TargetSystem.h"
 #include <llvm/IR/DataLayout.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
@@ -30,9 +31,11 @@ namespace Scripting
 	class ModuleContext
 	{
 	public:
-		explicit ModuleContext(llvm::LLVMContext& ctx);
+		/// A module of a program for `system` (D-86): its triple, data layout and calling convention.
+		ModuleContext(llvm::LLVMContext& ctx, TargetSystem system);
 		~ModuleContext();
 
+		TargetSystem System() const { return m_System; }
 		llvm::Module& module() { return *m_Module; }
 		/// The module, which the caller then owns; nothing may use this context after it (BUG-240: it owns it otherwise).
 		std::unique_ptr<llvm::Module> TakeModule() { return std::move(m_OwnedModule); }
@@ -108,8 +111,9 @@ namespace Scripting
 
 		// The extern _CxxThrowException(ptr value, ptr throwinfo): noreturn; performs the OS-level SEH raise.
 		llvm::Function* GetCxxThrowException();
-		// The extern __CxxFrameHandler3(...): the personality routine every catching function installs.
-		llvm::Function* GetFrameHandler3();
+		// The personality routine every catching function installs: the extern __CxxFrameHandler3(...) on Windows, the
+		// C4 runtime's __c4_personality_v0(...) on Linux, which reads the same catchable types (D-86).
+		llvm::Function* Personality();
 
 		// Where `rec`'s hidden parameters (this, sret) sit in its LLVM signature (MSVC x64 order).
 		Abi::Signature SignatureOf(const FunctionRecord& rec) const;
@@ -164,10 +168,12 @@ namespace Scripting
 		std::string GlobalName(const SymbolInfo& sym) const;
 		llvm::GlobalVariable* DeclareGlobal(const SymbolInfo& sym);
 		std::vector<StructPiece> StructPieces(const ObjectType* obj);
+		void PassOnStack(llvm::Function& fn, const FunctionRecord& rec);
 
 		const ProgramModel* m_Model = nullptr;
 		std::mutex* m_ModelLock = nullptr;
 		llvm::LLVMContext& m_Context;
+		TargetSystem m_System;
 		std::unique_ptr<llvm::Module> m_OwnedModule;
 		llvm::Module* m_Module = nullptr;
 		llvm::DataLayout m_DataLayout;

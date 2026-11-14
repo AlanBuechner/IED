@@ -24,13 +24,21 @@ static Core::String ReadFileText(const FS::Path& path) {
 }
 
 // A junction at `link` to the directory `target`.
+// A link to the folder `target`: a junction on Windows (mklink /J needs no privilege), a symbolic link on Linux.
 static bool MakeJunction(const FS::Path& link, const FS::Path& target) {
 	Process::StartInfo info;
+#if defined(PLATFORM_LINUX)
+	info.program = Core::String("ln");
+	info.arguments.Push(Core::String("-s"));
+	info.arguments.Push(Core::String(FS::AbsolutePath(target.CStr()).CStr()));
+	info.arguments.Push(Core::String(FS::AbsolutePath(link.CStr()).CStr()));
+#else
 	info.program = Core::String("cmd");
 	const char*[3] words = { "/c", "mklink", "/J" };
 	for (int32 i = 0; i < 3; ++i) info.arguments.Push(Core::String(words[i]));
 	info.arguments.Push(Core::String(FS::AbsolutePath(link.CStr()).CStr()));
 	info.arguments.Push(Core::String(FS::AbsolutePath(target.CStr()).CStr()));
+#endif
 	return Process::Run(info, 20000).exitCode == 0;
 }
 
@@ -67,8 +75,14 @@ class FileInfoTests {
 		assert_eq(when, info.modifiedNs, "read back to the 100 ns the system keeps");
 		assert_true(FS::SetModifiedTime(folder.CStr(), when) && FS::GetInfo(folder.CStr(), info) && info.modifiedNs == when, "a directory's too");
 		assert_true(FS::SetReadOnly(file.CStr(), true) && FS::GetInfo(file.CStr(), info) && info.readOnly, "read-only");
+#if defined(PLATFORM_LINUX)
+		// Linux asks the folder, not the file: a read-only file in a writable folder goes.
+		assert_true(FS::RemoveFile(file.CStr()), "RemoveFile removes a read-only file, as the system does");
+		assert_eq((int64)1, FS::RemoveAll(folder.CStr()), "RemoveAll removes the folder");
+#else
 		assert_true(!FS::RemoveFile(file.CStr()), "RemoveFile refuses a read-only file, as the system does");
 		assert_eq((int64)2, FS::RemoveAll(folder.CStr()), "RemoveAll removes it anyway (git's objects are read-only)");
+#endif
 		assert_true(!FS::SetModifiedTime(file.CStr(), when) && !FS::SetReadOnly(file.CStr(), false), "nothing there to change");
 	}
 
@@ -79,7 +93,7 @@ class FileInfoTests {
 		FS::MakeDirectory(target.CStr());
 		WriteFileText(target / "inside.txt", "inside");
 		FS::Path junction = folder / "junction";
-		assert_true(MakeJunction(junction, target), "mklink /J");
+		assert_true(MakeJunction(junction, target), "a link to a folder");
 		FS::FileInfo info;
 		assert_true(FS::GetInfo(junction.CStr(), info) && info.kind == FS::EntryKind::Directory, "followed: a directory");
 		assert_true(FS::GetInfo(junction.CStr(), info, false) && info.kind == FS::EntryKind::Link, "itself: a link");
@@ -147,10 +161,17 @@ class FilePathTests {
 		FS::Path here = FS::CurrentDirectory();
 		Core::StringBuilder expected;
 		expected.Append(here.View());
+#if defined(PLATFORM_LINUX)
+		expected.Append("/b");
+		assert_se(expected.CStr(), FS::AbsolutePath("a/../b").CStr(), "against the working directory, '..' folded");
+		assert_se("/x/z", FS::AbsolutePath("/x/./y/../z").CStr(), "an absolute path folded, as the system writes it");
+		assert_se("/no/such/thing", FS::AbsolutePath("/no/such/thing").CStr(), "without reading the file system");
+#else
 		expected.Append("\\b");
 		assert_se(expected.CStr(), FS::AbsolutePath("a/../b").CStr(), "against the working directory, '..' folded");
 		assert_se("C:\\x\\z", FS::AbsolutePath("C:/x/./y/../z").CStr(), "an absolute path folded, as the system writes it");
 		assert_se("C:\\no\\such\\thing", FS::AbsolutePath("C:/no/such/thing").CStr(), "without reading the file system");
+#endif
 		assert_true(FS::AbsolutePath("").IsEmpty(), "nothing to make absolute");
 	}
 
@@ -159,8 +180,15 @@ class FilePathTests {
 		FS::Path folder = InfoScratch("canonical");
 		FS::MakeDirectory((folder / "Mixed").CStr());
 		WriteFileText(folder / "Mixed" / "Case.txt", "x");
+#if defined(PLATFORM_LINUX)
+		// Linux's names are case-sensitive: only the names as written find the file.
+		assert_true(FS::CanonicalPath((folder / "mixed" / "CASE.TXT").CStr()).IsEmpty(), "another case names nothing");
+		FS::Path canonical = FS::CanonicalPath((folder / "Mixed" / "." / "Case.txt").CStr());
+		assert_true(canonical.View().EndsWith(Core::StringView("/canonical/Mixed/Case.txt")), canonical.CStr());
+#else
 		FS::Path canonical = FS::CanonicalPath((folder / "mixed" / "." / "CASE.TXT").CStr());
 		assert_true(canonical.View().EndsWith(Core::StringView("\\canonical\\Mixed\\Case.txt")), canonical.CStr());
+#endif
 		assert_true(canonical.IsAbsolute(), "absolute");
 		assert_true(FS::CanonicalPath((folder / "missing").CStr()).IsEmpty(), "nothing there");
 		FS::RemoveAll(folder.CStr());

@@ -1,7 +1,8 @@
 // Skills (docs/04 "Skills", shared/host-api/README.md "Skill file format"): folders <name>/SKILL.md whose YAML
 // frontmatter gives a name, a description and the keywords (or triggers) they are found by. A workspace's skills are
-// its own (.ied/skills/), its plugins' `skills` folders and the app's skills folder, the first of a name winning:
-// project > plugin > app. The system message lists them (docs/14 item 8); skill_search and skill_read reach the rest.
+// its own (.ied/skills/), its plugins' `skills` folders, the app's skills folder and a config server's (shared/skills/ in
+// the app data, docs/35), the first of a name winning: project > plugin > app > shared. The system message lists them
+// (docs/14 item 8); skill_search and skill_read reach the rest.
 
 include "bedrock.ch"
 

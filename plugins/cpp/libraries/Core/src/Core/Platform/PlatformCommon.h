@@ -16,9 +16,12 @@ namespace Platform
 
 	std::string ExecuteProcess(const std::string& a_ExePath, const std::vector<std::string>& a_Args);
 
+#if defined(_WIN32)
+	// The Windows clipboard; Linux has none without a display server (X11 or Wayland), which Core does not link.
 	bool ClipboardHasText();
 	Core::String ClipboardGetText();
 	void ClipboardSetText(const Core::String& text);
+#endif
 
 	std::wstring Utf8ToWide(const char* utf8);
 	Core::String WideToUtf8(const wchar_t* wide);

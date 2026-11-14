@@ -6,7 +6,7 @@
 #include "Features/Rename.h"
 #include "Compiler/FileIo.h"
 #include <filesystem>
-#include <process.h>
+#include <llvm/Support/Process.h>
 
 using namespace C4LSP::Features;
 
@@ -176,7 +176,7 @@ void Server::Start() {
 	{
 		// As IED's server is: files in folders, a build description, includes by the project's paths, a namespace.
 		namespace fs = std::filesystem;
-		const fs::path root = fs::temp_directory_path() / ("c4_lsp_constructions_" + std::to_string(_getpid()));
+		const fs::path root = fs::temp_directory_path() / ("c4_lsp_constructions_" + std::to_string(llvm::sys::Process::getProcessId()));
 		const fs::path src = root / "src";
 		const auto write = [&](const char* name, const std::string& text) {
 			Scripting::CreateFolders(Scripting::PathText((src / name).parent_path()));

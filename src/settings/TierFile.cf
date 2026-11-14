@@ -50,9 +50,11 @@ namespace Ied
 			Serialization::DomDoc* doc = new Serialization::DomDoc();
 			Serialization::ReadResult read = Serialization::ReadJsonc(view.Substring(member->m_ValueStart, member->m_ValueEnd - member->m_ValueStart), *doc);
 			SettingInfo* setting = catalog.Get(key);
+			if (!setting && m_Shared) continue;
 			Core::Array<Core::String> wrong;
 			if (!setting) wrong.Push(Core::String("unknown setting"));
-			else if (!catalog.AllowedIn(setting, m_Tier.View())) wrong.Push((Core::String("cannot be set in the ") + m_Tier.View()) + " tier");
+			else if (m_Shared && !setting->m_Shareable) wrong.Push(Core::String("a config server cannot set it (x-ied-shared: false)"));
+			else if (!catalog.AllowedIn(setting, m_Shared ? Core::StringView("app") : m_Tier.View())) wrong.Push((Core::String("cannot be set in the ") + m_Tier.View()) + " tier");
 			else if (!read.Ok()) wrong.Push(Core::String("not a JSON value"));
 			else wrong = catalog.Check(setting, read.root);
 			for (const Core::String& message : wrong) Problem(line, key, message.View());

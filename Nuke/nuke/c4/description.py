@@ -21,11 +21,14 @@ def _unexpanded(project, text):
 	return text
 
 
-def module_for(workspace, project, configuration, expand=_unexpanded):
+def module_for(workspace, project, configuration, expand=_unexpanded, system="windows"):
 	override = project.config_overrides.get(configuration.name)
+	for_system = project.system_overrides.get(system)
 	defines = dict(project.defines)
 	if override:
 		defines.update(override.defines)
+	if for_system:
+		defines.update(for_system.defines)
 	defines[configuration.name.upper()] = "1"
 	defines["PROJECT_NAME"] = project.name
 	# The project's folder as a string literal, '/' separators: a module finds its own files (a package's shaders) in a
@@ -41,9 +44,9 @@ def module_for(workspace, project, configuration, expand=_unexpanded):
 	)
 
 
-def modules_for(workspace, root, configuration, expand=_unexpanded):
-	"""`expand(project, text)`: `text` with that project's ${variables}."""
-	return [module_for(workspace, p, configuration, expand) for p in graph.c4_modules(workspace, root)]
+def modules_for(workspace, root, configuration, expand=_unexpanded, system="windows"):
+	"""`expand(project, text)`: `text` with that project's ${variables}; `system` picks [project.system.<name>]'s."""
+	return [module_for(workspace, p, configuration, expand, system) for p in graph.c4_modules(workspace, root)]
 
 
 def _absolute(base, path):

@@ -70,7 +70,12 @@ namespace Ied
 		}
 	}
 
-	static int32 Precedence(PluginSource source) { return source == PluginSource::Project ? 3 : source == PluginSource::App ? 2 : 1; }
+	// built-in < shared (a config server's, docs/35) < app = server < project.
+	static int32 Precedence(PluginSource source) {
+		if (source == PluginSource::Project) return 4;
+		if (source == PluginSource::App || source == PluginSource::Server) return 3;
+		return source == PluginSource::Shared ? 2 : 1;
+	}
 
 	// The state a plugin would have on its own: its problems, the owner's approval, the owner's switch.
 	static PluginState OwnState(Plugin* plugin, const Core::HashMap<Core::String, Core::String>& approved, const Core::HashMap<Core::String, bool>& disabled) {
@@ -158,6 +163,10 @@ namespace Ied
 		Core::Array<Manifest*> found;
 		Discover(home.IsEmpty() ? FS::Path() : home / "plugins", PluginSource::BuiltIn, found);
 		Discover(FS::Path(AppDataFolder(m_Server->m_Config).View()) / "plugins", PluginSource::App, found);
+		// A config server's client plugins need no approval of their own: following the server, with its token, is the
+		// owner's (docs/11); its server plugins come from its folder, deployed with an admin token (docs/35).
+		Discover(FS::Path(AppDataFolder(m_Server->m_Config).View()) / "shared" / "plugins", PluginSource::Shared, found);
+		if (m_Server->m_ConfigServer) Discover(m_Server->m_ConfigServer->Root() / "server-plugins", PluginSource::Server, found);
 		Choose(found);
 		CheckDependencies();
 		for (Plugin* plugin : m_Plugins)

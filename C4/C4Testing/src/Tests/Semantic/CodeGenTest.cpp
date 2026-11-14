@@ -1,5 +1,6 @@
 #include "CodeGenTest.h"
 #include "Backend/CodeGen/TestHarnessEmitter.h"
+#include "Compiler/TargetSystem.h"
 #include "Compiler/Toolchain.h"
 #include <algorithm>
 #include <cstdio>
@@ -166,15 +167,18 @@ namespace Testing
 
 	void CodeGenTest::ModuleTargetsWindowsX64()
 	{
-		// BUG-097: the module carries the Windows x64 triple and clang's layout for it.
+		// BUG-097: the module carries the Windows x64 triple and clang's layout for it - the host's system's: on Linux the
+		// x64 Linux triple and its layout (ELF mangling, D-86).
 		CompilerInstance compiler;
 		std::string triple, layout;
 		TEST_ASSERT(LowerAndInspect(compiler, "int32 main() { return 0; }", [&](llvm::Module& m) {
 			triple = m.getTargetTriple().str();
 			layout = m.getDataLayoutStr();
 		}));
-		TEST_ASSERT(triple == "x86_64-pc-windows-msvc");
-		TEST_ASSERT(layout == "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128");
+		const bool onLinux = HostSystem() == TargetSystem::Linux;
+		TEST_ASSERT(triple == (onLinux ? "x86_64-unknown-linux-gnu" : "x86_64-pc-windows-msvc"));
+		TEST_ASSERT(layout == (onLinux ? "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128"
+			: "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128"));
 	}
 
 	void CodeGenTest::ATargetAnnotationWidensOneFunction()

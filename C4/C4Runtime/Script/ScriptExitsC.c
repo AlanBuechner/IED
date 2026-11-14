@@ -7,7 +7,7 @@
 #include "ThreadRuntimeC.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <windows.h>
+#include "PlatformSync.h"
 
 enum { kFirstExitCapacity = 16 };
 
@@ -44,7 +44,7 @@ struct c4_script_module
 	int32_t finished;
 };
 
-static SRWLOCK g_lock = SRWLOCK_INIT;
+static c4_lock g_lock = C4_LOCK_INIT;
 
 static void fatal(const char* message)
 {
@@ -97,13 +97,13 @@ static void release_block(ScriptThreadExits* block)
 static void run_thread_block(void* item)
 {
 	ScriptThreadExits* block = (ScriptThreadExits*)item;
-	AcquireSRWLockExclusive(&g_lock);
+	c4_lock_take(&g_lock);
 	const ScriptExits exits = take_thread_exits(block);
-	ReleaseSRWLockExclusive(&g_lock);
+	c4_lock_give(&g_lock);
 	run_exits(exits);
-	AcquireSRWLockExclusive(&g_lock);
+	c4_lock_take(&g_lock);
 	release_block(block);
-	ReleaseSRWLockExclusive(&g_lock);
+	c4_lock_give(&g_lock);
 }
 
 static ScriptThreadExits* thread_block(c4_script_module* module, uint64_t thread)
@@ -121,9 +121,9 @@ c4_script_module* c4_script_module_create(void)
 void c4_script_at_exit(c4_script_module* module, void (*destroy)(void*), void* object)
 {
 	if (!module) return;
-	AcquireSRWLockExclusive(&g_lock);
+	c4_lock_take(&g_lock);
 	if (!module->finished) push_exit(&module->exits, destroy, object);
-	ReleaseSRWLockExclusive(&g_lock);
+	c4_lock_give(&g_lock);
 }
 
 void c4_script_thread_at_exit(c4_script_module* module, void (*destroy)(void*), void* object)
@@ -131,7 +131,7 @@ void c4_script_thread_at_exit(c4_script_module* module, void (*destroy)(void*), 
 	if (!module) return;
 	const uint64_t thread = c4_thread_current_id();
 	ScriptThreadExits* fresh = NULL;
-	AcquireSRWLockExclusive(&g_lock);
+	c4_lock_take(&g_lock);
 	if (!module->finished)
 	{
 		ScriptThreadExits* block = thread_block(module, thread);
@@ -147,35 +147,35 @@ void c4_script_thread_at_exit(c4_script_module* module, void (*destroy)(void*), 
 		}
 		push_exit(&block->exits, destroy, object);
 	}
-	ReleaseSRWLockExclusive(&g_lock);
+	c4_lock_give(&g_lock);
 	if (fresh) c4_thread_at_exit(run_thread_block, fresh);
 }
 
 void c4_script_module_finish(c4_script_module* module)
 {
 	if (!module) return;
-	AcquireSRWLockExclusive(&g_lock);
+	c4_lock_take(&g_lock);
 	module->finished = 1;
-	ReleaseSRWLockExclusive(&g_lock);
+	c4_lock_give(&g_lock);
 	for (ScriptThreadExits* block = module->threads; block; block = block->next)
 	{
-		AcquireSRWLockExclusive(&g_lock);
+		c4_lock_take(&g_lock);
 		const ScriptExits exits = take_thread_exits(block);
-		ReleaseSRWLockExclusive(&g_lock);
+		c4_lock_give(&g_lock);
 		run_exits(exits);
 	}
-	AcquireSRWLockExclusive(&g_lock);
+	c4_lock_take(&g_lock);
 	const ScriptExits exits = module->exits;
 	module->exits.entries = NULL;
 	module->exits.count = module->exits.capacity = 0;
-	ReleaseSRWLockExclusive(&g_lock);
+	c4_lock_give(&g_lock);
 	run_exits(exits);
 }
 
 void c4_script_module_destroy(c4_script_module* module)
 {
 	if (!module) return;
-	AcquireSRWLockExclusive(&g_lock);
+	c4_lock_take(&g_lock);
 	ScriptThreadExits* block = module->threads;
 	while (block)
 	{
@@ -184,6 +184,6 @@ void c4_script_module_destroy(c4_script_module* module)
 		block = next;
 	}
 	free(module->exits.entries);
-	ReleaseSRWLockExclusive(&g_lock);
+	c4_lock_give(&g_lock);
 	free(module);
 }

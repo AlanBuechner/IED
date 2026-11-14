@@ -95,12 +95,40 @@ def compile_args(toolchain, configuration, source, includes, system_includes, de
 	return args
 
 
+def linux_compile_args(toolchain, configuration, source, includes, system_includes, defines, compiler_args):
+	"""clang driver arguments for one source built for Linux: position independent, C++ exceptions, DWARF when the
+	configuration keeps debug information; a project's compiler-args are -cc1 arguments, so they go through -Xclang."""
+	args = ["-std=" + (toolchain.settings.c_standard if source.lower().endswith(".c") else toolchain.settings.standard)]
+	args += ["-x", "c" if source.lower().endswith(".c") else "c++"]
+	for folder in includes:
+		args += ["-I", folder]
+	for folder in system_includes:
+		args += ["-isystem", folder]
+	args += [f"-D{define}" for define in defines]
+	args += [f"-O{configuration.optimize}", "--target=" + toolchain.target, "-fPIC", "-fexceptions", "-ferror-limit=" + ERROR_LIMIT,
+		"-Wno-unused-comparison"]
+	if configuration.debug_info:
+		args.append("-g")
+	for argument in compiler_args:
+		args += ["-Xclang", argument]
+	return args
+
+
+def object_extension(toolchain):
+	return ".o" if toolchain.linux else ".obj"
+
+
 def make_job(toolchain, configuration, target, source, includes, system_includes, header_tool):
 	name = os.path.join(target.int_dir, object_name(source)).replace("\\", "/")
-	obj, dep = name + ".obj", name + ".d"
-	command = [toolchain.clang, "-cc1", "-emit-obj"]
-	command += compile_args(toolchain, configuration, source, includes, system_includes, target.defines, target.compiler_args)
-	command += [source, "-o", obj, "-dependency-file", dep, "-MT", dep]
+	obj, dep = name + object_extension(toolchain), name + ".d"
+	if toolchain.linux:
+		command = [toolchain.clang, "-c"]
+		command += linux_compile_args(toolchain, configuration, source, includes, system_includes, target.defines, target.compiler_args)
+		command += [source, "-o", obj, "-MD", "-MF", dep, "-MT", dep]
+	else:
+		command = [toolchain.clang, "-cc1", "-emit-obj"]
+		command += compile_args(toolchain, configuration, source, includes, system_includes, target.defines, target.compiler_args)
+		command += [source, "-o", obj, "-dependency-file", dep, "-MT", dep]
 	job = Job(source, obj, dep, name + ".args", command)
 	if header_tool:
 		job.header_tool = [header_tool, "--generated-folder", f"{target.int_dir}/generated", "--source-folder", f"{target.dir}/src", source,

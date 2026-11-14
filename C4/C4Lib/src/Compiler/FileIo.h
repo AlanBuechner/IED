@@ -13,8 +13,8 @@ namespace Scripting
 	/// `path` in UTF-8, as these calls take it (path::string() is the ANSI code page on Windows).
 	std::string PathText(const std::filesystem::path& path);
 	/// `path` as std::filesystem's calls take it past MAX_PATH: absolute and normal, spelled `\\?\` (`\\?\UNC\` for a
-	/// share). For what LLVM has no call for: walking a folder, or removing one (std::filesystem never follows a
-	/// junction there; LLVM's walk takes a junction for a folder).
+	/// share) on Windows; only absolute and normal on Linux. For what LLVM has no call for: walking a folder, or removing
+	/// one (std::filesystem never follows a junction there; LLVM's walk takes a junction for a folder).
 	std::filesystem::path ExtendedPath(const std::filesystem::path& path);
 	/// A path ExtendedPath spelled, or an entry of a walk of one, as it reads without the spelling.
 	std::filesystem::path PlainPath(const std::filesystem::path& path);

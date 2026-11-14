@@ -1,4 +1,7 @@
 #include "Script/ScriptDll.h"
+// Debug scripts linked into DLLs with PDBs (docs/runtime/04 section 6.4) are Windows': a Linux host links every script in
+// memory (ScriptHost::Link), a debug script with its DWARF in the JIT image.
+#if defined(_WIN32) // whole file
 #include "Script/ScriptDllImports.h"
 #include "Compiler/FileIo.h"
 #include <lld/Common/Driver.h>
@@ -273,3 +276,4 @@ namespace Scripting
 		return std::make_unique<DllScript>(module, dll, image, host.Function<ImageRemoveFn>("c4_script_image_remove"));
 	}
 } // namespace Scripting
+#endif

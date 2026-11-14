@@ -285,6 +285,7 @@ namespace Scripting
 	llvm::Value* ExprEmitter::EmitVa(const VaNode* n)
 	{
 		llvm::Value* list = Emit(n->list);
+		if (m_Ctx.mctx().System() == TargetSystem::Linux) return EmitSystemVVa(n, list);
 		switch (n->op)
 		{
 		case VaNode::Op::Start: return VaIntrinsic("llvm.va_start.p0", { list });
@@ -302,6 +303,124 @@ namespace Scripting
 		const bool byPointer = n->type->GetKind() == TypeKind::Object && mc.abi().PassesByHiddenPtr(n->type);
 		llvm::Value* at = byPointer ? B.CreateLoad(ptr, slot) : slot;
 		return B.CreateLoad(mc.Lower(n->type), at);
+	}
+
+	// System V: a va_list is { i32 gp_offset, i32 fp_offset, ptr overflow_arg_area, ptr reg_save_area }, which C passes as
+	// a pointer to it. C4's va_list is that pointer: va_start and va_copy point it at a list in the function's frame, so a
+	// C function (vprintf) takes it as it is. va_arg reads as clang reads (SystemVVaArg): a scalar or an aggregate's
+	// eightbytes from the registers they came in while they are left, else from the stack, as a larger aggregate is.
+	llvm::Value* ExprEmitter::EmitSystemVVa(const VaNode* n, llvm::Value* list)
+	{
+		auto& B = m_Ctx.builder();
+		ModuleContext& mc = m_Ctx.mctx();
+		llvm::LLVMContext& ctx = mc.context();
+		auto* ptr = llvm::PointerType::get(ctx, 0);
+		auto* i32 = llvm::Type::getInt32Ty(ctx);
+		llvm::StructType* tag = llvm::StructType::get(ctx, { i32, i32, ptr, ptr });
+		llvm::Type* tagArray = llvm::ArrayType::get(tag, 1);
+		switch (n->op)
+		{
+		case VaNode::Op::Start:
+		{
+			llvm::Value* opened = m_Ctx.EntryAlloca(tagArray, "va_list");
+			B.CreateStore(opened, list);
+			return VaIntrinsic("llvm.va_start.p0", { opened });
+		}
+		case VaNode::Op::End: return VaIntrinsic("llvm.va_end.p0", { B.CreateLoad(ptr, list) });
+		case VaNode::Op::Copy:
+		{
+			llvm::Value* copy = m_Ctx.EntryAlloca(tagArray, "va_list");
+			B.CreateStore(copy, list);
+			return VaIntrinsic("llvm.va_copy.p0", { copy, B.CreateLoad(ptr, Emit(n->source)) });
+		}
+		default: break;
+		}
+		llvm::Value* opened = B.CreateLoad(ptr, list);
+		llvm::Type* object = mc.Lower(n->type);
+		llvm::Type* registers = mc.abi().RegisterType(n->type);
+		if (registers)
+		{
+			llvm::Value* read = B.CreateLoad(registers, SystemVVaArg(opened, registers, tag));
+			return B.CreateLoad(object, m_Ctx.Materialize(read, mc.abi().CoercionSlot(object, registers)));
+		}
+		return B.CreateLoad(object, SystemVVaArg(opened, mc.abi().IsByValueAggregate(n->type) ? nullptr : object, tag, object));
+	}
+
+	// The address of the next argument in the System V list `opened`, the list moved past it. `registers` is the type it
+	// came in registers as (a scalar, or an aggregate's one or two eightbytes); an aggregate in memory has none and
+	// `memory` is its type. While the registers its eightbytes need are left in the save area (6 general ones of 8
+	// bytes, 8 vector ones of 16) it is read from there, a two-eightbyte one gathered into a temporary; else from the
+	// stack, 8-byte slots, aligned to 16 for a type that needs it. LLVM's own va_arg instruction is not used: x86-64
+	// lowers it wrongly at -O0, and clang never emits it there.
+	llvm::Value* ExprEmitter::SystemVVaArg(llvm::Value* opened, llvm::Type* registers, llvm::StructType* tag, llvm::Type* memory)
+	{
+		auto& B = m_Ctx.builder();
+		const llvm::DataLayout& layout = m_Ctx.mctx().layout();
+		llvm::LLVMContext& ctx = m_Ctx.mctx().context();
+		auto* ptr = llvm::PointerType::get(ctx, 0);
+		const uint32_t gpEnd = 6 * 8;
+		const uint32_t fpEnd = gpEnd + 8 * 16;
+		std::vector<llvm::Type*> pieces;
+		if (auto* pair = registers ? llvm::dyn_cast<llvm::StructType>(registers) : nullptr) pieces.assign(pair->element_begin(), pair->element_end());
+		else if (registers) pieces.push_back(registers);
+		auto isVector = [](llvm::Type* piece) { return piece->isFloatingPointTy() || piece->isVectorTy(); };
+		uint32_t gpNeeded = 0, fpNeeded = 0;
+		for (llvm::Type* piece : pieces) (isVector(piece) ? fpNeeded : gpNeeded) += 1;
+
+		llvm::Function* fn = B.GetInsertBlock()->getParent();
+		llvm::BasicBlock* inRegisters = llvm::BasicBlock::Create(ctx, "va.register", fn);
+		llvm::BasicBlock* onStack = llvm::BasicBlock::Create(ctx, "va.stack", fn);
+		llvm::BasicBlock* join = llvm::BasicBlock::Create(ctx, "va.end", fn);
+		llvm::Value* gpAt = B.CreateStructGEP(tag, opened, 0);
+		llvm::Value* fpAt = B.CreateStructGEP(tag, opened, 1);
+		llvm::Value* gp = B.CreateLoad(B.getInt32Ty(), gpAt, "va.gp");
+		llvm::Value* fp = B.CreateLoad(B.getInt32Ty(), fpAt, "va.fp");
+		llvm::Value* fits = B.getInt1(!pieces.empty());
+		if (gpNeeded) fits = B.CreateAnd(fits, B.CreateICmpULE(gp, B.getInt32(gpEnd - 8 * gpNeeded)));
+		if (fpNeeded) fits = B.CreateAnd(fits, B.CreateICmpULE(fp, B.getInt32(fpEnd - 16 * fpNeeded)));
+		B.CreateCondBr(fits, inRegisters, onStack);
+
+		B.SetInsertPoint(inRegisters);
+		llvm::Value* saveArea = B.CreateLoad(ptr, B.CreateStructGEP(tag, opened, 3));
+		auto at = [&](llvm::Value* offset) { return B.CreateInBoundsGEP(B.getInt8Ty(), saveArea, B.CreateZExt(offset, B.getInt64Ty())); };
+		llvm::Value* fromRegisters = nullptr;
+		if (pieces.size() == 1) fromRegisters = at(isVector(pieces[0]) ? fp : gp);
+		else if (!pieces.empty())
+		{
+			fromRegisters = m_Ctx.EntryAlloca(registers, "va.pair");
+			llvm::Value* gpCursor = gp;
+			llvm::Value* fpCursor = fp;
+			for (unsigned i = 0; i < pieces.size(); ++i)
+			{
+				llvm::Value*& cursor = isVector(pieces[i]) ? fpCursor : gpCursor;
+				B.CreateStore(B.CreateLoad(pieces[i], at(cursor)), B.CreateStructGEP(registers, fromRegisters, i));
+				cursor = B.CreateAdd(cursor, B.getInt32(isVector(pieces[i]) ? 16 : 8));
+			}
+		}
+		if (gpNeeded) B.CreateStore(B.CreateAdd(gp, B.getInt32(8 * gpNeeded)), gpAt);
+		if (fpNeeded) B.CreateStore(B.CreateAdd(fp, B.getInt32(16 * fpNeeded)), fpAt);
+		B.CreateBr(join);
+
+		B.SetInsertPoint(onStack);
+		llvm::Type* stacked = memory ? memory : registers;
+		const uint64_t bytes = (layout.getTypeAllocSize(stacked) + 7) & ~uint64_t(7);
+		llvm::Value* areaAt = B.CreateStructGEP(tag, opened, 2);
+		llvm::Value* area = B.CreateLoad(ptr, areaAt);
+		if (layout.getABITypeAlign(stacked).value() > 8)
+		{
+			// A 16-byte aligned argument starts at the next 16-byte slot.
+			llvm::Value* address = B.CreatePtrToInt(area, B.getInt64Ty());
+			address = B.CreateAnd(B.CreateAdd(address, B.getInt64(15)), B.getInt64(~uint64_t(15)));
+			area = B.CreateIntToPtr(address, ptr);
+		}
+		B.CreateStore(B.CreateConstInBoundsGEP1_64(B.getInt8Ty(), area, bytes), areaAt);
+		B.CreateBr(join);
+
+		B.SetInsertPoint(join);
+		llvm::PHINode* address = B.CreatePHI(ptr, 2, "va.at");
+		address->addIncoming(fromRegisters ? fromRegisters : llvm::ConstantPointerNull::get(ptr), inRegisters);
+		address->addIncoming(area, onStack);
+		return address;
 	}
 
 	llvm::Value* ExprEmitter::GcStore(llvm::Value* addr, llvm::Value* value, const Type* elemType, MemoryAccess access)

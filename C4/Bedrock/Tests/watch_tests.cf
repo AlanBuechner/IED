@@ -68,8 +68,13 @@ class WatchTests {
 		FS::Watcher all = FS::Watcher(folder.CStr());
 		FS::Watcher top = FS::Watcher(folder.CStr(), false);
 		WriteWatchedFile(folder / "sub" / "inner.txt", "x");
-		assert_true(WaitForChange(all, FS::ChangeKind::Added, "sub\\inner.txt", ""), "a file in a subfolder, by its relative path");
-		assert_true(!AnyChangeAt(top, "sub\\inner.txt", 300), "not seen without recursion");
+#if defined(PLATFORM_LINUX)
+		const char* inner = "sub/inner.txt";
+#else
+		const char* inner = "sub\\inner.txt";
+#endif
+		assert_true(WaitForChange(all, FS::ChangeKind::Added, inner, ""), "a file in a subfolder, by its relative path");
+		assert_true(!AnyChangeAt(top, inner, 300), "not seen without recursion");
 		FS::MakeDirectory((folder / "made").CStr());
 		assert_true(WaitForChange(top, FS::ChangeKind::Added, "made", ""), "the folder's own entries are");
 		FS::RemoveAll(folder.CStr());

@@ -1,3 +1,4 @@
+#ifdef _WIN32 // the Win32 debugger; Linux's engine is Target/LinuxEngine.h
 #include "Target/Process.h"
 #include <algorithm>
 
@@ -92,3 +93,4 @@ namespace C4DAP::Target
 		return thread && SetThreadContext(thread, &context);
 	}
 } // namespace C4DAP::Target
+#endif

@@ -45,6 +45,8 @@ namespace Scripting
 
 		std::vector<const Type*> ParameterTypes(const CallSite& site) const;
 		void AppendArguments(const CallSite& site, std::vector<llvm::Value*>& args);
+		// The variadic arguments AppendArguments found going on the stack, marked byval on `call` (System V).
+		void PassOnStack(llvm::CallBase* call);
 		llvm::Value* EmitArgument(const CallSite& site, uint32_t i, const Type* paramType, bool variadicExtra);
 		/// The temporary passed for an argument held in memory - by hidden pointer, or an rvalue for a reference - when
 		/// the argument is built in it (ExprEmitter::BuildsInPlace); null otherwise.
@@ -59,5 +61,6 @@ namespace Scripting
 
 		IRContext& m_Ctx;
 		ExprEmitter& m_Expr;
+		std::vector<std::pair<unsigned, const Type*>> m_StackArguments; // argument index, type (PassOnStack)
 	};
 } // namespace Scripting

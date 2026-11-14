@@ -55,6 +55,8 @@ namespace Ied
 		if (IsMaster()) {
 			m_Servers = new WorkspaceServers(self);
 			m_Proxy = new Proxy(self);
+			m_SharedMirror = new SharedMirror(self);
+			if (IsConfigServer(this.m_Config)) m_ConfigServer = new ConfigServer(self, FS::Path(this.m_Config.m_ConfigRoot.View()));
 		}
 		else m_Master = new MasterLink(this.m_Config.m_MasterControl.View());
 		m_LogThread = Threading::Thread::Run([self]() { self->m_LogPump.Run(self); });

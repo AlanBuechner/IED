@@ -40,6 +40,8 @@ namespace Testing
 		void MsvcNamesBackReferenceRepeatedNames();
 		TEST_FUNC(Semantic.ObjectModel)
 		void SignaturesFollowMsvcConventions();
+		TEST_FUNC(Semantic.ObjectModel)
+		void SignaturesFollowSystemVConventions();
 
 		// --- emitted tables -----------------------------------------------------------
 		TEST_FUNC(Semantic.ObjectModel)

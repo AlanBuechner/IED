@@ -5,6 +5,8 @@
 #include "Backend/CodeGen/Abi.h"
 #include "Backend/CodeGen/MsvcNames.h"
 #include "Backend/CodeGen/CodeGenDriver.h"
+#include "Backend/CodeGen/ModuleContext.h"
+#include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 
@@ -253,7 +255,8 @@ namespace Testing
 		const ObjectType* large = Object(model, "Large");
 		TEST_ASSERT(small && large);
 		llvm::LLVMContext ctx;
-		Abi abi(ctx);
+		ModuleContext module(ctx, TargetSystem::Windows);
+		Abi& abi = module.abi();
 
 		// A member function: `this` first, then the result pointer; every object returns through it.
 		auto member = abi.SignatureOf(small, Abi::CallKind::Member);
@@ -280,6 +283,52 @@ namespace Testing
 		auto freeSmall = abi.SignatureOf(small, Abi::CallKind::Free);
 		TEST_ASSERT(!freeSmall.sret);
 		TEST_ASSERT_EQ((int)freeSmall.firstParam, 0);
+		TEST_ASSERT(abi.RegisterType(small) == llvm::Type::getInt64Ty(ctx));
+		TEST_ASSERT(abi.RegisterType(Object(model, "Large")) == nullptr);
+	}
+
+	void ObjectModelTest::SignaturesFollowSystemVConventions()
+	{
+		CompilerInstance compiler;
+		auto& model = MakeModel(compiler,
+			"struct Long { public int64 v; }\n"
+			"struct Pair { public int64 a; public int64 b; }\n"
+			"struct Floats { public float x; public float y; }\n"
+			"struct Three { public float x; public float y; public float z; }\n"
+			"struct Mixed { public double d; public int32 i; }\n"
+			"struct Bytes { public int8 a; public int8 b; public int8 c; }\n"
+			"struct Large { public int64 a; public int64 b; public int64 c; }\n");
+		llvm::LLVMContext ctx;
+		ModuleContext module(ctx, TargetSystem::Linux);
+		Abi& abi = module.abi();
+		auto* i64 = llvm::Type::getInt64Ty(ctx);
+		auto* f32 = llvm::Type::getFloatTy(ctx);
+		auto* twoFloats = llvm::FixedVectorType::get(f32, 2);
+
+		// Up to 16 bytes cross in registers, an eightbyte at a time: an integer of its bytes, or the floats it holds.
+		TEST_ASSERT(abi.RegisterType(Object(model, "Long")) == i64);
+		TEST_ASSERT(abi.RegisterType(Object(model, "Pair")) == llvm::StructType::get(ctx, { i64, i64 }));
+		TEST_ASSERT(abi.RegisterType(Object(model, "Floats")) == twoFloats);
+		TEST_ASSERT(abi.RegisterType(Object(model, "Three")) == llvm::StructType::get(ctx, { twoFloats, f32 }));
+		// The int32 and its tail padding are one INTEGER eightbyte: a whole register, as clang's { double, i32 } is.
+		TEST_ASSERT(abi.RegisterType(Object(model, "Mixed")) == llvm::StructType::get(ctx, { llvm::Type::getDoubleTy(ctx), i64 }));
+		TEST_ASSERT(abi.RegisterType(Object(model, "Bytes")) == llvm::IntegerType::get(ctx, 24));
+
+		// More goes in memory: a hidden pointer, byval to a C function, and an sret return.
+		const ObjectType* large = Object(model, "Large");
+		TEST_ASSERT(abi.RegisterType(large) == nullptr);
+		TEST_ASSERT(abi.PassesOnStack(large));
+		TEST_ASSERT(!abi.PassesOnStack(Object(model, "Pair")));
+
+		// Itanium: the result pointer comes before `this`, and a member function returns a small object in registers.
+		auto member = abi.SignatureOf(large, Abi::CallKind::Member);
+		TEST_ASSERT_EQ(member.sretIndex, 0);
+		TEST_ASSERT_EQ(member.thisIndex, 1);
+		TEST_ASSERT_EQ((int)member.firstParam, 2);
+		auto smallMember = abi.SignatureOf(Object(model, "Pair"), Abi::CallKind::Member);
+		TEST_ASSERT(!smallMember.sret);
+		TEST_ASSERT_EQ(smallMember.thisIndex, 0);
+		TEST_ASSERT_EQ((int)smallMember.firstParam, 1);
 	}
 
 	// --- emitted tables -------------------------------------------------------------

@@ -33,6 +33,9 @@ namespace
 		std::vector<std::string> includeDirs;
 		std::vector<std::string> targetFlags; // -march=<cpu>, -m<feature>, -mno-<feature>: the C4 build's processor
 		std::string windowsSysroot;            // --winsysroot: the MSVC and SDK kit the compiler uses (Toolchain::WindowsSysroot)
+		std::string system = "windows-x64";    // --target: the system the C4 build is for (D-86)
+		std::string sysroot;                   // --sysroot: a Linux build's (Toolchain::LinuxSysroot)
+		std::string resourceDir;               // --resource-dir: clang's own headers (stddef.h), which the sysroot has not
 		std::vector<std::string> clangArgs;   // what clang parses the header with (main builds it)
 	};
 
@@ -50,6 +53,9 @@ namespace
 			else if (a == "-D" && i + 1 < argc) out.defines.push_back(argv[++i]);
 			else if (a == "-I" && i + 1 < argc) out.includeDirs.push_back(argv[++i]);
 			else if (a == "--winsysroot" && i + 1 < argc) out.windowsSysroot = argv[++i];
+			else if (a == "--target" && i + 1 < argc) out.system = argv[++i];
+			else if (a == "--sysroot" && i + 1 < argc) out.sysroot = argv[++i];
+			else if (a == "--resource-dir" && i + 1 < argc) out.resourceDir = argv[++i];
 			else if (a.size() > 2 && a.compare(0, 2, "-m") == 0) out.targetFlags.push_back(a);
 		}
 		return !out.header.empty() && !out.outFile.empty();
@@ -135,7 +141,8 @@ int main(int argc, char** argv)
 	CBindArgs args;
 	if (!ParseArgs(argc, argv, args))
 	{
-		std::cerr << "usage: CBind.exe <header> <outFile> [--lang c|c++] [-D name=value]... [-I dir]... [-march=cpu] [-m[no-]feature]... [--winsysroot dir]\n";
+		std::cerr << "usage: CBind.exe <header> <outFile> [--lang c|c++] [-D name=value]... [-I dir]... [-march=cpu] [-m[no-]feature]... "
+			"[--winsysroot dir] [--target windows-x64|linux-x64] [--sysroot dir] [--resource-dir dir]\n";
 		return 1;
 	}
 
@@ -153,15 +160,18 @@ int main(int argc, char** argv)
 	// taken from this tool's MangleContext and must be byte-identical to the symbols in the
 	// foreign object file. A target mismatch would switch the mangling scheme (MSVC vs Itanium)
 	// and silently break link resolution.
+	const bool forLinux = args.system == "linux-x64";
 	cmdLine.push_back("-target");
-	cmdLine.push_back("x86_64-pc-windows-msvc");
-	cmdLine.push_back("-mstackrealign");
+	cmdLine.push_back(forLinux ? "x86_64-unknown-linux-gnu" : "x86_64-pc-windows-msvc");
+	if (forLinux && !args.sysroot.empty()) cmdLine.push_back("--sysroot=" + args.sysroot);
+	if (forLinux && !args.resourceDir.empty()) cmdLine.push_back("-resource-dir=" + args.resourceDir);
+	if (!forLinux) cmdLine.push_back("-mstackrealign");
 	cmdLine.push_back("-x");
 	cmdLine.push_back(args.language);
 	for (const auto& d : args.defines) cmdLine.push_back("-D" + d);
 	for (const auto& i : args.includeDirs) cmdLine.push_back("-I" + i);
 	cmdLine.insert(cmdLine.end(), args.targetFlags.begin(), args.targetFlags.end());
-	if (!args.windowsSysroot.empty())
+	if (!forLinux && !args.windowsSysroot.empty())
 	{
 		// The headers the foreign objects compile with (CompileForeignSource), not an installed Visual Studio's.
 		cmdLine.push_back("-Xmicrosoft-windows-sys-root");

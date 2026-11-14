@@ -117,11 +117,14 @@ class NetTlsTests {
 		Net::TcpStream client = peer.Connect();
 		assert_true(!client.IsSecure() && client.SecureVersion() == Net::TlsVersion::None, "plain until secured");
 		assert_true(client.StartTls(TlsTrusting("localhost", kTlsTestCaPem), kTlsWaitMs), client.Error());
-		assert_true(client.IsSecure() && peer.secured.Load(), "secured on both sides");
+		assert_true(client.IsSecure(), "secured");
 		const Net::TlsVersion version = client.SecureVersion();
 		assert_true(version == Net::TlsVersion::Tls12 || version == Net::TlsVersion::Tls13, "TLS 1.2 or 1.3");
 		char[5] reply;
 		assert_true(client.SendText(TlsText("hello"), kTlsWaitMs) && client.ReceiveAll((void*)&reply[0], 5, kTlsWaitMs), "a round trip");
+		// Under TLS 1.3 the client's handshake ends before the server has read its last message: the server is secured
+		// once it answered.
+		assert_true(peer.secured.Load(), "secured on both sides");
 		assert_true(Core::StringView(&reply[0], 5) == "hello", "the bytes come back as sent");
 		client.Shutdown(Net::Shutdown::Send);
 		char[4] rest;

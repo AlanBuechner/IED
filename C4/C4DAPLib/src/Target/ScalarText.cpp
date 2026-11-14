@@ -1,3 +1,4 @@
+#ifdef _WIN32 // the Win32 debugger; Linux's engine is Target/LinuxEngine.h
 #include "Target/ScalarText.h"
 #include <charconv>
 #include <cstdio>
@@ -113,3 +114,4 @@ namespace C4DAP::Target
 		return quoted;
 	}
 } // namespace C4DAP::Target
+#endif

@@ -1,9 +1,12 @@
 #include "Compiler/Toolchain.h"
 #include "Compiler/FileIo.h"
+#include "Compiler/TargetSystem.h"
 #include <cstdlib>
 #include <system_error>
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <llvm/Support/Program.h>
 #endif
 
 namespace Scripting::Toolchain
@@ -43,6 +46,27 @@ namespace Scripting::Toolchain
 			}
 			return {};
 		}
+
+		// A program's file name where the compiler runs: `clang.exe` on Windows, `clang` on Linux.
+		fs::path ProgramName(const char* name) { return fs::path(std::string(name) + ExecutableExtension(HostSystem())); }
+
+		// A shared library's file name where the compiler runs, as Nuke's C/C++ driver names the ones it builds.
+		fs::path LibraryName(const char* name) { return fs::path(std::string(name) + (HostSystem() == TargetSystem::Windows ? ".dll" : ".so")); }
+
+#ifndef _WIN32
+		// The clang of an LLVM release outside C4's home, for a compiler that runs on Linux (the checkout's vendor/llvm is
+		// Windows'): $LLVM_HOME's, else the one on PATH with its links followed, so its resource folder is found above it.
+		fs::path SystemClang()
+		{
+			if (const char* llvm = std::getenv("LLVM_HOME"); llvm && *llvm && IsFile(fs::path(llvm) / "bin" / "clang"))
+				return fs::path(llvm) / "bin" / "clang";
+			const llvm::ErrorOr<std::string> found = llvm::sys::findProgramByName("clang");
+			if (!found) return {};
+			std::error_code ec;
+			const fs::path resolved = fs::canonical(*found, ec);
+			return ec ? fs::path(*found) : resolved;
+		}
+#endif
 	}
 
 	fs::path Executable()
@@ -51,6 +75,10 @@ namespace Scripting::Toolchain
 		wchar_t buffer[MAX_PATH] = {};
 		const DWORD length = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
 		if (length > 0 && length < MAX_PATH) return fs::path(buffer);
+#else
+		std::error_code ec;
+		const fs::path self = fs::read_symlink("/proc/self/exe", ec);
+		if (!ec) return self;
 #endif
 		return {};
 	}
@@ -63,15 +91,30 @@ namespace Scripting::Toolchain
 
 	fs::path Clang()
 	{
-		const fs::path installed = Home() / "toolchain" / "bin" / "clang.exe";
+		const fs::path installed = Home() / "toolchain" / "bin" / ProgramName("clang");
 		if (IsFile(installed)) return installed;
+#ifdef _WIN32
 		return InRepository(fs::path("vendor") / "llvm" / "bin" / "clang.exe");
+#else
+		return SystemClang();
+#endif
 	}
 
 	fs::path LldLink()
 	{
 		const fs::path clang = Clang();
-		return !clang.empty() && IsFile(clang.parent_path() / "lld-link.exe") ? clang.parent_path() / "lld-link.exe" : fs::path();
+		const fs::path lld = clang.empty() ? fs::path() : clang.parent_path() / ProgramName("lld-link");
+		return !lld.empty() && IsFile(lld) ? lld : fs::path();
+	}
+
+	fs::path ClangResourceDirectory()
+	{
+		const fs::path clang = Clang();
+		if (clang.empty()) return {};
+		std::error_code ec;
+		for (const fs::directory_entry& version : fs::directory_iterator(ExtendedPath(clang.parent_path().parent_path() / "lib" / "clang"), ec))
+			if (const fs::path folder = PlainPath(version.path()); IsFolder(folder / "include")) return folder;
+		return {};
 	}
 
 	fs::path ClangRuntimeLibraries()
@@ -90,6 +133,14 @@ namespace Scripting::Toolchain
 		return toolsets.empty() ? fs::path() : toolsets.parent_path().parent_path().parent_path();
 	}
 
+	fs::path LinuxSysroot()
+	{
+		const fs::path sysroot = fs::path("sysroots") / "linux-x64";
+		if (IsFile(Home() / sysroot / "sysroot.txt")) return Home() / sysroot;
+		const fs::path vendored = InRepository(fs::path("vendor") / sysroot / "sysroot.txt");
+		return vendored.empty() ? fs::path() : vendored.parent_path();
+	}
+
 	fs::path Runtime()
 	{
 		const fs::path installed = Home() / "C4Runtime";
@@ -99,18 +150,19 @@ namespace Scripting::Toolchain
 
 	fs::path CBind()
 	{
-		const fs::path installed = Home() / "CBind" / "CBind.exe";
+		const fs::path installed = Home() / "CBind" / ProgramName("CBind");
 		if (IsFile(installed)) return installed;
-		const fs::path sibling = ExecutableFolder().parent_path() / "CBind" / "CBind.exe";
+		const fs::path sibling = ExecutableFolder().parent_path() / "CBind" / ProgramName("CBind");
 		return IsFile(sibling) ? sibling : fs::path();
 	}
 
 	fs::path ScriptHost()
 	{
+		const fs::path library = LibraryName("C4Script");
 		const fs::path installed = Home() / "C4Script";
-		if (IsFile(installed / "C4Script.dll")) return installed;
+		if (IsFile(installed / library)) return installed;
 		const fs::path sibling = ExecutableFolder().parent_path() / "C4Script";
-		return IsFile(sibling / "C4Script.dll") ? sibling : fs::path();
+		return IsFile(sibling / library) ? sibling : fs::path();
 	}
 
 	fs::path Bedrock()

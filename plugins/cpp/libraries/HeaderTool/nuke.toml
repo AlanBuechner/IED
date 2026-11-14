@@ -7,4 +7,11 @@ group = "C++ Libraries"
 description = "Reflection header analysis (libclang)"
 depends = ["StaticReflection"]
 includes = ["${cpp.llvm}/include"]
+
+[project.system.windows]
 links = ["ntdll.lib", "version.lib", "${cpp.llvm}/lib/*.lib"]
+
+# clang's C++ API (tooling, AST matchers) and LLVM as the builder's shared libraries: the HeaderTool runs only where it
+# is built, and one LLVM in the process (an archive's copy beside libclang-cpp's would register its options twice).
+[project.system.linux]
+links = ["libclang-cpp.so", "libLLVM.so"]

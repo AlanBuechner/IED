@@ -4,8 +4,10 @@
 #include <cstring>
 #include <unordered_map>
 
+#if defined(_WIN32)
 extern "C" void __chkstk();
 extern "C" int _fltused;
+#endif
 
 namespace Scripting
 {
@@ -13,7 +15,9 @@ namespace Scripting
 	{
 		static const std::unordered_map<std::string, void*> kSymbols = {
 			{ "memcpy", (void*)&memcpy }, { "memmove", (void*)&memmove }, { "memset", (void*)&memset }, { "memcmp", (void*)&memcmp },
+#if defined(_WIN32)
 			{ "__chkstk", (void*)&__chkstk }, { kFloatingPointMarker, (void*)&_fltused },
+#endif
 			{ "sin", (void*)(double (*)(double))&sin }, { "cos", (void*)(double (*)(double))&cos }, { "tan", (void*)(double (*)(double))&tan },
 			{ "asin", (void*)(double (*)(double))&asin }, { "acos", (void*)(double (*)(double))&acos }, { "atan", (void*)(double (*)(double))&atan },
 			{ "atan2", (void*)(double (*)(double, double))&atan2 }, { "exp", (void*)(double (*)(double))&exp }, { "exp2", (void*)(double (*)(double))&exp2 },

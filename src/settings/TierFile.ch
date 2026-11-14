@@ -28,6 +28,9 @@ namespace Ied
 
 		public Core::String m_Tier;
 		public FS::Path m_File;
+		// The Shared tier's mirror (docs/35): it may set what the app tier may, but for a setting that says
+		// `"x-ied-shared": false`; a key no plugin here declares is no problem (the config server serves every machine).
+		public bool m_Shared;
 		public int64 m_Revision;
 		public Core::String m_Text;
 		public Core::HashMap<Core::String, Core::String> m_Values;   // key -> its last valid value, JSON

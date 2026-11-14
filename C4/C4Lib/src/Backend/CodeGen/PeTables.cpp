@@ -28,6 +28,64 @@ namespace Scripting
 			return llvm::ConstantExpr::getTrunc(llvm::ConstantExpr::getSub(target, base), llvm::Type::getInt32Ty(ctx));
 		}
 
+		namespace
+		{
+			// The target of an ImageRelative reference `c` (trunc(sub(ptrtoint target, ptrtoint base)))), or null.
+			llvm::Constant* ReferencedBy(llvm::Constant* c, const llvm::GlobalVariable* base)
+			{
+				auto* trunc = llvm::dyn_cast<llvm::ConstantExpr>(c);
+				if (!trunc || trunc->getOpcode() != llvm::Instruction::Trunc) return nullptr;
+				auto* sub = llvm::dyn_cast<llvm::ConstantExpr>(trunc->getOperand(0));
+				if (!sub || sub->getOpcode() != llvm::Instruction::Sub) return nullptr;
+				auto* from = llvm::dyn_cast<llvm::ConstantExpr>(sub->getOperand(1));
+				if (!from || from->getOpcode() != llvm::Instruction::PtrToInt || from->getOperand(0) != base) return nullptr;
+				return sub->getOperand(0);
+			}
+
+			// `init`, the part of `table` at the indices `path`, with each reference relative to its own field.
+			llvm::Constant* Anchor(llvm::Constant* init, llvm::GlobalVariable* table, const llvm::GlobalVariable* base, std::vector<llvm::Constant*>& path)
+			{
+				llvm::LLVMContext& ctx = init->getContext();
+				auto* i32 = llvm::Type::getInt32Ty(ctx);
+				if (auto* aggregate = llvm::dyn_cast<llvm::ConstantAggregate>(init))
+				{
+					std::vector<llvm::Constant*> elements;
+					bool changed = false;
+					for (unsigned i = 0; i < aggregate->getNumOperands(); ++i)
+					{
+						path.push_back(llvm::ConstantInt::get(i32, i));
+						elements.push_back(Anchor(aggregate->getOperand(i), table, base, path));
+						path.pop_back();
+						changed |= elements.back() != aggregate->getOperand(i);
+					}
+					if (!changed) return init;
+					if (auto* structure = llvm::dyn_cast<llvm::StructType>(init->getType())) return llvm::ConstantStruct::get(structure, elements);
+					return llvm::ConstantArray::get(llvm::cast<llvm::ArrayType>(init->getType()), elements);
+				}
+				llvm::Constant* target = ReferencedBy(init, base);
+				if (!target) return init;
+				auto* i64 = llvm::Type::getInt64Ty(ctx);
+				llvm::Constant* field = llvm::ConstantExpr::getInBoundsGetElementPtr(table->getValueType(), table, path);
+				return llvm::ConstantExpr::getTrunc(llvm::ConstantExpr::getSub(target, llvm::ConstantExpr::getPtrToInt(field, i64)), i32);
+			}
+		}
+
+		void AnchorAtFields(llvm::Module& m)
+		{
+			llvm::GlobalVariable* base = m.getGlobalVariable("__ImageBase");
+			if (!base) return;
+			auto* i32 = llvm::Type::getInt32Ty(m.getContext());
+			for (llvm::GlobalVariable& table : m.globals())
+			{
+				if (!table.hasInitializer()) continue;
+				std::vector<llvm::Constant*> path = { llvm::ConstantInt::get(i32, 0) };
+				llvm::Constant* anchored = Anchor(table.getInitializer(), &table, base, path);
+				if (anchored != table.getInitializer()) table.setInitializer(anchored);
+			}
+			base->removeDeadConstantUsers();
+			if (base->use_empty()) base->eraseFromParent();
+		}
+
 		llvm::GlobalVariable* Shared(llvm::Module& m, const std::string& name, llvm::Constant* init, const char* section)
 		{
 			if (auto* existing = m.getGlobalVariable(name)) return existing;

@@ -3,7 +3,30 @@
 // AVX-512 instructions fault however the processor supports them.
 
 #include "PlatformRuntimeC.h"
+
+#if defined(_WIN32)
 #include <intrin.h>
+
+static void ReadCpuid(int out[4], int leaf, int subleaf) { __cpuidex(out, leaf, subleaf); }
+static uint64_t ReadXcr(unsigned index) { return _xgetbv(index); }
+#else
+#include <cpuid.h>
+
+static void ReadCpuid(int out[4], int leaf, int subleaf)
+{
+	unsigned a = 0, b = 0, c = 0, d = 0;
+	__cpuid_count((unsigned)leaf, (unsigned)subleaf, a, b, c, d);
+	out[0] = (int)a; out[1] = (int)b; out[2] = (int)c; out[3] = (int)d;
+}
+
+// Spelled out: clang's _xgetbv needs the xsave feature on its caller.
+static uint64_t ReadXcr(unsigned index)
+{
+	unsigned low = 0, high = 0;
+	__asm__ volatile("xgetbv" : "=a"(low), "=d"(high) : "c"(index));
+	return ((uint64_t)high << 32) | low;
+}
+#endif
 
 enum
 {
@@ -24,18 +47,18 @@ static int Bit(int word, int bit) { return (word >> bit) & 1; }
 static void ReadLeaves(Leaves* leaves)
 {
 	int highest[4];
-	__cpuid(highest, 0);
-	__cpuid(leaves->basic, 1);
-	if (highest[0] >= 7) __cpuidex(leaves->extended, 7, 0);
+	ReadCpuid(highest, 0, 0);
+	ReadCpuid(leaves->basic, 1, 0);
+	if (highest[0] >= 7) ReadCpuid(leaves->extended, 7, 0);
 	int highestAmd[4];
-	__cpuid(highestAmd, (int)0x80000000);
-	if ((unsigned)highestAmd[0] >= 0x80000001u) __cpuid(leaves->amd, (int)0x80000001);
+	ReadCpuid(highestAmd, (int)0x80000000, 0);
+	if ((unsigned)highestAmd[0] >= 0x80000001u) ReadCpuid(leaves->amd, (int)0x80000001, 0);
 }
 
 // The vector state the system saves: 0 when it does not say (no OSXSAVE).
 static uint64_t SavedState(const Leaves* leaves)
 {
-	return Bit(leaves->basic[2], 27) ? _xgetbv(0) : 0;
+	return Bit(leaves->basic[2], 27) ? ReadXcr(0) : 0;
 }
 
 static uint64_t Feature(int present, int feature) { return present ? (uint64_t)1 << feature : 0; }

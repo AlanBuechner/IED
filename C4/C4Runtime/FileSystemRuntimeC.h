@@ -1,7 +1,8 @@
 #pragma once
 // The file system behind Bedrock's FS namespace beyond the fs_* builtins (D-69): what is at a path, copies, absolute
-// and real paths, and watching a folder for changes. One implementation per OS (FileSystem/*Win32.c). Paths are
-// UTF-8 and come back as the system writes them.
+// and real paths, and watching a folder for changes. One implementation per OS (FileSystem/*Win32.c; on Linux
+// FileSystem/*Posix.c and WatchLinux.c), the fs_* builtins' directories and renames beside them (Directory*.c). Paths
+// are UTF-8 and come back as the system writes them ('\' on Windows, '/' on Linux).
 
 #include <stdint.h>
 

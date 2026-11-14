@@ -43,9 +43,12 @@ def plan(session, project, test=False):
 	configuration = session.configuration
 	int_dir = session.int_dir(project) + ("/tests" if test else "")
 	output = session.test_output(project) if test else session.output(project)
-	modules = description.modules_for(session.workspace, project, configuration, lambda module, text: expand(text, session.variables(module)))
+	modules = description.modules_for(session.workspace, project, configuration, lambda module, text: expand(text, session.variables(module)),
+		session.system)
 	description_path = fsutil.join(int_dir, DESCRIPTION_FILE)
 	argv = toolchain.compiler_command() + ["--projects", description_path, f"-O{configuration.optimize}"]
+	if session.system == "linux":
+		argv += ["--target", "linux-x64"] # cross-compiled on Windows (C4 D-86)
 	if configuration.debug_info:
 		argv.append("-g")
 	if configuration.incremental and toolchain.accepts("--incremental"):
@@ -60,7 +63,7 @@ def plan(session, project, test=False):
 		argv += ["-l", link]
 	if project.subsystem != "console" and not test:
 		argv += ["--subsystem", project.subsystem]
-	argv += expand_argv(compiler_args(project, configuration), session.variables(project))
+	argv += expand_argv(compiler_args(project, configuration, session.system), session.variables(project))
 	argv += ["--int-dir", int_dir, "-o", output]
 	tracked = description.tracked_files(modules) + _toolchain_files(toolchain)
 	return CompileJob(label=f"{project.name}{' tests' if test else ''}", argv=tuple(argv), output=output, int_dir=int_dir,
@@ -73,15 +76,18 @@ def collect_links(session, project):
 	links = []
 	for module in session.c4_modules(project):
 		override = module.config_overrides.get(session.configuration.name)
-		for link in expand_argv(list(module.links + (override.links if override else ())), session.variables(module)):
+		system = module.system_overrides.get(session.system)
+		own = module.links + (override.links if override else ()) + (system.links if system else ())
+		for link in expand_argv(list(own), session.variables(module)):
 			if link not in links:
 				links.append(link)
 	return links
 
 
-def compiler_args(project, configuration):
+def compiler_args(project, configuration, system="windows"):
 	override = project.config_overrides.get(configuration.name)
-	return list(project.compiler_args) + list(override.compiler_args if override else ())
+	for_system = project.system_overrides.get(system)
+	return list(project.compiler_args) + list(override.compiler_args if override else ()) + list(for_system.compiler_args if for_system else ())
 
 
 def _toolchain_files(toolchain):

@@ -29,6 +29,13 @@ namespace Testing
 	{
 		constexpr unsigned kPartitions = 4;
 
+		// A process that runs whoever asks: Windows' System process, Linux's init.
+#ifdef _WIN32
+		const std::string kAlwaysRunning = "4";
+#else
+		const std::string kAlwaysRunning = "1";
+#endif
+
 		// Twelve functions calling one another, a private literal used by one of them, one used by two, a global with
 		// an initializer, a private function and file-scope assembly.
 		std::string ProgramText(const std::string& extra)
@@ -179,8 +186,12 @@ namespace Testing
 
 		fs::path DeepRoot() { return fs::temp_directory_path() / "c4-objectcache-deep"; }
 
-		// The spelling of an absolute path that std::filesystem's calls take past MAX_PATH.
+		// The spelling of an absolute path that std::filesystem's calls take past MAX_PATH; Linux's take any path.
+#ifdef _WIN32
 		fs::path LongPath(const fs::path& path) { return fs::path(L"\\\\?\\" + path.wstring()); }
+#else
+		fs::path LongPath(const fs::path& path) { return path; }
+#endif
 
 		// A folder deep enough that an object's path in it is longer than MAX_PATH.
 		fs::path DeepFolder()
@@ -248,7 +259,7 @@ namespace Testing
 		const fs::path folder = FreshFolder("keep-partials");
 		const ObjectCache cache(folder, "salt");
 		const std::string object = cache.ObjectFor("being-written").string();
-		const fs::path running = object + ".4-0.tmp";            // the System process's: running, whoever asks
+		const fs::path running = object + "." + kAlwaysRunning + "-0.tmp"; // running, whoever asks
 		const fs::path ended = object + ".4294967290-0.tmp";      // no process has that id
 		const fs::path ours = PrivatePartialPath(object);         // this process's: none of it is in flight here
 		for (const fs::path& path : { running, ended, ours }) std::ofstream(path) << "x";
@@ -274,12 +285,12 @@ namespace Testing
 		const fs::path ended = cache.ObjectFor("claimed-by-an-ended-build");
 		const fs::path ours = cache.ObjectFor("claimed-by-this-process");
 		for (const fs::path& path : { running, ended, ours }) std::ofstream(path) << "x";
-		std::ofstream(folder / ".claim.4") << running.filename().string() << "\n";          // the System process's: running
+		std::ofstream(folder / (".claim." + kAlwaysRunning)) << running.filename().string() << "\n"; // running, whoever asks
 		std::ofstream(folder / ".claim.4294967290") << ended.filename().string() << "\n";   // no process has that id
 		cache.Claim(ours);
 		cache.KeepOnly({});
 		TEST_ASSERT(fs::exists(running));
-		TEST_ASSERT(fs::exists(folder / ".claim.4"));
+		TEST_ASSERT(fs::exists(folder / (".claim." + kAlwaysRunning)));
 		TEST_ASSERT(!fs::exists(ended));
 		TEST_ASSERT(!fs::exists(folder / ".claim.4294967290"));
 		TEST_ASSERT(!fs::exists(ours));

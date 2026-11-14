@@ -306,4 +306,26 @@ namespace Testing
 
 		TEST_PASSED();
 	}
+
+	void StaticReflectionTest::TestAttributeStringsEndingInAValueOrAnEquals()
+	{
+		Reflection::Class reflected("Testing::Sample", "reflect-class,GROUP = Testing");
+		if (reflected.m_Attributes.Count() != 2)
+			TEST_FAILED("Expected a flag and a property from \"reflect-class,GROUP = Testing\"");
+		if (reflected.m_Attributes[0].type != Reflection::Attribute::Flag || reflected.m_Attributes[0].name != "reflect-class")
+			TEST_FAILED("The flag reflect-class was not parsed");
+		if (reflected.m_Attributes[1].type != Reflection::Attribute::Prop || reflected.m_Attributes[1].name != "GROUP" ||
+			reflected.m_Attributes[1].value != "Testing")
+			TEST_FAILED("The last attribute's value was not parsed");
+
+		Reflection::Property unset("p", "int32", "min=");
+		if (unset.m_Attributes.Count() != 1 || unset.m_Attributes[0].name != "min" || unset.m_Attributes[0].value != "")
+			TEST_FAILED("An attribute ending at its \"=\" should have an empty value");
+
+		Reflection::Property empty("p", "int32", "min=,readonly");
+		if (empty.m_Attributes.Count() != 2 || empty.m_Attributes[0].value != "" || empty.m_Attributes[1].name != "readonly")
+			TEST_FAILED("An empty value should not take the \",\" after it");
+
+		TEST_PASSED();
+	}
 }

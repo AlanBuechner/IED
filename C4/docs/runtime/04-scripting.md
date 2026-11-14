@@ -25,7 +25,7 @@ Sources:
   `ScriptHost`: load, calls, unload, reload), built into `C4Script/` (`C4Script.dll`, its C API in
   `C4Script/src/C4Script.h`, the guard in `C4Script/src/GuardedCall.cpp`).
 - Runtime support: `C4Runtime/ScriptRuntimeC.h` with `C4Runtime/Script/` (`ScriptExitsC.c`: per-script exit
-  lists, `ScriptTlsC.c`: emulated thread storage, `ScriptThrowC.c`: script images and their throws), the GC's
+  lists, `ScriptTlsC.c`: emulated thread storage, `ScriptThrowWin32.c`: script images and their throws), the GC's
   root tables and finalizer dropping (`C4Runtime/GC/GCApi.c`), and stacked reflection registrations
   (`C4Runtime/Reflect/ReflectShadows.c`).
 - C4 API: `Bedrock/Scripting/` (namespace `Scripting`, opt-in through `include "scripting.ch"`).
@@ -207,6 +207,14 @@ scripts' own files are the program's data. The program loads `C4Script.dll` on i
 delay-loads it), so one shipped without the DLL still starts, and `Host::Open` reports the missing DLL as its error.
 `Host::Open` loads the DLL from beside the program by its full path, never through the search path: another
 build's `C4Script.dll` on `PATH` (an installed program's) would compile against an interface it was not made for.
+
+On Linux (D-86) the script host library is `C4Script.so`: the program links it by its name and finds it beside itself
+as it starts (`-rpath $ORIGIN`), so `Game`, `Game.c4i` and `C4Script.so` ship together and a program without the
+library does not start (Linux has no delay-loading; ScriptTest `MissingLibrary` is Windows'). A Linux script host is
+built by the compiler running on Linux, which has the Linux library (`--script-host --target linux-x64` on Windows says
+so). Its LLVM needs `libz3`, `libxml2`, `libzstd` and zlib on the machine. Every Linux program links GCC's unwinder
+shared (`libgcc_s.so.1`, which every glibc system has): one unwinder for the program, the library and the script frames
+JITLink registers with it, so an exception unwinds through all of them.
 
 A build while the program runs (an IDE rebuilding itself) cannot write over the `C4Script.dll` the program has loaded:
 the build renames it to `C4Script.dll.<ms>.old`, which Windows allows, and copies the new one in; a later build removes
@@ -445,6 +453,27 @@ across host and script frames, and crash dumps name its functions.
 - ScriptTest `DebugScripts` checks the module, its lines, a throw, a fault, a reload and the files; `RunTests.ps1
   -DebugScripts` runs every case with its host built `-g`, so every case also runs as debug scripts.
 
+### 6.5 Linux (D-86)
+
+A Linux host's scripts link in memory with ORC's own ELF linker (JITLink) instead of RuntimeDyld:
+
+- **Code model.** Scripts are position-independent code of the small model. JITLink places a script anywhere in the
+  address space, so nothing a script declares is `dso_local` (nor hidden, which implies it): its code reaches the
+  host's functions through stubs and the host's data through a GOT that JITLink builds, never by a 32-bit PC-relative
+  offset, which cannot span the distance (`ScriptJit.cpp`, `ReachDeclarationsIndirectly`).
+- **Exceptions.** A script throws with `c4_eh_throw` and catches through landing pads with the runtime's personality,
+  `__c4_personality_v0` (`C4Runtime/ExceptionsPosix.c`); the host table lists those entry points instead of Windows'
+  (`ScriptRuntimeEntryPoints`). The exception tables are relative to their own fields, so a script image needs no base
+  and no personality thunk; the host functions they name are reached through the image's `c4.image.` thunks as on
+  Windows. JITLink registers the script's `.eh_frame` with the process's unwinder.
+- **The image.** A JITLink plugin records where the script's blocks landed, so a fault is told as `script+0x..`; a
+  debug script's (section 6.4's setting) is told by its function, `<script>!<function>+0x..`. A debug script links in
+  memory too, with its DWARF: DLLs with PDBs are Windows'.
+- **The interface's files** sit under `/c4i` (Windows' `//c4i` is a network root; POSIX folds a leading `//`).
+
+ScriptTest runs on Linux with `assets/ScriptTest/run_linux.py`, in the Linux builder's container: every case but
+`MissingLibrary` and `DebugScripts` (`LinuxSkipTests.json`), at `-O0`, `-O2` and `--debug-scripts`.
+
 ---
 
 ## 7. Crash isolation
@@ -464,6 +493,15 @@ loaded.
 The guard lives in `C4Script.dll`, not in the runtime: the runtime is compiled with `-mstackrealign`, under
 which clang (LLVM 22) miscompiles SEH `__try` / `__except` (at `-O2` the handler crashes, at `-O0` the filter
 writes its findings to the wrong frame).
+
+On Linux the faults are signals (`SIGSEGV`, `SIGBUS`, `SIGILL`, `SIGFPE`, `SIGTRAP`). `C4Script.so` installs a handler
+for each at the first guarded call, on the thread's signal stack (the runtime gives its threads one; the guard gives
+any other thread one), so a stack overflow is caught too. A fault on a thread inside a guarded call jumps back to that
+call (`siglongjmp`); anywhere else it goes on to the handler the signal had before - the runtime's crash report, or
+the system's. A fault is described with the Windows exception code it would have had (`0xc0000005`, writing or
+reading, `0xc00000fd` for a stack overflow), so the fault text reads the same. A program that installs its own
+handlers later puts the guard's behind them; the guard looks again every 100 ms of guarded calls and puts its own back
+in front.
 
 What the guard cannot cover: a script's code called by host code that is not guarded (a virtual call into a
 script object from the engine's own loop). The host wraps such calls in `Scripting::Guard` where a script may run.
@@ -505,3 +543,4 @@ a faulted script is not trusted to run again.
 | `Bedrock/Scripting` (ScriptTest) | **Done** |
 | Debugging scripts: DLLs with PDBs (section 6.4; ScriptTest `DebugScripts`, and every case with `-DebugScripts`) | **Done** |
 | Layers: a script over a script (section 5.2; ScriptTest `Layers`) | **Done** |
+| Linux script hosts: `C4Script.so`, JITLink, signal guards, landing-pad exceptions (sections 3.4, 6.5, 7; ScriptTest on Linux with `run_linux.py`, 25 cases at `-O0`, `-O2` and as debug scripts) | **Done** |

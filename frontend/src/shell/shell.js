@@ -170,7 +170,7 @@ export class Shell {
 	// The server topic: workspaces, devices, notifications
 
 	serverSnapshot(data) {
-		this.server = { serverVersion: data.serverVersion, workspaces: data.workspaces || [], recent: data.recent || [], clients: data.clients || [], notifications: data.notifications || [], master: data.master || null };
+		this.server = { serverVersion: data.serverVersion, workspaces: data.workspaces || [], recent: data.recent || [], clients: data.clients || [], notifications: data.notifications || [], master: data.master || null, configServer: data.configServer || null };
 		if (this.client.setRoutes) this.client.setRoutes(data.routes);
 		this.serverChanged();
 		if (!this.wsId || !this.server.workspaces.some((w) => w.wsId === this.wsId)) this.showWorkspace(this.preferredWorkspace());
@@ -195,6 +195,7 @@ export class Shell {
 		else if (kind === "workspace.closed") s.workspaces = s.workspaces.filter((w) => w.wsId !== data.wsId);
 		else if (kind === "recent.changed") s.recent = data.recent || [];
 		else if (kind === "routes.changed" && this.client.setRoutes) this.client.setRoutes(data.routes);
+		else if (kind === "configServer.changed") s.configServer = data;
 		this.serverChanged();
 		if (kind === "workspace.opened" && !this.wsId && !this.startPageAsked) this.showWorkspace(data.wsId);
 		// A workspace server that stops for good (its workspace closes, or the master stops) loses its socket first, so the

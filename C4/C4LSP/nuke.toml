@@ -7,4 +7,6 @@ language = "cpp"
 group = "C4"
 description = "The C4 language server"
 depends = ["Core", "C4Lib", "ObjectDescription", "C4Protocol", "C4LSPLib"]
+
+[project.system.windows]
 links = ["ntdll.lib"]

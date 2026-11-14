@@ -6,4 +6,6 @@ language = "cpp"
 group = "C4"
 description = "The C4 debug adapter"
 depends = ["Core", "ObjectDescription", "C4Protocol", "C4DAPLib"]
+
+[project.system.windows]
 links = ["dbghelp.lib"]

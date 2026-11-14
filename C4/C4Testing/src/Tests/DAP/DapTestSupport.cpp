@@ -1,11 +1,15 @@
 #include "DapTestSupport.h"
+#include "Compiler/BuildUtils.h"
+#include "Compiler/TargetSystem.h"
 #include "Compiler/Toolchain.h"
 #include "Json/JsonReader.h"
-#include "Target/Launch.h"
 #include <chrono>
 #include <fstream>
 #include <sstream>
+#ifdef _WIN32
+#include "Target/Launch.h"
 #include <windows.h>
+#endif
 
 namespace Testing::Dap
 {
@@ -14,16 +18,21 @@ namespace Testing::Dap
 	namespace
 	{
 		constexpr auto kReplyWait = std::chrono::seconds(30);
-		constexpr DWORD kBuildMilliseconds = 120000;
+
+		// A program's file name where the tests run: `.exe` on Windows.
+		std::string ProgramName(const char* name) { return name + std::string(Scripting::ExecutableExtension(Scripting::HostSystem())); }
 
 		// The compiler of this build: C4Testing runs from bin/<config>/C4Testing, C4.exe is in bin/<config>/C4.
-		fs::path Compiler() { return Scripting::Toolchain::Home().parent_path() / "C4" / "C4.exe"; }
+		fs::path Compiler() { return Scripting::Toolchain::Home().parent_path() / "C4" / ProgramName("C4"); }
 
-		bool Run(const std::wstring& commandLine)
+#ifdef _WIN32
+		constexpr DWORD kBuildMilliseconds = 120000;
+
+		bool Run(const std::string& program, const std::vector<std::string>& args)
 		{
 			STARTUPINFOW startup{ sizeof(STARTUPINFOW) };
 			PROCESS_INFORMATION started{};
-			std::wstring line = commandLine;
+			std::wstring line = C4DAP::Target::CommandLine(program, args);
 			if (!CreateProcessW(nullptr, line.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &started)) return false;
 			WaitForSingleObject(started.hProcess, kBuildMilliseconds);
 			DWORD exitCode = 1;
@@ -32,6 +41,17 @@ namespace Testing::Dap
 			CloseHandle(started.hProcess);
 			return exitCode == 0;
 		}
+#else
+		bool Run(const std::string& program, const std::vector<std::string>& args)
+		{
+			Core::Vector<Core::String> line;
+			line.Push(program);
+			for (const std::string& arg : args) line.Push(arg);
+			int exitCode = 1;
+			std::string output, errors;
+			return Scripting::RunToolWithOutput(line, exitCode, output, errors) && exitCode == 0;
+		}
+#endif
 	}
 
 	DebugProgram BuildProgram(const std::string& name, const std::string& source, int optLevel)
@@ -42,9 +62,9 @@ namespace Testing::Dap
 		fs::create_directories(folder);
 		DebugProgram program;
 		program.source = folder / "main.cf";
-		program.exe = folder / "app.exe";
+		program.exe = folder / ProgramName("app");
 		std::ofstream(program.source, std::ios::binary) << source;
-		program.built = Run(C4DAP::Target::CommandLine(Compiler().string(), { folder.string(), "-g", "-O" + std::to_string(optLevel), "-o", program.exe.string() }));
+		program.built = Run(Compiler().string(), { folder.string(), "-g", "-O" + std::to_string(optLevel), "-o", program.exe.string() });
 		return program;
 	}
 
@@ -56,13 +76,13 @@ namespace Testing::Dap
 		fs::create_directories(folder / "host");
 		DebugProgram program;
 		program.source = folder / "script.cf";
-		program.exe = folder / "app.exe";
+		program.exe = folder / ProgramName("app");
 		std::ofstream(program.source, std::ios::binary) << scriptSource;
 		std::string host = hostSource;
 		const std::string token = "@SCRIPT@";
 		for (size_t at = host.find(token); at != std::string::npos; at = host.find(token, at)) host.replace(at, token.size(), program.source.generic_string());
 		std::ofstream(folder / "host" / "main.cf", std::ios::binary) << host;
-		program.built = Run(C4DAP::Target::CommandLine(Compiler().string(), { (folder / "host").string(), "-g", "-O0", "--script-host", "-o", program.exe.string() }));
+		program.built = Run(Compiler().string(), { (folder / "host").string(), "-g", "-O0", "--script-host", "-o", program.exe.string() });
 		return program;
 	}
 

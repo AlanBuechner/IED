@@ -1,5 +1,6 @@
 #pragma once
 #include "Target/Patches.h"
+#include "Target/SessionTypes.h"
 #include "Target/Symbols.h"
 #include <map>
 #include <string>
@@ -7,16 +8,6 @@
 
 namespace C4DAP::Target
 {
-	/// A source breakpoint as the client sees it: bound (verified) to the line it stops on, or not with why.
-	struct BoundBreakpoint
-	{
-		uint32_t id = 0;
-		bool verified = false;
-		uint32_t line = 0;
-		std::string source;
-		std::string message;
-	};
-
 	/// The breakpoints the client sets per source file, bound to code addresses once the program's symbols are
 	/// loaded.
 	class SourceBreakpoints

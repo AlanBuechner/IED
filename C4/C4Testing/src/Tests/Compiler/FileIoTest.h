@@ -20,10 +20,19 @@ namespace Testing
 		void AFileInAMissingFolderIsNotWritten();
 		TEST_FUNC(Compiler.FileIo)
 		void DeepFilesAndFoldersAreTold();
+#ifdef _WIN32
 		TEST_FUNC(Compiler.FileIo)
 		void ExtendedPathsAreSpelledForStdFilesystem();
 		// UpdateFile over a file a running program has loaded (C4Script.dll beside a host): set aside, replaced, then removed.
 		TEST_FUNC(Compiler.FileIo)
 		void AFileInUseIsSetAsideAndReplaced();
+#else
+		TEST_FUNC(Compiler.FileIo)
+		void ExtendedPathsAreAbsoluteAndNormal();
+		// UpdateFile over a file a running program has open (C4Script.so beside a host): a new file takes its name, and the
+		// program keeps reading the one it has.
+		TEST_FUNC(Compiler.FileIo)
+		void AFileInUseIsReplacedByANewFile();
+#endif
 	};
 } // namespace Testing

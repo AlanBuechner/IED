@@ -11,8 +11,15 @@ namespace Ied
 	// The first word of a command line, its quotes taken off.
 	Core::String ProgramWord(Core::StringView commandLine);
 
-	// Whether cmd would find `program`: a file as given, or a name in `cwd` or a folder of `path` (`;`-separated), as it
-	// is or with one of `extensions` (PATHEXT).
+	// PATH's separator: ';' on Windows, ':' on Linux.
+#if defined(PLATFORM_LINUX)
+	const char8 c_PathListSeparator = ':';
+#else
+	const char8 c_PathListSeparator = ';';
+#endif
+
+	// Whether cmd would find `program`: a file as given, or a name in `cwd` or a folder of `path` (c_PathListSeparator
+	// between folders), as it is or, on Windows, with one of `extensions` (PATHEXT).
 	bool FindsProgram(Core::StringView program, Core::StringView cwd, Core::StringView path, Core::StringView extensions);
 	// The file cmd would run for `program`, found as FindsProgram finds it; empty when there is none.
 	Core::String FoundProgram(Core::StringView program, Core::StringView cwd, Core::StringView path, Core::StringView extensions);

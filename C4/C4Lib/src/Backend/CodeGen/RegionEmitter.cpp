@@ -87,6 +87,8 @@ namespace Scripting
 		{
 			if (!e.exceptionalOnly) EmitBlock(e.body);
 		}
+		else if (e.kind == CleanupEntry::Kind::Handler && !m_Ctx.Funclets())
+			EndCatch(); // leaving a catch handler by a jump ends its catch
 		else if (e.kind == CleanupEntry::Kind::Handler)
 		{
 			// Leaving a catch handler by a jump: return from its funclet first, then continue outside it.
@@ -389,11 +391,11 @@ namespace Scripting
 			else B.CreateRet(llvm::Constant::getNullValue(fn->getReturnType()));
 			return;
 		}
-		// A 1/2/4/8-byte aggregate returns as an integer of its width (the mirror of EmitCall's unpack).
-		uint32_t intSize = ret ? abi.ByValueIntSize(ret) : 0;
-		if (intSize == 0) { B.CreateRet(v); return; }
-		llvm::Value* tmp = m_Ctx.Materialize(v, v->getType());
-		B.CreateRet(B.CreateLoad(llvm::IntegerType::get(m_Ctx.mctx().context(), intSize * 8), tmp));
+		// An aggregate returned in registers returns as its RegisterType (the mirror of EmitCall's unpack).
+		llvm::Type* registers = ret ? abi.RegisterType(ret) : nullptr;
+		if (!registers) { B.CreateRet(v); return; }
+		llvm::Value* tmp = m_Ctx.Materialize(v, abi.CoercionSlot(v->getType(), registers));
+		B.CreateRet(B.CreateLoad(registers, tmp));
 	}
 
 	// --- control flow -----------------------------------------------------------------------------------
@@ -522,6 +524,7 @@ namespace Scripting
 	void RegionEmitter::EmitTryCatch(const TryNode* n)
 	{
 		if (n->catches.empty()) { EmitBlock(n->tryBlock); return; }
+		if (!m_Ctx.Funclets()) { EmitLandingPadTry(n); return; }
 		auto& B = m_Ctx.builder();
 		llvm::LLVMContext& ctx = m_Ctx.mctx().context();
 		llvm::Value* parent = m_Ctx.CurrentFunclet();
@@ -558,6 +561,7 @@ namespace Scripting
 	{
 		// The body of a noexcept function runs inside a catch-all whose handler stops the program: an
 		// exception never leaves the function.
+		if (!m_Ctx.Funclets()) { EmitLandingPadNoexceptBody(root); return; }
 		auto& B = m_Ctx.builder();
 		llvm::LLVMContext& ctx = m_Ctx.mctx().context();
 		auto* ptr = llvm::PointerType::get(ctx, 0);
@@ -589,15 +593,20 @@ namespace Scripting
 		llvm::BasicBlock* handlerBlock, llvm::BasicBlock* join)
 	{
 		// The frame handler copies the caught value (or, by reference, stores its address) into the clause's
-		// slot; `catch (...)` has none.
+		// slot; `catch (...)` has none. With landing pads (no dispatch) the runtime's begin_catch does, from the
+		// exception the landingpad caught.
 		auto& B = m_Ctx.builder();
 		B.SetInsertPoint(handlerBlock);
 		m_Ctx.At(clause.origin); // the handler's entry is the catch's line, not the try body's last
 		EhTables::Handler handler = m_Ctx.mctx().eh().HandlerFor(clause);
-		llvm::Value* caught = clause.catchAll ? llvm::ConstantPointerNull::get(llvm::PointerType::get(m_Ctx.mctx().context(), 0))
-			: m_Ctx.SlotAlloca(clause.slot);
-		llvm::CatchPadInst* pad = B.CreateCatchPad(dispatch,
-			{ handler.typeDescriptor, llvm::ConstantInt::get(llvm::Type::getInt32Ty(m_Ctx.mctx().context()), handler.adjectives), caught }, "catchpad");
+		auto* ptr = llvm::PointerType::get(m_Ctx.mctx().context(), 0);
+		llvm::Value* caught = clause.catchAll ? llvm::ConstantPointerNull::get(ptr) : m_Ctx.SlotAlloca(clause.slot);
+		llvm::Value* adjectives = llvm::ConstantInt::get(llvm::Type::getInt32Ty(m_Ctx.mctx().context()), handler.adjectives);
+		llvm::CatchPadInst* pad = nullptr;
+		if (dispatch) pad = B.CreateCatchPad(dispatch, { handler.typeDescriptor, adjectives, caught }, "catchpad");
+		else
+			m_Ctx.Call(EhRuntime("c4_eh_begin_catch", B.getVoidTy(), { ptr, ptr, B.getInt32Ty(), ptr }),
+				{ B.CreateLoad(ptr, ExceptionSlot(), "exn"), handler.typeDescriptor, adjectives, caught }, false);
 
 		size_t handlerDepth = m_Ctx.Cleanups().Depth();
 		CleanupEntry entry;
@@ -607,12 +616,18 @@ namespace Scripting
 		entry.floor = m_Ctx.Floor();
 		m_Ctx.Cleanups().Push(entry);
 		EmitBlock(clause.block);
-		if (IsOpen()) B.CreateCatchRet(pad, join);
+		if (IsOpen() && pad) B.CreateCatchRet(pad, join);
+		else if (IsOpen())
+		{
+			EndCatch();
+			B.CreateBr(join);
+		}
 		m_Ctx.Cleanups().PopTo(handlerDepth);
 	}
 
 	void RegionEmitter::EmitThrow(const ThrowNode* n)
 	{
+		if (!m_Ctx.Funclets()) { EmitLandingPadThrow(n); return; }
 		auto& B = m_Ctx.builder();
 		ModuleContext& mc = m_Ctx.mctx();
 		llvm::Function* raise = mc.GetCxxThrowException();

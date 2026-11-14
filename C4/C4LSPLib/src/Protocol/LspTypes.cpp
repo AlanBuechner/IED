@@ -60,7 +60,9 @@ namespace C4LSP::Protocol
 			else decoded.push_back(path[i]);
 		path = std::move(decoded);
 
+#ifdef _WIN32
 		std::replace(path.begin(), path.end(), '/', '\\');
+#endif
 		return path;
 	}
 

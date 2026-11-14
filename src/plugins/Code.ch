@@ -87,13 +87,14 @@ namespace Ied
 		public Core::HashMap<Core::String, bool> m_Hears;      // the event kinds it listens to
 		public Core::Array<Contributed*> m_Contributed;
 		public int64 m_Builds;                 // how many times it compiled
+		public int64 m_Settled;                // how many of those builds ended (started, or failed): fewer while one runs
 		public bool m_BuildQueued;             // a build is queued: it reads the files when it starts
 		public Core::Array<Core::String> m_Methods;     // the protocol methods it registered
 		public Core::Array<PluginTopic*> m_Topics;
 		public Core::Array<PluginWatch*> m_Watches;
 		public bool m_WantsTrust;              // it has OnTrustChanged handlers
 		public bool m_WantsFiles;              // it has OnFilesChanged handlers
-		public int64 m_Running;                // its methods running now
+		public int64 m_Running;                // its methods running now, and a script's threads (StartThread)
 		public Threading::ConditionVariable m_Idle;
 		public CodeRuntime* m_Runtime;
 

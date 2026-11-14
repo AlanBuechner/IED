@@ -1,3 +1,4 @@
+#ifdef _WIN32 // the Win32 debugger; Linux's engine is Target/LinuxEngine.h
 #include "Target/SourceBreakpoints.h"
 #include <algorithm>
 #include <cctype>
@@ -121,3 +122,4 @@ namespace C4DAP::Target
 		return false;
 	}
 } // namespace C4DAP::Target
+#endif

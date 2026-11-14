@@ -1,0 +1,37 @@
+include "Shared.ch"
+include "host/Server.ch"
+
+namespace IED::Shared
+{
+	// The config server the calling plugin's code runs in; null with `problem` outside a plugin's code or on another
+	// server.
+	static Ied::ConfigServer* CallersConfigServer(Core::String& plugin, Core::String& problem) {
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		if (!instance) return nullptr;
+		Ied::ConfigServer* config = instance->m_Runtime->m_Server->m_ConfigServer;
+		if (!config) {
+			problem = Core::String("IED::Shared works only on a config server (ied-server --config-root <folder>, docs/35); this server serves no configuration");
+			return nullptr;
+		}
+		plugin = instance->m_PluginId;
+		return config;
+	}
+
+	bool Publish(Core::StringView key, Core::StringView valueJson, Core::String& problem) {
+		Core::String plugin;
+		Ied::ConfigServer* config = CallersConfigServer(plugin, problem);
+		return config && config->Publish(plugin.View(), key, valueJson, problem);
+	}
+
+	bool Unpublish(Core::StringView key, Core::String& problem) {
+		Core::String plugin;
+		Ied::ConfigServer* config = CallersConfigServer(plugin, problem);
+		return config && config->Unpublish(plugin.View(), key, problem);
+	}
+
+	bool IsConfigServer() {
+		Core::String problem;
+		Ied::CodeInstance* instance = Ied::ApiCaller(problem);
+		return instance && instance->m_Runtime->m_Server->m_ConfigServer != nullptr;
+	}
+}

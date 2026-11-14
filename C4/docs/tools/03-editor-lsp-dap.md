@@ -328,6 +328,10 @@ C4DAP/src/main.cpp          the executable: the stdio loop over DapServer
 
 ### The debugger
 
+**On Linux** C4DAP builds and speaks DAP, but it has no debugger yet (one over ptrace and the program's DWARF is to
+come): `launch` fails saying so, and breakpoints come back unverified with the same reason
+(`C4DAPLib/src/Target/LinuxEngine.h`; the session types both engines share are `Target/SessionTypes.h`).
+
 The adapter is its own small debugger over the Win32 debug API and DbgHelp, both part of every Windows
 install. (The system's `dbgeng.dll` refuses to load its symbol engine outside the Debugging Tools for
 Windows, so it cannot be the engine; and the debug API lets the adapter give the program its own

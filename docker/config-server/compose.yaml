@@ -1,0 +1,14 @@
+# The IED config server as a TrueNAS custom app (docs/35; the nas-deploy skill): build the image on the NAS first
+# (tools/config-server/image.py, then build it on the NAS with the tag below), make the dataset with storage_create
+# (owner 568, the apps user; /mnt/tank stands for your pool), then app_deploy this file. Tokens: run the same image
+# once with --config-token (docs/35):
+#   docker run --rm -u 568:568 -v /mnt/tank/apps/ied-config:/data ied-config-server:latest --config-token admin deploy
+services:
+  ied-config:
+    image: ied-config-server:latest
+    restart: unless-stopped
+    user: "568:568"
+    ports:
+      - "8780:8780"
+    volumes:
+      - /mnt/tank/apps/ied-config:/data

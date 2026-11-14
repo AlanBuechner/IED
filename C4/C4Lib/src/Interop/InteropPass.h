@@ -1,4 +1,5 @@
 #pragma once
+#include "Compiler/CpuTarget.h"
 #include "Core/String.h"
 #include "Core/Vector.h"
 #include <cstdint>
@@ -18,6 +19,7 @@ namespace Scripting
 		std::vector<std::string> includeDirs;
 		std::vector<std::string> targetFlags; // the build's -march / -m flags (D-62)
 		std::vector<std::string> compileFlags; // the build's -O and -g (BUG-285)
+		TargetSystem system = HostSystem();    // the system it is compiled for (D-86)
 	};
 
 	/// How CBind parses a foreign header: what its bindings are cached by.
@@ -27,6 +29,7 @@ namespace Scripting
 		std::vector<std::string> defines;
 		std::vector<std::string> includeDirs;
 		std::vector<std::string> targetFlags; // the build's, so the header sees the same processor macros
+		TargetSystem system = HostSystem();    // and the same system's headers and mangling (D-86)
 	};
 
 	/// One file handed to the interop pass: its display name (for diagnostics), unique identity,
@@ -84,16 +87,16 @@ namespace Scripting
 		/// When `declarationsOnly` is true, only binding text is generated: foreign sources and
 		/// vtable shims are not compiled into objects (used by the LSP, which needs declarations
 		/// for analysis but never links or runs code).
-		/// `targetFlags` are the build's -march / -m flags: headers are parsed and sources compiled for its processor.
+		/// `target` is the build's: headers are parsed and sources compiled for its processor and system.
 		static Result RunFolder(const std::vector<std::string>& rootFolders,
 			const std::vector<InteropFileInput>& files,
 			const std::vector<std::string>& cliIncludeDirs,
-			const std::string& objDir, const std::vector<std::string>& targetFlags, bool verbose, bool declarationsOnly = false,
+			const std::string& objDir, const CpuTarget& target, bool verbose, bool declarationsOnly = false,
 			const std::vector<std::string>& compileFlags = {});
 
 	private:
 		static bool ResolveForeignHeader(const std::string& headerPath, const std::string& fileDir,
-			const std::vector<std::string>& rootFolders, const std::vector<std::string>& cliIncludeDirs, std::string& outAbs);
+			const std::vector<std::string>& rootFolders, const std::vector<std::string>& cliIncludeDirs, TargetSystem system, std::string& outAbs);
 		static bool GenerateBindings(const std::string& cbindExe, const std::string& headerAbs, const BindingFlags& flags,
 			const std::string& outFile, bool verbose);
 		static bool CompileForeign(const ForeignObject& fo, bool verbose);

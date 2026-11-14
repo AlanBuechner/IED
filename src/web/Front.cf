@@ -163,6 +163,8 @@ namespace Ied
 			RespondToMaster(request, response);
 			return;
 		}
+		// The config API's own tokens, whatever name the server is reached by: no browser sends them by itself.
+		if (m_Config.Handle(request, response)) return;
 		if (!HostAllowed(request)) {
 			Answer(response, 403, Core::StringView("that Host is not allowed (DNS rebinding protection; see --allow-host)"));
 			return;

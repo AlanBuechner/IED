@@ -1,0 +1,228 @@
+// configserver: a config server's tokens (made, kept as hashes, checked, replaced by name), package names, paths and
+// hashes, the served settings merging what plugins publish, the state's version, its command line, and what a client
+// makes of configServer.url and configServer.token (docs/35).
+
+include "configserver/ConfigServer.ch"
+include "configserver/SharedMirror.ch"
+include "host/Config.ch"
+include "host/Appdata.ch"
+
+static Ied::ChangeBatch ConfigTestChange(FS::ChangeKind kind, const char* path) {
+	FS::Change change;
+	change.kind = kind;
+	change.path = Core::String(path);
+	Ied::ChangeBatch batch;
+	batch.Add(change);
+	return batch;
+}
+
+static FS::Path ConfigTestScratch(const char* name) {
+	Core::StringBuilder folder;
+	folder.Append(name);
+	folder.AppendInt(Platform::UnixTimeNs());
+	FS::Path root = FS::TempDirectory() / folder.View();
+	FS::MakeDirectories(root.CStr());
+	return root;
+}
+
+static void ConfigTestWrite(const FS::Path& file, const char* text) {
+	FS::MakeDirectories(file.Parent().CStr());
+	Core::StringView bytes = Core::StringView(text);
+	FS::WriteFileAtomically(file.CStr(), (const void*)bytes.Data(), bytes.ByteLength());
+}
+
+static Core::String ConfigTestRead(const FS::Path& file) {
+	FS::File opened = FS::File(file.CStr(), "rb");
+	return opened.ReadText();
+}
+
+static Ied::ServedPackage* ConfigTestPackage(const char* id, const char* hash) {
+	Ied::ServedPackage* package = new Ied::ServedPackage();
+	package->m_Id = Core::String(id);
+	package->m_Hash = Core::String(hash);
+	return package;
+}
+
+[test("server.configserver")]
+class ConfigServerTests {
+	// docs/35 "The API": a token is shown once; access.json keeps its SHA-256 alone; a second token of one name revokes
+	// the first.
+	[test("tokens")]
+	public static void TestTokens() {
+		FS::Path root = ConfigTestScratch("ied-config-tokens-");
+		Core::String reader;
+		Core::String admin;
+		Core::String error;
+		assert_true(Ied::MintConfigToken(root, Ied::ConfigRole::Reader, Core::StringView("laptop"), reader, error), error.CStr());
+		assert_true(Ied::MintConfigToken(root, Ied::ConfigRole::Admin, Core::StringView("deploy"), admin, error), error.CStr());
+		assert_eq((int64)64, reader.View().ByteLength(), "64 hex digits");
+		assert_true(reader.View() != admin.View(), "each token its own");
+		Core::String file = ConfigTestRead(root / "access.json");
+		assert_true(!file.View().Contains(reader.View()) && !file.View().Contains(admin.View()), "access.json never holds a token");
+		assert_true(file.View().Contains(Ied::TokenDigest(reader.View()).View()), "it holds the token's SHA-256");
+		Ied::ConfigAccess access;
+		assert_true(access.Load(root / "access.json", error), error.CStr());
+		Core::String name;
+		assert_true(access.Check(reader.View(), name) == Ied::ConfigRole::Reader, "a reader's token reads");
+		assert_se("laptop", name.CStr(), "and says whose it is");
+		assert_true(access.Check(admin.View(), name) == Ied::ConfigRole::Admin, "an admin's token writes");
+		assert_se("deploy", name.CStr(), "the admin's name");
+		assert_true(access.Check(Core::StringView("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"), name) == Ied::ConfigRole::None, "a guess is nothing");
+		assert_true(access.Check(Core::StringView(""), name) == Ied::ConfigRole::None, "no token is nothing");
+		assert_true(access.Check(Ied::TokenDigest(reader.View()).View(), name) == Ied::ConfigRole::None, "nor is the stored hash itself");
+		Core::String again;
+		assert_true(Ied::MintConfigToken(root, Ied::ConfigRole::Reader, Core::StringView("laptop"), again, error), error.CStr());
+		assert_true(access.Load(root / "access.json", error), error.CStr());
+		assert_eq((int64)2, access.Count(), "the name's token replaced, not added");
+		assert_true(access.Check(reader.View(), name) == Ied::ConfigRole::None, "the old one no longer works");
+		assert_true(access.Check(again.View(), name) == Ied::ConfigRole::Reader, "the new one does");
+		ConfigTestWrite(root / "access.json", "{\"tokens\": [{\"name\": \"x\", \"role\": \"owner\", \"sha256\": \"00\"}]}");
+		assert_true(!access.Load(root / "access.json", error), "a token with no known role or digest does not load");
+		assert_eq((int64)0, access.Count(), "and none is accepted");
+		FS::RemoveAll(root.CStr());
+	}
+
+	[test("bearer")]
+	public static void TestBearer() {
+		assert_se("abc", Core::String(Ied::BearerToken(Core::StringView("Bearer abc"))).CStr(), "the scheme and the token");
+		assert_se("abc", Core::String(Ied::BearerToken(Core::StringView(" bearer   abc "))).CStr(), "the scheme in any case, spaces around");
+		assert_true(Ied::BearerToken(Core::StringView("Basic YTpi")).IsEmpty(), "another scheme carries none");
+		assert_true(Ied::BearerToken(Core::StringView("")).IsEmpty(), "no header carries none");
+	}
+
+	[test("names_and_paths")]
+	public static void TestNames() {
+		assert_true(Ied::IsPackageName(Core::StringView("spark.models")) && Ied::IsPackageName(Core::StringView("nas-deploy_2")), "plain names");
+		assert_true(!Ied::IsPackageName(Core::StringView(".staging")) && !Ied::IsPackageName(Core::StringView("a/b")) && !Ied::IsPackageName(Core::StringView("")), "no hidden, nested or empty name");
+		Core::String why;
+		assert_true(Ied::IsPackagePath(Core::StringView("code/Models.cf"), why), why.CStr());
+		assert_true(!Ied::IsPackagePath(Core::StringView("../x"), why), "no climbing out");
+		assert_true(!Ied::IsPackagePath(Core::StringView("a//b"), why) && !Ied::IsPackagePath(Core::StringView("/a"), why), "no empty part, nothing absolute");
+		assert_true(!Ied::IsPackagePath(Core::StringView("C:x"), why) && !Ied::IsPackagePath(Core::StringView("a\\b"), why), "no drive, no backslash");
+		assert_true(!Ied::IsPackagePath(Core::StringView(".staging/x"), why), "never the staging folder");
+		assert_se("a%20b/c%25.md", Ied::EscapeUrlPath(Core::StringView("a b/c%.md")).CStr(), "a URL path's escapes, '/' kept");
+	}
+
+	// A package's hash covers every file's path and bytes, and the listing is in path order.
+	[test("package_hash")]
+	public static void TestPackageHash() {
+		FS::Path root = ConfigTestScratch("ied-config-package-");
+		ConfigTestWrite(root / "b.txt", "two");
+		ConfigTestWrite(root / "a" / "one.txt", "one");
+		Core::Array<Ied::PackageFile*> files = Ied::ListPackage(root);
+		assert_eq((int64)2, files.Count(), "every file");
+		assert_se("a/one.txt", files[0]->m_Path.CStr(), "in path order, '/' separators");
+		assert_eq((int64)3, files[1]->m_Size, "its size");
+		assert_se(Ied::BytesHash(Core::StringView("two")).CStr(), files[1]->m_Hash.CStr(), "its SHA-256");
+		Core::String first = Ied::PackageHash(files);
+		assert_se(first.CStr(), Ied::PackageHash(Ied::ListPackage(root)).CStr(), "the same files, the same hash");
+		ConfigTestWrite(root / "b.txt", "twO");
+		Core::String edited = Ied::PackageHash(Ied::ListPackage(root));
+		assert_true(edited.View() != first.View(), "a byte changed");
+		FS::Rename((root / "b.txt").CStr(), (root / "c.txt").CStr());
+		assert_true(Ied::PackageHash(Ied::ListPackage(root)).View() != edited.View(), "a file renamed");
+		assert_true(Ied::ListPackage(root / "missing").IsEmpty(), "no folder, no files");
+		FS::RemoveAll(root.CStr());
+	}
+
+	// docs/35: published values come after settings.json's, each by its key's merge kind.
+	[test("merge_published")]
+	public static void TestMergePublished() {
+		Core::HashMap<Core::String, Ied::MergeKind> kinds;
+		kinds.At(Core::String("ai.models")) = Ied::MergeKind::Merge;
+		kinds.At(Core::String("paths")) = Ied::MergeKind::Append;
+		Core::Array<Core::String> published;
+		published.Push(Core::String("{\"ai.models\":{\"qwen\":{\"size\":32}},\"paths\":[\"b\"],\"theme\":\"darker\",\"new\":1}"));
+		Core::String merged = Ied::MergePublished(Core::StringView("{\"ai.models\":{\"big\":{\"size\":70}},\"paths\":[\"a\"],\"theme\":\"dark\"}"), published, kinds);
+		assert_se("{\"ai.models\":{\"big\":{\"size\":70},\"qwen\":{\"size\":32}},\"paths\":[\"a\",\"b\"],\"theme\":\"darker\",\"new\":1}", merged.CStr(),
+			"merged, appended, replaced (a key no plugin declares), and a new key last");
+		Core::Array<Core::String> none;
+		assert_se("{\"x\":1}", Ied::MergePublished(Core::StringView("{\"x\":1}"), none, kinds).CStr(), "nothing published: settings.json's");
+		assert_se("{}", Ied::MergePublished(Core::StringView("{}"), none, kinds).CStr(), "nothing at all");
+	}
+
+	[test("version")]
+	public static void TestVersion() {
+		Core::Array<Ied::ServedPackage*> plugins;
+		plugins.Push(ConfigTestPackage("p", "1"));
+		Core::Array<Ied::ServedPackage*> skills;
+		skills.Push(ConfigTestPackage("s", "2"));
+		Core::String version = Ied::StateVersion(Core::StringView("{}"), plugins, skills);
+		assert_se(version.CStr(), Ied::StateVersion(Core::StringView("{}"), plugins, skills).CStr(), "the same state, the same version");
+		assert_true(version.View() != Ied::StateVersion(Core::StringView("{\"a\":1}"), plugins, skills).View(), "settings changed");
+		skills[0]->m_Hash = Core::String("3");
+		assert_true(version.View() != Ied::StateVersion(Core::StringView("{}"), plugins, skills).View(), "a skill changed");
+		Core::Array<Ied::ServedPackage*> swapped;
+		swapped.Push(ConfigTestPackage("s", "2"));
+		skills.Clear();
+		skills.Push(ConfigTestPackage("p", "1"));
+		assert_true(version.View() != Ied::StateVersion(Core::StringView("{}"), swapped, skills).View(), "a plugin is no skill");
+	}
+
+	[test("command_line")]
+	public static void TestCommandLine() {
+		Core::Array<Core::String> arguments;
+		const char*[5] given = { "--config-root", "/srv/ied-config", "--config-token", "admin", "deploy tool" };
+		for (int32 i = 0; i < 5; ++i) arguments.Push(Core::String(given[i]));
+		Ied::ServerConfig config = Ied::DefaultConfig();
+		Core::String error;
+		assert_true(Ied::ParseArguments(arguments, config, error), error.CStr());
+		assert_true(Ied::IsConfigServer(config), "a config server");
+		assert_se("admin", config.m_ConfigTokenRole.CStr(), "the role");
+		assert_se("deploy tool", config.m_ConfigTokenName.CStr(), "the name");
+		Core::Array<Core::String> owner;
+		owner.Push(Core::String("--config-root"));
+		owner.Push(Core::String("x"));
+		owner.Push(Core::String("--config-token"));
+		owner.Push(Core::String("owner"));
+		owner.Push(Core::String("me"));
+		config = Ied::DefaultConfig();
+		assert_true(!Ied::ParseArguments(owner, config, error), "a role is reader or admin");
+		Core::Array<Core::String> alone;
+		alone.Push(Core::String("--config-token"));
+		alone.Push(Core::String("reader"));
+		alone.Push(Core::String("laptop"));
+		config = Ied::DefaultConfig();
+		assert_true(!Ied::ParseArguments(alone, config, error), "a token needs the folder");
+		assert_true(error.View().Contains(Core::StringView("--config-root")), error.CStr());
+		Core::Array<Core::String> tls;
+		tls.Push(Core::String("--tls-identity"));
+		tls.Push(Core::String("nas.p12"));
+		config = Ied::DefaultConfig();
+		assert_true(Ied::ParseArguments(tls, config, error), error.CStr());
+		assert_true(Ied::LaunchUrl(config, 8780, Core::StringView(""), Core::StringView("")).View().StartsWith(Core::StringView("https://")), "TLS: https");
+	}
+
+	// The mirror's writes reach every server's app data watcher: the Shared tier and shared plugins are read again, and the
+	// mirror's staging is nothing.
+	[test("mirror_changes")]
+	public static void TestMirrorChanges() {
+		Ied::ChangeBatch settings = ConfigTestChange(FS::ChangeKind::Modified, "shared/settings.json");
+		assert_true(Ied::TouchesSettings(settings) && !Ied::TouchesPlugins(settings), "the Shared tier's file");
+		Ied::ChangeBatch plugin = ConfigTestChange(FS::ChangeKind::Added, "shared/plugins/demo");
+		assert_true(Ied::TouchesPlugins(plugin), "a shared plugin put in place");
+		Ied::ChangeBatch staging = ConfigTestChange(FS::ChangeKind::Modified, "shared/.staging/plugins-demo/ied-plugin.json");
+		assert_true(!Ied::TouchesPlugins(staging) && !Ied::TouchesSettings(staging), "the mirror's staging");
+		Ied::ChangeBatch folder = ConfigTestChange(FS::ChangeKind::Modified, "shared");
+		assert_true(!Ied::TouchesPlugins(folder) && !Ied::TouchesSettings(folder), "the folder changed because something in it did");
+		Ied::ChangeBatch made = ConfigTestChange(FS::ChangeKind::Added, "shared");
+		assert_true(Ied::TouchesPlugins(made) && Ied::TouchesSettings(made), "the folder made or removed");
+	}
+
+	// docs/35 "The client": what configServer.url and configServer.token come to.
+	[test("client_settings")]
+	public static void TestClientSettings() {
+		Core::String problem;
+		assert_se("https://nas.lan:8780/", Ied::MirrorBaseUrl(Core::StringView(" https://nas.lan:8780 "), problem).CStr(), "a base URL ends with '/'");
+		assert_true(Ied::MirrorBaseUrl(Core::StringView("nas.lan:8780"), problem).IsEmpty() && !problem.IsEmpty(), "http or https only");
+		Platform::SetEnvironmentVariable("IED_CONFIG_TEST_TOKEN", " abc ");
+		problem = Core::String();
+		assert_se("abc", Ied::MirrorToken(Core::StringView("{\"env\":\"IED_CONFIG_TEST_TOKEN\"}"), problem).CStr(), problem.CStr());
+		Platform::RemoveEnvironmentVariable("IED_CONFIG_TEST_TOKEN");
+		assert_true(Ied::MirrorToken(Core::StringView("{\"env\":\"IED_CONFIG_TEST_TOKEN\"}"), problem).IsEmpty(), "an unset variable");
+		assert_true(problem.View().Contains(Core::StringView("IED_CONFIG_TEST_TOKEN")), problem.CStr());
+		assert_true(Ied::MirrorToken(Core::StringView("{\"secret\":\"configServer\"}"), problem).IsEmpty(), "no secret store yet");
+		assert_true(problem.View().Contains(Core::StringView("secret store")), problem.CStr());
+		assert_true(Ied::MirrorToken(Core::StringView("null"), problem).IsEmpty() && problem.View().Contains(Core::StringView("env")), "not set: says how");
+	}
+}

@@ -75,6 +75,8 @@ namespace Scripting
 		llvm::Value* EmitSequence(const SequenceNode* n);
 		llvm::Value* EmitTernary(const TernaryNode* n);
 		llvm::Value* EmitVa(const VaNode* n);
+		llvm::Value* EmitSystemVVa(const VaNode* n, llvm::Value* list);
+		llvm::Value* SystemVVaArg(llvm::Value* opened, llvm::Type* registers, llvm::StructType* tag, llvm::Type* memory = nullptr);
 		llvm::Value* EmitAtomic(const AtomicNode* n);
 		/// A SIMD intrinsic (D-62) over its emitted operands `v`.
 		llvm::Value* EmitSimd(const SimdNode* n);

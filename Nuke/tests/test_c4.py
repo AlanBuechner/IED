@@ -98,6 +98,34 @@ class C4BuildTests(WorkspaceTest):
 		self.assertEqual(code, 0, out)
 		self.assertNotIn("--incremental", self.compiles()[0])
 
+	def test_a_linux_build_targets_linux_and_takes_its_system_tables(self):
+		# C4 D-86: --system linux cross-compiles; [project.system.<name>] adds what one system needs, and a copy may
+		# name the systems it is for.
+		self.files({"Game/nuke.toml": "[project]\ndepends = [\"Engine\", \"Tools\"]\n"
+			"[project.system.windows]\nlinks = [\"ws2_32\"]\ncompiler-args = [\"--script-host\"]\n"
+			"[project.system.linux]\ndefines = { POSIX_BUILD = \"1\" }\nlinks = [\"m\"]\n"
+			"[[project.copy]]\nfrom = \"data\"\nsystems = [\"windows\"]\n"})
+		code, out = self.nuke("build", "--system", "linux")
+		self.assertEqual(code, 0, out)
+		args = self.compiles()[0]
+		self.assertEqual(args[args.index("--target") + 1], "linux-x64")
+		links = [args[i + 1] for i in range(len(args) - 1) if args[i] == "-l"]
+		self.assertIn("m", links)
+		self.assertNotIn("ws2_32", links)
+		self.assertNotIn("--script-host", args)
+		self.assertEqual(args[args.index("-o") + 1].replace("\\", "/").split("/")[-1], "Game")   # no .exe on Linux
+		bin_linux = self.path("build", "bin", "Development-linux-x64", "Game")
+		self.assertFalse(os.path.exists(os.path.join(bin_linux, "data")), "a Windows-only copy is not made for Linux")
+		description = tomllib.loads(read(self.path("build", "int", "Development-linux-x64", "Game", "projects.toml")))
+		self.assertEqual(description["project"][0]["defines"]["POSIX_BUILD"], "1")
+		code, out = self.nuke("build")
+		self.assertEqual(code, 0, out)
+		windows = self.compiles()[1]
+		self.assertNotIn("--target", windows)
+		self.assertIn("--script-host", windows)
+		self.assertIn("ws2_32", [windows[i + 1] for i in range(len(windows) - 1) if windows[i] == "-l"])
+		self.assertTrue(os.path.exists(self.bin("Game", "data")), "the copy is made for Windows")
+
 	def test_sources_includes_and_copies_expand_variables(self):
 		"""A manifest string expands its ${variables}: a module's include folder in the toolchain (C4Api's header for C4's
 		interop), its sources in the workspace, and a copy from anywhere (C4Api.dll beside a C4 tool)."""

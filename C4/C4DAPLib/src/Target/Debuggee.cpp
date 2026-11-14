@@ -5,7 +5,7 @@ namespace C4DAP::Target
 	namespace
 	{
 		// While the program runs, calls wait at most this long for the engine to look up from its debug events.
-		constexpr DWORD kPollMilliseconds = 20;
+		constexpr uint32_t kPollMilliseconds = 20;
 	}
 
 	Debuggee::Debuggee(EngineEvents events) : m_Thread(&Debuggee::Loop, this, std::move(events)) {}

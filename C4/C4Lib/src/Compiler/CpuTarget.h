@@ -1,4 +1,5 @@
 #pragma once
+#include "Compiler/TargetSystem.h"
 #include <map>
 #include <optional>
 #include <string>
@@ -6,13 +7,14 @@
 
 namespace Scripting
 {
-	/// The processor a build compiles for (D-62): an LLVM x86-64 CPU and the features enabled on it once the
-	/// `-m` / `-mno-` flags and everything they imply are applied. One per build: every function of the program,
-	/// its foreign C/C++ sources and its scripts are compiled for it, so they agree on how a vector is passed.
+	/// The machine a build compiles for: the processor (D-62), an LLVM x86-64 CPU and the features enabled on it
+	/// once the `-m` / `-mno-` flags and everything they imply are applied, and the operating system (D-86). One per
+	/// build: every function of the program, its foreign C/C++ sources and its scripts are compiled for it, so they
+	/// agree on how a vector is passed.
 	class CpuTarget
 	{
 	public:
-		/// The baseline x86-64 (SSE2), what a build gets without flags.
+		/// The baseline x86-64 (SSE2) on the host's system, what a build gets without flags.
 		CpuTarget();
 
 		/// The target `flags` select, read as clang reads them: the last `-march=<cpu>` (an LLVM x86-64 CPU or `native`)
@@ -28,6 +30,10 @@ namespace Scripting
 		/// target of a function annotated `[target(...)]`. Fails, saying why, on a name that is not one.
 		std::optional<CpuTarget> With(const std::vector<std::string>& features, std::string& error) const;
 
+		/// This target on `system`: what `--target` selects.
+		CpuTarget On(TargetSystem system) const;
+		TargetSystem System() const { return m_System; }
+
 		const std::string& Cpu() const { return m_Cpu; }
 		/// An LLVM feature name: `avx2`, `fma`, `sse4.1`.
 		bool Has(const std::string& feature) const;
@@ -40,9 +46,13 @@ namespace Scripting
 		/// `SIMD_AVX2` = 1 and the rest for each enabled feature, and `SIMD_FLOAT_LANES`.
 		std::map<std::string, std::string> Macros() const;
 
-		bool operator==(const CpuTarget& other) const { return m_Cpu == other.m_Cpu && m_Features == other.m_Features; }
+		bool operator==(const CpuTarget& other) const
+		{
+			return m_System == other.m_System && m_Cpu == other.m_Cpu && m_Features == other.m_Features;
+		}
 
 	private:
+		TargetSystem m_System;
 		std::string m_Cpu;
 		std::map<std::string, bool> m_Features;
 		std::vector<std::string> m_Flags;

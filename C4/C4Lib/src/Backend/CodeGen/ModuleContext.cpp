@@ -22,21 +22,22 @@
 
 namespace Scripting
 {
-	namespace
-	{
-		constexpr const char* kTargetTriple = "x86_64-pc-windows-msvc";
-		constexpr const char* kTargetDataLayout = "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128";
-	}
-
-	ModuleContext::ModuleContext(llvm::LLVMContext& ctx)
-		: m_Context(ctx), m_Abi(ctx), m_AliasTags(ctx, [this](const Type* t) { return m_Vtables->HasVptrs(t); })
+	ModuleContext::ModuleContext(llvm::LLVMContext& ctx, TargetSystem system)
+		: m_Context(ctx), m_System(system), m_Abi(ctx, system, m_DataLayout, [this](const Type* t) { return Lower(t); },
+			[this] { return m_Model ? uint64_t(m_Model->Target().FloatLanes()) * sizeof(float) : uint64_t(16); }), m_AliasTags(ctx, [this](const Type* t) { return m_Vtables->HasVptrs(t); })
 	{
 		m_OwnedModule = std::make_unique<llvm::Module>("c4_program", m_Context);
 		m_Module = m_OwnedModule.get();
-		// The Windows x64 target and the layout clang uses for it, so our struct sizes and aggregate passing
-		// agree with C/C++ at every boundary (doc 04).
-		m_Module->setTargetTriple(llvm::Triple(kTargetTriple));
-		m_DataLayout = llvm::DataLayout(kTargetDataLayout);
+		// The target and the layout clang uses for it, so our struct sizes and aggregate passing agree with C/C++ at
+		// every boundary (doc 04).
+		m_Module->setTargetTriple(llvm::Triple(TargetTriple(system)));
+		m_DataLayout = llvm::DataLayout(TargetDataLayout(system));
+		if (system == TargetSystem::Linux)
+		{
+			// A position-independent executable: what it defines it reaches directly, the rest through the GOT and PLT.
+			m_Module->setPICLevel(llvm::PICLevel::BigPIC);
+			m_Module->setPIELevel(llvm::PIELevel::Large);
+		}
 		m_Module->setDataLayout(m_DataLayout);
 		m_Rtti = std::make_unique<RttiEmitter>(*m_Module);
 		m_Vtables = std::make_unique<VtableEmitter>(*this, *m_Rtti);
@@ -206,6 +207,23 @@ namespace Scripting
 		return llvm::FunctionType::get(retTy, paramTys, ft ? ft->IsVariadic() : false);
 	}
 
+	// A C function takes an aggregate System V passes in memory on the stack: its hidden pointer is `byval`, and a call
+	// copies the aggregate there (Abi::PassesOnStack).
+	void ModuleContext::PassOnStack(llvm::Function& fn, const FunctionRecord& rec)
+	{
+		if (!rec.type) return;
+		const unsigned first = SignatureOf(rec).firstParam;
+		for (uint32 i = 0; i < rec.type->GetParameterCount() && first + i < fn.arg_size(); ++i)
+		{
+			const Type* p = rec.type->GetParameters()[i].m_Type;
+			if (!m_Abi.PassesOnStack(p)) continue;
+			llvm::Type* storage = Lower(p);
+			const uint64_t align = std::max<uint64_t>(8, m_DataLayout.getABITypeAlign(storage).value());
+			fn.addParamAttr(first + i, llvm::Attribute::getWithByValType(m_Context, storage));
+			fn.addParamAttr(first + i, llvm::Attribute::getWithAlignment(m_Context, llvm::Align(align)));
+		}
+	}
+
 	// Whether a declaration of the function says `inline` (BUG-357): any of them, so a header's declaration and an
 	// out-of-line definition each may.
 	static bool DeclaredInline(const FunctionRecord& rec)
@@ -239,6 +257,7 @@ namespace Scripting
 		if (fileStatic) MakeLocal(*fn);
 		if (DeclaredInline(rec)) fn->addFnAttr(llvm::Attribute::AlwaysInline);
 		if (rec.isNoexcept) fn->setDoesNotThrow();
+		if (rec.isLinked) PassOnStack(*fn, rec);
 		m_FuncCache[&rec] = fn;
 		m_NewFunctions.push_back(&rec);
 		return fn;
@@ -574,12 +593,13 @@ namespace Scripting
 		return f;
 	}
 
-	llvm::Function* ModuleContext::GetFrameHandler3()
+	llvm::Function* ModuleContext::Personality()
 	{
-		auto* f = m_Module->getFunction("__CxxFrameHandler3");
+		const char* name = m_System == TargetSystem::Linux ? "__c4_personality_v0" : "__CxxFrameHandler3";
+		auto* f = m_Module->getFunction(name);
 		if (!f)
 			f = llvm::Function::Create(llvm::FunctionType::get(llvm::Type::getInt32Ty(m_Context), {}, true),
-				llvm::Function::ExternalLinkage, "__CxxFrameHandler3", m_Module);
+				llvm::Function::ExternalLinkage, name, m_Module);
 		return f;
 	}
 

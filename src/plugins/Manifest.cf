@@ -5,6 +5,8 @@ namespace Ied
 	const char* PluginSourceName(PluginSource source) {
 		if (source == PluginSource::BuiltIn) return "builtin";
 		if (source == PluginSource::App) return "app";
+		if (source == PluginSource::Shared) return "shared";
+		if (source == PluginSource::Server) return "server";
 		return "project";
 	}
 
@@ -90,6 +92,11 @@ namespace Ied
 			manifest->m_Servers.Clear();
 			manifest->m_Servers.Push(Core::String("workspace"));
 		}
+		// A config server's server plugin runs where the config folder is served: the master (docs/35).
+		if (manifest->m_Source == PluginSource::Server) {
+			manifest->m_Servers.Clear();
+			manifest->m_Servers.Push(Core::String("master"));
+		}
 		manifest->m_Activation = Strings(root.Member("activation"));
 		manifest->m_ApiRange = Core::String(root.Member("ied").Member("api").AsView());
 		manifest->m_Permissions = Strings(root.Member("permissions"));
@@ -132,6 +139,8 @@ namespace Ied
 			Problem(manifest, ((Core::String("needs host API ") + manifest->m_ApiRange.View()) + ", this host has " + c_HostApiVersion).View());
 		const bool builtin = manifest->m_Kind.View() == "builtin";
 		if (builtin && manifest->m_Source != PluginSource::BuiltIn) Problem(manifest, Core::StringView("a builtin plugin ships with IED itself"));
+		if (manifest->m_Source == PluginSource::Server && manifest->m_Kind.View() != "c4")
+			Problem(manifest, Core::StringView("a server plugin runs C4 code on the config server: its runtime.kind is \"c4\" (docs/35)"));
 		if (!builtin && manifest->m_Kind.View() != "declarative" && manifest->m_Kind.View() != "c4")
 			Problem(manifest, (Core::String("runtime kind '") + manifest->m_Kind.View() + "' is not one this host runs (builtin, declarative, c4)").View());
 		if (manifest->m_Kind.View() == "c4") CheckCode(manifest);

@@ -4,6 +4,7 @@
 // after the lock is released, so they may block, allocate or start threads.
 
 #include "GC/GCCollector.h"
+#include "StartupC.h"
 #include "ThreadRuntimeC.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -101,7 +102,7 @@ static int register_main_thread(void)
 	this_thread();
 	return 0;
 }
-__attribute__((section(".CRT$XIU"), used)) static int (*const g_registerMainThread)(void) = register_main_thread;
+C4_AT_STARTUP(register_main_thread);
 
 // ------------------------------------------------------------------------------------------------
 // After a collection: the callbacks, the statistics and the ready finalizers, without the lock

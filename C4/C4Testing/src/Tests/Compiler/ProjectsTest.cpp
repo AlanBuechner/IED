@@ -1,7 +1,7 @@
 #include "ProjectsTest.h"
 #include "Compiler/FileIo.h"
 #include "Compiler/ProjectFile.h"
-#include <process.h>
+#include <llvm/Support/Process.h>
 #include <string>
 
 namespace Testing
@@ -156,7 +156,7 @@ namespace Testing
 	void ProjectsTest::ADeepDescriptionReads()
 	{
 		// BUG-356: a description in a folder whose path passes MAX_PATH reads, and its folders resolve from there.
-		const fs::path root = fs::temp_directory_path() / ("c4_projects_test_" + std::to_string(_getpid()));
+		const fs::path root = fs::temp_directory_path() / ("c4_projects_test_" + std::to_string(llvm::sys::Process::getProcessId()));
 		const fs::path folder = root / std::string(120, 'd') / std::string(120, 'e');
 		std::error_code ec;
 		fs::create_directories(ExtendedPath(folder), ec);

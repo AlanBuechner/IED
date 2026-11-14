@@ -1,3 +1,4 @@
+#ifdef _WIN32 // the Win32 debugger; Linux's engine is Target/LinuxEngine.h
 #include "Target/Frames.h"
 #include <dbghelp.h>
 #include <cstring>
@@ -158,3 +159,4 @@ namespace C4DAP::Target
 		return frames;
 	}
 } // namespace C4DAP::Target
+#endif

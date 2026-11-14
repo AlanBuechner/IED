@@ -155,7 +155,11 @@ class LocalTests {
 		assert_true(!listener.Listen(""), "an empty name");
 		assert_true(!listener.Listen("a\\b"), "a backslash");
 		Core::String user = Net::UserLocalName("ied");
-		assert_true(user.View().StartsWith(Core::StringView("ied-S-1-5-")), user.CStr());
+#if defined(PLATFORM_LINUX)
+		assert_true(user.View().StartsWith(Core::StringView("ied-")) && user.ByteLength() > 4, user.CStr()); // the user's id
+#else
+		assert_true(user.View().StartsWith(Core::StringView("ied-S-1-5-")), user.CStr()); // the user's SID
+#endif
 		assert_true(user.View() == Net::UserLocalName("ied").View(), "the same each time");
 	}
 }

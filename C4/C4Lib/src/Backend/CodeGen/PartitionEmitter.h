@@ -10,7 +10,7 @@ namespace Scripting
 	class PartitionEmitter
 	{
 	public:
-		PartitionEmitter() : m_MCtx(m_Context), m_Emitter(m_MCtx) {}
+		explicit PartitionEmitter(TargetSystem system) : m_MCtx(m_Context, system), m_Emitter(m_MCtx) {}
 
 		ModuleContext& mctx() { return m_MCtx; }
 		FunctionEmitter& emitter() { return m_Emitter; }

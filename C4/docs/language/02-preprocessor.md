@@ -152,7 +152,8 @@ tooling). See [../tools/01-compiler-cli.md](../tools/01-compiler-cli.md).
 | Macro | Value |
 |---|---|
 | `TEST` | `1` when building with `-test`, so tests and test helpers strip out of shipping builds |
-| `PLATFORM_WINDOWS` | `1` (the only platform today) |
+| `PLATFORM_WINDOWS` | `1` when the program is built for Windows (the default on Windows) |
+| `PLATFORM_LINUX` | `1` when it is built for Linux (`--target linux-x64`, D-86); exactly one of the two is defined |
 | `ARCH_X64` | `1` (the only architecture today) |
 | `C4_VERSION` | `major * 10000 + minor * 100 + patch` (`C4.exe --version` prints the version) |
 | `SIMD_SSE3`, `SIMD_SSSE3`, `SIMD_SSE4_1`, `SIMD_SSE4_2`, `SIMD_AVX`, `SIMD_AVX2`, `SIMD_FMA`, `SIMD_AVX512F`, `SIMD_AVX512VL`, `SIMD_AVX512BW`, `SIMD_AVX512DQ` | `1` when the build's processor has the feature (`-march`, `-m<feature>`; [vectors 8](11-vectors-and-swizzling.md#8-the-simd-target)); not defined otherwise |

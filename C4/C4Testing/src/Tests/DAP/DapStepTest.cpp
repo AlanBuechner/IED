@@ -1,3 +1,4 @@
+#ifdef _WIN32 // the Win32 debugger's internals (C4DAPLib Target/), which Linux has none of yet
 #include "DapStepTest.h"
 #include "Target/Step.h"
 
@@ -156,3 +157,4 @@ namespace Testing
 		TEST_PASSED();
 	}
 } // namespace Testing
+#endif

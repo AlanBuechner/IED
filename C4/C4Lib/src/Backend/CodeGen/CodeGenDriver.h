@@ -48,7 +48,9 @@ namespace Scripting
 		static constexpr int kReflectionPriority = 65534;
 
 	public:
-		explicit CodeGenDriver(llvm::LLVMContext& ctx);
+		/// A driver emitting the program for `system` (D-86): the build's, or the running host's for a program that runs
+		/// here (a script, a test's).
+		explicit CodeGenDriver(llvm::LLVMContext& ctx, TargetSystem system = HostSystem());
 
 		/// A lowered body and the partition it is emitted into.
 		struct Placed

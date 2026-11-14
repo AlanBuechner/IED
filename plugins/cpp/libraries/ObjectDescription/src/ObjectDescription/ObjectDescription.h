@@ -225,6 +225,12 @@ namespace Core
 	IntConverter(int32);
 	IntConverter(int64);
 
+#if !defined(_WIN32)
+	// uint64_t, int64_t and size_t on Linux: long, where uint64 and int64 are long long (on Windows they are one type).
+	UIntConverter(unsigned long);
+	IntConverter(long);
+#endif
+
 	FloatConverter(float);
 	FloatConverter(double);
 

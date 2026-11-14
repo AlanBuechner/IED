@@ -4,6 +4,9 @@
 include "bedrock.ch"
 include "scratch.ch"
 
+// Windows only: It opens Windows' own libraries (kernel32.dll, version.dll) and checks Windows' error codes. Linux's tests of this area are to come (C4 D-86).
+#if defined(PLATFORM_WINDOWS)
+
 const char* kMissingLibrary = "c4_platform_no_such_library.dll";
 
 bool Contains(const char* text, const char* part) { return Core::StringView(text).IndexOf(Core::StringView(part)) >= 0; }
@@ -109,3 +112,4 @@ class LibraryTests {
 		assert_true(moved.IsOpen() && moved.Find("GetTickCount64") != nullptr, "and the module moves");
 	}
 }
+#endif

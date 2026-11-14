@@ -1,6 +1,6 @@
 // Scripts (docs/runtime/04): a Host opens the program's interface, compiles scripts from files or text, and a Script
 // is one loaded script: its functions and types are found through reflection under its tag, calls into it are
-// guarded, and Unload ends it. Over C4Script.dll's C API (C4Script/src/C4Script.h).
+// guarded, and Unload ends it. Over C4Script.dll's C API (C4Script.so on Linux; C4Script/src/C4Script.h).
 include "Container/array.ch"
 include "Text/string.ch"
 include "Reflection/reflect.ch"

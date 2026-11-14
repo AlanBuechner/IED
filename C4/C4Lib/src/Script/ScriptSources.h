@@ -31,8 +31,14 @@ namespace Scripting
 		std::vector<std::string> scriptFolders; // the folders its includes resolve from
 	};
 
-	/// The folder no disk path has that the interface's files are placed under (`//c4i/f<n>/...`, `//c4i/lib/...`).
+	/// The folder no disk path has that the interface's files are placed under (`//c4i/f<n>/...`, `//c4i/lib/...`): a
+	/// network root on Windows (a path on no drive); on Linux `/c4i`, as a path's normalized form spells it there (POSIX
+	/// folds the leading `//`, so an include beside an interface file would be looked for under another name).
+#if defined(_WIN32)
 	inline constexpr const char* kInterfaceRoot = "//c4i";
+#else
+	inline constexpr const char* kInterfaceRoot = "/c4i";
+#endif
 
 	/// What to register for a script (ScriptCompileOptions' fields).
 	struct ScriptSourcesDesc

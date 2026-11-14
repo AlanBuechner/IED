@@ -1,5 +1,6 @@
 #include "Script/ScriptCompiler.h"
 #include "Backend/CodeGen/CodeGenDriver.h"
+#include "Backend/CodeGen/PeTables.h"
 #include "Backend/CodeGen/TestHarnessEmitter.h"
 #include "Backend/Reflection/RegistrationEmitter.h"
 #include "Compiler/AggregateCopies.h"
@@ -205,7 +206,7 @@ namespace Scripting
 		std::string error;
 		std::unique_ptr<llvm::Module> module;
 		{
-			CodeGenDriver driver(*out.context);
+			CodeGenDriver driver(*out.context, HostSystem()); // a script runs in the host that compiles it
 			driver.SetReflectionTag(options.name.c_str());
 			driver.EnableScriptMode({ &index.symbols, &index.types, units.interfaceUnits });
 			if (options.debugInfo) driver.EnableDebugInfo();
@@ -249,6 +250,9 @@ namespace Scripting
 		}
 		Optimize(*module, machine, options.optimize);
 		KeepImageOffsetsInImage(*module);
+		// ELF: each table reference relative to its own field, once the host functions they name are thunks in the
+		// script (a script lies anywhere in the address space, too far from the host for a 32-bit offset).
+		if (HostSystem() == TargetSystem::Linux) PeTables::AnchorAtFields(*module);
 		if (out.layer) out.layer->symbols = LayerSymbols(*module);
 		out.module = std::move(module);
 		return out;

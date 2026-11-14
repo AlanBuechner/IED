@@ -29,6 +29,31 @@
 					"remove": { "type": "boolean" }
 				}
 			}
+		},
+		"configServer.url": {
+			"type": "string",
+			"default": "",
+			"x-ied-tiers": ["app"],
+			"x-ied-shared": false,
+			"description": "A config server to follow (docs/35): its settings become the Shared tier, under yours, and its plugins and skills are mirrored into the app data's shared folder. 'https://nas.lan:8780/'; empty follows none."
+		},
+		"configServer.token": {
+			"type": "object",
+			"x-ied-tiers": ["app"],
+			"x-ied-shared": false,
+			"description": "The config server's reader token, never in a settings file: { \"env\": \"IED_CONFIG_TOKEN\" } names the environment variable that holds it ({ \"secret\": \"<name>\" } waits for the secret store, docs/11).",
+			"additionalProperties": false,
+			"properties": {
+				"env": { "type": "string", "minLength": 1 },
+				"secret": { "type": "string", "minLength": 1 }
+			}
+		},
+		"configServer.certificate": {
+			"type": "string",
+			"default": "",
+			"x-ied-tiers": ["app"],
+			"x-ied-shared": false,
+			"description": "A PEM file of CA certificates trusted for the config server's https besides the system's (a NAS's own CA); empty trusts the system's alone."
 		}
 	}
 }

@@ -164,6 +164,47 @@ def write(path, text):
 		f.write(text)
 
 
+# A plugin whose thread of its own ticks until its OnDeactivate says stop, as a poller does.
+TICKER = r'''include "api/Plugin.ch"
+
+namespace Probe
+{
+	class Ticks
+	{
+		public Threading::Atomic<bool> m_Stopping;
+		public Threading::Atomic<int64> m_Count;
+	}
+
+	Ticks* s_Ticks = nullptr;
+
+	IED::Result Echo(const Serialization::DomNode& args)
+	{
+		Core::StringBuilder out;
+		out.Append("{\"said\":\"ticks\",\"heard\":");
+		out.AppendInt(s_Ticks->m_Count.Load());
+		out.Append(",\"version\":VERSION}");
+		return IED::Answer(out.View());
+	}
+
+	void Activate(IED::PluginContext& context)
+	{
+		Ticks* ticks = new Ticks();
+		s_Ticks = ticks;
+		IED::PluginContext* plugin = &context;
+		context.Provide(Core::StringView("probe.echo"), Echo);
+		context.StartThread([ticks, plugin]() {
+			while (!ticks->m_Stopping.Load()) {
+				ticks->m_Count.Store(ticks->m_Count.Load() + 1);
+				Threading::Thread::Sleep(150000000);
+			}
+			plugin->Log(Core::StringView("ticker VERSION stopped"));
+		});
+		context.OnDeactivate([ticks]() { ticks->m_Stopping.Store(true); });
+	}
+}
+'''
+
+
 class PluginCodeTests(ServerTestCase):
 	def setUp(self):
 		self.root = tempfile.mkdtemp(prefix="ied-code-")
@@ -343,6 +384,32 @@ class PluginCodeTests(ServerTestCase):
 		self.assertIn("thrown: class Ied::RpcError", text, "the exception's type")
 		self.assertEqual("after", (await self.echo("after"))["said"], "the plugin still answers")
 		self.assertIsNone(self.server.process.poll(), "the server runs on")
+
+	async def test_a_reload_waits_for_the_plugins_threads(self):
+		"""PluginContext::StartThread: a script's code unloads only once its threads ended - the thread OnDeactivate told to
+		stop, asleep when the reload comes, wakes in code that is still there and ends; the new build runs its own."""
+		folder = self.builtin(probe_manifest(), {"code/probe.cf": TICKER.replace("VERSION", "1")})
+		self.start()
+		await self.connect()
+		first = await self.settled("test.probe")
+		self.assertEqual("active", first["state"], first)
+		deadline = time.monotonic() + 10
+		while (await self.echo("t"))["heard"] < 3 and time.monotonic() < deadline:
+			await asyncio.sleep(0.1)
+		self.assertGreaterEqual((await self.echo("t"))["heard"], 3, "the thread ticks")
+		for version in (2, 3):
+			before = await self.code("test.probe")
+			write(os.path.join(folder, "code", "probe.cf"), TICKER.replace("VERSION", str(version)))
+			await self.client.request("plugins.reload")
+			code = await self.settled("test.probe", after=before)
+			self.assertEqual("active", code["state"], code)
+			self.assertEqual(version, (await self.echo("t"))["version"], "the new build answers")
+		self.assertIsNone(self.server.process.poll(), "the server runs on")
+		log = workspace_log(self.server.data, self.repo)
+		with open(log, encoding="utf-8") as f:
+			text = f.read()
+		self.assertIn("ticker 1 stopped", text, "the first build's thread ended before its code unloaded")
+		self.assertIn("ticker 2 stopped", text)
 
 	async def test_diagnostics_the_allow_list_and_a_failed_rebuild(self):
 		folder = self.builtin(probe_manifest(), {"code/probe.cf": "include \"api/Plugin.ch\"\nnamespace Probe { void Activate(IED::PluginContext& context) { undefined_thing(); } }\n"})

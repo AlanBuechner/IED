@@ -4,11 +4,12 @@
 
 namespace Scripting
 {
-	// The MSVC frame handler is a definition's personality before any EH pad exists (LLVM requires that order); a
-	// function without exceptions ignores it. A declaration has none. Every definition's unwind table is ApplyTarget's.
+	// The personality (the MSVC frame handler, or C4's on Linux) is a definition's before any EH pad exists (LLVM
+	// requires that order); a function without exceptions ignores it. A declaration has none. Every definition's unwind
+	// table is ApplyTarget's.
 	void FunctionEmitter::PrepareDefinition(llvm::Function& fn)
 	{
-		if (!fn.hasPersonalityFn()) fn.setPersonalityFn(m_MCtx.GetFrameHandler3());
+		if (!fn.hasPersonalityFn()) fn.setPersonalityFn(m_MCtx.Personality());
 	}
 
 	void FunctionEmitter::Emit(const HIRFunction& hir)
@@ -77,18 +78,16 @@ namespace Scripting
 		for (uint32 i = 0; i < paramCount && llvmArg + i < fn->arg_size(); ++i)
 		{
 			// Slot i is the i-th parameter (params occupy slots 0..paramCount-1 in HIR order). A by-value
-			// aggregate that rides in one register arrives as an integer of that width - reinterpret its
-			// bytes as the object (our struct layout matches clang's, so the byte pattern is the object).
+			// aggregate that rides in registers arrives as its RegisterType - reinterpret its bytes as the
+			// object (our struct layout matches clang's, so the byte pattern is the object).
 			llvm::Value* p = fn->getArg(llvmArg + i);
 			const Type* ptype = ft->GetParameters()[i].m_Type;
-			uint32_t intSize = abi.ByValueIntSize(ptype);
-			if (intSize != 0)
+			if (llvm::Type* registers = abi.RegisterType(ptype))
 			{
 				auto& B = ctx.builder();
-				llvm::Value* intAlloca = B.CreateAlloca(llvm::IntegerType::get(m_MCtx.context(), intSize * 8));
-				B.CreateStore(p, intAlloca);
-				llvm::Value* asObjPtr = B.CreateBitCast(intAlloca, llvm::PointerType::get(m_MCtx.context(), 0));
-				llvm::Value* obj = B.CreateLoad(m_MCtx.Lower(ptype), asObjPtr);
+				llvm::Value* slot = B.CreateAlloca(abi.CoercionSlot(m_MCtx.Lower(ptype), registers));
+				B.CreateStore(p, slot);
+				llvm::Value* obj = B.CreateLoad(m_MCtx.Lower(ptype), slot);
 				B.CreateStore(obj, ctx.SlotAlloca(i));
 			}
 			else if (ctx.SlotAlloca(i) == p)

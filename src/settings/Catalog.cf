@@ -45,6 +45,8 @@ namespace Ied
 		}
 		setting->m_Merge = MergeOf(property.Member("x-ied-merge").AsView());
 		setting->m_Page = Core::String(page);
+		Serialization::DomNode shared = property.Member("x-ied-shared");
+		setting->m_Shareable = !shared.IsValid() || shared.AsBool();
 		return setting;
 	}
 

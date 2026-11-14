@@ -139,7 +139,7 @@ namespace C4DAP::Server
 			}
 			Emit("stopped", body);
 		};
-		events.thread = [this](DWORD thread, bool started) {
+		events.thread = [this](Target::ThreadId thread, bool started) {
 			Json::Value body = Json::Value::MakeObject();
 			body.SetMember("reason", Text(started ? "started" : "exited"));
 			body.SetMember("threadId", Json::Value::Int(thread));
@@ -168,7 +168,7 @@ namespace C4DAP::Server
 			Emit("exited", body);
 			Emit("terminated", Json::Value::MakeObject());
 		};
-		events.processStarted = [this](DWORD processId) {
+		events.processStarted = [this](Target::ThreadId processId) {
 			Json::Value body = Json::Value::MakeObject();
 			body.SetMember("name", Text(std::filesystem::path(m_Program).filename().string()));
 			body.SetMember("systemProcessId", Json::Value::Int(processId));

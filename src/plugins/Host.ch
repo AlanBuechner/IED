@@ -1,6 +1,7 @@
 // PluginHost (docs/02 "Lifecycle"): finds plugins - built-in ones in the install's plugins/ folder, app ones in
-// <app data>/plugins/, and a workspace's project ones: its solution's pins and its .ied/plugins/ folders (docs/26) -
-// validates their manifests, lets a stronger source override
+// <app data>/plugins/, shared ones a config server serves in <app data>/shared/plugins/ (docs/35), a config server's
+// own server plugins in <config root>/server-plugins/, and a workspace's project ones: its solution's pins and its
+// .ied/plugins/ folders (docs/26) - validates their manifests, lets a stronger source override
 // a plugin of the same id, loads an app plugin only once the owner approved its exact content and a project-local one
 // only in a trusted workspace (docs/11 "Trust layers"), checks dependencies, keeps which are disabled, and offers the
 // declarative contributions of the loaded ones. The "plugins" topic and the plugins.* methods; every member runs with

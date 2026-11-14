@@ -9,4 +9,10 @@ group = "C4"
 description = "The C4 compiler as a library: front end, program model, HIR, LLVM codegen, interop"
 depends = ["Core", "Reflection", "ObjectDescription", "Profiling"]
 includes = ["../C4Runtime", "${cpp.llvm}/include"]
+
+[project.system.windows]
 links = ["${cpp.llvm}/lib/LLVM*.lib", "!LLVM-C.lib", "${cpp.llvm}/lib/Remarks.lib", "${cpp.llvm}/lib/LTO.lib", "advapi32.lib", "kernel32.lib", "user32.lib", "gdi32.lib"]
+
+# LLVM's component archives and what they need (llvm-config --system-libs --link-static), on tools/linux/builder's LLVM.
+[project.system.linux]
+links = ["${cpp.llvm}/lib/libLLVM*.a", "libz3.so", "libz.so", "libzstd.so", "libxml2.so"]

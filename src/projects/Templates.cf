@@ -93,7 +93,12 @@ namespace Ied
 			if (!folder.Parent().IsEmpty()) return ForwardSlashes(folder.Parent().View());
 		}
 		Core::String home;
-		return Platform::TryGetEnvironmentVariable("USERPROFILE", home) ? ForwardSlashes(home.View()) : Core::String();
+#if defined(PLATFORM_LINUX)
+		const char* homeVariable = "HOME";
+#else
+		const char* homeVariable = "USERPROFILE";
+#endif
+		return Platform::TryGetEnvironmentVariable(homeVariable, home) ? ForwardSlashes(home.View()) : Core::String();
 	}
 
 	static void WriteTemplate(JsonWriter& json, const ProjectTemplate* made, Workspace* ws) {

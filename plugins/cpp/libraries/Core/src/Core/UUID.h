@@ -1,7 +1,9 @@
 #pragma once
-#include <xhash>
+#include <functional>
 #include "Core.h"
+#if defined(PLATFORM_WINDOWS)
 #include "Platform/Windows/Win.h"
+#endif
 
 namespace Core
 {

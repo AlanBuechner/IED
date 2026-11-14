@@ -210,19 +210,36 @@ namespace IED
 		instance->m_Runtime->m_Server->Log(line.View());
 	}
 
+	// A script's thread counts as its code running, as a method call does: the script unloads (CodeRuntime::Retire) once
+	// its threads have ended, so a thread OnDeactivate told to stop never goes on in code that is gone. A built-in's code
+	// never unloads, and its threads may outlive a disable.
+	static void CountThread(Ied::CodeInstance* instance, int64 change) {
+		if (instance->m_Builtin) return;
+		Ied::Server* server = instance->m_Runtime->m_Server;
+		const bool held = Ied::HostLockHeld();
+		if (!held) server->m_Lock.Lock();
+		instance->m_Running += change;
+		if (instance->m_Running == 0) instance->m_Idle.NotifyAll();
+		if (!held) server->m_Lock.Unlock();
+	}
+
 	void PluginContext::StartThread(func<void()> body) {
 		Ied::CodeInstance* instance = Of(m_Host);
+		CountThread(instance, 1);
 		Threading::Thread::Run([instance, body]() {
-			Ied::CodeScope scope(instance);
-			try {
-				body();
+			{
+				Ied::CodeScope scope(instance);
+				try {
+					body();
+				}
+				catch (Ied::RpcError& error) {
+					ThreadFailed(instance, error.m_Message.View(), Platform::StackText().View());
+				}
+				catch (...) {
+					ThreadFailed(instance, Core::StringView(""), Platform::StackText().View());
+				}
 			}
-			catch (Ied::RpcError& error) {
-				ThreadFailed(instance, error.m_Message.View(), Platform::StackText().View());
-			}
-			catch (...) {
-				ThreadFailed(instance, Core::StringView(""), Platform::StackText().View());
-			}
+			CountThread(instance, -1);
 		}).Detach();
 	}
 

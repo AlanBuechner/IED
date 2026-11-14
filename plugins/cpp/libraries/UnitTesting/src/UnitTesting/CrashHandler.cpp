@@ -1,3 +1,5 @@
+// The Windows crash interception (SEH); Linux's is CrashHandlerPosix.cpp.
+#ifdef _WIN32
 // NOMINMAX must be defined before any Windows headers to prevent min/max macros
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -192,4 +194,10 @@ namespace Testing
 		return Core::String(oss.str());
 	}
 
+	Core::String CrashSummary(const CrashInfo& crash)
+	{
+		return crash.description.empty() ? Core::String("SEH exception") : "SEH " + crash.description;
+	}
+
 } // namespace Testing
+#endif

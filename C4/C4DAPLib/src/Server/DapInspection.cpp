@@ -57,7 +57,7 @@ namespace C4DAP::Server
 	void DapServer::StackTrace(const Json::Value& request)
 	{
 		const Json::Value arguments = request.Member("arguments");
-		const DWORD thread = static_cast<DWORD>(arguments.Member("threadId").GetInt());
+		const Target::ThreadId thread = static_cast<Target::ThreadId>(arguments.Member("threadId").GetInt());
 		const uint32_t start = static_cast<uint32_t>(arguments.Member("startFrame").GetInt());
 		const uint32_t levels = static_cast<uint32_t>(arguments.Member("levels").GetInt());
 		uint32_t total = 0;

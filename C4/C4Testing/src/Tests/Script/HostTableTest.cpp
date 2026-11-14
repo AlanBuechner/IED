@@ -130,9 +130,13 @@ namespace Testing
 			TEST_ASSERT(Lists(names, "__c4_tls_t_frames"));
 			TEST_ASSERT(Lists(names, "printf"));                  // used, and listed
 			TEST_ASSERT(Lists(names, "puts"));                    // listed though unused
-			TEST_ASSERT(Lists(names, "c4_script_throw"));         // a runtime entry point the host never calls
-			TEST_ASSERT(Lists(names, "__CxxFrameHandler3"));
-			TEST_ASSERT(module->getFunction("c4_script_throw") != nullptr);
+			// a runtime entry point the host never calls, and the personality a script's catches name
+			const bool forLinux = module->getTargetTriple().isOSLinux();
+			const char* thrower = forLinux ? "c4_eh_throw" : "c4_script_throw";
+			TEST_ASSERT(Lists(names, thrower));
+			TEST_ASSERT(Lists(names, forLinux ? "__c4_personality_v0" : "__CxxFrameHandler3"));
+			TEST_ASSERT(!Lists(names, forLinux ? "c4_script_throw" : "c4_eh_throw")); // the other system's
+			TEST_ASSERT(module->getFunction(thrower) != nullptr);
 			std::vector<std::string> sorted = names;
 			std::sort(sorted.begin(), sorted.end());
 			TEST_ASSERT(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end()); // each once

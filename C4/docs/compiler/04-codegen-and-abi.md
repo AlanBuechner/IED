@@ -155,6 +155,32 @@ The model is the size authority (`Type::GetSize`); `Abi` only classifies. Intero
 `assets/IsolatedTest/Interop/` (by-value aggregates of each size class, struct-by-pointer, C++ references,
 init lists, COM) are the oracle for this section.
 
+## System V ABI (Linux, D-86)
+
+Under `--target linux-x64` the triple is `x86_64-unknown-linux-gnu` (`TargetSystem`, carried by the build's
+`CpuTarget`), and `Abi` follows the System V x86-64 convention as clang does, so C4 objects link with clang's C:
+
+- An aggregate of up to 16 bytes is classified an eightbyte at a time from its LLVM storage type: an eightbyte
+  holding only floats is SSE (`float`, `<2 x float>` or `double`), any other INTEGER (an integer of the bytes it
+  holds); `RegisterType` is that one type or a struct of the two, which LLVM passes in one or two registers.
+  An unaligned field, an x87 or 128-bit float, or more than 16 bytes puts it in memory: a hidden pointer, marked
+  `byval` (a copy on the stack) for a `[link]`ed C function, and an sret return. C4's own functions take the
+  hidden pointer as it is, so a C function reached through a function pointer takes such an aggregate only up to
+  16 bytes.
+- A packed vector passes in a vector register when one holds it (16 bytes, 32 with AVX, 64 with AVX-512F), else
+  in memory as clang passes `__m256` without AVX, and it always returns as its vector, which LLVM splits into XMM
+  registers.
+- Itanium's hidden parameters: the sret pointer comes before `this`, and a member function returns a small
+  object in registers (MSVC's member rule for every object is Windows only).
+- Register-passed aggregates cross through a temporary sized for the larger of the object and its registers
+  (`Abi::CoercionSlot`), so neither side reads past the other.
+- `va_list` is a pointer to the System V list (`{ gp_offset, fp_offset, overflow_arg_area, reg_save_area }`), which
+  `va_start` and `va_copy` place in the frame, so it passes to C's `vprintf` as it is; `va_arg` is expanded as
+  clang expands it (`ExprEmitter::SystemVVaArg`), never LLVM's `va_arg` instruction, which x86-64 lowers wrongly
+  at `-O0`. A scalar or an aggregate comes from the registers its eightbytes came in while they are left, else from the stack, as a larger aggregate does.
+- Objects are position independent (`Reloc::PIC_`, the module's PIE level), constructors go in `.init_array`,
+  debug information is DWARF 5, and `-mstackrealign` is Windows only.
+
 ## Objects, vtables and construction
 
 The object model follows the MSVC x64 ABI ([../language/05-objects.md](../language/05-objects.md)). The
@@ -302,6 +328,31 @@ TypeDescriptor names reproduce MSVC's name back-references (`MsvcNames`): a repe
 index in the name's table, and a template-id is mangled with a table of its own that then counts as one
 name (`Pair<Box<int32>, Box<int32>>` is `.?AU?$Pair@U?$Box@H@@U1@@@`), so a C++ clause for a template type
 matches the C4 one. Windows only.
+
+### Landing pads (Linux, D-86)
+
+On Linux the same cleanup stack lowers to landing pads (`RegionLandingPads.cpp`) on libgcc's unwinder, with the
+runtime's personality `__c4_personality_v0` (`C4Runtime/ExceptionsPosix.c`); the tables are the same
+`EhTables` ThrowInfo and catchable types, so a clause catches what it catches on Windows:
+
+- An exception raised above entry `i` lands at that entry's `landingpad`, whose clauses are the TypeDescriptors of
+  every try on the way out, innermost first, up to a `catch (...)` (a null clause), and `cleanup` when a cleanup
+  or a handler is on the way. It saves the exception and the selector, then takes each entry's step in turn
+  (`EhStepOf`): a cleanup runs its body (with only the scopes outside it visible, as its cleanuppad does), a
+  handler ends its catch, a try's dispatch compares the selector with `llvm.eh.typeid.for` of each clause and
+  branches to the first that matches. Below the last entry it `resume`s.
+- A handler begins with `c4_eh_begin_catch(exception, TypeDescriptor, adjectives, slot)`, which makes the copy
+  the frame handler makes on Windows (by reference, a simple type's bits with a pointer adjusted, an object by
+  its copy function), and every way out of it calls `c4_eh_end_catch`, which destroys the exception unless
+  `throw;` (`c4_eh_rethrow`) sent it on.
+- `throw v` stores the value in an exception `c4_eh_allocate` makes (the stack unwinds before a handler runs,
+  so it cannot stay in the frame; the collector scans it as a root) and raises it with `c4_eh_throw(object,
+  ThrowInfo)`. With no handler the report holds the stack of the throw, as on Windows.
+- An ELF image has no `__ImageBase`: once a partition is assembled, `PeTables::AnchorAtFields` makes each 32-bit
+  table reference relative to its own field, and the runtime reads both forms through `c4_table_ref`
+  (`RttiTablesC.h`).
+- A C++ exception (libstdc++'s) is caught by C4 only with `catch (...)`, and a C4 exception by C++ likewise:
+  the two personalities do not share types, unlike MSVC's on Windows.
 
 ## GC emission
 

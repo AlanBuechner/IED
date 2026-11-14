@@ -20,7 +20,8 @@ def tool_program(ctx, name):
 	tool = dependency(ctx, name)
 	if tool is None:
 		ctx.problem(f"{ctx.project.name} reflects but does not depend on {name}")
-	return f"{tool.bin_dir}/{name}.exe".replace("\\", "/")
+	program = name if ctx.system == "linux" else f"{name}.exe"
+	return f"{tool.bin_dir}/{program}".replace("\\", "/")
 
 
 def generated_folder(target):
@@ -44,7 +45,7 @@ def needs_code_gen(target, code_gen, sources_worked):
 	output, generator = _mtime(target.output), _mtime(code_gen)
 	if output is None or (generator is not None and generator > output):
 		return True
-	source, obj = _mtime(generated_source(target)), _mtime(f"{target.int_dir}/generated.obj")
+	source, obj = _mtime(generated_source(target)), _mtime(f"{target.int_dir}/generated.obj") or _mtime(f"{target.int_dir}/generated.o")
 	return source is None or obj is None or source > obj
 
 

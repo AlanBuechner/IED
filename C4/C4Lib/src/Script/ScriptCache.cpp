@@ -11,7 +11,11 @@
 #include <filesystem>
 #include <iterator>
 #include <thread>
+#if defined(_WIN32)
 #include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 namespace Scripting
 {
@@ -190,6 +194,17 @@ namespace Scripting
 
 	std::string ScriptCompilerIdentity()
 	{
+#if !defined(_WIN32)
+		// The shared library (or program) this code is in, by its file, size and time.
+		Dl_info info = {};
+		if (!dladdr(reinterpret_cast<void*>(&ScriptCompilerIdentity), &info) || !info.dli_fname || !*info.dli_fname) return "";
+		std::error_code ec;
+		const fs::path file = fs::canonical(info.dli_fname, ec);
+		if (ec) return "";
+		const std::optional<FileStamp> stamp = StampOf(PathText(file));
+		if (!stamp) return "";
+		return PathText(file) + "|" + std::to_string(stamp->size) + "|" + std::to_string(stamp->modified);
+#else
 		HMODULE module = nullptr;
 		if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
 				reinterpret_cast<LPCWSTR>(&ScriptCompilerIdentity), &module))
@@ -201,5 +216,6 @@ namespace Scripting
 		if (!stamp) return "";
 		return std::string(reinterpret_cast<const char*>(path), length * sizeof(wchar_t)) + "|" + std::to_string(stamp->size) + "|" +
 			std::to_string(stamp->modified);
+#endif
 	}
 } // namespace Scripting

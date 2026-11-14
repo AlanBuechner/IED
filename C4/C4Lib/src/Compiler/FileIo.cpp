@@ -1,6 +1,7 @@
 #include "Compiler/FileIo.h"
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/MemoryBuffer.h>
+#include <llvm/Support/Process.h>
 #include <llvm/Support/raw_ostream.h>
 #include <chrono>
 
@@ -35,6 +36,7 @@ namespace Scripting
 
 	bool IsFolder(const std::string& path) { return llvm::sys::fs::is_directory(path); }
 
+#ifdef _WIN32
 	namespace
 	{
 		const std::wstring kExtended = L"\\\\?\\";
@@ -59,6 +61,17 @@ namespace Scripting
 		if (text.rfind(kExtended, 0) == 0) return std::filesystem::path(text.substr(kExtended.size()));
 		return path;
 	}
+#else
+	// Linux has no path length limit to spell around: a path is only made absolute and normal, as on Windows.
+	std::filesystem::path ExtendedPath(const std::filesystem::path& path)
+	{
+		std::error_code ec;
+		const std::filesystem::path full = std::filesystem::absolute(path, ec);
+		return (ec ? path : full).lexically_normal();
+	}
+
+	std::filesystem::path PlainPath(const std::filesystem::path& path) { return path; }
+#endif
 
 	void RemoveFile(const std::string& path) { llvm::sys::fs::remove(path); }
 
@@ -98,11 +111,21 @@ namespace Scripting
 		if (!source) return std::make_error_code(std::errc::no_such_file_or_directory);
 		RemoveSetAside(to);
 		if (existing && existing->modified >= source->modified) return {};
+#ifdef _WIN32
 		const std::error_code copied = llvm::sys::fs::copy_file(from, to);
 		if (!copied || !existing) return copied;
 		// A running program has it loaded (a DLL beside it): Windows will not write it, but renames it.
 		if (RenameFile(to, AsidePath(to))) return copied;
 		return llvm::sys::fs::copy_file(from, to);
+#else
+		// A running program may have `to` mapped (a shared library beside it): Linux would write the code under it, so the
+		// copy goes beside it and is renamed over it, and the program keeps the file it has open.
+		const std::string partial = to + "." + std::to_string(llvm::sys::Process::getProcessId()) + ".partial";
+		if (const std::error_code copied = llvm::sys::fs::copy_file(from, partial)) return copied;
+		const std::error_code renamed = RenameFile(partial, to);
+		if (renamed) RemoveFile(partial);
+		return renamed;
+#endif
 	}
 
 	std::optional<FileStamp> StampOf(const std::string& path)
