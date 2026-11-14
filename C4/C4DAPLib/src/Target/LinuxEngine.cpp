@@ -1,16 +1,19 @@
 #ifndef _WIN32
 #include "Target/LinuxEngine.h"
+#include <filesystem>
 
 namespace C4DAP::Target
 {
 	namespace
 	{
-		const char* const kNoDebugger = "C4DAP cannot debug programs on Linux yet: its debugger is the Win32 debug API's, and "
+		const std::string kNoDebugger = "C4DAP cannot debug programs on Linux yet: its debugger is the Win32 debug API's, and "
 			"Linux's (ptrace and the program's DWARF) is still to be written";
 	}
 
-	std::string Engine::Launch(const LaunchOptions&)
+	std::string Engine::Launch(const LaunchOptions& options)
 	{
+		std::error_code ec;
+		if (!std::filesystem::is_regular_file(options.program, ec)) return "no program at " + options.program;
 		return kNoDebugger;
 	}
 
@@ -18,7 +21,7 @@ namespace C4DAP::Target
 	{
 		std::vector<BoundBreakpoint> bound;
 		for (uint32_t line : lines)
-			bound.push_back(BoundBreakpoint{ m_NextBreakpoint++, false, line, path, kNoDebugger });
+			bound.push_back(BoundBreakpoint{ m_NextBreakpoint++, false, line, path, "the program's code is not loaded (" + kNoDebugger + ")" });
 		return bound;
 	}
 
@@ -30,7 +33,7 @@ namespace C4DAP::Target
 
 	EvaluateResult Engine::Evaluate(const std::string&, uint32_t)
 	{
-		return EvaluateResult{ kNoDebugger, {} };
+		return EvaluateResult{ "the program is not stopped (" + kNoDebugger + ")", {} };
 	}
 } // namespace C4DAP::Target
 #endif

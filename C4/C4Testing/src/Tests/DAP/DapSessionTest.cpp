@@ -1,3 +1,4 @@
+#ifdef _WIN32 // debug sessions of real programs: they need a debugger, which C4DAP has none of on Linux yet (D-86)
 #include "DapSessionTest.h"
 #include "DapTestSupport.h"
 
@@ -454,3 +455,4 @@ int32 main() {
 		TEST_PASSED();
 	}
 } // namespace Testing
+#endif

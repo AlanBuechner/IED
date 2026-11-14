@@ -111,10 +111,16 @@ namespace Testing
 
 	void SourceOutlineTest::DefinesDecideWhatIsCompiledIn()
 	{
-		const std::string text = "#ifdef FAST\nint32 Fast();\n#else\nint32 Slow();\n#endif\n#ifdef PLATFORM_WINDOWS\nint32 OnWindows();\n#endif\n";
+		// The system the build is for, as its predefined macro: the host's when nothing names another.
+#ifdef _WIN32
+		const std::string host = "PLATFORM_WINDOWS";
+#else
+		const std::string host = "PLATFORM_LINUX";
+#endif
+		const std::string text = "#ifdef FAST\nint32 Fast();\n#else\nint32 Slow();\n#endif\n#ifdef " + host + "\nint32 OnHost();\n#endif\n";
 		const SourceOutline plain = Outline(text);
 		TEST_ASSERT(Find(plain, "Fast") < 0 && Find(plain, "Slow") >= 0);
-		TEST_ASSERT(Find(plain, "OnWindows") >= 0); // the predefined macros of a build
+		TEST_ASSERT(Find(plain, "OnHost") >= 0); // the predefined macros of a build
 		const SourceOutline fast = Outline(text, { { "FAST", "1" } });
 		TEST_ASSERT(Find(fast, "Fast") >= 0 && Find(fast, "Slow") < 0);
 		TEST_ASSERT_EQ(fast.declarations[Find(fast, "Fast")].nameAt.line, 2u);

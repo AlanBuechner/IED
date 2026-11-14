@@ -209,6 +209,11 @@ def run_job(job, cwd):
 			return job.code
 	if job.reflect_needed:
 		os.makedirs(job.header_tool[2], exist_ok=True)
+		# What the HeaderTool found in the source's own header before goes first: a header that reflects nothing now (its
+		# classes fenced off for another system, or removed) would otherwise leave its old findings to CodeGen.
+		stale = os.path.join(job.header_tool[2], os.path.splitext(os.path.basename(job.source))[0] + ".h.reflected")
+		if os.path.isfile(stale):
+			os.remove(stale)
 		job.code = run_retrying_crashes(job.header_tool, cwd, job.log, os.path.basename(job.source))
 		if job.code != 0:
 			job.log.append(f"error: the HeaderTool failed on {os.path.basename(job.source)} (exit code {job.code})")

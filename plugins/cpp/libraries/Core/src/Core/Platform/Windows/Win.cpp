@@ -283,12 +283,15 @@ namespace Platform
 		si.cb = sizeof(si);
 		si.dwFlags |= STARTF_USESTDHANDLES;
 
-		// Create anonymous pipe for stdout capture
+		// Create anonymous pipe for stdout capture: the child inherits its write end (a handle made without inheritance
+		// never reaches it, and its output went nowhere), never its read end.
+		SECURITY_ATTRIBUTES inheritable{ sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE };
 		HANDLE hReadPipe = nullptr, hWritePipe = nullptr;
-		if (!CreatePipe(&hReadPipe, &hWritePipe, nullptr, 0))
+		if (!CreatePipe(&hReadPipe, &hWritePipe, &inheritable, 0))
 		{
 			return result;
 		}
+		SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
 
 		si.hStdOutput = hWritePipe;
 		si.hStdError = hWritePipe; // merge stderr into stdout pipe
@@ -310,7 +313,7 @@ namespace Platform
 		{
 			DWORD err = GetLastError();
 			CORE_WARN("ExecuteProcess: CreateProcessW failed for \"{0}\" with error {1}: {2}",
-				a_ExePath, err, TranslateError(HRESULT_FROM_WIN32(err)));
+				a_ExePath, err, WideToUtf8(TranslateError(HRESULT_FROM_WIN32(err)).c_str())); // StringFormat prints no wide text
 			CloseHandle(hReadPipe);
 			return result;
 		}

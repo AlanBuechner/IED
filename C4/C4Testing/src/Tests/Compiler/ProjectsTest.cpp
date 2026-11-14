@@ -10,15 +10,30 @@ namespace Testing
 
 	namespace
 	{
-		const fs::path kFolder = fs::path("C:/Work/build");
+		// An absolute folder on the host's system (C4 D-86): the descriptions below name C:/Work, which is relative on Linux.
+#if defined(_WIN32)
+		const std::string kWork = "C:/Work";
+#else
+		const std::string kWork = "/work";
+#endif
+
+		// `text` with C:/Work spelled as kWork.
+		std::string Here(std::string text)
+		{
+			const std::string spelled = "C:/Work";
+			for (size_t at = text.find(spelled); at != std::string::npos; at = text.find(spelled, at + kWork.size())) text.replace(at, spelled.size(), kWork);
+			return text;
+		}
+
+		const fs::path kFolder = fs::path(kWork + "/build");
 
 		ProjectList Parsed(const char* text)
 		{
-			ProjectFileResult read = ParseProjectFile(text, kFolder);
+			ProjectFileResult read = ParseProjectFile(Here(text), kFolder);
 			return read.list;
 		}
 
-		std::string ParseError(const char* text) { return ParseProjectFile(text, kFolder).error; }
+		std::string ParseError(const char* text) { return ParseProjectFile(Here(text), kFolder).error; }
 
 		std::string CheckError(const char* text) { return ProjectSet::Check(Parsed(text)).error; }
 
@@ -33,7 +48,7 @@ namespace Testing
 
 	void ProjectsTest::ReadsADescription()
 	{
-		ProjectFileResult read = ParseProjectFile(
+		ProjectFileResult read = ParseProjectFile(Here(
 			"# written by nuke\n"
 			"root = \"Game\"\n"
 			"\n"
@@ -50,19 +65,19 @@ namespace Testing
 			"[[project]]\n"
 			"name = \"Engine\"\n"
 			"sources = [\"C:/Work/Engine/src\", \"C:/Work/Engine/gen\"]\n"
-			"includes = [\"C:/Work/Engine/third_party\"]\n", kFolder);
+			"includes = [\"C:/Work/Engine/third_party\"]\n"), kFolder);
 		TEST_ASSERT_EQ(read.error, std::string());
 		TEST_ASSERT_EQ(read.list.root, std::string("Game"));
 		TEST_ASSERT_EQ((int)read.list.projects.size(), 2);
 		const Project& game = read.list.projects[0];
-		TEST_ASSERT_EQ(game.sources[0].generic_string(), std::string("C:/Work/Game/src"));
+		TEST_ASSERT_EQ(game.sources[0].generic_string(), Here("C:/Work/Game/src"));
 		TEST_ASSERT_EQ((int)game.depends.size(), 1);
 		TEST_ASSERT_EQ(game.depends[0], std::string("Engine"));
 		TEST_ASSERT_EQ(game.defines.at("PROJECT_NAME"), std::string("Game"));
 		TEST_ASSERT_EQ(game.defines.at("QUOTE"), std::string("say \"hi\""));
 		const Project& engine = read.list.projects[1];
 		TEST_ASSERT_EQ((int)engine.sources.size(), 2);
-		TEST_ASSERT_EQ(engine.includes[0].generic_string(), std::string("C:/Work/Engine/third_party"));
+		TEST_ASSERT_EQ(engine.includes[0].generic_string(), Here("C:/Work/Engine/third_party"));
 		TEST_ASSERT(engine.depends.empty() && engine.defines.empty());
 		TEST_PASSED();
 	}
@@ -114,7 +129,7 @@ namespace Testing
 			"root = \"Game\"\n"
 			"[[project]]\nname = \"Game\"\nsources = [\"C:/Work/Game\"]\ndepends = [\"Engine\"]\n"
 			"[[project]]\nname = \"Engine\"\nsources = [\"C:/Work/Game/engine\"]\n"),
-			std::string("'C:/Work/Game/engine' is in the sources of both 'Game' and 'Engine'"));
+			Here("'C:/Work/Game/engine' is in the sources of both 'Game' and 'Engine'"));
 		TEST_ASSERT_EQ(CheckError(
 			"root = \"Game\"\n"
 			"[[project]]\nname = \"Game\"\nsources = [\"C:/Work/Game/src\"]\ndepends = [\"Engine\"]\n"
@@ -144,12 +159,14 @@ namespace Testing
 	void ProjectsTest::FilesBelongToTheirProject()
 	{
 		ProjectSet set = Checked(kGameEngineCore);
-		TEST_ASSERT_EQ((int)*set.OwnerOf("C:/Work/Engine/src/render/mesh.ch"), 1);
+		TEST_ASSERT_EQ((int)*set.OwnerOf(Here("C:/Work/Engine/src/render/mesh.ch")), 1);
+#if defined(_WIN32)
 		TEST_ASSERT_EQ((int)*set.OwnerOf("c:/work/game/src/main.cf"), 0); // Windows paths ignore case
-		TEST_ASSERT(!set.OwnerOf("C:/Work/Engine/srcs/x.cf"));          // a sibling folder with a longer name is not inside
-		ProjectSet one = ProjectSet::OneProject({ "C:/Work/app", "C:/Work/lib" });
+#endif
+		TEST_ASSERT(!set.OwnerOf(Here("C:/Work/Engine/srcs/x.cf")));          // a sibling folder with a longer name is not inside
+		ProjectSet one = ProjectSet::OneProject({ Here("C:/Work/app"), Here("C:/Work/lib") });
 		TEST_ASSERT_EQ((int)one.Count(), 1);
-		TEST_ASSERT_EQ((int)*one.OwnerOf("C:/Work/lib/x.cf"), 0);
+		TEST_ASSERT_EQ((int)*one.OwnerOf(Here("C:/Work/lib/x.cf")), 0);
 		TEST_PASSED();
 	}
 

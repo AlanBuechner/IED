@@ -47,6 +47,8 @@ namespace Testing
 				}
 				Value options = Value::MakeObject();
 				options.SetMember("programs", programs);
+				// C4 Tidy is the process's (Features::Tidy), and other tests leave it on: these count the analyses' own messages.
+				options.SetMember("tidy", Value::Bool(false));
 				return options;
 			}
 		};

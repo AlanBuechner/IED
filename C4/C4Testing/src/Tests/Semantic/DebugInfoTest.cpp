@@ -247,9 +247,15 @@ namespace Testing
 			for (llvm::Function& fn : m)
 			{
 				if (!fn.getSubprogram() || fn.getSubprogram()->getName() != "Recover") continue;
+				// The handler's entry: its catchpad (Windows' funclets), or the call that begins the catch (Linux's landing
+				// pads, C4 D-86).
 				for (llvm::BasicBlock& block : fn)
 					for (llvm::Instruction& instruction : block)
-						if (llvm::isa<llvm::CatchPadInst>(instruction) && instruction.getDebugLoc()) padLine = instruction.getDebugLoc().getLine();
+					{
+						const auto* call = llvm::dyn_cast<llvm::CallBase>(&instruction);
+						const bool begins = call && call->getCalledFunction() && call->getCalledFunction()->getName() == "c4_eh_begin_catch";
+						if ((llvm::isa<llvm::CatchPadInst>(instruction) || begins) && instruction.getDebugLoc()) padLine = instruction.getDebugLoc().getLine();
+					}
 				for (const llvm::DINode* node : fn.getSubprogram()->getRetainedNodes())
 					if (const auto* variable = llvm::dyn_cast<llvm::DILocalVariable>(node); variable && variable->getName() == "e")
 						caughtLine = variable->getLine();

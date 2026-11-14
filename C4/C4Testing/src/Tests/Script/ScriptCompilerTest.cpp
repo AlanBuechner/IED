@@ -237,7 +237,9 @@ namespace Testing
 		TEST_ASSERT(Compiled(script));
 		const std::vector<const llvm::CallBase*> calls = CallsOf(*script.module->getFunction("Caught_0"), "__c4_tls_Game_t_frames");
 		TEST_ASSERT_EQ(calls.size(), (size_t)1);
-		TEST_ASSERT(calls[0]->getOperandBundle(llvm::LLVMContext::OB_funclet).has_value());
+		// Windows' catch is a funclet, which the call names; Linux's is code after a landing pad, with no funclet (D-86).
+		const bool onLinux = script.module->getTargetTriple().isOSLinux();
+		TEST_ASSERT_EQ(calls[0]->getOperandBundle(llvm::LLVMContext::OB_funclet).has_value(), !onLinux);
 		TEST_PASSED();
 	}
 
