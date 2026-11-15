@@ -61,6 +61,8 @@ namespace IED
 	bool WriteFile(const Workspace& ws, Core::StringView path, Core::StringView text, Core::String& problem);
 	// Moves a file or folder of workspace `wsId` to the recoverable trash (docs/11; fs.write).
 	bool MoveToTrash(Core::StringView wsId, Core::StringView path, Core::String& problem);
+	// The same, with the trash entry's id (what trash.restore takes, for an Undo).
+	bool MoveToTrash(Core::StringView wsId, Core::StringView path, Core::String& trashId, Core::String& problem);
 	// `path` relative to `root` with '/' separators, ASCII case and separator kind not mattering; false when it is not
 	// `root` or under it.
 	bool RelativeTo(Core::StringView root, Core::StringView path, Core::String& relative);

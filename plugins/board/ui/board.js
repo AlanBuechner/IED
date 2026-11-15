@@ -267,6 +267,11 @@ export class BoardView {
 	// --- the model's changes ---------------------------------------------------------------------------------------
 
 	changed(change) {
+		// The board was deleted (here, on another device, in the Solution Explorer): its tab goes too.
+		if (change.kind === "deleted") {
+			this.ied.tabs.close(this.ctx.ref);
+			return;
+		}
 		if (change.kind === "error") {
 			this.message.hidden = false;
 			replace(this.message, icon("error", "c-error"), " Cannot open the board: " + this.model.error);

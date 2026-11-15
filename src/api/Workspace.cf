@@ -76,6 +76,11 @@ namespace IED
 	}
 
 	bool MoveToTrash(Core::StringView wsId, Core::StringView path, Core::String& problem) {
+		Core::String trashId;
+		return MoveToTrash(wsId, path, trashId, problem);
+	}
+
+	bool MoveToTrash(Core::StringView wsId, Core::StringView path, Core::String& trashId, Core::String& problem) {
 		Ied::CodeInstance* instance = Caller(problem);
 		if (!instance) return false;
 		Ied::Server* server = instance->m_Runtime->m_Server;
@@ -86,7 +91,7 @@ namespace IED
 		if (!found) return false;
 		try {
 			Core::String relative = Ied::NormalizePath(path);
-			server->m_Trash->MoveIn(found, relative.View(), FS::IsDirectory(found->At(relative.View()).CStr()));
+			trashId = server->m_Trash->MoveIn(found, relative.View(), FS::IsDirectory(found->At(relative.View()).CStr()));
 			return true;
 		}
 		catch (Ied::RpcError& error) {

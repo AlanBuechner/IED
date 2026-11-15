@@ -82,8 +82,25 @@
 .board-set-head.drop, .board-list-rows.drop, .board-list-row.drop { background: var(--tint-info); outline: var(--border-width) dashed var(--accent-info); outline-offset: -1px; }
 .board-list-row[draggable="true"]:active { cursor: grabbing; }
 
+/* New board (newboard.js): its name and its folder, the folder's suggestions under its field */
+.popup.dialog.board-new:not(.sheet) { width: min(480px, calc(100vw - 32px)); }
+.board-new-field { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: var(--space-4); margin-top: var(--space-4); color: var(--text-1); }
+.board-new-field .input-field { width: 100%; height: var(--row-h); padding: 0 var(--space-3); min-width: 0; }
+.board-new-folder { position: relative; display: flex; min-width: 0; }
+.board-new-folder .input-field { padding-right: 28px; }
+.board-new-browse { position: absolute; right: 1px; top: 50%; transform: translateY(-50%); }
+.board-new-folders { position: absolute; left: 0; right: 0; top: calc(100% + 2px); max-height: 220px; overflow-y: auto; background: var(--bg-2); border: var(--border-width) solid var(--border-1); border-radius: var(--radius-2); box-shadow: var(--shadow-popup); z-index: 2; }
+.board-new-folder-row { display: flex; align-items: center; gap: var(--space-3); height: var(--row-h); padding: 0 var(--space-3); color: var(--text-1); cursor: pointer; }
+.board-new-folder-row .ci { width: 14px; height: 14px; flex: none; }
+.board-new-folder-row:hover { background: var(--veil); color: var(--text-0); }
+.board-new-folder-row.sel { background: var(--selection-active); color: var(--text-0); }
+.board-new-where { min-height: 1.2em; margin-top: var(--space-4); font-size: var(--font-size-sm); overflow-wrap: anywhere; }
+
 /* phone: the panel is a sheet over the lower half of the board */
 @media (max-width: 719px) {
+	.board-new-field { grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
+	.board-new-field .input-field { height: var(--row-h-touch); }
+	.board-new-folder-row { height: var(--row-h-touch); }
 	.board-sheet:not([hidden]) { display: flex; position: absolute; left: 0; right: 0; bottom: 0; height: 55%; border-top: var(--border-width) solid var(--border-1); box-shadow: var(--shadow-popup); z-index: 3; }
 	.board-toolbar { padding: var(--space-2); gap: var(--space-2); flex-wrap: nowrap; overflow-x: auto; }
 	.board-end { display: contents; }

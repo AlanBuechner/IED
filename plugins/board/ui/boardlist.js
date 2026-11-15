@@ -1,12 +1,13 @@
 // boardlist.js - the Boards tool window (docs/32 "The board in the UI", "Groups"): the workspace's boards, live, in the
 // owner's groups - folded or open as this device left them - then the boards in none. A click opens a board; a board is
-// dragged onto a group (or between two of its boards) or moved from its menu; a group's menu renames or deletes it (its
-// boards stay, ungrouped) and makes a board in it. The arrangement lives in the workspace's .ied/boards.json, written
-// whole through ied.board/groups.
+// dragged onto a group (or between two of its boards) or moved from its menu, and deleted from it (Del: to the trash,
+// with an Undo); a group's menu renames or deletes it (its boards stay, ungrouped) and makes a board in it. The
+// arrangement lives in the workspace's .ied/boards.json, written whole through ied.board/groups.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { MenuHost } from "/ui-kit/menu.js";
-import { promptDialog } from "/ui-kit/dialog.js";
+import { confirmDialog, promptDialog } from "/ui-kit/dialog.js";
+import { commonFolder } from "./newboard.js";
 
 const menus = new MenuHost();
 const CLOSED_KEY = "ied.board.closedGroups";
@@ -136,6 +137,10 @@ export class BoardListView {
 				click: open,
 				keydown: (e) => {
 					if (e.key === "Enter") open();
+					else if (e.key === "Delete") {
+						e.preventDefault();
+						this.deleteBoard(board);
+					}
 					else if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
 						e.preventDefault();
 						this.boardMenu(e.target, board, group);
@@ -244,6 +249,32 @@ export class BoardListView {
 		return this.save(this.groups().filter((g) => g.name !== group));
 	}
 
+	// To the trash with its images (ied.board/delete), with an Undo that puts both back - in its group again, since the
+	// groups file keeps a board that is gone. Its tabs close everywhere.
+	async deleteBoard(board) {
+		const label = board.title || boardName(board.path);
+		const sure = await confirmDialog({ title: "Delete board", message: "'" + label + "' (" + board.path + "), with any images on it, will be moved to the trash.", confirm: "Delete", danger: true });
+		if (!sure) return;
+		let deleted;
+		try {
+			deleted = await this.ied.client.request("ied.board/delete", { wsId: this.ctx.wsId, path: board.path });
+		}
+		catch (e) {
+			this.ied.toast("Cannot delete the board: " + (e.message || e), { level: "error" });
+			return;
+		}
+		this.ied.toast("Deleted '" + label + "'.", { action: { label: "Undo", run: () => this.restore(deleted.trashIds, board.path) } });
+	}
+
+	async restore(trashIds, path) {
+		try {
+			for (const id of trashIds) await this.ied.client.request("trash.restore", { id });
+		}
+		catch (e) {
+			this.ied.toast(e.code === "conflict" ? "'" + path + "' was not restored: something is there now." : "Cannot restore '" + path + "': " + (e.message || e), { level: "error" });
+		}
+	}
+
 	moveGroup(group, by) {
 		const groups = this.groups();
 		const at = groups.findIndex((g) => g.name === group);
@@ -264,12 +295,15 @@ export class BoardListView {
 			{ kind: "separator" },
 			{ kind: "submenu", label: "Move to Group", menuId: "move" },
 			group !== UNGROUPED ? { kind: "item", label: "Remove from Group", id: "ungroup", enabled: true } : null,
+			{ kind: "separator" },
+			{ kind: "item", label: "Delete…", id: "delete", enabled: true, keys: "Del" },
 		].filter(Boolean), submenu: () => [
 			...others.map((g) => ({ kind: "item", label: g.name, id: "to:" + g.name, enabled: true })),
 			others.length ? { kind: "separator" } : null,
 			{ kind: "item", label: "New Group…", id: "new", enabled: true },
 		].filter(Boolean), pick: (row) => {
 			if (row.id === "open") this.openBoard(board.path);
+			else if (row.id === "delete") this.deleteBoard(board);
 			else if (row.id === "ungroup") this.move(board.path, UNGROUPED, null);
 			else if (row.id === "new") this.newGroup(board.path);
 			else if (row.id.startsWith("to:")) this.move(board.path, row.id.slice(3), null);
@@ -289,7 +323,9 @@ export class BoardListView {
 			{ kind: "item", label: "Delete Group (keeps its boards)", id: "delete", enabled: true },
 		], pick: async (row) => {
 			if (row.id === "board") {
-				const made = await this.newBoard();
+				// It starts in the folder most of the group's boards are in.
+				const own = this.data.groups.find((g) => g.name === group);
+				const made = await this.newBoard({ folder: commonFolder(own ? own.boards : []) });
 				if (made) await this.move(made, group, null);
 			}
 			else if (row.id === "rename") this.renameGroup(group);

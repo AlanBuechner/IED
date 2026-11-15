@@ -40,6 +40,21 @@ namespace Boards
 		return Opened(service->Create(request.m_Params.Str("wsId").View(), request.m_Params.Str("path").View(), request.m_Params.Str("title", Core::StringView("")).View()));
 	}
 
+	// {wsId, path} -> {path, trashIds}: the board and its images in the trash (trash.restore puts each back).
+	static Core::String DeleteMethod(BoardService* service, const IED::Request& request) {
+		Core::String path = BoardPath(request.m_Params.Str("path").View());
+		Core::Array<Core::String> trashIds = service->Delete(request.m_Params.Str("wsId").View(), path.View());
+		JsonOut json;
+		json.BeginObject();
+		json.StrField("path", path.View());
+		json.Key(Core::StringView("trashIds"));
+		json.BeginArray();
+		for (const Core::String& id : trashIds) json.Str(id.View());
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
 	static Core::String EditMethod(BoardService* service, const IED::Request& request) {
 		OpenBoard* open = service->ById(request.m_Params.Str("boardId").View());
 		ChangeResult result;
@@ -125,6 +140,7 @@ namespace Boards
 		Method(service, "ied.board/groups", GroupsMethod);
 		Method(service, "ied.board/open", OpenMethod);
 		Method(service, "ied.board/create", CreateMethod);
+		Method(service, "ied.board/delete", DeleteMethod);
 		Method(service, "ied.board/edit", EditMethod);
 		Method(service, "ied.board/undo", UndoMethod);
 		Method(service, "ied.board/redo", RedoMethod);

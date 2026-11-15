@@ -215,6 +215,71 @@ class BoardTests(ServerTestCase):
 				await self.client.request("ied.board/groups", {"wsId": "w1", "groups": bad}, timeout=WAIT)
 			self.assertIn(why, str(refused.exception))
 
+	async def test_a_deleted_board_goes_to_the_trash_and_comes_back(self):
+		opened, _ = await self.open_board("design/gone")
+		request = urllib.request.Request("http://%s:%d/w/w1/api/upload" % (self.server.host, self.server.port), data=png(8, 8), method="PUT", headers={"Cookie": self.cookie, "Content-Type": "image/png", "Host": "%s:%d" % (self.server.host, self.server.port), "Origin": "http://%s:%d" % (self.server.host, self.server.port)})
+		blob = json.loads(urllib.request.urlopen(request).read())["blobId"]
+		stored = await self.client.request("ied.board/image", {"boardId": opened["boardId"], "blobId": blob})
+		await self.client.request("ied.board/groups", {"wsId": "w1", "groups": [{"name": "Sprint", "boards": ["design/gone.iedboard"]}]}, timeout=WAIT)
+		# An edit not saved yet: the trash keeps the board as it was, and no save writes it back.
+		await self.client.request("ied.board/edit", {"boardId": opened["boardId"], "ops": [{"op": "add", "type": "note", "x": 0, "y": 0, "text": "last words"}]})
+		path = os.path.join(self.ws, "design", "gone.iedboard")
+		list_topic = "ied.board/ws:w1"
+		await self.client.sub([list_topic])
+		deleted = await self.client.request("ied.board/delete", {"wsId": "w1", "path": "design/gone"}, timeout=WAIT)
+		self.assertEqual("design/gone.iedboard", deleted["path"])
+		self.assertEqual(2, len(deleted["trashIds"]), "the board and its images")
+		event = (await self.client.wait_for(opened["topic"], lambda f: f.get("kind") == "deleted", timeout=WAIT))[-1]["data"]
+		self.assertEqual({"path": "design/gone.iedboard"}, event, "its windows hear it")
+		self.assertFalse(os.path.exists(path))
+		self.assertFalse(os.path.exists(os.path.join(self.ws, "design", "gone.assets")))
+		await self.client.wait_for(list_topic, lambda f: f.get("kind") == "boards.changed" and not f["data"]["boards"], timeout=WAIT)
+		await asyncio.sleep(1.5)
+		self.assertFalse(os.path.exists(path), "the saver does not write a deleted board back")
+		with self.assertRaises(Exception) as refused:
+			await self.client.request("ied.board/edit", {"boardId": opened["boardId"], "ops": [{"op": "add", "type": "note", "x": 0, "y": 0, "text": "x"}]})
+		self.assertIn("no open board", str(refused.exception))
+		with self.assertRaises(Exception) as missing:
+			await self.client.request("ied.board/delete", {"wsId": "w1", "path": "design/gone"}, timeout=WAIT)
+		self.assertIn("no board design/gone.iedboard", str(missing.exception))
+		# Undo: trash.restore puts each back; the board opens anew with the edit and is in its group again.
+		for trash_id in deleted["trashIds"]:
+			await self.client.request("trash.restore", {"id": trash_id}, timeout=WAIT)
+		frames = await self.client.wait_for(list_topic, lambda f: f.get("kind") == "boards.changed" and f["data"]["boards"], timeout=WAIT)
+		self.assertEqual([{"name": "Sprint", "boards": ["design/gone.iedboard"]}], frames[-1]["data"]["groups"])
+		self.assertTrue(os.path.exists(os.path.join(self.ws, *stored["src"].split("/"))))
+		_, snap = await self.reopen("design/gone")
+		self.assertEqual(["last words"], [el.get("text") for el in snap["elements"]])
+
+	async def test_a_board_restored_at_once_is_listed_again(self):
+		await self.client.request("ied.board/create", {"wsId": "w1", "path": "design/quick"}, timeout=WAIT)
+		await asyncio.sleep(1.5)   # the watcher has told of the new file
+		topic = "ied.board/ws:w1"
+		await self.client.sub([topic])
+		deleted = await self.client.request("ied.board/delete", {"wsId": "w1", "path": "design/quick"}, timeout=WAIT)
+		await self.client.request("trash.restore", {"id": deleted["trashIds"][0]}, timeout=WAIT)
+		# The watcher folds the delete and the restore into one change of the file, which still lists it again.
+		await self.client.wait_for(topic, lambda f: f.get("kind") == "boards.changed" and "design/quick.iedboard" in [b["path"] for b in f["data"]["boards"]], timeout=WAIT)
+
+	async def test_a_board_is_not_made_where_the_list_does_not_look(self):
+		for path, folder in (("build/plans/x", "build"), (".notes/x", ".notes"), ("design/node_modules/x", "node_modules")):
+			with self.assertRaises(Exception, msg=path) as refused:
+				await self.client.request("ied.board/create", {"wsId": "w1", "path": path}, timeout=WAIT)
+			self.assertIn("the Boards list does not look in %s/" % folder, str(refused.exception))
+		made = await self.client.request("ied.board/create", {"wsId": "w1", "path": "design/new folder/x"}, timeout=WAIT)
+		self.assertEqual("design/new folder/x.iedboard", made["path"], "a folder that is not there yet is made")
+
+	async def test_a_board_deleted_outside_the_list_is_forgotten(self):
+		opened, _ = await self.open_board("design/elsewhere")
+		await self.client.request("ied.board/edit", {"boardId": opened["boardId"], "ops": [{"op": "add", "type": "note", "x": 0, "y": 0, "text": "draft"}]})
+		trashed = await self.client.request("fs.delete", {"wsId": "w1", "path": "design/elsewhere.iedboard"}, timeout=WAIT)
+		await self.client.wait_for(opened["topic"], lambda f: f.get("kind") == "deleted", timeout=WAIT)
+		await asyncio.sleep(1.5)
+		self.assertFalse(os.path.exists(os.path.join(self.ws, "design", "elsewhere.iedboard")), "the saver does not write it back")
+		await self.client.request("trash.restore", {"id": trashed["trashId"]}, timeout=WAIT)
+		_, snap = await self.reopen("design/elsewhere")
+		self.assertEqual("Shop", snap["title"], "opened anew from the file")
+
 	async def test_an_empty_board_file_opens_as_a_new_board(self):
 		path = os.path.join(self.ws, "design", "empty.iedboard")
 		with open(path, "w", encoding="utf-8") as f:

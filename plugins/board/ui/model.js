@@ -25,6 +25,7 @@ export class BoardModel {
 		this.listeners = new Set();
 		this.loaded = false;
 		this.error = null;
+		this.deleted = false;
 		this.nextTemp = 1;
 		this.stop = null;
 	}
@@ -36,6 +37,12 @@ export class BoardModel {
 			this.stop = this.ied.client.subscribe(opened.topic, {
 				snap: (data) => this.snapshot(data),
 				evt: (kind, data) => this.event(kind, data),
+				// The server let the board go (deleted while this window was away, the plugin reloaded): open it again,
+				// which says so when its file is gone.
+				gone: () => {
+					this.stop = null;
+					if (!this.deleted) this.open();
+				},
 			});
 		}
 		catch (e) {
@@ -108,6 +115,10 @@ export class BoardModel {
 
 	event(kind, data) {
 		if (kind === "reloaded") return this.snapshot(data);
+		if (kind === "deleted") {
+			this.deleted = true;
+			return this.emit({ kind: "deleted" });
+		}
 		if (kind === "plans") {
 			this.plans = data.plans;
 			return this.emit({ kind: "plans" });

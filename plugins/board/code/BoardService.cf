@@ -117,13 +117,18 @@ namespace Boards
 		}
 	}
 
-	// Writes the board's file and then its history, which names the text it goes with.
 	void BoardService::Save(OpenBoard* open) {
+		Threading::LockGuard saving(m_SaveLock);
+		SaveHeld(open);
+	}
+
+	// Writes the board's file and then its history, which names the text it goes with.
+	void BoardService::SaveHeld(OpenBoard* open) {
 		Core::String text;
 		Core::String history;
 		{
 			Threading::LockGuard held(open->m_Lock);
-			if (!open->m_Dirty) return;
+			if (!open->m_Dirty || open->m_Deleted) return;
 			text = WriteBoard(*open->m_Board);
 			history = WriteHistory(*open->m_Board, text.View());
 			open->m_Dirty = false;
@@ -132,6 +137,13 @@ namespace Boards
 		IED::Workspace ws;
 		Core::String problem;
 		if (!IED::FindWorkspace(open->m_WsId.View(), ws)) return;
+		// A save only ever overwrites (Create writes a new board's file): a file gone since was deleted outside the
+		// Boards window, before the watcher said so, and the board goes with it rather than coming back.
+		if (!FS::FileExists(IED::WorkspaceFile(ws, open->m_Path.View()).CStr())) {
+			m_Context->Log((Core::String("forgot the board ") + open->m_Path.View() + ": its file was deleted before its last change was saved").View());
+			Forget(open);
+			return;
+		}
 		if (!IED::WriteFile(ws, open->m_Path.View(), text.View(), problem)) {
 			m_Context->Log((((Core::String("cannot save ") + open->m_Path.View()) + ": ") + problem.View()).View());
 			return;
@@ -316,6 +328,15 @@ namespace Boards
 
 	OpenBoard* BoardService::Create(Core::StringView wsId, Core::StringView path, Core::StringView title) {
 		Core::String normal = BoardPath(path);
+		// A board in a folder the list never looks in (Walk) would be lost from it.
+		Core::StringView whole = normal.View();
+		int64 start = 0;
+		for (int64 i = 0; i < whole.ByteLength(); ++i) {
+			if (whole.ByteAt(i) != (int32)'/') continue;
+			Core::StringView folder = whole.Substring(start, i - start);
+			if (Skipped(folder)) throw IED::RpcError(IED::ErrorCode::BadRequest, ((Core::String("the Boards list does not look in ") + folder) + "/: put the board in another folder").View());
+			start = i + 1;
+		}
 		IED::Workspace ws = WorkspaceOrThrow(wsId);
 		Core::String existing;
 		Core::String problem;
@@ -327,6 +348,56 @@ namespace Boards
 		OpenBoard* open = Register(this, wsId, normal.View(), board, text.View());
 		PublishList(wsId);
 		return open;
+	}
+
+	void BoardService::Forget(OpenBoard* open) {
+		{
+			Threading::LockGuard held(open->m_Lock);
+			if (open->m_Deleted) return;
+			JsonOut json;
+			json.BeginObject();
+			json.StrField("path", open->m_Path.View());
+			json.EndObject();
+			m_Context->Atomically([&](IED::Events& events) {
+				open->m_Deleted = true;
+				open->m_Dirty = false;
+				events.Publish(open->Topic().View(), "deleted", json.View());
+			});
+		}
+		{
+			Threading::LockGuard guard(m_Lock);
+			OpenBoard** found = m_Boards.Find(open->m_Id);
+			if (found && *found == open) m_Boards.Remove(open->m_Id);
+		}
+		m_Context->RemoveTopic(open->Topic().View());
+	}
+
+	Core::Array<Core::String> BoardService::Delete(Core::StringView wsId, Core::StringView path) {
+		Core::String normal = BoardPath(path);
+		IED::Workspace ws = WorkspaceOrThrow(wsId);
+		if (!FS::FileExists(IED::WorkspaceFile(ws, normal.View()).CStr())) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no board ") + normal.View()).View());
+		Core::StringView stem = normal.View().Substring(0, normal.ByteLength() - Core::StringView(c_Extension).ByteLength());
+		Core::String assets = Core::String(stem) + ".assets";
+		Core::Array<Core::String> trashIds;
+		Threading::LockGuard saving(m_SaveLock);
+		OpenBoard* open = nullptr;
+		{
+			Threading::LockGuard guard(m_Lock);
+			OpenBoard** found = m_Boards.Find(BoardIdFor(wsId, normal.View()));
+			if (found) open = *found;
+		}
+		if (open) SaveHeld(open);
+		Core::String trashId;
+		Core::String problem;
+		if (!IED::MoveToTrash(wsId, normal.View(), trashId, problem)) throw IED::RpcError(IED::ErrorCode::Unavailable, (((Core::String("cannot delete ") + normal.View()) + ": ") + problem.View()).View());
+		trashIds.Push(trashId);
+		if (FS::IsDirectory(IED::WorkspaceFile(ws, assets.View()).CStr())) {
+			if (IED::MoveToTrash(wsId, assets.View(), trashId, problem)) trashIds.Push(trashId);
+			else m_Context->Log((((Core::String("kept the images of the deleted board ") + normal.View()) + ": ") + problem.View()).View());
+		}
+		if (open) Forget(open);
+		PublishList(wsId);
+		return trashIds;
 	}
 
 	static void MarkChanged(OpenBoard* open) {
@@ -471,10 +542,12 @@ namespace Boards
 		for (const IED::FileChange& change : changes.m_Changes) {
 			if (IsGroupsFile(change.m_Path.View())) listChanged = true;
 			if (!change.m_Path.View().EndsWith(Core::StringView(c_Extension))) continue;
-			if (change.m_Change != "changed") listChanged = true;
 			Threading::LockGuard guard(m_Lock);
 			OpenBoard** found = m_Boards.Find(BoardIdFor(changes.m_WsId.View(), change.m_Path.View()));
 			if (found && !touched.Contains(*found)) touched.Push(*found);
+			// A board deleted and back within one batch (Undo of a delete) comes as "changed": for a board that is not
+			// open, the list may have changed too. An open board's own saves leave it be.
+			if (change.m_Change != "changed" || !found) listChanged = true;
 		}
 		if (listChanged) PublishList(changes.m_WsId.View());
 		IED::Workspace ws;
@@ -482,7 +555,13 @@ namespace Boards
 		for (OpenBoard* open : touched) {
 			Core::String text;
 			Core::String problem;
-			if (!IED::ReadFile(ws, open->m_Path.View(), text, problem)) continue;
+			if (!IED::ReadFile(ws, open->m_Path.View(), text, problem)) {
+				// Deleted outside the Boards window (the Solution Explorer, git, a shell): forgotten, so the saver does not
+				// write it back.
+				Threading::LockGuard saving(m_SaveLock);
+				if (!FS::FileExists(IED::WorkspaceFile(ws, open->m_Path.View()).CStr())) Forget(open);
+				continue;
+			}
 			Board* fresh = new Board();
 			if (!ReadBoard(text.View(), *fresh, problem)) {
 				m_Context->Log((((Core::String("ignored a change to ") + open->m_Path.View()) + " that does not read: ") + problem.View()).View());

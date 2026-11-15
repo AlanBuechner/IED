@@ -5,7 +5,8 @@
 // Topics: ied.board/ws:<wsId> - {boards} the workspace's .iedboard files; event "boards.changed" (the new list).
 // ied.board/b:<boardId> - {boardId, path, rev, title, layers, elements, plans, history}; events "changed" (a change,
 // an undo, a redo or a revert: {rev, change, put: [{at, el}], removed, layers?, title?, refs?, opId?}), "plans"
-// ({plans}), "reloaded" (the whole board again after its file changed on disk).
+// ({plans}), "reloaded" (the whole board again after its file changed on disk), "deleted" ({path}: the board was
+// deleted, its file is gone; the topic goes with it).
 //
 // Locks: a board's state changes only while its own lock is held and inside PluginContext::Atomically, so the
 // topic's pulled snapshot (taken under the server's lock) never sees half a change, and readers (pictures, text,
@@ -31,6 +32,7 @@ namespace Boards
 		public Board* m_Board;
 		public Threading::Mutex m_Lock;
 		public bool m_Dirty;
+		public bool m_Deleted;             // forgotten: its file is gone, and no save writes it back
 		public int64 m_ChangedNs;
 		public Core::String m_Saved;       // the file's text as last read or written
 
@@ -62,6 +64,10 @@ namespace Boards
 		public OpenBoard* Open(Core::StringView wsId, Core::StringView path);
 		// A new board file; throws conflict when one is there.
 		public OpenBoard* Create(Core::StringView wsId, Core::StringView path, Core::StringView title);
+		// The board at a workspace path moved to the recoverable trash with its images (<board>.assets/): an open one
+		// saved first, so the trash keeps it as it was, then forgotten. The trash entries' ids, the board's first;
+		// throws not_found, unavailable.
+		public Core::Array<Core::String> Delete(Core::StringView wsId, Core::StringView path);
 		public OpenBoard* ById(Core::StringView boardId);
 		// The workspace's .iedboard files.
 		public Core::Array<Core::String> BoardFiles(const IED::Workspace& ws);
@@ -89,6 +95,9 @@ namespace Boards
 
 		public IED::PluginContext* m_Context;
 		public Threading::Mutex m_Lock;
+		// Held through each save and each delete, so a save that read a board before it was deleted never writes its
+		// file back after. Taken before a board's lock, and never while the service's is held.
+		public Threading::Mutex m_SaveLock;
 		public Core::HashMap<Core::String, OpenBoard*> m_Boards;
 		public bool m_Stopping;
 		public int64 m_ViewCount;
@@ -96,6 +105,11 @@ namespace Boards
 		// Saves the boards whose last change is old enough; a board now.
 		public void SaveDue();
 		public void Save(OpenBoard* open);
+		// Save with m_SaveLock held.
+		public void SaveHeld(OpenBoard* open);
+		// An open board whose file is gone, dropped (m_SaveLock held): it is never saved again, its windows hear
+		// "deleted", and its topic goes, so opening the path again (a board back from the trash) reads the file anew.
+		public void Forget(OpenBoard* open);
 		public void PublishList(Core::StringView wsId);
 	}
 

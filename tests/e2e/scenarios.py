@@ -2262,6 +2262,72 @@ def board_groups(run):
 	run.request("ied.board/groups", {"wsId": ws, "groups": []})
 
 
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def board_new_and_delete(run):
+	"""New board asks the board's name and its folder apart (owner, 2026-11-15: "when we create a new board we should be
+	able to select the folder separately from the name"): the folder field offers the workspace's folders, a level at a
+	time, a folder not there yet is made with the board, and the board opens. A board's menu deletes it (the same day:
+	"we should be able to delete boards"): confirmed, it goes to the trash and its tab closes; Undo brings it back into its
+	group."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	try:
+		run.request("ied.board/create", {"wsId": ws, "path": "sketches/seed"})
+	except Exception:
+		pass   # left by the other viewport's run
+	name = "checkout-phone" if run.phone else "checkout-desk"
+	flows = "flows-phone" if run.phone else "flows-desk"   # a folder not there yet in either run
+	path = "sketches/%s/%s.iedboard" % (flows, name)
+	run.show_activity("ied.board")
+	if run.phone:
+		page.evaluate("ied_shell.commands.run('shell.showView', { id: 'ied.board.list' })")
+	page.click(".board-list-window button[aria-label='New board']")
+	page.wait_for_selector(".board-new")
+	page.fill(".board-new input[aria-label='Board name']", name)
+	folder = ".board-new input[aria-label='Folder']"
+	page.fill(folder, "sk")
+	page.wait_for_selector(".board-new-folder-row[data-folder='sketches']")
+	run.shot("folder-suggestions")
+	page.click(".board-new-folder-row[data-folder='sketches']")
+	check(page.input_value(folder) == "sketches", "a suggested folder goes in the field: %r" % page.input_value(folder))
+	page.type(folder, "/" + flows)
+	page.wait_for_selector(".board-new-where:has-text('(a new folder)')", timeout=10000)
+	where = page.inner_text(".board-new-where")
+	check(where.startswith(path), "the file the board will be: %r" % where)
+	run.shot("new-board")
+	page.click(".board-new .btn.primary:has-text('Create')")
+	page.wait_for_selector(".view[data-ref='board:%s']" % path, timeout=20000)
+	check(not page.is_visible(".board-new"), "the dialog closed")
+	run.request("ied.board/groups", {"wsId": ws, "groups": [{"name": "Flows", "boards": [path]}]})
+	run.show_activity("ied.board")
+	if run.phone:
+		page.evaluate("ied_shell.commands.run('shell.showView', { id: 'ied.board.list' })")
+	row = ".board-set[data-group='Flows'] .board-list-row[data-path='%s']" % path
+	page.wait_for_selector(row, timeout=10000)
+	if run.phone:
+		page.evaluate("document.querySelector(\"%s\").dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, clientX: 40, clientY: 200}))" % row.replace('"', '\\"'))
+	else:
+		page.click(row, button="right")
+	page.click(".menu .menu-item:has-text('Delete')")
+	page.wait_for_selector(".dialog[aria-label='Delete board']")
+	run.shot("delete-confirm")
+	page.click(".dialog .btn.danger")
+	page.wait_for_selector(".view[data-ref='board:%s']" % path, state="detached", timeout=10000)
+	page.wait_for_selector(".board-list-row[data-path='%s']" % path, state="detached", timeout=10000)
+	listed = run.request("ied.board/list", {"wsId": ws})
+	check(path not in [b["path"] for b in listed["boards"]], "the board is gone from the list")
+	page.wait_for_selector(".toast:has-text('Deleted') .toast-action:has-text('Undo')")
+	run.shot("deleted")
+	page.click(".toast:has-text('Deleted') .toast-action:has-text('Undo')")
+	page.wait_for_selector(row + ", .toast.error", timeout=10000)
+	check(not page.is_visible(".toast.error"), "Undo failed: %r" % run.texts(".toast.error .text"))
+	run.shot("restored")
+	deleted = run.request("ied.board/delete", {"wsId": ws, "path": path})
+	for trash_id in deleted["trashIds"]:
+		run.request("trash.purge", {"id": trash_id})
+	run.request("ied.board/groups", {"wsId": ws, "groups": []})
+
+
 @scenario(viewports=("desktop", "phone"))
 def chat_archive_and_unarchive(run):
 	"""Archiving a chat sets it aside like deleting it, but for good (owner, 2026-11-11: "like they are deleted but they

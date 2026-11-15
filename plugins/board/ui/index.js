@@ -3,11 +3,11 @@
 // .iedboard), View > Boards.
 
 import { h, replace } from "/ui-kit/dom.js";
-import { promptDialog } from "/ui-kit/dialog.js";
 import { BoardView } from "./board.js";
 import { PanelFrame } from "./panels.js";
 import { currentBoard, onCurrentBoard } from "./current.js";
 import { BoardListView } from "./boardlist.js";
+import { showNewBoard } from "./newboard.js";
 
 const name = (path) => path.split("/").pop().replace(/\.iedboard$/, "");
 
@@ -15,30 +15,20 @@ function openBoard(ied, path) {
 	ied.tabs.open("board:" + path, { preview: false });
 }
 
-// A new board file, opened; its path, or null when none was made.
-async function newBoard(ied) {
-	const path = await promptDialog({
-		title: "New board",
-		message: "A planning board is a file in the workspace: sketch on it, and let the AI clean it up, turn it into Mermaid and a plan, and build it.",
-		value: "design/board.iedboard",
-		confirm: "Create",
-		check: (value) => (value.trim() ? "" : "Name the board's file"),
-	});
+// A new board file (its name and folder asked, newboard.js), opened; its path, or null when none was made.
+// `options.folder`: the folder the dialog starts with.
+async function newBoard(ied, options) {
+	const path = await showNewBoard(ied, options);
 	if (!path) return null;
-	const made = await ied.client.request("ied.board/create", { wsId: ied.workspace.wsId, path: path.trim() }).catch((e) => {
-		ied.toast("Cannot create the board: " + (e.message || e), { level: "error" });
-		return null;
-	});
-	if (!made) return null;
-	openBoard(ied, made.path);
-	return made.path;
+	openBoard(ied, path);
+	return path;
 }
 
 export function activate(ied) {
 	if (!document.querySelector("link[href='" + ied.plugin.base + "ui/board.css']")) document.head.append(h("link", { rel: "stylesheet", href: ied.plugin.base + "ui/board.css" }));
 	ied.tabs.kind("board", { view: "BoardDocument", title: (path) => name(path), icon: () => "$(edit)", resource: (path) => path });
 	ied.commands.handle("ied.board.show", () => ied.commands.run("shell.showActivity", { id: "ied.board" }));
-	ied.commands.handle("ied.board.new", () => newBoard(ied));
+	ied.commands.handle("ied.board.new", (args) => newBoard(ied, args && args.folder !== undefined ? { folder: args.folder } : {}));
 	ied.commands.handle("ied.board.open", (args) => {
 		const path = args && args.path ? args.path : ied.context.get("resourcePath");
 		if (path) openBoard(ied, path);
@@ -73,6 +63,6 @@ export function BoardPanel(ctx) {
 
 // The Boards tool window: the workspace's boards in the owner's groups, live (boardlist.js).
 export function BoardList(ctx) {
-	const view = new BoardListView(ctx, (path) => openBoard(ctx.ied, path), () => newBoard(ctx.ied));
+	const view = new BoardListView(ctx, (path) => openBoard(ctx.ied, path), (options) => newBoard(ctx.ied, options));
 	return { dispose: () => view.dispose() };
 }
