@@ -11,6 +11,7 @@ include "run/Effort.ch"
 namespace Ai
 {
 	const int32 c_ClaudeCountAskMs = 30000;
+	const char* c_ClaudeCountUser = "count";   // the session's user while the count holds it (ClaudeSession::m_User)
 
 	static int64 CountNowMs() { return Platform::UnixTimeNs() / 1000000; }
 
@@ -32,7 +33,7 @@ namespace Ai
 		start.m_Profile = FindModel(models, NextModel(chat, ws, group, roleEffort).View());
 		if (!start.m_Profile || !start.m_Profile->IsClaude()) return nullptr;
 		ClaudeSession* session = SessionOf(chat);
-		if (session->m_InUse) return nullptr;
+		if (session->InUse()) return nullptr;
 		Loaded(chat);
 		Core::Array<Core::String> contributed;
 		ToolRegistry* tools = TurnTools(this, chat, ws, contributed);
@@ -42,7 +43,8 @@ namespace Ai
 		start.m_ToolsBytes = sent.ByteLength();
 		start.m_Effort = Core::String(EffortOf(chat->m_Effort.View(), roleEffort.View()));
 		start.m_Command = FindClaude(ClaudeCommandSetting(m_Context->Setting(Core::StringView("ai.claude.command"), Core::StringView("")).View()));
-		session->m_InUse = true;
+		// Held until the count ends: a turn sent meanwhile waits for it (TurnRun::StartClaude).
+		session->m_User = Core::String(c_ClaudeCountUser);
 		return session;
 	}
 
@@ -79,12 +81,14 @@ namespace Ai
 		if (!session) return;
 		Core::String problem;
 		Serialization::DomNode usage;
-		if (Resumed(session, start, ChatFolder(LocalStateOf(ws), chat->m_ChatId.View()) / "claude-system.md", ws.m_Root.View(), problem))
-			usage = session->m_Process->Request(Core::StringView("{\"subtype\":\"get_context_usage\",\"detail\":\"summary\"}"), c_ClaudeCountAskMs, problem,
-				[session](ClaudeLine* line) { session->Serve(line); });
+		if (Resumed(session, start, ChatFolder(LocalStateOf(ws), chat->m_ChatId.View()) / "claude-system.md", ws.m_Root.View(), problem)) {
+			ClaudeProcess* process = session->m_Process;
+			if (process)
+				usage = process->Request(Core::StringView("{\"subtype\":\"get_context_usage\",\"detail\":\"summary\"}"), c_ClaudeCountAskMs, problem,
+					[session](ClaudeLine* line) { session->Serve(line); });
+		}
 		IED::HostLock guard(*m_Context);
-		session->m_InUse = false;
-		session->m_IdleSinceMs = CountNowMs();
+		session->Release(Core::StringView(c_ClaudeCountUser), CountNowMs());
 		int64 used = 0;
 		int64 window = 0;
 		if (!usage.IsValid() || !ReadClaudeContext(usage, used, window)) {

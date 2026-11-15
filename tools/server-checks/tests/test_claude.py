@@ -213,6 +213,38 @@ class ClaudeTurnTests(ClaudeCase):
 		self.assertIn("--resume", self.sessions_started()[-1], "the chat's own session")
 		self.assertEqual(queries, len([entry for entry in self.log() if "query" in entry]), "no query was made")
 
+	async def test_a_turn_sent_while_claude_counts_the_chat_waits_for_the_count(self):
+		"""The count of a shown chat (ClaudeCount.cf) holds the chat's session while it resumes it; a turn sent meanwhile
+		waits for it, then runs on that one session. Before 2026-11-15 the turn took the session at once: a second CLI
+		process for it, the two threads reading one CLI's lines, and the count's end marking the session idle under the
+		running turn - which the idle keeper then stopped, crashing the owner's workspace server in ClaudeStep."""
+		await self.use_claude()
+		self.script({"blocks": [{"text": "One."}]}, {"blocks": [{"text": "Two."}]})
+		chat_id, _ = await self.chat()
+		self.assertEqual("finished", (await self.turn(chat_id, "first"))["stop"])
+		header_path = os.path.join(self.local_state(), "chats", chat_id, "chat.json")
+		self.server.stop(remove_data=False)
+		self.client.abort()
+		with open(header_path, encoding="utf-8") as f:
+			header = json.load(f)
+		del header["context"]
+		with open(header_path, "w", encoding="utf-8") as f:
+			json.dump(header, f)
+		# The count's `auth status` takes 2 s: the turn below is sent while the count holds the session.
+		self.put("auth.json", {"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty", "delayMs": 2000})
+		started = len(self.sessions_started())
+		self.server = self.start_server()
+		self.assertTrue(self.server.started, self.server.error)
+		await self.connect()
+		await self.client.sub(["chat:" + chat_id])
+		await self.client.next_frame("chat:" + chat_id)
+		turn = await self.turn(chat_id, "second")
+		self.assertEqual("finished", turn["stop"])
+		self.assertTrue([entry["query"] for entry in self.log() if "query" in entry][-1][0]["text"].startswith("second"), "the turn's message reached Claude")
+		self.assertEqual(started + 1, len(self.sessions_started()), "one CLI process: the turn ran on the session the count resumed")
+		counted = [f["data"] for f in self.frames if f.get("kind") == "context.changed"]
+		self.assertTrue(counted and counted[-1].get("source") == "claude", "the chat's meter is Claude's own count")
+
 	async def test_the_session_is_kept_between_turns_and_resumed_after_a_restart(self):
 		await self.use_claude()
 		self.script({"blocks": [{"text": "One."}]}, {"blocks": [{"text": "Two."}]}, {"blocks": [{"text": "Three."}]})

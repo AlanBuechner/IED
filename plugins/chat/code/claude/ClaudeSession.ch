@@ -3,6 +3,9 @@
 // system message it was started with. It answers the CLI's own control requests - IED's in-process MCP server (initialize,
 // tools/list) and its permission prompts (only IED's tools are allowed) - and keeps each tools/call until the run that
 // owns its tool_use answers it.
+//
+// Its members read m_Process once per call: Stop() from another thread (the plugin stopping) ends that process and
+// clears the field, and a member in the middle of a call then sees an ended process, never a null one.
 
 include "ClaudeCli.ch"
 include "ClaudeWire.ch"
@@ -22,11 +25,16 @@ namespace Ai
 		public uint64 m_SystemHash;                    // the system message it started with
 		public Core::String m_Tools;                   // tools/list's result
 		public bool m_Querying;                        // a message went in and the CLI owes its result
-		public bool m_InUse;                           // a turn drives it (host lock)
+		// Who drives it now - a turn ("turn:<turnId>") or the chat's context count ("count") - one at a time; empty when
+		// free, and only then may the idle keeper stop it (host lock). Each user frees only its own hold.
+		public Core::String m_User;
 		public int64 m_IdleSinceMs;                    // host lock
 		public Core::Array<ClaudeLine*> m_Calls;       // tools/call requests not answered yet
 
 		public bool Running() const { return m_Process != null && m_Process->Running(); }
+		public bool InUse() const { return !m_User.IsEmpty(); }
+		// Frees the session when `user` holds it (host lock); false when another does.
+		public bool Release(Core::StringView user, int64 nowMs);
 		// Starts `command` with the session's arguments in `folder`: the system message from `systemFile`, `model`,
 		// `effort` when set, and --resume when there is a session id. Then initializes it, naming IED's MCP server; false
 		// with `error`.

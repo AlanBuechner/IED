@@ -35,6 +35,8 @@ leading arguments the setting names come before IED's own.
 - **Errors:** a response with `error` is the synthetic assistant message the CLI writes (`error`, `is_api_error_message`) and an
   error result. An `interrupt` while a response streams ends the query with `error_during_execution`.
 - **`--resume <id>`** of a session it never made prints "No conversation found with session ID: <id>" and exits 1.
+- **A slow `auth status`:** `auth.json`'s `delayMs` makes it wait that long before answering (the real CLI reads, and may
+  refresh, the login), so a check can hold whatever waits on it.
 - **API keys:** with `ANTHROPIC_API_KEY` in its environment it reports `authMethod: "api_key"` and `apiKeySource:
   "ANTHROPIC_API_KEY"`, as the real CLI would, so a check proves IED takes the key out (it never logs the value).
 

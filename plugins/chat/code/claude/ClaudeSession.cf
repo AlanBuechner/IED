@@ -25,16 +25,17 @@ namespace Ai
 			argv.Push(Core::String("--resume"));
 			argv.Push(m_SessionId);
 		}
-		m_Process = new ClaudeProcess();
-		if (!m_Process->Start(argv, folder, ClaudeEnvironment(), error)) {
+		ClaudeProcess* process = new ClaudeProcess();
+		m_Process = process;
+		if (!process->Start(argv, folder, ClaudeEnvironment(), error)) {
 			m_Process = null;
 			return false;
 		}
 		m_Querying = false;
 		ClaudeSession* self = this;
-		Serialization::DomNode answer = m_Process->Request(InitializeRequest().View(), c_ClaudeRequestMs, error, [self](ClaudeLine* line) { self->Serve(line); });
+		Serialization::DomNode answer = process->Request(InitializeRequest().View(), c_ClaudeRequestMs, error, [self](ClaudeLine* line) { self->Serve(line); });
 		if (answer.IsValid()) return true;
-		Core::String notes = m_Process->Notes();
+		Core::String notes = process->Notes();
 		if (!notes.IsEmpty()) error = (error + ": ") + notes.View();
 		Stop();
 		return false;
@@ -57,24 +58,32 @@ namespace Ai
 		return json.ToString();
 	}
 
+	bool ClaudeSession::Release(Core::StringView user, int64 nowMs) {
+		if (m_User.View() != user) return false;
+		m_User = Core::String();
+		m_IdleSinceMs = nowMs;
+		return true;
+	}
+
 	void ClaudeSession::Serve(ClaudeLine* line) {
-		if (!m_Process) return;
+		ClaudeProcess* process = m_Process;
+		if (!process) return;
 		Core::StringView requestId = line->m_Root.Member("request_id").AsView();
 		Serialization::DomNode request = line->m_Root.Member("request");
 		Core::StringView subtype = request.Member("subtype").AsView();
 		if (subtype == "can_use_tool") {
-			m_Process->Send(ControlAnswerLine(requestId, Permission(request).View()).View());
+			process->Send(ControlAnswerLine(requestId, Permission(request).View()).View());
 			return;
 		}
 		if (subtype != "mcp_message" || request.Member("server_name").AsView() != c_ClaudeServerName) {
-			m_Process->Send(ControlRefusalLine(requestId, (Core::String("IED does not answer ") + subtype).View()).View());
+			process->Send(ControlRefusalLine(requestId, (Core::String("IED does not answer ") + subtype).View()).View());
 			return;
 		}
 		Serialization::DomNode message = request.Member("message");
 		Core::StringView method = message.Member("method").AsView();
 		Serialization::DomNode id = message.Member("id");
 		if (!id.IsValid()) {
-			m_Process->Send(ControlAnswerLine(requestId, McpAnswer(Core::StringView("{\"jsonrpc\":\"2.0\",\"result\":{},\"id\":0}")).View()).View());
+			process->Send(ControlAnswerLine(requestId, McpAnswer(Core::StringView("{\"jsonrpc\":\"2.0\",\"result\":{},\"id\":0}")).View()).View());
 			return;
 		}
 		if (method == "tools/call") {
@@ -86,7 +95,7 @@ namespace Ai
 		else if (method == "tools/list") reply = McpReply(id, m_Tools.IsEmpty() ? Core::StringView("{\"tools\":[]}") : m_Tools.View());
 		else if (method == "ping") reply = McpReply(id, Core::StringView("{}"));
 		else reply = McpFailure(id, -32601, (Core::String("IED's server has no method ") + method).View());
-		m_Process->Send(ControlAnswerLine(requestId, McpAnswer(reply.View()).View()).View());
+		process->Send(ControlAnswerLine(requestId, McpAnswer(reply.View()).View()).View());
 	}
 
 	// A user message of the CLI's that carries the result of `toolUseId`: it settled the call itself.
@@ -105,13 +114,14 @@ namespace Ai
 			m_Calls.RemoveAt(i);
 			return found;
 		}
-		if (!m_Process) return null;
+		ClaudeProcess* process = m_Process;
+		if (!process) return null;
 		Core::Array<ClaudeLine*> kept;
 		ClaudeLine* found = null;
 		const int64 deadline = SessionNowMs() + waitMs;
 		for (;;) {
 			const int64 left = deadline - SessionNowMs();
-			ClaudeLine* line = left > 0 ? m_Process->Next((int32)left) : null;
+			ClaudeLine* line = left > 0 ? process->Next((int32)left) : null;
 			if (!line || SettlesCall(line, toolUseId)) break;
 			if (line->Type() != "control_request") {
 				kept.Push(line);
@@ -122,24 +132,30 @@ namespace Ai
 			found = m_Calls.Pop();
 			break;
 		}
-		m_Process->PutBack(kept);
+		process->PutBack(kept);
 		return found;
 	}
 
 	void ClaudeSession::Answer(ClaudeLine* call, Core::StringView result) {
-		if (!m_Process) return;
+		ClaudeProcess* process = m_Process;
+		if (!process) return;
 		Core::String reply = McpReply(call->m_Root.Member("request").Member("message").Member("id"), result);
-		m_Process->Send(ControlAnswerLine(call->m_Root.Member("request_id").AsView(), McpAnswer(reply.View()).View()).View());
+		process->Send(ControlAnswerLine(call->m_Root.Member("request_id").AsView(), McpAnswer(reply.View()).View()).View());
 	}
 
 	bool ClaudeSession::SetModel(Core::StringView id, Core::String& error) {
+		ClaudeProcess* process = m_Process;
+		if (!process) {
+			error = Core::String("the Claude Code CLI is not running");
+			return false;
+		}
 		IED::JsonWriter json;
 		json.BeginObject();
 		json.Field("subtype", "set_model");
 		json.Field("model", id);
 		json.EndObject();
 		ClaudeSession* self = this;
-		if (!m_Process->Request(json.View(), c_ClaudeRequestMs, error, [self](ClaudeLine* line) { self->Serve(line); }).IsValid()) return false;
+		if (!process->Request(json.View(), c_ClaudeRequestMs, error, [self](ClaudeLine* line) { self->Serve(line); }).IsValid()) return false;
 		m_Model = Core::String(id);
 		return true;
 	}
@@ -147,15 +163,17 @@ namespace Ai
 	void ClaudeSession::SetTools(Core::StringView result) {
 		if (m_Tools.View() == result) return;
 		m_Tools = Core::String(result);
-		if (!Running()) return;
+		ClaudeProcess* process = m_Process;
+		if (!process || !process->Running()) return;
 		Core::String error;
 		ClaudeSession* self = this;
-		m_Process->Request(Core::StringView("{\"subtype\":\"mcp_message\",\"server_name\":\"ied\",\"message\":{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}}"),
+		process->Request(Core::StringView("{\"subtype\":\"mcp_message\",\"server_name\":\"ied\",\"message\":{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}}"),
 			c_ClaudeRequestMs, error, [self](ClaudeLine* line) { self->Serve(line); });
 	}
 
 	void ClaudeSession::Settle(Core::StringView note, bool interrupt, int32 waitMs, ClaudeServe other) {
-		if (!Running()) {
+		ClaudeProcess* process = m_Process;
+		if (!process || !process->Running()) {
 			Stop();
 			return;
 		}
@@ -164,7 +182,7 @@ namespace Ai
 		ClaudeSession* self = this;
 		if (m_Querying && interrupt) {
 			Core::String error;
-			m_Process->Request(Core::StringView("{\"subtype\":\"interrupt\"}"), c_ClaudeRequestMs, error, [self](ClaudeLine* line) { self->Serve(line); });
+			process->Request(Core::StringView("{\"subtype\":\"interrupt\"}"), c_ClaudeRequestMs, error, [self](ClaudeLine* line) { self->Serve(line); });
 		}
 		const int64 deadline = SessionNowMs() + waitMs;
 		for (;;) {
@@ -172,7 +190,7 @@ namespace Ai
 			m_Calls.Clear();
 			if (!m_Querying) return;
 			const int64 left = deadline - SessionNowMs();
-			ClaudeLine* line = left > 0 ? m_Process->Next((int32)left) : null;
+			ClaudeLine* line = left > 0 ? process->Next((int32)left) : null;
 			if (!line) break;
 			if (line->Type() == "control_request") Serve(line);
 			else {
@@ -184,8 +202,9 @@ namespace Ai
 	}
 
 	void ClaudeSession::Stop() {
-		if (m_Process) m_Process->Stop();
+		ClaudeProcess* process = m_Process;
 		m_Process = null;
+		if (process) process->Stop();
 		m_Querying = false;
 		m_Calls.Clear();
 	}

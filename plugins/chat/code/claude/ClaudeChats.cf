@@ -31,7 +31,7 @@ namespace Ai
 		const int64 now = KeeperNowMs();
 		for (Core::KeyValue<Core::String, ClaudeSession*>& entry : m_ClaudeSessions) {
 			ClaudeSession* session = entry.value;
-			if (!session->m_InUse && session->m_Process && now - session->m_IdleSinceMs > c_ClaudeIdleMs) session->Stop();
+			if (!session->InUse() && session->m_Process && now - session->m_IdleSinceMs > c_ClaudeIdleMs) session->Stop();
 		}
 	}
 

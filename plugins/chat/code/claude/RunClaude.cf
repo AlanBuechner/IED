@@ -13,8 +13,16 @@ namespace Ai
 	const char* c_ClaudeTurnOverNote = "The call did not run: the turn ended first.";
 	// A retried step with nothing new for the model (the CLI's query ended with an error, or the CLI was restarted).
 	const char* c_ClaudeGoOnNote = "The last request failed before you answered. Go on where you left off.";
+	// How a turn waits for the chat's session while the context count holds it (ClaudeCount.cf: its sign-in check, the
+	// resume and get_context_usage take seconds, each with its own limit); past the longest wait the hold is taken as
+	// left behind.
+	const int64 c_ClaudeHeldPollNs = 100000000;
+	const int64 c_ClaudeHeldWaitNs = 120000000000;
 
 	static int64 ClaudeNowMs() { return Platform::UnixTimeNs() / 1000000; }
+
+	// The session's user while this turn drives it (ClaudeSession::m_User).
+	static Core::String TurnUser(const Turn* turn) { return Core::String("turn:") + turn->m_TurnId.View(); }
 
 	// --- Which Claude ----------------------------------------------------------------------------------------------------
 
@@ -39,8 +47,24 @@ namespace Ai
 		{
 			IED::HostLock guard(*m_Context);
 			if (!m_Claude) {
-				m_Claude = m_Chats->SessionOf(m_Chat);
-				m_Claude->m_InUse = true;
+				// One user at a time: the chat's context count may hold the session for a few seconds (a chat shown just
+				// after a restart). Taken at once, the turn and the count read one CLI's lines and may each start a CLI, and
+				// the count's end left the session marked idle under the turn - which the idle keeper then stopped
+				// (2026-11-15, the owner's workspace server crashed in ClaudeStep).
+				ClaudeSession* session = m_Chats->SessionOf(m_Chat);
+				Threading::ConditionVariable never;
+				int64 waited = 0;
+				while (session->InUse() && waited < c_ClaudeHeldWaitNs && !m_Run->m_Cancelled) {
+					guard.Wait(never, c_ClaudeHeldPollNs);
+					waited += c_ClaudeHeldPollNs;
+				}
+				if (m_Run->m_Cancelled) {
+					problem = Core::String("the turn was stopped");
+					return false;
+				}
+				if (session->InUse()) m_Context->Log((((Core::String("chat ") + m_Chat->m_ChatId.View()) + ": took over its Claude session, held by ") + session->m_User.View() + " for too long").View());
+				session->m_User = TurnUser(m_Turn);
+				m_Claude = session;
 			}
 			toolList = McpToolsResult(m_Tools->RequestTools(m_Chat->m_Mode, true, m_Chat->m_Endless).View());
 			effort = Core::String(EffortOf(m_Chat->m_Effort.View(), m_Role.m_Effort.View()));
@@ -110,6 +134,8 @@ namespace Ai
 	// the turn's new messages - the owner's, harness notes - wait in claudeAside for the next tool result, or for the
 	// query's end.
 	void TurnRun::SendToClaude() {
+		ClaudeProcess* process = m_Claude->m_Process;
+		if (!process) return;   // stopped elsewhere: the step finds its CLI ended
 		Core::Array<ModelMessage*> pending;
 		Core::String history;
 		{
@@ -149,7 +175,7 @@ namespace Ai
 			}
 			Core::String told = pending[i]->WithNote(pending[i]->m_Content.View());
 			Core::String text = i == 0 && !history.IsEmpty() ? (history + "\n\n") + told.View() : told;
-			m_Claude->m_Process->Send(UserMessageLine(text.View(), images).View());
+			process->Send(UserMessageLine(text.View(), images).View());
 			m_Claude->m_Querying = true;
 		}
 	}
@@ -176,8 +202,12 @@ namespace Ai
 		StepResult* result = new StepResult();
 		const int64 started = ClaudeNowMs();
 		Core::String problem;
-		if (!StartClaude(problem)) {
-			result->m_End = WireEnd::ConnectFailed;
+		// The step's own process: one stopped elsewhere (the plugin stopping) ends the step as a CLI that ended, never
+		// pulls the process out from under the loop.
+		ClaudeProcess* process = null;
+		if (StartClaude(problem)) process = m_Claude->m_Process;
+		if (!process) {
+			result->m_End = m_Run->m_Cancelled ? WireEnd::Cancelled : WireEnd::ConnectFailed;
 			result->m_Error = problem.IsEmpty() ? Core::String("Claude Code did not start") : problem;
 			result->m_Ms = ClaudeNowMs() - started;
 			return result;
@@ -185,7 +215,7 @@ namespace Ai
 		SendToClaude();
 		if (!m_Claude->m_Querying) {
 			Core::Array<ClaudeImage> none;
-			m_Claude->m_Process->Send(UserMessageLine(Core::StringView(c_ClaudeGoOnNote), none).View());
+			process->Send(UserMessageLine(Core::StringView(c_ClaudeGoOnNote), none).View());
 			m_Claude->m_Querying = true;
 		}
 		ModelProfile* profile = m_Candidates[m_Candidate];
@@ -195,19 +225,19 @@ namespace Ai
 		for (;;) {
 			if (m_Run->m_Cancelled && !interrupted) {
 				interrupted = true;
-				m_Claude->m_Process->Send(ControlRequestLine(Core::StringView("ied-stop"), Core::StringView("{\"subtype\":\"interrupt\"}")).View());
+				process->Send(ControlRequestLine(Core::StringView("ied-stop"), Core::StringView("{\"subtype\":\"interrupt\"}")).View());
 			}
-			ClaudeLine* line = m_Claude->m_Process->Next(c_ClaudePollMs);
+			ClaudeLine* line = process->Next(c_ClaudePollMs);
 			const int64 now = ClaudeNowMs();
 			if (line) {
 				lastMs = now;
 				if (TakeClaudeLine(line, response, result, events, started)) break;
 				continue;
 			}
-			if (m_Claude->m_Process->Ended()) {
+			if (process->Ended()) {
 				result->m_End = response->m_Started ? WireEnd::Disconnected : WireEnd::ConnectFailed;
-				result->m_Error = (Core::String("the Claude Code CLI ended: ") + m_Claude->m_Process->Notes().View());
-				m_Claude->Stop();
+				result->m_Error = (Core::String("the Claude Code CLI ended: ") + process->Notes().View());
+				if (m_Claude->m_Process == process) m_Claude->Stop();
 				break;
 			}
 			if (now - started > profile->m_StepCapMs) result->m_End = WireEnd::StepCap;
@@ -484,16 +514,17 @@ namespace Ai
 			Account(last, 0, estimateBefore);
 		}
 		m_Claude->Settle(Core::StringView(c_ClaudeTurnOverNote), true, c_ClaudeDrainMs, [self](ClaudeLine* line) { self->ClaudeAside(line); });
-		if (m_Claude->Running()) {
+		ClaudeProcess* process = m_Claude->m_Process;
+		if (process && process->Running()) {
 			Core::String error;
 			ClaudeSession* session = m_Claude;
-			Serialization::DomNode usage = m_Claude->m_Process->Request(Core::StringView("{\"subtype\":\"get_usage\",\"skip_behaviors\":true}"), c_ClaudeUsageAskMs, error,
+			Serialization::DomNode usage = process->Request(Core::StringView("{\"subtype\":\"get_usage\",\"skip_behaviors\":true}"), c_ClaudeUsageAskMs, error,
 				[session](ClaudeLine* line) { session->Serve(line); });
 			if (usage.IsValid()) {
 				IED::HostLock guard(*m_Context);
 				m_Chats->m_Claude->TookUsage(usage);
 			}
-			Serialization::DomNode contextUsage = m_Claude->m_Process->Request(Core::StringView("{\"subtype\":\"get_context_usage\",\"detail\":\"summary\"}"), c_ClaudeUsageAskMs, error,
+			Serialization::DomNode contextUsage = process->Request(Core::StringView("{\"subtype\":\"get_context_usage\",\"detail\":\"summary\"}"), c_ClaudeUsageAskMs, error,
 				[session](ClaudeLine* line) { session->Serve(line); });
 			if (contextUsage.IsValid()) {
 				IED::HostLock guard(*m_Context);
@@ -503,7 +534,6 @@ namespace Ai
 		IED::HostLock guard(*m_Context);
 		m_Chat->m_ClaudeSession = m_Claude->m_SessionId;
 		m_Chat->m_ClaudeTurns = m_Claude->m_Turns;
-		m_Claude->m_InUse = false;
-		m_Claude->m_IdleSinceMs = ClaudeNowMs();
+		m_Claude->Release(TurnUser(m_Turn).View(), ClaudeNowMs());
 	}
 }

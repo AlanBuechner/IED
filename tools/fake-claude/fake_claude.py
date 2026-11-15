@@ -341,7 +341,9 @@ def main(argv):
 			auth = {"loggedIn": False, "authMethod": "none", "apiProvider": "firstParty"}   # bare mode never reads the login
 		else:
 			auth = state.read("auth.json", {"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty"})
-		print(json.dumps({k: v for k, v in auth.items() if k != "apiKeySource"}))
+		# delayMs: a slow answer, as the real CLI's can be (it reads the login and may refresh it)
+		time.sleep(auth.get("delayMs", 0) / 1000.0)
+		print(json.dumps({k: v for k, v in auth.items() if k not in ("apiKeySource", "delayMs")}))
 		return 0
 	if args[:2] == ["auth", "login"]:
 		# the person finishes the login in the browser: the CLI is signed in from now on

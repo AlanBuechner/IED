@@ -234,7 +234,13 @@ defines `CLAUDE_SUBSCRIPTION_APPROVED` (once Anthropic approves claude.ai login 
 
 **A chat's session.** A chat that uses a Claude profile gets one CLI process, started at its first Claude step and kept between
 turns so its prompt cache stays warm; it stops when the chat is deleted, the server stops, or after 10 idle minutes (a
-`--resume` brings it back in seconds, and the prompt cache does not outlive that much idling):
+`--resume` brings it back in seconds, and the prompt cache does not outlive that much idling). It has one user at a time -
+a turn, or the count of a chat shown without Claude's own (the meter, below) - and only a session nobody holds is stopped
+for idling: a turn sent while the count holds it waits for the count (seconds), and each user frees only its own hold.
+Before 2026-11-15 a turn took the session at once, the count's end marked it idle under the running turn, and the idle
+keeper stopped the CLI 10 minutes later - the owner's workspace server crashed in the turn's loop (`RunClaude.cf`). A
+turn's step reads the process once, so one stopped elsewhere (the plugin stopping) ends the step as a CLI that ended. The
+CLI is started as:
 
     <cli> -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages
           --tools "" --strict-mcp-config --setting-sources "" --disable-slash-commands --permission-prompt-tool stdio
