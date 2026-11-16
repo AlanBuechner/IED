@@ -14,4 +14,10 @@ namespace Scripting
 	/// the macros it maps to.
 	std::vector<MacroPass::FileResult> ExpandSourceMacros(const SourceManager& sources, const std::map<std::string, std::string>& predefined,
 		const std::unordered_map<uint32, MacroTable>& expanded = {});
+
+	/// A script's macro pass (docs/runtime/04 section 4, step 2): only `scriptUnits` are expanded, as ExpandSourceMacros
+	/// expands a file. Every other registered file - the interface's and its layers', whose text is final - gives its
+	/// includers the macros `exported` maps it to, and one it maps nothing to gives none: none is read again.
+	std::vector<MacroPass::FileResult> ExpandScriptMacros(const SourceManager& sources, const std::map<std::string, std::string>& predefined,
+		const std::vector<uint32>& scriptUnits, const std::unordered_map<uint32, MacroTable>& exported);
 }

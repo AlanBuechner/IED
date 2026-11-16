@@ -107,4 +107,40 @@ namespace Testing
 		}
 		TEST_PASSED();
 	}
+
+	// A script's macro pass takes its files and the macros its interface files export; an interface file exporting none is
+	// not read again (its text is final), so whatever it says gives the script nothing.
+	void MacroPassTest::AScriptExpandsOnlyItsOwnFiles()
+	{
+		CompilerInstance compiler;
+		SourceManager& sources = compiler.GetSourceManager();
+		const uint32 silent = sources.RegisterInMemory("silent.ch", "#define HIDDEN 7\nint32 Hidden() ;\n");
+		const uint32 math = sources.RegisterInMemory("math.ch", "int32 Area(int32 side) ;\n");
+		const uint32 shared = sources.RegisterInMemory("shared.ch", "include \"math.ch\"\n#define TWICE(x) SQUARE(x) + SQUARE(x)\n");
+		const uint32 script = sources.RegisterInMemory("script.cf", "include \"silent.ch\"\ninclude \"shared.ch\"\nint32 g = TWICE(3) + HIDDEN;\n");
+		MacroTable exports;
+		exports.DefineFunction("SQUARE", { "x" }, "((x) * (x))");
+		const std::vector<MacroPass::FileResult> results = ExpandScriptMacros(sources, {}, { shared, script }, { { math, exports } });
+		TEST_ASSERT_EQ(results.size(), (size_t)3); // the script's two files and the one interface file that exports macros
+		for (const MacroPass::FileResult& result : results)
+			TEST_ASSERT(result.absPath != MacroIdentity(sources.GetInfo(silent)));
+		const MacroPass::FileResult* expanded = nullptr;
+		for (const MacroPass::FileResult& result : results)
+			if (result.absPath == MacroIdentity(sources.GetInfo(script))) expanded = &result;
+		TEST_ASSERT(expanded != nullptr);
+		TEST_ASSERT(expanded->text.find("int32 g = ((3) * (3)) + ((3) * (3)) + HIDDEN;") != std::string::npos);
+		TEST_PASSED();
+	}
+
+	// The script's files see the project defines and the predefined macros, as ExpandSourceMacros gives them.
+	void MacroPassTest::AScriptsFilesStartWithThePredefinedMacros()
+	{
+		CompilerInstance compiler;
+		SourceManager& sources = compiler.GetSourceManager();
+		const uint32 script = sources.RegisterInMemory("script.cf", "#if TARGET_X64\nint32 g = TARGET_X64;\n#endif\n");
+		const std::vector<MacroPass::FileResult> results = ExpandScriptMacros(sources, { { "TARGET_X64", "1" } }, { script }, {});
+		TEST_ASSERT_EQ(results.size(), (size_t)1);
+		TEST_ASSERT(results[0].text.find("int32 g = 1;") != std::string::npos);
+		TEST_PASSED();
+	}
 } // namespace Testing

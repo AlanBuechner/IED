@@ -2,6 +2,7 @@
 #include "Core/Core.h"
 #include "Compiler/CpuTarget.h"
 #include "Script/HostInterface.h"
+#include "Script/InlineImport.h"
 #include "Script/ScriptJit.h"
 #include <atomic>
 #include <memory>
@@ -19,6 +20,7 @@ namespace Scripting
 		std::unordered_set<std::string> symbols; // the table's entries
 		std::unordered_set<std::string> types;   // the types the host's reflection registered
 		CpuTarget target;                        // the host's processor: every script compiles for it (D-62)
+		std::shared_ptr<InlineBodyIndex> inlineBodies = std::make_shared<InlineBodyIndex>(); // where the host's inline bodies are, read at the first optimized compile
 	};
 
 	/// What a script compiled to be extended leaves for the scripts over it (docs/runtime/04 section 5.2): to them its

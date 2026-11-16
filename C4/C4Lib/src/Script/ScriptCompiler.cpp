@@ -48,7 +48,7 @@ namespace Scripting
 		void Preprocess(CompilerInstance& compiler, ScriptUnits& units, const CpuTarget& target)
 		{
 			SourceManager& sources = compiler.GetSourceManager();
-			const std::vector<MacroPass::FileResult> results = ExpandSourceMacros(sources, PredefinedMacros(false, target, {}), units.interfaceMacros);
+			const std::vector<MacroPass::FileResult> results = ExpandScriptMacros(sources, PredefinedMacros(false, target, {}), units.scriptUnits, units.interfaceMacros);
 			compiler.AddMacroDiagnostics(results);
 			std::unordered_map<std::string, const MacroPass::FileResult*> resultOf;
 			for (const MacroPass::FileResult& result : results) resultOf[result.absPath] = &result;
@@ -243,7 +243,7 @@ namespace Scripting
 		}
 		out.threadLocals = ThreadLocals(*module);
 		// The host's bodies are only for inlining (docs/runtime/04 section 3.3): an unoptimized script takes none.
-		if (options.optimize && !ImportInlineBodies(*module, host.inlineBodies, error))
+		if (options.optimize && !ImportInlineBodies(*module, host.inlineBodies, *index.inlineBodies, error))
 		{
 			out.diagnostics += "error: " + error + "\n";
 			return out;

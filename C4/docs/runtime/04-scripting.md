@@ -197,7 +197,10 @@ module as lowering finished it, so they cost the build no time of its own. An op
 (`kInlineImportDepth`, `Script/InlineImport`), whichever chunk each is in: the optimizer may inline them, and every
 call it does not inline goes to the host's code. Only the imported bodies are read from the bitcode; importing every
 body a script reaches transitively made a 78-line IED plugin carry thousands of host functions through the
-optimizer for the same machine code. An unoptimized script imports none. Template instances the host made need no
+optimizer for the same machine code. Which chunk holds each body is read once for a host, at its first optimized compile
+(`InlineBodyIndex`), so each compile reads only the chunks holding the bodies it imports: an editor's interface has
+hundreds of chunks, and reading them all lazily cost every compile a quarter of a second. An unoptimized script imports
+none. Template instances the host made need no
 bitcode: the script lowers their bodies from the template (section 4.3).
 
 ### 3.4 What the build ships
@@ -230,7 +233,7 @@ what it set aside once nothing has it open (`UpdateFile`, C4Testing `Compiler.Fi
    name that depends on registration order comes out as it did in the host), each marked as an interface unit;
    then the script's files, as the script's project. A script file may come from disk or from memory.
 2. **Preprocess.** Interface files are not preprocessed again (their text is already expanded); each provides the
-   macros it exports. Script files are preprocessed as in a build, inheriting the macros of the headers they
+   macros it exports, and one that exports none is not read at all (`ExpandScriptMacros`). Script files are preprocessed as in a build, inheriting the macros of the headers they
    include. A script file with an `extern "c"` / `extern "c++"` directive is an error (section 2).
 3. **Parse and build the model**, as for a program. The allow-list (section 4.5) is checked as includes resolve.
 4. **Lower in script mode** (section 4.2), with no entry point, for the host's target (its macros in step 2 too).

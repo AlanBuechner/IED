@@ -7,7 +7,7 @@ namespace Testing
 {
 	// The macro pass over a whole program (Macro/MacroPass, Compiler/SourceMacros): includes carry macros, each file
 	// is expanded once however many files include it, sources given as text are expanded too, and an interface file
-	// is passed through with the macros it exports.
+	// is passed through with the macros it exports; a script's pass reads only the script's files.
 	CLASS(GROUP = Testing) MacroPassTest : public Test
 	{
 	public:
@@ -21,5 +21,9 @@ namespace Testing
 		void SourcesGivenAsTextAreExpanded();
 		TEST_FUNC(Macro.Pass)
 		void InterfaceFilesPassThroughWithTheirMacros();
+		TEST_FUNC(Macro.Pass)
+		void AScriptExpandsOnlyItsOwnFiles();
+		TEST_FUNC(Macro.Pass)
+		void AScriptsFilesStartWithThePredefinedMacros();
 	};
 } // namespace Testing
