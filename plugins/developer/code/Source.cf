@@ -41,6 +41,17 @@ namespace Developer
 		return SourceOf(home.View(), installed ? &record : nullptr);
 	}
 
+	Core::String NukeTurn(Core::StringView checkout) {
+		Core::StringBuilder name;
+		name.Append("ied.developer.nuke:");
+		for (int64 i = 0; i < checkout.ByteLength(); ++i) {
+			const int32 c = checkout.ByteAt(i);
+			name.AppendByte(c == '\\' ? '/' : c >= 'A' && c <= 'Z' ? c + 32 : c);
+		}
+		while (name.View().EndsWith(Core::StringView("/"))) name.Truncate(name.ByteLength() - 1);
+		return name.ToString();
+	}
+
 	static Process::Output Git(Core::StringView checkout, const Core::Array<Core::String>& arguments) {
 		Process::StartInfo info;
 		info.program = Core::String("git");

@@ -212,14 +212,42 @@ namespace Developer
 		return result;
 	}
 
-	// The default projects (the C4 toolchain), then the server, which is none of them.
-	IED::ToolResult RebuildTool(const IED::ToolCall& call) {
-		IED::ToolResult toolchain = Nuke("build");
-		if (toolchain.m_IsError) return toolchain;
-		return Nuke("build", "ied-server");
+	// `run` once no other nuke run holds the checkout (NukeTurn): another window's chat, the master's Rebuild and relaunch.
+	// The wait is said at the head of the result; a run that waited past c_BuildSeconds, or was stopped while it waited,
+	// runs nothing.
+	static IED::ToolResult InTurn(const IED::ToolCall& call, const char* tool, func<IED::ToolResult()> run) {
+		Core::String source = SourceFolder();
+		if (source.IsEmpty()) return IED::ToolFailure(Core::StringView("IED is not running from its source checkout"));
+		IED::MachineLock turn;
+		Core::String what = (Core::String(tool) + " from a chat in ") + call.m_Workspace.m_Name.View();
+		const IED::ToolCall* asked = &call;
+		if (!turn.Take(NukeTurn(source.View()).View(), what.View(), c_BuildSeconds * 1000, [asked]() -> bool { return asked->Cancelled(); })) {
+			Core::String holder = turn.WaitedFor().IsEmpty() ? Core::String("another nuke run in the checkout") : turn.WaitedFor();
+			if (call.Cancelled()) return IED::ToolFailure((Core::String("stopped while it waited for ") + holder.View() + "; nothing ran").View());
+			return IED::ToolFailure((((Core::String("waited ") + IED::WaitText(turn.WaitedMs()).View()) + " for " + holder.View()) + " to end; nothing ran - call it again once that is done").View());
+		}
+		IED::ToolResult result = run();
+		if (turn.WaitedMs() >= c_SaidWaitMs) {
+			Core::String holder = turn.WaitedFor().IsEmpty() ? Core::String("another nuke run in the checkout") : turn.WaitedFor();
+			Core::String waited = ((Core::String("(Waited ") + IED::WaitText(turn.WaitedMs()).View()) + " for " + holder.View()) + " - another IED window - before this run started.)\n";
+			result.m_Content = waited + result.m_Content.View();
+			if (!result.m_Preview.IsEmpty()) result.m_Preview = waited + result.m_Preview.View();
+		}
+		return result;
 	}
 
-	IED::ToolResult GatesTool(const IED::ToolCall& call) { return Nuke("gates"); }
+	// The default projects (the C4 toolchain), then the server, which is none of them.
+	IED::ToolResult RebuildTool(const IED::ToolCall& call) {
+		return InTurn(call, "ied_rebuild", []() -> IED::ToolResult {
+			IED::ToolResult toolchain = Nuke("build");
+			if (toolchain.m_IsError) return toolchain;
+			return Nuke("build", "ied-server");
+		});
+	}
+
+	IED::ToolResult GatesTool(const IED::ToolCall& call) {
+		return InTurn(call, "ied_gates", []() -> IED::ToolResult { return Nuke("gates"); });
+	}
 
 	IED::ToolResult RelaunchTool(const IED::ToolCall& call) {
 		IED::Result installed = IED::CallBinding(Core::StringView("ied.developer.install"), Core::StringView("{}"));

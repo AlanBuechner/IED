@@ -7,11 +7,15 @@ import os
 import shutil
 import stat
 import sys
+import threading
 import time
 
 # NTFS keeps 1-2 s mtime granularity on some volumes: a copy is stamped older than its source so a
 # later edit of the source is always seen as newer.
 COPY_MTIME_NUDGE_SECONDS = 2
+# write_if_changed's rename into place waits this long in all for a reader that holds the file open.
+REPLACE_TRIES = 40
+REPLACE_PAUSE_SECONDS = 0.05
 
 
 def norm(path):
@@ -110,12 +114,25 @@ def matches_any(relative_path, patterns):
 
 
 def write_if_changed(path, text):
-	"""Write `text` only when it differs, so mtimes stay stable for incremental checks. True if written."""
+	"""Write `text` only when it differs, so mtimes stay stable for incremental checks. True if written. The text goes to
+	a file beside and is renamed into place, so another process reading it at that moment - IED reading a generated
+	project file, another Nuke on the same workspace from another IED window - never sees it half written."""
 	if os.path.isfile(path):
 		with open(path, encoding="utf-8") as f:
 			if f.read() == text:
 				return False
 	ensure_dir(os.path.dirname(path))
+	temporary = "%s.%d-%d.tmp" % (path, os.getpid(), threading.get_ident())
+	with open(temporary, "w", encoding="utf-8", newline="\n") as f:
+		f.write(text)
+	for _ in range(REPLACE_TRIES):
+		try:
+			os.replace(temporary, path)
+			return True
+		except PermissionError:
+			time.sleep(REPLACE_PAUSE_SECONDS)
+	# Held open all along by a reader that lets no one replace it: written in place, as before.
+	os.remove(temporary)
 	with open(path, "w", encoding="utf-8", newline="\n") as f:
 		f.write(text)
 	return True

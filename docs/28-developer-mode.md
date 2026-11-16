@@ -194,6 +194,20 @@ plugin API like the others, and the chat plugin learns of the source through a b
 - **Where it is not yet:** the chat's Modified files list keeps to the chat's workspace (an `ied:/` write shows in its
   tool card).
 
+## One nuke run at a time
+
+Each IED window's chats run in a workspace server of its own, and the master runs Rebuild and relaunch, so two windows
+could run `nuke` in the checkout at once - two builds writing the same build folders, a gates run refreshing the `dev`
+toolchain under the other's compiler and language server. `ied_rebuild`, `ied_gates` and Rebuild and relaunch (Settings,
+and `ied_relaunch` through it) take the checkout's turn first (`NukeTurn`, an `IED::MachineLock` every IED process of the
+user sees, `docs/26` section 2), built 2026-11-16: a tool waits up to its 30 minutes and its result starts with what it
+waited for ("(Waited 2 min 5 s for ied_gates from a chat in AmmoCrate (process 4410) - another IED window - before this
+run started.)"); a tool stopped while it waits, or one that waited the whole time, runs nothing and says so. The
+rebuild's log says "waiting for ... to end" and runs once the turn is free; Cancel ends the wait. A process that dies
+gives its turn back with it. Not coordinated: a `nuke` run by hand in a terminal, or by a Claude session outside IED.
+Server check `test_developer_turn.py` (another window holding the turn: the tool waits and says so, the rebuild's log
+does; both ran at once before).
+
 ## Several chats at once
 
 Two chats may meet the same compiler bug. Before fixing one, a chat reads `known-bugs.md` (`ied_known_bugs`) and the

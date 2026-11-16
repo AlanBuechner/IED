@@ -10,6 +10,7 @@ import subprocess
 import tarfile
 import tempfile
 
+from .. import locks
 from ..errors import NukeError
 
 TOOL_ENV = "NUKE_TOOL_GIT"
@@ -99,28 +100,38 @@ def local_refs(repo):
 # --- the mirror ------------------------------------------------------------------------------------
 
 def ensure_mirror(path, url):
-	"""A bare mirror of `url` at `path`, created on first use. Returns True when it had to be created (fetched)."""
+	"""A bare mirror of `url` at `path`, created on first use. Returns True when it had to be created (fetched).
+	One Nuke at a time makes it (the mirror's machine lock, locks.py): another that made it while this one waited is
+	used as it is."""
 	if os.path.isfile(os.path.join(path, "HEAD")):
 		return False
 	os.makedirs(os.path.dirname(path), exist_ok=True)
-	temporary = path + ".partial"
-	shutil.rmtree(temporary, ignore_errors=True)
-	try:
-		run(["clone", "--bare", "--quiet", url, temporary], what=f"git clone {url}")
-	except GitError as error:
+	with locks.held(path, f"cloning {url}"):
+		if os.path.isfile(os.path.join(path, "HEAD")):
+			return False
+		temporary = path + ".partial"
 		shutil.rmtree(temporary, ignore_errors=True)
-		raise unreachable(url, str(error).split(": ", 1)[-1]) from None
-	run(["config", "remote.origin.fetch", "+refs/heads/*:refs/heads/*"], cwd=temporary)
-	run(["config", "--add", "remote.origin.fetch", "+refs/tags/*:refs/tags/*"], cwd=temporary)
-	os.replace(temporary, path)
+		try:
+			run(["clone", "--bare", "--quiet", url, temporary], what=f"git clone {url}")
+		except GitError as error:
+			shutil.rmtree(temporary, ignore_errors=True)
+			raise unreachable(url, str(error).split(": ", 1)[-1]) from None
+		run(["config", "remote.origin.fetch", "+refs/heads/*:refs/heads/*"], cwd=temporary)
+		run(["config", "--add", "remote.origin.fetch", "+refs/tags/*:refs/tags/*"], cwd=temporary)
+		# A folder without HEAD in the way is what a clone that never finished left.
+		shutil.rmtree(path, ignore_errors=True)
+		os.replace(temporary, path)
 	return True
 
 
 def fetch(path, url):
-	try:
-		run(["fetch", "--quiet", "--prune", "--force", "origin"], cwd=path, what=f"git fetch {url}")
-	except GitError as error:
-		raise unreachable(url, str(error).split(": ", 1)[-1]) from None
+	"""Brings the repository at `path` (a mirror, or a develop checkout) up to `url`; one Nuke at a time fetches into one
+	repository (git refuses a second fetch's ref updates while the first holds their locks)."""
+	with locks.held(path, f"fetching {url}"):
+		try:
+			run(["fetch", "--quiet", "--prune", "--force", "origin"], cwd=path, what=f"git fetch {url}")
+		except GitError as error:
+			raise unreachable(url, str(error).split(": ", 1)[-1]) from None
 
 
 def has_commit(repo, commit):
@@ -132,9 +143,10 @@ def fetch_commit(path, url, commit):
 	any reachable commit has it even when no branch or tag names it any more)."""
 	if has_commit(path, commit):
 		return
-	fetch(path, url)
-	if not has_commit(path, commit):
-		run(["fetch", "--quiet", "origin", commit], cwd=path, check=False)
+	with locks.held(path, f"fetching {url}"):
+		fetch(path, url)
+		if not has_commit(path, commit):
+			run(["fetch", "--quiet", "origin", commit], cwd=path, check=False)
 	if not has_commit(path, commit):
 		raise GitError(f"commit {commit[:12]} is not in {url}: it was never pushed, or it was removed (a force-push). "
 			"Push it from the checkout that made it, or run `nuke package update`")

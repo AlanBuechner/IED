@@ -2,12 +2,18 @@ include "Service.ch"
 include "host/Server.ch"
 include "plugins/Context.ch"
 include "Commands.ch"
+include "api/MachineLock.ch"
 
 namespace Ied
 {
+	const int64 c_InstallWaitMs = 1800000;   // how long an install waits while another window installs into its folder
+
 	Core::String ToolsTopic(const Workspace* ws) { return Core::String("tools:") + ws->m_WsId.View(); }
 
 	FS::Path ToolsFolder(Server* server) { return FS::Path(server->m_Config.m_DataDir.View()) / "tools"; }
+
+	// The machine lock an install into `folder` holds: every window's workspace server installs into the one tools folder.
+	static Core::String InstallTurn(const FS::Path& folder) { return Core::String("ied.tools.install:") + TrustKey(folder.View()).View(); }
 
 	void Tools::Init(Server* server) {
 		this.m_Server = server;
@@ -383,34 +389,49 @@ namespace Ied
 		Core::String failure;
 		for (ToolSpec* spec : order) {
 			InstallPlan plan;
-			// Each IED window's workspace runs in a server of its own, all installing into one tools folder: one that
-			// installed this tool since this server last looked leaves it found, and installing it again would take its
-			// folder from under that window's running tool.
 			DetectJob* first = nullptr;
 			{
 				Threading::LockGuard guard(m_Server->m_Lock);
 				entry->m_Current = spec->m_Id;
 				Publish(entry);
+				plan = PlanFor(entry, spec);
 				first = JobFor(entry->m_Ws, spec);
 			}
-			ToolStatus* already = DetectTool(*first);
-			if (already->m_State == "found") {
-				Threading::LockGuard guard(m_Server->m_Lock);
-				Store(entry, already);
-				entry->m_Failures.Remove(spec->m_Id);
-				done.Push((spec->m_Title + " ") + already->m_Version.View());
-				Say(entry, ((Core::String("\r\n== ") + spec->m_Title.View()) + " is there already (another window may have installed it): " + already->m_Path.View() + "\r\n").View());
-				continue;
+			// Each IED window's workspace runs in a server of its own, all installing into one tools folder: one install of
+			// a folder at a time (a machine lock), and a tool another window installed since this server looked is left as
+			// it is - installing it again would take its folder from under that window's running tool.
+			IED::MachineLock turn;
+			IED::MachineLock* waiting = &turn;
+			InstallControl* stop = control;
+			bool told = false;
+			const bool had = turn.Take(InstallTurn(plan.m_Folder).View(), (Core::String("installing ") + spec->m_Title.View() + " for " + entry->m_Ws->m_Name.View()).View(), c_InstallWaitMs, [say, waiting, stop, &told]() -> bool {
+				if (!told) {
+					told = true;
+					say((Core::String("Waiting for another IED window: ") + (waiting->WaitedFor().IsEmpty() ? Core::String("it installs this tool") : waiting->WaitedFor()).View() + "\r\n").View());
+				}
+				return stop->Cancelled();
+			});
+			if (had) {
+				ToolStatus* already = DetectTool(*first);
+				if (already->m_State == "found") {
+					Threading::LockGuard guard(m_Server->m_Lock);
+					Store(entry, already);
+					entry->m_Failures.Remove(spec->m_Id);
+					done.Push((spec->m_Title + " ") + already->m_Version.View());
+					Say(entry, ((Core::String("\r\n== ") + spec->m_Title.View()) + " is there already (another window may have installed it): " + already->m_Path.View() + "\r\n").View());
+					continue;
+				}
 			}
 			{
 				Threading::LockGuard guard(m_Server->m_Lock);
-				plan = PlanFor(entry, spec);
 				Say(entry, ((((Core::String("\r\n== Installing ") + spec->m_Title.View()) + " ") + plan.m_Version.View()) + " into " + plan.m_Folder.View() + "\r\n").View());
 			}
 			Core::String problem;
 			bool installed = false;
-			if (!IsFolderSafeVersion(plan.m_Version.View())) problem = (Core::String("the version to install, '") + plan.m_Version.View()) + "', cannot name a folder";
+			if (!had) problem = control->Cancelled() ? Core::String("cancelled") : ((Core::String("another IED window has been installing it for ") + IED::WaitText(turn.WaitedMs()).View()) + "; try again once it is done");
+			else if (!IsFolderSafeVersion(plan.m_Version.View())) problem = (Core::String("the version to install, '") + plan.m_Version.View()) + "', cannot name a folder";
 			else installed = RunInstall(plan, control, say, problem);
+			turn.Release();
 			DetectJob* job = nullptr;
 			{
 				Threading::LockGuard guard(m_Server->m_Lock);

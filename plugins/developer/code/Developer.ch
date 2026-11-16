@@ -23,6 +23,7 @@ namespace Developer
 
 	const int64 c_TailBytes = 6000;
 	const int64 c_BuildSeconds = 1800;
+	const int64 c_SaidWaitMs = 1000;   // a wait for the checkout's nuke turn this long is said in the tool's result
 	const int64 c_QuickSeconds = 30;
 	const int64 c_SectionTokens = 600;   // the system message section, its source path included
 	const int64 c_TailLines = 60;   // of a failed install's log, for ied_relaunch

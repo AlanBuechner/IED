@@ -137,8 +137,26 @@ namespace Developer
 		}
 	}
 
-	// `cmd /c <checkout>\nuke.bat install-ied`, its output published as it comes.
+	// `cmd /c <checkout>\nuke.bat install-ied`, its output published as it comes - once no other nuke run holds the
+	// checkout (NukeTurn: a chat's ied_rebuild or ied_gates in some window), which the log says it waits for.
 	void Builds::Run() {
+		IED::MachineLock turn;
+		IED::MachineLock* waiting = &turn;
+		Builds* self = this;
+		bool told = false;
+		const bool had = turn.Take(NukeTurn(m_Source.View()).View(), Core::StringView("Rebuild and relaunch (nuke install-ied)"), c_BuildMostSeconds * 1000, [self, waiting, &told]() -> bool {
+			if (!told) {
+				told = true;
+				Core::Array<Core::String> said;
+				said.Push((Core::String("waiting for ") + (waiting->WaitedFor().IsEmpty() ? Core::String("another nuke run in the checkout") : waiting->WaitedFor()).View()) + " to end");
+				self->Publish(said);
+			}
+			return self->m_Canceled.Load();
+		});
+		if (!had) {
+			Finish(m_Canceled.Load() ? BuildState::Canceled : BuildState::Failed, -1);
+			return;
+		}
 		Process::StartInfo info;
 		info.program = Core::String("cmd.exe");
 		info.arguments.Push(Core::String("/d"));

@@ -100,7 +100,11 @@ names it (P-12). A change to a package is built by the sample at once: no commit
 - **One copy of each repository per machine.** A bare mirror in Nuke's cache (`<nuke home>/.cache/packages/git/`,
   `NUKE_PACKAGE_CACHE`) fetched only when a needed commit is missing; manifests are read from it with
   `git cat-file --batch` without checking anything out; a locked package is exported from it with `git archive` of its
-  folder at its commit.
+  folder at its commit. The mirror is the machine's, so several Nukes reach it at once - each IED window's workspace
+  server fetches packages when it opens and on a timer, and builds fetch too: its first clone and every fetch into it
+  (or into a develop clone) hold its machine lock (`Nuke/nuke/locks.py`, a byte the system locks in a file under the
+  temp folder, given back with its process), so a second clone finds the mirror made and a second fetch waits instead of
+  failing on git's ref locks (2026-11-16, `test_locks.py`).
 - **Only what is used.** A package's dependencies are resolved only when one of its projects is used.
 
 ## 4. Where packages live

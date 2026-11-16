@@ -1,0 +1,70 @@
+include "MachineLock.ch"
+
+namespace IED
+{
+	static int64 LockNowMs() { return clock_now_ns() / 1000000; }
+
+	Core::String MachineLockPipe(Core::StringView name) {
+		Core::String digest = Crypto::Sha256((const void*)name.Data(), name.ByteLength()).ToHex();
+		return Core::String("ied-lock-") + digest.View().Substring(0, 24);
+	}
+
+	Core::String WaitText(int64 ms) {
+		const int64 seconds = (ms + 500) / 1000;
+		Core::StringBuilder text;
+		if (seconds >= 60) {
+			text.AppendInt(seconds / 60);
+			text.Append(" min ");
+		}
+		text.AppendInt(seconds % 60);
+		text.Append(" s");
+		return text.ToString();
+	}
+
+	static FS::Path NoteFile(Core::StringView pipe) { return FS::TempDirectory() / "ied-locks" / (Core::String(pipe) + ".txt").View(); }
+
+	static Core::String ReadNote(const FS::Path& file) {
+		if (!FS::FileExists(file.CStr())) return Core::String();
+		FS::File opened = FS::File(file.CStr(), "rb");
+		Core::String text = opened.IsOpen() ? opened.ReadText() : Core::String();
+		opened.Close();
+		return Core::String(text.View().Trimmed());
+	}
+
+	bool MachineLock::Take(Core::StringView name, Core::StringView what, int64 waitMs) {
+		return Take(name, what, waitMs, []() -> bool { return false; });
+	}
+
+	bool MachineLock::Take(Core::StringView name, Core::StringView what, int64 waitMs, func<bool()> cancelled) {
+		Release();
+		m_WaitedMs = 0;
+		m_WaitedFor = Core::String();
+		Core::String pipe = MachineLockPipe(name);
+		FS::Path note = NoteFile(pipe.View());
+		const int64 started = LockNowMs();
+		while (!m_Pipe.Listen(pipe.CStr())) {
+			if (m_WaitedFor.IsEmpty()) m_WaitedFor = ReadNote(note);
+			m_WaitedMs = LockNowMs() - started;
+			if (m_WaitedMs >= waitMs || cancelled()) return false;
+			Threading::Thread::Sleep(c_MachineLockPollMs * 1000000);
+		}
+		m_WaitedMs = LockNowMs() - started;
+		// The note is this holder's from here on: a holder that ended without its Release left its own, written over now.
+		Core::StringBuilder said;
+		said.Append(what);
+		said.Append(" (process ");
+		said.AppendInt((int64)Platform::ProcessId());
+		said.Append(")");
+		FS::MakeDirectories(note.Parent().CStr());
+		if (FS::WriteFileAtomically(note.CStr(), (const void*)said.View().Data(), said.View().ByteLength())) m_Note = Core::String(note.View());
+		return true;
+	}
+
+	// The note goes while the pipe is still held, so it is never another holder's.
+	void MachineLock::Release() {
+		if (!m_Pipe.IsOpen()) return;
+		if (!m_Note.IsEmpty()) FS::RemoveFile(m_Note.CStr());
+		m_Note = Core::String();
+		m_Pipe.Close();
+	}
+}

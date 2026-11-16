@@ -2,6 +2,7 @@
 // from (install.json, which nuke install-ied writes into the install last), and how far that install is behind it.
 
 include "api/Plugin.ch"
+include "api/MachineLock.ch"
 
 namespace Developer
 {
@@ -22,6 +23,10 @@ namespace Developer
 	Core::String SourceOf(Core::StringView home, const InstallRecord* record);
 	// The checkout of this server.
 	Core::String SourceFolder();
+	// The machine lock a nuke run in `checkout` holds (docs/28 "One nuke run at a time"): every window's chats and the
+	// master's Rebuild and relaunch take it, since two runs at once write the same build folders and refresh the dev
+	// toolchain under each other's compiler and language server.
+	Core::String NukeTurn(Core::StringView checkout);
 
 	// `git rev-parse HEAD` in `checkout`; "" when git cannot say.
 	Core::String HeadCommit(Core::StringView checkout);

@@ -1,0 +1,64 @@
+// api/machinelock: a lock every process of the user sees - one holder at a time, a waiter that says what held it, a
+// wait that ends when the holder lets go, a cancelled wait, and nothing left behind once it is given back.
+
+include "api/MachineLock.ch"
+
+static Core::String LockName(const char* what) {
+	Core::StringBuilder name;
+	name.Append("ied.tests.machinelock:");
+	name.Append(what);
+	name.Append(":");
+	name.AppendInt((int64)Platform::ProcessId());
+	return name.ToString();
+}
+
+[test("server.machinelock")]
+class MachineLockTests {
+	[test("one_holder_at_a_time")]
+	public static void TestOneHolderAtATime() {
+		Core::String name = LockName("one");
+		IED::MachineLock first;
+		assert_true(first.Take(name.View(), Core::StringView("the first"), 0), "free: had at once");
+		assert_eq(0, first.WaitedFor().ByteLength(), "nothing held it");
+		IED::MachineLock second;
+		assert_true(!second.Take(name.View(), Core::StringView("the second"), 0), "held: not had");
+		assert_true(second.WaitedFor().View().StartsWith(Core::StringView("the first (process ")), second.WaitedFor().CStr());
+		first.Release();
+		assert_true(!first.Held(), "given back");
+		assert_true(second.Take(name.View(), Core::StringView("the second"), 0), "free again");
+		second.Release();
+		assert_true(!FS::FileExists((FS::TempDirectory() / "ied-locks" / (IED::MachineLockPipe(name.View()) + ".txt").View()).CStr()), "its note went with it");
+	}
+
+	[test("a_wait_ends_when_the_holder_lets_go")]
+	public static void TestAWaitEndsWhenTheHolderLetsGo() {
+		Core::String name = LockName("wait");
+		IED::MachineLock* holder = new IED::MachineLock();
+		assert_true(holder->Take(name.View(), Core::StringView("a build"), 0), "had");
+		Threading::Thread letGo = Threading::Thread::Run([holder]() {
+			Threading::Thread::Sleep(600000000);
+			holder->Release();
+		});
+		IED::MachineLock waiter;
+		assert_true(waiter.Take(name.View(), Core::StringView("another build"), 10000), "had once the holder let go");
+		letGo.Join();
+		assert_true(waiter.WaitedMs() >= 400, "it waited");
+		assert_true(waiter.WaitedFor().View().StartsWith(Core::StringView("a build")), "for the build that held it");
+		waiter.Release();
+	}
+
+	[test("a_cancelled_wait_gives_up")]
+	public static void TestACancelledWaitGivesUp() {
+		Core::String name = LockName("cancel");
+		IED::MachineLock holder;
+		holder.Take(name.View(), Core::StringView("a long build"), 0);
+		IED::MachineLock waiter;
+		const int64 started = clock_now_ns() / 1000000;
+		int64 asked = 0;
+		assert_true(!waiter.Take(name.View(), Core::StringView("x"), 60000, [&asked]() -> bool { asked += 1; return asked > 2; }), "cancelled");
+		assert_true(clock_now_ns() / 1000000 - started < 5000, "long before the wait ran out");
+		holder.Release();
+		assert_se("2 min 5 s", IED::WaitText(125000).CStr(), "how a wait is said");
+		assert_se("40 s", IED::WaitText(40200).CStr(), "under a minute");
+	}
+}
