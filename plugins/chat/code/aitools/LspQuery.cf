@@ -699,8 +699,9 @@ namespace Ai
 			}
 		}
 		if (target.m_Symbols.IsEmpty()) {
-			// Without a path only the workspace's own code is searched: a file elsewhere (IED's, ied:/...) needs its path.
-			Core::String where = path.IsEmpty() ? Core::String(" in the workspace (code outside it, such as ied:/..., needs its path)") : Core::String(" in ") + path.View();
+			// Without a path the workspace's own code is searched (and the chat's roots after it, TurnRun::RunInRoots): a package's
+			// file needs its path.
+			Core::String where = path.IsEmpty() ? Core::String(" in the workspace (code outside it, such as a package's, needs its path)") : Core::String(" in ") + path.View();
 			throw IED::RpcError(IED::ErrorCode::NotFound, (((((Core::String("no symbol ") + name) + where.View()) + Similar(query, name).View()) + query.FileNamedHint(name).View()) + "; code_symbols lists a file's symbols or searches by name").View());
 		}
 		target.m_Symbols = WithoutAliases(query, target.m_Symbols);

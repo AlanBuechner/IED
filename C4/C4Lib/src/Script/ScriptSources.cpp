@@ -45,10 +45,13 @@ namespace Scripting
 		// The projects name only the script's folders on disk as sources: the interface's folders, the layers' and the
 		// script given as text are in memory, where RegisterInterface, RegisterLayers and RegisterScriptSources add them (a
 		// project set asks the file system about its sources, and "//c4i" is a network path to Windows).
+		// Each layer and the script depend on what ScriptDependencies gave them. The script's project is the root, which uses
+		// only what it reaches.
 		ProjectList Projects(const HostInterface& host, const std::vector<const ScriptChain*>& layers, const ScriptSourcesDesc& desc,
 			const std::vector<std::string>& scriptFolders)
 		{
 			ProjectList list;
+			list.everyProjectUsed = false;
 			for (const InterfaceProject& written : host.projects)
 			{
 				Project project;
@@ -56,20 +59,18 @@ namespace Scripting
 				for (uint32 used : written.dependencies) project.depends.push_back(host.projects[used].name);
 				list.projects.push_back(std::move(project));
 			}
-			std::string below = host.projects[host.rootProject].name;
-			for (const ScriptChain* at : layers)
+			for (const ScriptChain* layer : layers)
 			{
 				Project project;
-				project.name = at->layer.project;
-				project.depends.push_back(below);
-				below = project.name;
+				project.name = layer->layer.project;
+				project.depends = layer->layer.depends;
 				list.projects.push_back(std::move(project));
 			}
 			Project script;
 			script.name = ScriptProjectName(host, layers, desc.project);
 			for (const std::string& folder : scriptFolders) script.sources.push_back(folder);
 			script.defines = desc.defines;
-			script.depends.push_back(below);
+			script.depends = desc.depends;
 			list.root = script.name;
 			list.projects.push_back(std::move(script));
 			return list;

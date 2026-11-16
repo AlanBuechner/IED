@@ -1,6 +1,8 @@
 #pragma once
 #include "Core/Core.h"
+#include "Compiler/AskedNames.h"
 #include "Compiler/CpuTarget.h"
+#include "Script/HostAssumptions.h"
 #include "Script/HostInterface.h"
 #include "Script/ScriptLayer.h"
 #include "Script/ScriptSources.h"
@@ -28,6 +30,7 @@ namespace Scripting
 		std::string name;                           // the script's name, also its reflection tag
 		std::vector<ScriptFile> files;
 		std::vector<std::string> allow;             // the host headers a script file may include (section 4.5); empty: all
+		bool onlyAllowed = false;                   // only what `allow` names (and the library), even when it names nothing
 		std::map<std::string, std::string> defines;
 		bool optimize = true;                       // -O2; false: -O0
 		bool debugInfo = false;                     // CodeView for a debug script's PDB (section 6.4)
@@ -47,6 +50,25 @@ namespace Scripting
 		std::vector<std::string> threadLocals; // the script's thread_local globals; LLVM's emulated TLS controls them through `__emutls_v.<name>`
 		std::string diagnostics;               // every error and warning, as the compiler prints them
 		std::optional<ScriptLayer> layer;      // an extensible script's (section 5.2)
+		HostAssumptions assumptions;           // what its code assumed of the host (section 4.6); its wholeInterface the cache's to fill
+		size_t interfaceFilesRead = 0;         // how many of the interface's and the layers' files it parsed (section 4, step 3)
+		bool readWholeInterface = false;       // it met a collided symbol, and read every file
+	};
+
+	/// What a script compile asks of its host, kept as asked (section 4.6): the names of its table and the types it
+	/// registered. Outlives the compiler instance that asks.
+	struct HostQuestions
+	{
+		explicit HostQuestions(const HostIndex& index) : symbols(index.symbols), types(index.types) {}
+		AskedNames symbols;
+		AskedNames types;
+	};
+
+	/// How much of the host's interface (and its layers') a script's front end parses.
+	enum class InterfaceParse
+	{
+		Reached, // what the script's project reaches (ReachedUnits): a compile
+		Whole,   // every file: the language server, which answers for the interface's files too
 	};
 
 	/// Compiles a script against its host (docs/runtime/04 section 4): registers the interface and the script,
@@ -56,13 +78,15 @@ namespace Scripting
 	CompiledScript CompileScript(const HostInterface& host, const HostIndex& index, const ScriptCompileOptions& options, llvm::TargetMachine& machine);
 
 	/// The front end of a script compile alone (section 4, steps 1 to 3) into `compiler`, which then holds the script's
-	/// model and the compiler's own diagnostics: registered, preprocessed, parsed and analyzed against `host`, with what a
-	/// script may not do (an `extern` import, a header off the allow-list, a body for a host function) in `checks`. The
-	/// language server analyzes scripts with it. Nothing, with why in `error`, when the files cannot be registered.
+	/// model and the compiler's own diagnostics: registered, preprocessed, parsed (as much of the interface as `parse`
+	/// says) and analyzed against `host`, asking `questions`, with what a script may not do (an `extern` import, a header
+	/// off the allow-list, a body for a host function) in `checks`. The language server analyzes scripts with it. Nothing,
+	/// with why in `error`, when the files cannot be registered.
 	std::optional<ScriptUnits> AnalyzeScript(CompilerInstance& compiler, const HostInterface& host, const HostIndex& index,
-		const ScriptCompileOptions& options, ErrorTracker& checks, std::string* error);
+		const HostQuestions& questions, const ScriptCompileOptions& options, InterfaceParse parse, ErrorTracker& checks, std::string* error);
 
 	/// Whether `include` (an interface file) is one the allow-list lets a script include: a library file always, any
-	/// file when the list is empty, else a file whose project is named on the list or whose path starts with an entry.
-	bool IncludeAllowed(const HostInterface& host, const InterfaceFile& include, const std::vector<std::string>& allow);
+	/// file when the list is empty and not `onlyAllowed`, else a file whose project is named on the list or whose path
+	/// starts with an entry.
+	bool IncludeAllowed(const HostInterface& host, const InterfaceFile& include, const std::vector<std::string>& allow, bool onlyAllowed);
 } // namespace Scripting

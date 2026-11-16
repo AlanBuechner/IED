@@ -12,7 +12,7 @@ namespace Scripting
 	namespace
 	{
 		constexpr char kMagic[4] = { 'C', '4', 'I', 'F' };
-		constexpr uint32 kFormatVersion = 5;
+		constexpr uint32 kFormatVersion = 6;
 		constexpr size_t kBuildIdOffset = sizeof(kMagic) + sizeof(uint32); // after the magic and the version
 
 		// Little-endian fields: integers of fixed width, strings and lists after their length.
@@ -144,6 +144,8 @@ namespace Scripting
 			out.U32(file.bindingsLine);
 			out.U32(static_cast<uint32>(file.macros.size()));
 			for (const MacroDefinition& macro : file.macros) WriteMacro(out, macro);
+			out.Texts(file.templates);
+			out.Texts(file.extendedTemplates);
 		}
 
 		InterfaceFile ReadFile(Reader& in)
@@ -159,7 +161,32 @@ namespace Scripting
 			file.bindingsLine = in.U32();
 			const uint32 macros = in.U32();
 			for (uint32 i = 0; i < macros && in.Ok(); ++i) file.macros.push_back(ReadMacro(in));
+			file.templates = in.Texts();
+			file.extendedTemplates = in.Texts();
 			return file;
+		}
+
+		void WriteCollided(Writer& out, const std::vector<CollidedSymbol>& collided)
+		{
+			out.U32(static_cast<uint32>(collided.size()));
+			for (const CollidedSymbol& symbol : collided)
+			{
+				out.Text(symbol.symbol);
+				out.Indexes(symbol.units);
+			}
+		}
+
+		std::vector<CollidedSymbol> ReadCollided(Reader& in)
+		{
+			const uint32 count = in.U32();
+			std::vector<CollidedSymbol> collided;
+			for (uint32 i = 0; i < count && in.Ok(); ++i)
+			{
+				CollidedSymbol& symbol = collided.emplace_back();
+				symbol.symbol = in.Text();
+				symbol.units = in.Indexes();
+			}
+			return collided;
 		}
 
 		void WriteProject(Writer& out, const InterfaceProject& project)
@@ -194,6 +221,8 @@ namespace Scripting
 		for (const InterfaceFile& file : layer.files) WriteFile(out, file);
 		out.Texts(layer.symbols);
 		out.Texts(layer.reflectedTypes);
+		out.Texts(layer.depends);
+		WriteCollided(out, layer.collidedSymbols);
 		return out.Take();
 	}
 
@@ -207,6 +236,8 @@ namespace Scripting
 		for (uint32 i = 0; i < files && in.Ok(); ++i) read.files.push_back(ReadFile(in));
 		read.symbols = in.Texts();
 		read.reflectedTypes = in.Texts();
+		read.depends = in.Texts();
+		read.collidedSymbols = ReadCollided(in);
 		if (!in.Ok() || !in.AtEnd()) return false;
 		layer = std::move(read);
 		return true;
@@ -231,6 +262,7 @@ namespace Scripting
 		out.Texts(host.symbols);
 		out.Texts(host.reflectedTypes);
 		out.Texts(host.inlineBodies);
+		WriteCollided(out, host.collidedSymbols);
 		return out.Take();
 	}
 
@@ -258,6 +290,7 @@ namespace Scripting
 		read.symbols = in.Texts();
 		read.reflectedTypes = in.Texts();
 		read.inlineBodies = in.Texts();
+		read.collidedSymbols = ReadCollided(in);
 		if (!in.Ok()) return Fail(error, "the interface ends early (a truncated or damaged .c4i file)");
 		if (!in.AtEnd()) return Fail(error, "the interface has bytes past its end (a damaged .c4i file)");
 		std::string why;

@@ -35,6 +35,9 @@ namespace Scripting
 	std::optional<std::vector<InterfaceFile>> LayerFiles(CompilerInstance& compiler, const std::vector<uint32>& units,
 		const std::unordered_map<uint32, MacroTable>& exportedMacros, const std::vector<std::string>& folders, std::string* error);
 
+	/// The function symbols `model` gave two functions or more, with their units (SymbolTable::CollidedSymbols), by symbol.
+	std::vector<CollidedSymbol> CollidedSymbols(const ProgramModel& model);
+
 	/// The C functions the prelude declares (their link symbols): a host lists them whether or not it calls them.
 	std::vector<std::string> PreludeFunctionSymbols(const ProgramModel& model);
 	/// The runtime functions the default library (Bedrock) declares by `[link("c4_...")]`: a host lists them whether or not it

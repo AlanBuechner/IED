@@ -48,6 +48,7 @@ typedef struct c4s_options
 	uint32_t rootCount;
 	int32_t extensible;              // 1: other scripts may extend it (docs/runtime/04 section 5.2)
 	const c4s_script* base;          // the extensible script it compiles against and links to; null: its host alone
+	int32_t onlyAllowed;             // 1: only what `allow` names (and the library) may be included, even when it names nothing
 } c4s_options;
 
 // The program's script host: its interface at `interfacePath` (null: <the executable>.c4i) against its symbol table

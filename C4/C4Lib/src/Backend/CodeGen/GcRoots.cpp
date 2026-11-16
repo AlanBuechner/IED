@@ -22,9 +22,9 @@ namespace Scripting
 
 		// Every global, static member and static local whose type may hold a managed pointer, but a script's host's:
 		// those are the host's roots.
-		std::vector<llvm::GlobalVariable*> RootStorage(ModuleContext& mctx, const ProgramModel& model, const std::unordered_set<std::string>* hostSymbols)
+		std::vector<llvm::GlobalVariable*> RootStorage(ModuleContext& mctx, const ProgramModel& model, const AskedNames* hostSymbols)
 		{
-			auto hosts = [&](const llvm::GlobalVariable* g) { return hostSymbols && hostSymbols->count(g->getName().str()); };
+			auto hosts = [&](const llvm::GlobalVariable* g) { return hostSymbols && hostSymbols->Has(g->getName().str()); };
 			std::vector<llvm::GlobalVariable*> storage;
 			model.Symbols()->CollectGlobalVariables([&](const SymbolInfo& info)
 				{
@@ -72,7 +72,7 @@ namespace Scripting
 		}
 	}
 
-	void EmitGcRoots(ModuleContext& mctx, const ProgramModel& model, const std::unordered_set<std::string>* hostSymbols)
+	void EmitGcRoots(ModuleContext& mctx, const ProgramModel& model, const AskedNames* hostSymbols)
 	{
 		llvm::LLVMContext& ctx = mctx.context();
 		auto* rangeTy = llvm::StructType::get(ctx, { llvm::PointerType::get(ctx, 0), llvm::Type::getInt64Ty(ctx) });

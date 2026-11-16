@@ -32,6 +32,8 @@ namespace Scripting
 		std::vector<InterfaceFile> files;        // `folder` indexes `folders`, -1 for a file given as text; `project` is unused
 		std::vector<std::string> symbols;        // what it defines and a script over it may name
 		std::vector<std::string> reflectedTypes; // the types it registered that nothing below it did
+		std::vector<std::string> depends;        // the projects its project depends on (ScriptDependencies)
+		std::vector<CollidedSymbol> collidedSymbols; // as HostInterface's, its compile's
 	};
 
 	/// A layer as bytes, for the script cache (section 4.6).

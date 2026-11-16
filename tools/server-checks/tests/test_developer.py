@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 
 from iedclient import Client, RpcFailure
@@ -23,6 +24,7 @@ from test_chat import REPO, ChatCase, call_step, text_step, write
 
 BUILD_SECONDS = 30
 RELAUNCH_SECONDS = 60
+FAKE_LSP = os.path.join(REPO, "tools", "server-checks", "fake_lsp.py")
 
 KNOWN_BUGS = """# Known bugs
 
@@ -235,6 +237,34 @@ class OffByDefaultTests(ChatCase):
 		self.assertNotIn("ied_relaunch", messages[0]["content"])
 		self.assertIn("nothing is reachable as ied:/", [m["content"] for m in messages if m["role"] == "tool"][0])
 		self.assertNotIn("[Developer mode]", [m["content"] for m in messages if m["role"] == "tool"][0], "no note without it")
+
+
+class SourceCodeTests(SourceCase):
+	"""A code tool asked for a name alone that the workspace does not have looks in the source (ied:/) too: IED's code is
+	found without its path. A language plugin of the install (the fake server) serves both."""
+
+	def start_server(self):
+		plugin = os.path.join(self.home, "plugins", "fake")
+		os.makedirs(plugin, exist_ok=True)
+		shutil.copy(FAKE_LSP, plugin)
+		write(os.path.join(plugin, "ied-plugin.json"), json.dumps({"manifestVersion": 1, "id": "fake", "name": "Fake", "version": "1.0.0", "ied": {"api": "^1"},
+			"runtime": {"kind": "declarative"}, "contributes": {"languages": [{"id": "fake", "extensions": [".fk"]}],
+			"lspProfiles": [{"id": "fake-lsp", "command": sys.executable, "args": ["-I", "${pluginDir}/fake_lsp.py", os.path.join(self.root, "fake-lsp.jsonl")], "selector": {"languages": ["fake"]}}]}}))
+		write(os.path.join(self.repo, "a.fk"), "nothing to find\n")
+		server = super().start_server()
+		write(os.path.join(self.home, "src", "deep.fk"), "first\nthe deep one\n")
+		return server
+
+	async def test_a_name_the_workspace_lacks_is_found_in_the_source(self):
+		chat_id, _ = await self.chat(mode="agent", permission="auto")
+		self.model.queue(call_step("code_hover", {"symbol": "deep"}, "h1"), call_step("code_hover", {"symbol": "nowhere"}, "h2"),
+			call_step("code_hover", {"symbol": "deep", "path": "a.fk"}, "h3"), text_step("Done."))
+		await self.turn(chat_id)
+		results = self.tool_results()
+		self.assertIn("[not in the workspace: found in ied:/]", results["h1"], results["h1"])
+		self.assertIn("at 1:4", results["h1"], "the source's server answered, at the name's place there")
+		self.assertIn("no symbol nowhere in the workspace", results["h2"], "found nowhere: the workspace's answer")
+		self.assertNotIn("found in ied:/", results["h3"], "a path names the file: no other root is asked")
 
 
 class RelaunchTests(SourceCase):

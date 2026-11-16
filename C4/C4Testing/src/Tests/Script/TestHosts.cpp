@@ -3,6 +3,7 @@
 #include "Backend/Reflection/RegistrationEmitter.h"
 #include "Compiler/CompilerInstance.h"
 #include "Compiler/DiagnosticReporter.h"
+#include "Compiler/Projects.h"
 #include "Compiler/SourceMacros.h"
 #include "Compiler/Toolchain.h"
 #include "Macro/PredefinedMacros.h"
@@ -18,6 +19,8 @@
 namespace Testing
 {
 	using namespace Scripting;
+
+	TestHost BuildTestHost(CompilerInstance& compiler);
 
 	namespace
 	{
@@ -41,9 +44,38 @@ namespace Testing
 
 	TestHost MakeTestHost(const std::vector<std::pair<std::string, std::string>>& files)
 	{
-		TestHost host;
 		CompilerInstance compiler;
 		for (const auto& [name, text] : files) compiler.RegisterInMemory(name, text);
+		return BuildTestHost(compiler);
+	}
+
+	TestHost MakeProjectTestHost(const std::vector<TestProject>& projects)
+	{
+		CompilerInstance compiler;
+		SourceManager& sources = compiler.GetSourceManager();
+		ProjectList list;
+		for (const TestProject& project : projects) list.projects.push_back({ project.name, {}, {}, {}, project.depends });
+		list.root = projects.back().name;
+		ProjectSetResult checked = ProjectSet::Check(std::move(list));
+		if (!checked.set)
+		{
+			TestHost failed;
+			failed.diagnostics = checked.error;
+			return failed;
+		}
+		sources.SetProjects(std::move(*checked.set));
+		for (uint32 p = 0; p < projects.size(); ++p)
+		{
+			const std::string folder = "//c4test/" + projects[p].name;
+			sources.AddFolder(folder, p);
+			for (const auto& [name, text] : projects[p].files) sources.RegisterVirtual(folder + "/" + name, name, text, p, false);
+		}
+		return BuildTestHost(compiler);
+	}
+
+	TestHost BuildTestHost(CompilerInstance& compiler)
+	{
+		TestHost host;
 		compiler.RegisterIncludedLibraryFiles(Toolchain::Bedrock());
 		const std::unordered_map<std::string, MacroTable> exports = Preprocess(compiler);
 		compiler.CompileAll();
@@ -78,13 +110,14 @@ namespace Testing
 		return host;
 	}
 
-	CompiledScript CompileTestScript(const TestHost& host, const std::string& script, bool optimize, const std::vector<std::string>& allow)
+	CompiledScript CompileTestScript(const TestHost& host, const std::string& script, bool optimize, const std::vector<std::string>& allow, bool onlyAllowed)
 	{
 		ScriptCompileOptions options;
 		options.name = "test-script";
 		options.files.push_back({ "script.cf", script });
 		options.optimize = optimize;
 		options.allow = allow;
+		options.onlyAllowed = onlyAllowed;
 		std::string error;
 		std::unique_ptr<llvm::TargetMachine> machine = ScriptTargetMachine(host.index->target, &error);
 		if (!machine)

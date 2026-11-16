@@ -29,6 +29,10 @@ namespace Scripting
 		std::unordered_map<uint32, MacroTable> interfaceMacros; // what each interface unit exports, for the macro pass
 		std::unordered_map<uint32, MacroTable> exportedMacros;  // what each of the script's files exports, once the macro pass has run
 		std::vector<std::string> scriptFolders; // the folders its includes resolve from
+		std::vector<std::string> depends;       // what its project depends on (ScriptDependencies)
+		// It read only what its project reaches, and met a function symbol another function has too (collidedSymbols): which
+		// is which follows from every file, so its model is not the one to lower.
+		bool needsWholeInterface = false;
 	};
 
 	/// The folder no disk path has that the interface's files are placed under (`//c4i/f<n>/...`, `//c4i/lib/...`): a
@@ -49,13 +53,13 @@ namespace Scripting
 		const std::string& project;
 		const std::vector<std::string>& roots;
 		const ScriptChain* base;
+		const std::vector<std::string>& depends; // its project's dependencies (ScriptDependencies)
 	};
 
 	/// Registers `host`'s files, those of the layers `desc` extends and then `desc`'s files into `compiler`: the host's
 	/// projects, with each folder and the library in a place of its own under kInterfaceRoot, a project for each layer on
-	/// the one below, and the script as one more project that uses the host's root or the top layer (so includes resolve
-	/// among the host's files as they did in the host, and the script reaches every host header). A file given as text
-	/// sits in the script's own folder under kInterfaceRoot. Empty, with the reason, when a script file cannot be read or
-	/// the interface's ids do not come out as recorded.
+	/// what it depends on, and the script as one more project that depends on `desc.depends`, so includes resolve among
+	/// the host's files as they did in the host. A file given as text sits in the script's own folder under kInterfaceRoot. Empty, with the reason, when a
+	/// script file cannot be read or the interface's ids do not come out as recorded.
 	std::optional<ScriptUnits> RegisterScriptSources(CompilerInstance& compiler, const HostInterface& host, const ScriptSourcesDesc& desc, std::string* error);
 } // namespace Scripting

@@ -2,19 +2,22 @@
 publishes a diagnostic on every "bad" of an open document (a warning on every "meh"; nothing at all for a document with
 "silent" in it), formats a document by making each "messy" "tidy" (one edit per word, at its column in the negotiated
 encoding), answers hover with the position it got and definition with
-another file (on a line with "far", far.fk in the folder above, outside the workspace), answers workspace/symbol with every "bad" of its open documents, expands the word at a position on "fake/expand" ({name, expansion}: the word, lowercased, with "(1)"), echoes "fake/echo" params, answers "fake/slow" after {seconds}, exits on a "fake/crash" request, and writes every message it gets to the JSON-lines file named by its
+another file (on a line with "far", far.fk in the folder above, outside the workspace), answers workspace/symbol with every "bad" of its open documents and every "deep" of the .fk files under its root, open or not, expands the word at a position on "fake/expand" ({name, expansion}: the word, lowercased, with "(1)"), echoes "fake/echo" params, answers "fake/slow" after {seconds}, exits on a "fake/crash" request, and writes every message it gets to the JSON-lines file named by its
 first argument - after a {"argv": [...]} line with the arguments that follow it."""
 
 import json
+import os
 import re
 import sys
 import time
+from urllib.parse import unquote, urlparse
 
 LOG = open(sys.argv[1], "a", encoding="utf-8")
 STDIN = sys.stdin.buffer
 STDOUT = sys.stdout.buffer
 documents = {}
 encoding = "utf-16"
+root = None
 
 
 def read_message():
@@ -65,14 +68,31 @@ def publish(uri):
 	send({"method": "textDocument/publishDiagnostics", "params": {"uri": uri, "diagnostics": items}})
 
 
+def on_disk(word):
+	"""(uri, line, start, end) of every `word` in the .fk files under the root."""
+	if not root:
+		return
+	for folder, _, names in os.walk(root):
+		for name in sorted(n for n in names if n.endswith(".fk")):
+			path = os.path.join(folder, name)
+			with open(path, encoding="utf-8") as f:
+				lines = f.read().split("\n")
+			for number, line in enumerate(lines):
+				at = line.find(word)
+				if at >= 0:
+					yield "file:///" + path.replace("\\", "/").lstrip("/"), number, column(line, at), column(line, at + len(word))
+
+
 def formatting(uri):
 	return [{"range": {"start": {"line": number, "character": start}, "end": {"line": number, "character": end}}, "newText": "tidy"} for number, start, end in words(uri, "messy")]
 
 
 def answer(message):
-	global encoding
+	global encoding, root
 	method, params = message["method"], message.get("params") or {}
 	if method == "initialize":
+		if params.get("rootUri"):
+			root = unquote(urlparse(params["rootUri"]).path).lstrip("/")
 		offered = params["capabilities"].get("general", {}).get("positionEncodings", [])
 		encoding = "utf-8" if "utf-8" in offered else "utf-16"
 		return {"capabilities": {"positionEncoding": encoding, "textDocumentSync": {"openClose": True, "change": 1, "save": True}, "hoverProvider": True, "definitionProvider": True, "workspaceSymbolProvider": True, "documentFormattingProvider": True}, "serverInfo": {"name": "fake"}}
@@ -93,6 +113,9 @@ def answer(message):
 				if at >= 0 and params.get("query", "") in "bad":
 					start = {"line": number, "character": column(line, at)}
 					symbols.append({"name": "bad", "kind": 13, "location": {"uri": uri, "range": {"start": start, "end": dict(start, character=column(line, at + 3))}}})
+		if params.get("query", "") and params["query"] in "deep":
+			for uri, number, start, end in on_disk("deep"):
+				symbols.append({"name": "deep", "kind": 12, "location": {"uri": uri, "range": {"start": {"line": number, "character": start}, "end": {"line": number, "character": end}}}})
 		return symbols
 	if method == "fake/expand":
 		position = params["position"]

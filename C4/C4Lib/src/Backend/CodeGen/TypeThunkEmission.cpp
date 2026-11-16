@@ -102,6 +102,6 @@ namespace Scripting
 	bool CodeGenDriver::RegistersType(const ProgramModel& model, const ObjectType* type) const
 	{
 		if (!ReflectedType(model, type) || type->GetTemplateParameterCount() != 0) return false;
-		return !m_Script || !m_Script->hostTypes || !m_Script->hostTypes->count(QualifiedName(type).c_str());
+		return !m_Script || !m_Script->hostTypes || !m_Script->hostTypes->Has(QualifiedName(type).c_str());
 	}
 } // namespace Scripting

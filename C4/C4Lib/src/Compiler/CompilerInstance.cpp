@@ -34,6 +34,12 @@ namespace Scripting
 	{
 	}
 
+	Ref<CompilationUnit> CompilerInstance::FindCompilationUnit(uint32 sourceId) const
+	{
+		auto it = m_CompilationUnits.find(sourceId);
+		return it == m_CompilationUnits.end() ? nullptr : it->second;
+	}
+
 	Ref<CompilationUnit> CompilerInstance::GetCompilationUnit(uint32 sourceId)
 	{
 		if (!m_SourceManager.HasInfo(sourceId)) return nullptr;
@@ -69,10 +75,21 @@ namespace Scripting
 
 	void CompilerInstance::CompileAll()
 	{
-		uint32 totalUnits = EnqueueAllSources();
-		if (!totalUnits) return;
+		EnqueueAllSources();
+		ParseScheduled();
+	}
 
-		while (m_FilesCompleted < totalUnits)
+	void CompilerInstance::CompileReachable(const std::vector<uint32>& roots)
+	{
+		for (uint32 id : roots) Schedule(id);
+		ParseScheduled();
+	}
+
+	// Until every unit scheduled - those queued at first and those scheduled since as their includers asked for them -
+	// has parsed, or none can go on.
+	void CompilerInstance::ParseScheduled()
+	{
+		while (m_FilesCompleted < m_ScheduledIds.size())
 		{
 			DispatchAvailableUnits();
 
@@ -88,19 +105,19 @@ namespace Scripting
 		}
 	}
 
-	uint32 CompilerInstance::EnqueueAllSources()
+	void CompilerInstance::EnqueueAllSources()
 	{
 		for (uint32 id = 1; id <= m_SourceManager.Count(); ++id)
-		{
-			if (!m_SourceManager.HasInfo(id)) continue;
+			Schedule(id);
+	}
 
-			GetCompilationUnit(id);
-			m_ParseQueue.Push(id);
-			m_QueueIds.insert(id); // Track which source IDs are in the parse queue for fast lookup
-		}
-
-		m_FilesCompleted = 0;
-		return m_ParseQueue.Count();
+	// A registered unit queued to parse, once.
+	void CompilerInstance::Schedule(uint32 sourceId)
+	{
+		if (!m_SourceManager.HasInfo(sourceId) || !m_ScheduledIds.insert(sourceId).second) return;
+		GetCompilationUnit(sourceId);
+		m_ParseQueue.Push(sourceId);
+		m_QueueIds.insert(sourceId); // Track which source IDs are in the parse queue for fast lookup
 	}
 
 	void CompilerInstance::DispatchAvailableUnits()
@@ -266,7 +283,13 @@ namespace Scripting
 	void CompilerInstance::PromoteDependencyInQueue(uint32 targetId)
 	{
 		// The worklist is LIFO (Pop takes from the back), so swapping with the back brings the
-		// dependency to the head of dispatch order. If it is not queued, it is already parsing.
+		// dependency to the head of dispatch order. One never scheduled (CompileReachable) is queued
+		// there now; one scheduled but not queued is already parsing.
+		if (!m_ScheduledIds.count(targetId))
+		{
+			Schedule(targetId);
+			return;
+		}
 		if (!m_QueueIds.count(targetId)) return;
 
 		uint32 loc = m_ParseQueue.Find(targetId);
@@ -339,7 +362,7 @@ namespace Scripting
 		for (uint32 id = 1; id <= m_SourceManager.Count(); ++id)
 		{
 			if (!m_SourceManager.HasInfo(id)) continue;
-			auto unit = GetCompilationUnit(id);
+			auto unit = FindCompilationUnit(id);
 			if (!unit || !IsEntryFile(m_SourceManager.GetInfo(id).displayName))
 				continue;
 

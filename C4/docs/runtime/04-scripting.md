@@ -160,13 +160,14 @@ One binary file:
 
 | Section | Content |
 |---|---|
-| Header | magic `C4IF`, format version (5), build id, compiler version |
+| Header | magic `C4IF`, format version (6), build id, compiler version |
 | Target | the host's LLVM CPU name and feature string (D-62); a target the reading compiler does not know is refused |
 | Debug information | whether the host was built with `-g`: its scripts are debugged at first (section 6.4) |
 | Projects | each project's name and dependencies (D-59), so includes resolve as in the host |
 | Folders | how many source folders the host registered; each project names its own |
-| Files | every source of the host in registration order (its sources, the Bedrock files it uses, the prelude): its unit id, project, folder and path in it (or its path in the library), whether it is a library file or the prelude, its **interface text**, the line its C bindings start on (the interop pass appended them: a binding two files repeat is one declaration in a script's compile, as in the host's) and the macros it exports |
+| Files | every source of the host in registration order (its sources, the Bedrock files it uses, the prelude): its unit id, project, folder and path in it (or its path in the library), whether it is a library file or the prelude, its **interface text**, the line its C bindings start on (the interop pass appended them: a binding two files repeat is one declaration in a script's compile, as in the host's), the macros it exports, and the templates it declares and those it adds to (section 4, step 3) |
 | Symbols | the names of the table's entries, in table order |
+| Collided symbols | each function symbol two or more functions claimed (all but the first got `_<n>`, in the order their records came in), with the unit of each claimant in that order (section 4, step 3) |
 | Reflected types | the qualified names of the types the host registered, so a script does not register them again |
 | Inline bodies | chunks of LLVM bitcode of the host functions a script may inline (section 3.3) |
 
@@ -235,7 +236,17 @@ what it set aside once nothing has it open (`UpdateFile`, C4Testing `Compiler.Fi
 2. **Preprocess.** Interface files are not preprocessed again (their text is already expanded); each provides the
    macros it exports, and one that exports none is not read at all (`ExpandScriptMacros`). Script files are preprocessed as in a build, inheriting the macros of the headers they
    include. A script file with an `extern "c"` / `extern "c++"` directive is an error (section 2).
-3. **Parse and build the model**, as for a program. The allow-list (section 4.5) is checked as includes resolve.
+3. **Parse what the script reaches and build the model**, as for a program. The allow-list (section 4.5) is checked as
+   includes resolve. Every interface file is registered, but only these are parsed (`ReachedUnits`, `Script/ScriptReach`):
+   the default library's; those of every project the script's project reaches (section 4.5); every file that adds to a
+   template one of those declares - a specialization, a member defined out of line, an extension, which apply wherever
+   the template is used (`Script/TemplateNames`); and every unit of a collided symbol one of those declares - each with
+   what its own project reaches, to a fixed point. A name a declaration uses resolves only within its project's reach
+   (docs/language/15 rule 4), so a file left out changes nothing the script means: an engine package's scripts read
+   40 to 50 percent of an editor's 1400 to 2000 interface files. When the model meets a collided symbol it read only part of, or the script
+   defines a function under a name the host's table has (a host function in a file left out may have had it first), it
+   is built again of every file (`NeedsWholeInterface`). `CompiledScript::interfaceFilesRead` says how many it read
+   (C4Testing `Script.Compiler`, `Script.Reach`).
 4. **Lower in script mode** (section 4.2), with no entry point, for the host's target (its macros in step 2 too).
 5. **Import inline bodies** (section 3.3) when optimizing, then optimize at the requested level (`-O0` or `-O2`,
    the same pipeline as the host's build).
@@ -294,19 +305,44 @@ The script is optimized as a whole program would be, with the host's small funct
 outside them is a compile error: `a script may not include 'x': it is not on the allow-list`. No entry allows
 every host header. Bedrock is always allowed.
 
+The list is also what the script's project depends on, as a module depends on what its manifest names: when every
+entry names a project (of the host, or a layer below the script), the script reaches those projects and what they
+depend on, and nothing else (section 4, step 3). An entry that is a path prefix, or no list, makes it depend on the
+host's root and every layer below: it reaches every file. `ScriptOptions::onlyAllowed` makes an empty list mean what it
+says - nothing but Bedrock - so a script of a package that depends on nothing reads the library alone; an engine that
+hands each package its manifest's dependencies sets it. Then an include of a host project off the list is refused as a
+program's include of a project it does not depend on is (docs/language/15 rule 3: `cannot include 'x': it is a file of
+project 'P', and project 'script' does not depend on 'P'`), the error the same include gives in a build.
+
 ### 4.6 The compiled-script cache
 
 `Host::UseCache(folder)` (`c4s_host_use_cache`) keeps every script the host compiles from then on in `folder`
 (`Script/ScriptCache`): its machine code (the COFF object the JIT generated), its warnings and its `thread_local`
 names. A later compile whose inputs are the same links that object instead of compiling: steps 1 to 5 are
-skipped, and step 6 links the object as it is. The inputs are everything that decides the code: each script file's
-path and text, the script's name up to a trailing `#<tag>` (a host tells builds of one script apart with one; the
-reflection tag is applied at load, not in the machine code), the optimization level, the allow-list, the defines, the
-host's build id, and the compiler's own build (the path, size and time of `C4Script.dll`, so a rebuilt compiler
-never runs code an older one made). An entry is a file `<name>.<O0|O2>-<digest>.c4so`; writing one removes the
-script's other entries at that level, so the folder holds one per script and level. A missing, damaged or
-unlinkable entry is compiled again; a folder that cannot be written only makes compiles slower. Debug scripts
-(section 6.4) are never kept.
+skipped, and step 6 links the object as it is. The inputs are everything that decides the code, and nothing that does
+not - a rebuilt host whose changes the script cannot see keeps its scripts:
+
+- the script's own: each file's path and text, its name up to a trailing `#<tag>` (a host tells builds of one script
+  apart with one; the reflection tag is applied at load, not in the machine code), the optimization level, the
+  allow-list and `onlyAllowed`, the defines, its project, roots and the layers below it (section 5.2);
+- the compiler's own build (the path, size and time of `C4Script.dll`, so a rebuilt compiler never runs code an older
+  one made);
+- the host's shape: its compiler version, target, projects, file count and collided symbols;
+- the files the script reaches (step 3): each one's place, macros, templates and a digest of its interface text that a
+  body edit does not change - the text without blank lines (a removed body leaves only its line breaks), and the lines
+  an `assert_` is on, which an assertion's site records (`InterfaceDigests`).
+
+The host's build id is not one: what else the script's code took of the host is kept with the entry as its
+**assumptions** (`HostAssumptions`) and checked before it is used - each name it asked the host's table about with the
+answer, each type it asked whether the host registered, each inline body it imported with a digest of the body's code
+alone (`InlineBodyIndex::Digest`), and, when step 3 read every file, the digest of them all. A function whose body
+changed invalidates exactly the scripts that inlined it; one that became a host instance or stopped being one, the
+scripts that asked.
+
+An entry is a file `<name>.<O0|O2>-<digest>.c4so`; writing one removes the script's other entries at that level, so
+the folder holds one per script and level. A missing, damaged or unlinkable entry, or one whose assumptions no longer
+hold, is compiled again; a folder that cannot be written only makes compiles slower. Debug scripts (section 6.4) are
+never kept. C4Testing `Script.Cache`.
 
 ---
 
@@ -374,7 +410,7 @@ low->Unload();
 
 | Rule | Status |
 |---|---|
-| What a script over a layer compiles against is the layer's interface: its files' interface text (section 3.2) under the unit ids they had, its exported macros, and the project it names (`ScriptOptions::project`), which depends on the layer below or the host's root. It is a script of the host's interface otherwise: section 4.2 applies to the layer's entities as to the host's. | **Done** (ScriptTest `Layers`) |
+| What a script over a layer compiles against is the layer's interface: its files' interface text (section 3.2) under the unit ids they had, its exported macros, and the project it names (`ScriptOptions::project`), which depends on what the layer's own allow-list made it depend on (section 4.5), kept with the layer with its collided symbols, so a script over it reads what the layer reaches (section 4, step 3). It is a script of the host's interface otherwise: section 4.2 applies to the layer's entities as to the host's. | **Done** (ScriptTest `Layers`, C4Testing `Script.Reach`) |
 | What it links to is the names the layer defines, through the layer below and the host's table (`HostSymbolTable::Extended`): a layer's locals a script over it may name - file-static functions and globals, vtables, static locals and their guards - are external in an extensible script's module, and it has an accessor per `thread_local` (`ExportLayerDefinitions`). Its bodies are not imported for inlining. | **Done** (ScriptTest `Layers`, at `-O0`, `-O2`, as debug scripts and over a host in partitions) |
 | A script over a layer links to it from the layer's `Prepare`, loaded or not: a host prepares a whole chain on a worker, then loads it lowest first. | **Done** (ScriptTest `Layers`) |
 | A layer stays loaded while a loaded script extends it: `Unload` then leaves it as it is, and its diagnostics say why; a `Script` destroyed anyway keeps its code until what stands on it is gone. | **Done** (ScriptTest `Layers`) |
@@ -546,4 +582,5 @@ a faulted script is not trusted to run again.
 | `Bedrock/Scripting` (ScriptTest) | **Done** |
 | Debugging scripts: DLLs with PDBs (section 6.4; ScriptTest `DebugScripts`, and every case with `-DebugScripts`) | **Done** |
 | Layers: a script over a script (section 5.2; ScriptTest `Layers`) | **Done** |
+| A compile reads only what the script's project reaches (section 4, step 3; C4Testing `Script.Reach`, `Script.TemplateNames`, `Script.Compiler`); the cache keeps a script across host rebuilds that change nothing it read, inlined or asked (section 4.6; C4Testing `Script.Cache`, `Script.InlineImport`) | **Done** |
 | Linux script hosts: `C4Script.so`, JITLink, signal guards, landing-pad exceptions (sections 3.4, 6.5, 7; ScriptTest on Linux with `run_linux.py`, 25 cases at `-O0`, `-O2` and as debug scripts) | **Done** |

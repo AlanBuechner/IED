@@ -402,8 +402,8 @@ namespace Scripting
 	ImageDescription DescribeReflectionImage(ModuleContext& module, const ProgramModel& model, const InvokeThunks& thunks,
 		const TypeThunks& types, const HostEntities& host, ErrorTracker& errors)
 	{
-		auto hostType = [&](const Type* type) { return host.types && host.types->count(QualifiedName(type).c_str()); };
-		auto hostSymbol = [&](const Core::String& symbol) { return host.symbols && host.symbols->count(symbol.c_str()); };
+		auto hostType = [&](const Type* type) { return host.types && host.types->Has(QualifiedName(type).c_str()); };
+		auto hostSymbol = [&](const Core::String& symbol) { return host.symbols && host.symbols->Has(symbol.c_str()); };
 		auto hostUnit = [&](uint32 unit) { return unit >= 1 && unit <= host.interfaceUnits; };
 		ImageWriter writer(module, model, thunks, types, errors);
 		for (const ObjectType* object : model.ObjectTypes())

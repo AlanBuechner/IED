@@ -189,6 +189,7 @@ namespace Scripting
 			c.rootCount = (uint32)roots.Count();
 			c.extensible = options.extensible ? 1 : 0;
 			c.base = options.base == nullptr ? nullptr : options.base->Handle();
+			c.onlyAllowed = options.onlyAllowed ? 1 : 0;
 		}
 	}
 

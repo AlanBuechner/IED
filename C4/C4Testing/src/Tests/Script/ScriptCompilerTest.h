@@ -52,5 +52,13 @@ namespace Testing
 		void ImageOffsetsNameOnlyTheImage();
 		TEST_FUNC(Script.Compiler)
 		void InlineBodiesComeTwoCallsDeep();
+		TEST_FUNC(Script.Compiler)
+		void ACompileReadsOnlyWhatItsProjectReaches();
+		TEST_FUNC(Script.Compiler)
+		void ASpecializationOutOfReachIsRead();
+		TEST_FUNC(Script.Compiler)
+		void ADeclarationOutOfReachIsAnError();
+		TEST_FUNC(Script.Compiler)
+		void AScriptWithoutAListReadsEveryFile();
 	};
 } // namespace Testing

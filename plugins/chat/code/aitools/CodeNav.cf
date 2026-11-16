@@ -18,6 +18,7 @@ namespace Ai
 		spec->m_ParallelSafe = true;
 		spec->m_InPlan = true;
 		spec->m_Deferred = deferred;
+		spec->m_SearchesRoots = true;
 		if (deferred) spec->m_Group = Core::String("code");
 		return spec;
 	}
@@ -756,7 +757,7 @@ namespace Ai
 		symbols->m_Plan = [](const ToolInvocation& call) -> ToolPlan { return CodePlan(call, "List symbols of"); };
 		symbols->m_Run = SymbolsRun;
 		registry.Add(symbols);
-		ToolSpec* read = CodeToolSpec("code_read_symbol", "The whole source of one symbol - a function with its body, a type with its members, a macro - numbered, with the comment above it; a definition before its declaration; a plain name that up to three symbols of different namespaces have shows each. A line names the symbol holding it, and a file's comments and includes hold none: to read those, or a file no language server serves (a shader, a config file), use fs_read. Example: code_read_symbol({\"symbol\": \"Ring::Push\"}) or code_read_symbol({\"path\": \"src/ring.cf\", \"line\": 120})",
+		ToolSpec* read = CodeToolSpec("code_read_symbol", "The whole source of one symbol - a function with its body, a type with its members, a macro - numbered, with the comment above it; a definition before its declaration; a plain name that up to three symbols of different namespaces have shows each. A line names the symbol holding it, and a file's comments and includes hold none: to read those, or a file no language server serves (a shader, a config file), use fs_read. A symbol of a package outside the workspace is found only with its path; one the workspace does not have is looked for in IED's checkout (ied:/) too. Example: code_read_symbol({\"symbol\": \"Ring::Push\"}) or code_read_symbol({\"path\": \"src/ring.cf\", \"line\": 120})",
 			CodeTargetSchema(", \"declaration\": {\"type\": \"boolean\", \"description\": \"the declaration (a header's) instead of the definition\"}").View(), false);
 		read->m_Plan = [](const ToolInvocation& call) -> ToolPlan { return CodePlan(call, "Read"); };
 		read->m_Run = ReadSymbolRun;

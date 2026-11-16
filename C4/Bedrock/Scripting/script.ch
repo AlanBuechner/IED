@@ -26,6 +26,7 @@ struct __C4sOptions
 	public uint32 rootCount;
 	public int32 extensible;
 	public void* base;
+	public int32 onlyAllowed;
 }
 
 [link("c4s_host_open")] void* c4s_host_open(const char* interfacePath, void* table, char* error, uint64 errorSize);
@@ -87,8 +88,11 @@ namespace Scripting
 		public void AddFile(const char* path);
 		// A file given as text, under `name` (another file of the script includes it by that name).
 		public void AddText(const char* fileName, const char* text);
-		// A host project or interface path the script may include (none: every host header).
+		// A host project or interface path the script may include (none: every host header, unless onlyAllowed).
 		public void Allow(const char* projectOrPath);
+		// Only what Allow names - and the default library - may be included, even when it names nothing: a script whose
+		// allow-list is all projects then depends on them alone (docs/runtime/04 section 4.5).
+		public bool onlyAllowed = false;
 		// NAME or NAME=VALUE, as after -D.
 		public void Define(const char* define);
 

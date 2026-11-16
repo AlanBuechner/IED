@@ -73,6 +73,7 @@ namespace Ai
 		public Core::String m_Group;        // "media", a plugin tool's group or else its plugin id
 		public bool m_FolderRoots;          // works in a plugin's folder (plugins:/), which is no workspace: reads it from the disk
 		public bool m_OwnPaths;             // its path names no workspace's file (docs_read's "c4/library/x.md"): no root alias takes it
+		public bool m_SearchesRoots;        // a name it finds nowhere in the chat's workspace, no path given, is looked for in its roots (ied:/)
 		public bool m_Asks;                 // every call asks until a rule allows it (a toolCalls entry's approval "ask")
 		public ToolPlanner m_Plan;
 		public ToolDetailer m_Detail;       // null: the card shows the plan as it is

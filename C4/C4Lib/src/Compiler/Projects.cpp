@@ -115,7 +115,7 @@ namespace Scripting
 		set.m_Projects = std::move(list.projects);
 		set.m_Root = *root;
 		for (uint32_t i = 0; i < set.m_Projects.size(); ++i) set.m_Uses.push_back(Closure(set.m_Projects, i));
-		for (uint32_t i = 0; i < set.m_Projects.size(); ++i)
+		for (uint32_t i = 0; i < set.m_Projects.size() && list.everyProjectUsed; ++i)
 			if (!set.CanUse(set.m_Root, i))
 			{
 				result.error = "project '" + set.m_Projects[i].name + "' is described, but the root '" + set.m_Projects[set.m_Root].name + "' does not use it";

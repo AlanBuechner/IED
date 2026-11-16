@@ -556,7 +556,7 @@ namespace Scripting
 
 	bool CodeGenDriver::IsHostSymbol(const std::string& symbol) const
 	{
-		return m_Script && m_Script->hostSymbols && m_Script->hostSymbols->count(symbol);
+		return m_Script && m_Script->hostSymbols && m_Script->hostSymbols->Has(symbol);
 	}
 
 	void CodeGenDriver::MarkHostGlobalsStarted(ProgramModel& model, StartedGlobals& started) const

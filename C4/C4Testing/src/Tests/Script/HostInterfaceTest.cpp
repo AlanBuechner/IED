@@ -1,5 +1,6 @@
 #include "HostInterfaceTest.h"
 #include "Script/HostInterface.h"
+#include "Script/ScriptLayer.h"
 #include "Compiler/FileIo.h"
 #include <filesystem>
 
@@ -36,6 +37,8 @@ namespace Testing
 			function.params = { "x", "..." };
 			function.body = "((x) * (x))";
 			header.macros = { object, function };
+			header.templates = { "Ai::Plan", "Ai::Brain" };
+			header.extendedTemplates = { "Ai|Core::KeyTraits" };
 			InterfaceFile prelude;
 			prelude.unitId = 2;
 			prelude.path = "Prelude/prelude.ch";
@@ -46,6 +49,7 @@ namespace Testing
 			host.symbols = { "Think_1int32", "g_score", "c4_alloc" };
 			host.reflectedTypes = { "Ai::Brain", "Box<int32>" };
 			host.inlineBodies = { std::string("BC\xC0\xDE\0\x01", 6), std::string("BC\xC0\xDE\0\x02", 6) };
+			host.collidedSymbols = { { "Rhi_Not_0", { 1, 2 } } };
 			return host;
 		}
 	}
@@ -78,6 +82,34 @@ namespace Testing
 		TEST_ASSERT(read.symbols == written.symbols);
 		TEST_ASSERT(read.reflectedTypes == written.reflectedTypes);
 		TEST_ASSERT(read.inlineBodies == written.inlineBodies);
+		TEST_ASSERT(header.templates == written.files[0].templates && header.extendedTemplates == written.files[0].extendedTemplates);
+		TEST_ASSERT(read.files[1].templates.empty() && read.files[1].extendedTemplates.empty());
+		TEST_ASSERT_EQ(read.collidedSymbols.size(), (size_t)1);
+		TEST_ASSERT(read.collidedSymbols[0].symbol == "Rhi_Not_0" && read.collidedSymbols[0].units == (std::vector<uint32>{ 1, 2 }));
+		TEST_PASSED();
+	}
+
+	// A layer as the script cache keeps it: what its project depends on and its collided symbols with the rest.
+	void HostInterfaceTest::ALayerRoundTrips()
+	{
+		ScriptLayer written;
+		written.project = "Kernel";
+		written.folders = { "C:/game/kernel/src" };
+		written.files = { Sample().files[0] };
+		written.symbols = { "Kernel_Area_0" };
+		written.reflectedTypes = { "Kernel::Square" };
+		written.depends = { "engine", "Shapes" };
+		written.collidedSymbols = { { "Kernel_Not_0", { 3, 4 } } };
+		ScriptLayer read;
+		TEST_ASSERT(DeserializeLayer(SerializeLayer(written), read));
+		TEST_ASSERT(read.project == "Kernel" && read.folders == written.folders && read.symbols == written.symbols);
+		TEST_ASSERT(read.files.size() == 1 && read.files[0].templates == written.files[0].templates);
+		TEST_ASSERT(read.depends == written.depends && read.reflectedTypes == written.reflectedTypes);
+		TEST_ASSERT(read.collidedSymbols.size() == 1 && read.collidedSymbols[0].units == (std::vector<uint32>{ 3, 4 }));
+		ScriptLayer nothing;
+		TEST_ASSERT(DeserializeLayer(SerializeLayer(nothing), read) && read.depends.empty()); // a layer that depends on nothing
+		const std::string bytes = SerializeLayer(written);
+		TEST_ASSERT(!DeserializeLayer(bytes.substr(0, bytes.size() - 1), read));
 		TEST_PASSED();
 	}
 

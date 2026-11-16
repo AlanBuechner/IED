@@ -8,6 +8,7 @@
 #include "Backend/HIR/GlobalInit.h"
 #include "Backend/HIR/TypeOperations.h"
 #include "Backend/Reflection/RegistrationEmitter.h"
+#include "Compiler/AskedNames.h"
 #include "Compiler/ErrorTracker.h"
 #include <llvm/IR/LLVMContext.h>
 #include <memory>
@@ -35,8 +36,8 @@ namespace Scripting
 	/// What lowering a script needs of its host (docs/runtime/04 section 4.2).
 	struct ScriptLowering
 	{
-		const std::unordered_set<std::string>* hostSymbols = nullptr; // the names of the host table's entries
-		const std::unordered_set<std::string>* hostTypes = nullptr;   // the types the host's reflection registered
+		const AskedNames* hostSymbols = nullptr; // the names of the host table's entries
+		const AskedNames* hostTypes = nullptr;   // the types the host's reflection registered
 		uint32 interfaceUnits = 0;                                    // units 1..interfaceUnits are the host's files
 	};
 

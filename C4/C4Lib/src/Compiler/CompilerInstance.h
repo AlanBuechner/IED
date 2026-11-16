@@ -43,6 +43,9 @@ namespace Scripting
 		CompilerMessageQueue& GetMessageQueue() { return m_MessageQueue; }
 		const CompilerMessageQueue& GetMessageQueue() const { return m_MessageQueue; }
 		Ref<CompilationUnit> GetCompilationUnit(uint32 sourceId);
+		/// The unit of `sourceId` when one was made (CompileAll makes every registered one, CompileReachable those it
+		/// reaches); null otherwise - it never makes one.
+		Ref<CompilationUnit> FindCompilationUnit(uint32 sourceId) const;
 
 		/// The set of units whose file-scope symbols are visible FROM `sourceId`: the unit itself
 		/// plus its full transitive include closure. This is the visibility domain the model's
@@ -86,6 +89,11 @@ namespace Scripting
 		/// parallel. Does not build the model - call AnalyzeProgram() for that.
 		void CompileAll();
 
+		/// Parse `roots` and the files they include, transitively, as they ask for them: a registered file nothing
+		/// reaches is never parsed and has no unit. A script compile reads only what its project reaches of its host's
+		/// interface (docs/runtime/04 section 4, step 3). Does not build the model either.
+		void CompileReachable(const std::vector<uint32>& roots);
+
 		/// Build the single program-wide model: one ModelBuilder over all units' own declarations.
 		/// Must run after CompileAll(). Re-runnable (tests rebuild in place).
 		bool AnalyzeProgram();
@@ -108,7 +116,7 @@ namespace Scripting
 		/// errors are skipped (their parse diagnostics still surface via GetAllDiagnostics()).
 		bool BuildProgramModel();
 		/// A script compile (docs/runtime/04): the host's symbols, so the functions the host defines count as defined.
-		void SetHostSymbols(const std::unordered_set<std::string>* symbols) { m_ProgramModel.Symbols()->SetHostSymbols(symbols); }
+		void SetHostSymbols(const AskedNames* symbols) { m_ProgramModel.Symbols()->SetHostSymbols(symbols); }
 		/// The processor the program is compiled for (D-62).
 		void SetTarget(const CpuTarget& target) { m_ProgramModel.SetTarget(target); }
 
@@ -136,7 +144,9 @@ namespace Scripting
 
 	private:
 		// --- Parse scheduler (CompileAll) ---------------------------------------
-		uint32 EnqueueAllSources();
+		void EnqueueAllSources();
+		void Schedule(uint32 sourceId);
+		void ParseScheduled();
 		void DispatchAvailableUnits();
 		bool NoProgressPossible() const;
 		void HandleUnitFinished(uint32 sourceId);
@@ -169,6 +179,7 @@ namespace Scripting
 		// include dependency tracking
 		std::unordered_set<uint32> m_CompletedUnits;   // source IDs whose parsing has finished
 		std::unordered_set<uint32> m_QueueIds;         // source IDs currently in m_ParseQueue
+		std::unordered_set<uint32> m_ScheduledIds;     // source IDs ever queued: those that parse
 
 		// include dependency tracking: targetId -> list of requesterIds blocked on it
 		std::unordered_map<uint32, Core::Vector<uint32>> m_BlockedUnits;

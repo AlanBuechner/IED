@@ -243,8 +243,33 @@ namespace Ai
 			return outcome;
 		}
 		catch (IED::RpcError& error) {
+			ToolOutcome found;
+			const bool elsewhere = error.m_Code == IED::ErrorCode::NotFound && spec->m_SearchesRoots && rootAlias.IsEmpty() && invocation.m_Args.Member("path").AsView().IsEmpty();
+			if (elsewhere && RunInRoots(spec, invocation, found)) return found;
 			return ToolError(((spec->m_Name + ": ") + error.m_Message.View()).View());
 		}
+	}
+
+	bool TurnRun::RunInRoots(ToolSpec* spec, ToolInvocation& invocation, ToolOutcome& found) {
+		for (const RootFolder& folder : RootFolders(m_Ws)) {
+			if (folder.m_Alias.IsEmpty()) continue;
+			RootTarget root;
+			Core::String problem;
+			if (!OpenRoot(m_Ws.m_Id.View(), folder.m_Alias.View(), root, problem)) continue;
+			invocation.m_Ws = root.m_Ws;
+			invocation.m_Shown = root.m_Shown;
+			try {
+				const int64 ran = ToolNowMs();
+				found = spec->m_Run(invocation);
+				if (found.m_IsError) continue;
+				found.m_Ms = ToolNowMs() - ran;
+				found.m_Timed = true;
+				found.m_Content = ((Core::String("[not in the workspace: found in ") + root.m_Shown.View()) + "]\n") + found.m_Content.View();
+				return true;
+			}
+			catch (IED::RpcError& missed) {}
+		}
+		return false;
 	}
 
 	void TurnRun::LoadTool(const ToolSpec* spec) {

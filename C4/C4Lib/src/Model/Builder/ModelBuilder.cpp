@@ -266,9 +266,9 @@ namespace Scripting
 
 		model.m_PreludeUnit = compiler.GetSourceManager().PreludeId();
 		model.SetProjects(&compiler.GetSourceManager().Projects(), ProjectOfEachUnit(compiler.GetSourceManager()));
-		for (uint32 s = 1; s <= compiler.SourceCount(); ++s) // source ids are 1-based
+		for (uint32 s = 1; s <= compiler.SourceCount(); ++s) // source ids are 1-based; a unit never parsed (CompileReachable) has none
 		{
-			auto unit = compiler.GetCompilationUnit(s);
+			auto unit = compiler.FindCompilationUnit(s);
 			if (!unit) continue;
 			model.m_SourceNames[unit->SourceId()] = compiler.GetSourceManager().GetInfo(unit->SourceId()).displayName;
 			const SourceInfo& source = compiler.GetSourceManager().GetInfo(unit->SourceId());
@@ -286,7 +286,7 @@ namespace Scripting
 		// transitively includes. Without this every cross-file symbol is invisible.
 		for (uint32 s = 1; s <= compiler.SourceCount(); ++s) // source ids are 1-based
 		{
-			auto unit = compiler.GetCompilationUnit(s);
+			auto unit = compiler.FindCompilationUnit(s);
 			if (!unit) continue;
 			Core::Vector<uint32> closure;
 			closure.Push(unit->SourceId());
@@ -412,7 +412,7 @@ namespace Scripting
 	{
 		// After the program: a name the program declares at file scope is the program's, the prelude's is hidden. A
 		// hidden function goes to a scope no name reaches, for the files the program's declaration is not visible in.
-		auto prelude = ctx.model->m_PreludeUnit ? compiler.GetCompilationUnit(ctx.model->m_PreludeUnit) : nullptr;
+		auto prelude = ctx.model->m_PreludeUnit ? compiler.FindCompilationUnit(ctx.model->m_PreludeUnit) : nullptr;
 		if (!prelude) return;
 		ctx.unitId = ctx.model->m_PreludeUnit;
 		Scope* root = ctx.model->Symbols()->GetRoot();

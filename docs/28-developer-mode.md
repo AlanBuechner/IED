@@ -171,7 +171,9 @@ plugin API like the others, and the chat plugin learns of the source through a b
   root allows it, whatever the mode (the subjects `fs.write(<alias>:/<path>)`, `shell(<alias>:/: <command>)`). A root
   whose `folder` holds a plugin's folder takes the writes `plugins:/` refuses otherwise; `home` says the root is the
   source the server's home was built or installed from, so it holds the home's plugins at the same place (`docs/13`
-  "Plugin folders"). The developer plugin provides it with one root, `{alias: "ied", title: "IED source", confirm:
+  "Plugin folders"). A code tool (`code_*`) asked for a symbol by name alone that the chat's workspace does not have
+  runs again in each root and says which answered (`ToolSpec::m_SearchesRoots`, `TurnRun::RunInRoots`): IED's code is
+  found without its path. The developer plugin provides it with one root, `{alias: "ied", title: "IED source", confirm:
   false, home: true}`, while developer mode is on; nothing is reachable otherwise. `plugins` is the chat's own alias,
   never a root's.
 - **`aiToolFailureNotes`** (a contribution point, `docs/26` section 8): the plugin's code contributes item 5's note with

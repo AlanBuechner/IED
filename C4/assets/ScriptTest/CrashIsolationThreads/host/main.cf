@@ -90,13 +90,10 @@ void CheckTwoScriptsFault(Scripting::Host* host, Threading::JobSystem& jobs, Scr
 	second->Unload();
 }
 
-// A stack overflow on a worker, then another on the same thread: its guard page came back.
+// A stack overflow on a worker, then another on the same thread: its guard page came back. One thread of its own runs
+// both: a job system's Wait may run a job on the waiting thread, so two jobs need not share one.
 void CheckOverflowsOnOneWorker(Scripting::Host* host, ScriptTest::Checks& checks)
 {
-	Threading::JobSystemDesc desc;
-	desc.frameWorkers = 1;
-	desc.backgroundWorkers = 0;
-	Threading::JobSystem single(desc);
 	Scripting::Script* first = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "overflow-a", "faults.cf"));
 	Scripting::Script* second = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "overflow-b", "faults.cf"));
 	if (!first->Ok() || !second->Ok()) return;
@@ -105,20 +102,19 @@ void CheckOverflowsOnOneWorker(Scripting::Host* host, ScriptTest::Checks& checks
 	int64[2] limits;
 	limits[0] = 1000000000;
 	limits[1] = 1000000000;
-	for (int32 i = 0; i < 2; ++i)
-	{
-		Scripting::Script* script = i == 0 ? first : second;
-		funcptr<void(void*)> overflows = FunctionOf(script, "Overflows");
-		int64* limit = &limits[i];
-		uint64* thread = &threads[i];
-		bool* result = &returned[i];
-		Threading::WaitGroup group;
-		single.Submit([script, overflows, limit, thread, result]() {
-			*thread = Threading::Thread::CurrentId();
-			*result = script->Call(overflows, (void*)limit);
-		}, Threading::JobPriority::High, &group);
-		single.Wait(group);
-	}
+	uint64* threadsOf = &threads[0];
+	bool* returnedOf = &returned[0];
+	int64* limitsOf = &limits[0];
+	funcptr<void(void*)> firstOverflows = FunctionOf(first, "Overflows");
+	funcptr<void(void*)> secondOverflows = FunctionOf(second, "Overflows");
+	Threading::Thread worker = Threading::Thread::Run([first, second, firstOverflows, secondOverflows, threadsOf, returnedOf, limitsOf]() {
+		for (int32 i = 0; i < 2; ++i)
+		{
+			threadsOf[i] = Threading::Thread::CurrentId();
+			returnedOf[i] = (i == 0 ? first : second)->Call(i == 0 ? firstOverflows : secondOverflows, (void*)&limitsOf[i]);
+		}
+	});
+	worker.Join();
 	checks.That(!returned[0] && !returned[1], "both overflows are caught");
 	checks.That(threads[0] == threads[1], "on the same thread");
 	checks.Contains(first->FaultText(), "0xc00000fd", "a stack overflow");

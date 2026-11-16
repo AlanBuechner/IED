@@ -4,6 +4,7 @@
 #include "Compiler/Version.h"
 #include "Model/ProgramModel.h"
 #include "Script/InterfaceText.h"
+#include "Script/TemplateNames.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
 #include <unordered_set>
@@ -69,6 +70,13 @@ namespace Scripting
 			if (file.folder >= 0) file.path = absPath.substr(Normalized(sources.Folders()[file.folder].first).size() + 1);
 		}
 
+		void NameTemplates(const CompilationUnit& unit, InterfaceFile& file)
+		{
+			TemplateNames names = TemplateNamesOf(unit.GetOriginalChildren());
+			file.templates = std::move(names.declared);
+			file.extendedTemplates = std::move(names.extended);
+		}
+
 		// The definitions of functions something else declares too: the interface keeps the declaration alone.
 		std::unordered_set<const AstNode*> DeclaredElsewhere(const ProgramModel& model)
 		{
@@ -117,8 +125,10 @@ namespace Scripting
 			file.text = std::move(*text);
 			file.bindingsLine = info.bindingsLine;   // the interface text keeps every line in place
 			file.macros = Exported(exportedMacros, MacroIdentity(info));
+			NameTemplates(*unit, file);
 			host.files.push_back(std::move(file));
 		}
+		host.collidedSymbols = CollidedSymbols(compiler.GetProgramModel());
 		host.symbols = std::move(build.symbols);
 		host.reflectedTypes = std::move(build.reflectedTypes);
 		host.debugInfo = build.debugInfo;
@@ -155,9 +165,18 @@ namespace Scripting
 			file.text = std::move(*text);
 			if (auto macros = exportedMacros.find(id); macros != exportedMacros.end())
 				for (const auto& [name, macro] : macros->second.All()) file.macros.push_back(macro);
+			NameTemplates(*unit, file);
 			files.push_back(std::move(file));
 		}
 		return files;
+	}
+
+	std::vector<CollidedSymbol> CollidedSymbols(const ProgramModel& model)
+	{
+		std::vector<CollidedSymbol> symbols;
+		for (const auto& [symbol, units] : model.Symbols()->CollidedSymbols()) symbols.push_back({ symbol.c_str(), units });
+		std::sort(symbols.begin(), symbols.end(), [](const CollidedSymbol& a, const CollidedSymbol& b) { return a.symbol < b.symbol; });
+		return symbols;
 	}
 
 	std::vector<std::string> PreludeFunctionSymbols(const ProgramModel& model)

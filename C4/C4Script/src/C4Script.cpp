@@ -79,6 +79,7 @@ namespace
 		if (from.project) options.project = from.project;
 		for (uint32_t i = 0; i < from.rootCount; ++i) options.roots.push_back(from.roots[i]);
 		options.extensible = from.extensible != 0;
+		options.onlyAllowed = from.onlyAllowed != 0;
 		if (from.base)
 		{
 			if (from.base->script) options.base = from.base->script->Chain();

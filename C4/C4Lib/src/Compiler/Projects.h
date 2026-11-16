@@ -25,6 +25,8 @@ namespace Scripting
 	{
 		std::vector<Project> projects;
 		std::string root;
+		// The root uses every project, as a build's must; a script's root uses only what it depends on of its host's.
+		bool everyProjectUsed = true;
 	};
 
 	struct ProjectSetResult;

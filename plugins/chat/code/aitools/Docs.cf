@@ -440,7 +440,7 @@ namespace Ai
 			"{\"type\": \"object\", \"properties\": {\"query\": {\"type\": \"string\", \"minLength\": 1}}, \"required\": [\"query\"], \"additionalProperties\": false}");
 		search->m_Run = [folders](const ToolInvocation& call) -> ToolOutcome { return DocsSearchRun(call, folders(call)); };
 		registry.Add(search);
-		ToolSpec* read = DocsSpec("docs_read", "Read a section of the reference docs by its path and heading (or a line), as docs_search gives them (a docs file's plugins:/ path works too); a path alone lists the file's headings. Only the languages' and libraries' docs: a workspace's own docs (docs/...) are read with fs_read. Example: docs_read({\"path\": \"c4/library/bedrock.md\", \"heading\": \"Core::HashMap\"})",
+		ToolSpec* read = DocsSpec("docs_read", "Read a section of the reference docs by its path and heading (or a line), as docs_search gives them (a docs file's plugins:/ path works too); a path alone lists the file's headings. Only the languages' and libraries' docs: a workspace's own docs (docs/...) and a source of these in IED's checkout (ied:/C4/docs/...) are read with fs_read. Example: docs_read({\"path\": \"c4/library/bedrock.md\", \"heading\": \"Core::HashMap\"})",
 			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"minLength\": 1}, \"heading\": {\"type\": \"string\"}, \"line\": {\"type\": \"integer\", \"minimum\": 1}}, \"required\": [\"path\"], \"additionalProperties\": false}");
 		read->m_Run = [folders](const ToolInvocation& call) -> ToolOutcome { return DocsReadRun(call, folders(call)); };
 		registry.Add(read);

@@ -146,21 +146,21 @@ namespace Scripting
 		}
 	}
 
-	void UseHostDefinitions(llvm::Module& module, const std::unordered_set<std::string>& hostSymbols)
+	void UseHostDefinitions(llvm::Module& module, const AskedNames& hostSymbols)
 	{
 		for (llvm::Function& f : module)
 		{
 			// A host's file-static function (internal in the host, BUG-289) is only declared here, and binds to the
 			// host table's entry by name: a declaration cannot be internal.
 			if (f.isDeclaration() && f.hasLocalLinkage()) f.setLinkage(llvm::GlobalValue::ExternalLinkage);
-			if (f.isDeclaration() || !hostSymbols.count(f.getName().str())) continue;
+			if (f.isDeclaration() || !hostSymbols.Has(f.getName().str())) continue;
 			f.setLinkage(llvm::GlobalValue::AvailableExternallyLinkage);
 			f.setVisibility(llvm::GlobalValue::DefaultVisibility);
 			f.setComdat(nullptr);
 		}
 		for (llvm::GlobalVariable& g : module.globals())
 		{
-			if (g.isDeclaration() || !hostSymbols.count(g.getName().str())) continue;
+			if (g.isDeclaration() || !hostSymbols.Has(g.getName().str())) continue;
 			g.setInitializer(nullptr);
 			g.setLinkage(llvm::GlobalValue::ExternalLinkage);
 			g.setVisibility(llvm::GlobalValue::DefaultVisibility);
@@ -168,11 +168,11 @@ namespace Scripting
 		}
 	}
 
-	void UseHostThreadStorage(llvm::Module& module, const std::unordered_set<std::string>& hostSymbols)
+	void UseHostThreadStorage(llvm::Module& module, const AskedNames& hostSymbols)
 	{
 		std::vector<llvm::GlobalVariable*> hosts;
 		for (llvm::GlobalVariable& g : module.globals())
-			if (g.isThreadLocal() && g.hasName() && hostSymbols.count(ThreadLocalAccessor(g.getName().str()))) hosts.push_back(&g);
+			if (g.isThreadLocal() && g.hasName() && hostSymbols.Has(ThreadLocalAccessor(g.getName().str()))) hosts.push_back(&g);
 		auto* accessorType = llvm::FunctionType::get(Ptr(module), false);
 		PlacedCalls calls;
 		for (llvm::GlobalVariable* variable : hosts)

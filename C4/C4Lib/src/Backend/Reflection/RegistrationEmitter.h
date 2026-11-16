@@ -1,5 +1,6 @@
 #pragma once
 #include "Core/Core.h"
+#include "Compiler/AskedNames.h"
 #include "Compiler/ErrorTracker.h"
 #include "Backend/Reflection/ImageDescription.h"
 #include <string>
@@ -45,8 +46,8 @@ namespace Scripting
 	/// program's own build.
 	struct HostEntities
 	{
-		const std::unordered_set<std::string>* symbols = nullptr;
-		const std::unordered_set<std::string>* types = nullptr;
+		const AskedNames* symbols = nullptr;
+		const AskedNames* types = nullptr;
 		uint32 interfaceUnits = 0; // units 1..interfaceUnits are the host's files: what they declare is the host's
 	};
 

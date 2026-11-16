@@ -111,6 +111,7 @@ ENGINE_EDITOR = "1"
 | `SourceManager` | each source records its project (`SetProjects`); `ResolveInclude` follows rule 3 from the including file and reports the ambiguity and boundary errors; there is no basename fallback |
 | `Compiler/SourceMacros`, `MacroPass::RunFiles` | each file starts with its project's macros; an include carries the included file's `exported` table |
 | `ProgramModel::OutOfProjectReach` | declaration-level lookups (`TypeResolver::ResolveTypeInContext`) reject a name from a project out of reach |
+| `Script/ScriptReach` | a script compile parses only the host files its project reaches (and those adding to their templates): by rule 4 the rest could not change what its code means (docs/runtime/04 section 4, step 3) |
 | interop | `InteropFileInput::folders`: an `extern "c"` header is searched in its file's project folders and its dependencies' |
 | driver, LSP, Nuke | `--projects`; the LSP's `projects` option; Nuke writes `projects.toml` and the build-derived LSP options file (`.ied/local/lsp-options/<project>.json`) names it |
 

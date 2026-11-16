@@ -212,9 +212,20 @@ namespace Scripting
 	{
 		if (m_Writes) m_Writes->Ask("a function record");
 		if (!record.isBuiltin && !record.isLinked && !record.mangledName.empty())
+		{
+			const Core::String base = record.mangledName;
+			const uint32 unit = record.declUnit ? record.declUnit : record.definingUnit;
 			for (uint32 n = 1; !m_ClaimedSymbols.insert(record.mangledName).second; ++n)
 				record.mangledName += "_" + std::to_string(n);
-		record.isHostDefined = m_HostSymbols && !HasBody(record) && !record.isLinked && m_HostSymbols->count(record.mangledName.c_str());
+			if (record.mangledName == base) m_FirstClaimant.emplace(base, unit);
+			else
+			{
+				std::vector<uint32>& claimants = m_CollidedSymbols[base];
+				if (claimants.empty()) claimants.push_back(m_FirstClaimant[base]);
+				claimants.push_back(unit);
+			}
+		}
+		record.isHostDefined = m_HostSymbols && !HasBody(record) && !record.isLinked && m_HostSymbols->Has(record.mangledName.c_str());
 		auto rec = std::make_unique<FunctionRecord>(std::move(record));
 		const FunctionRecord* raw = rec.get();
 		m_Records.Push(std::move(rec));

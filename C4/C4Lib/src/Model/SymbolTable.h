@@ -3,6 +3,7 @@
 #include "Model/Types.h"
 #include "Model/ConstantValue.h"
 #include "Model/ModelWrites.h"
+#include "Compiler/AskedNames.h"
 #include "Compiler/ErrorTracker.h"
 #include "Core/Core.h"
 #include <deque>
@@ -373,8 +374,11 @@ namespace Scripting
 		/// another function already has gets `_<n>`, so every function has its own (BUG-153); a builtin or
 		/// [link] symbol names a foreign function and is kept.
 		const FunctionRecord* AddFunctionRecord(FunctionRecord record);
+		/// The symbols two functions or more had, before the later ones' `_<n>`, each with the units that declared them in
+		/// the order their records came in: which one is which follows from that order.
+		const std::unordered_map<Core::String, std::vector<uint32>>& CollidedSymbols() const { return m_CollidedSymbols; }
 		/// A script compile's host table: a record with no body whose symbol it lists is the host's (isHostDefined).
-		void SetHostSymbols(const std::unordered_set<std::string>* symbols) { m_HostSymbols = symbols; }
+		void SetHostSymbols(const AskedNames* symbols) { m_HostSymbols = symbols; }
 
 		/// Every owned record, in registration order (stable per build). Read-only view.
 		const Core::Vector<std::unique_ptr<FunctionRecord>>& Records() const { return m_Records; }
@@ -408,7 +412,9 @@ namespace Scripting
 		Scope* m_Current = nullptr;
 		Core::Vector<std::unique_ptr<FunctionRecord>> m_Records;
 		std::unordered_set<Core::String> m_ClaimedSymbols; // the symbols of the C4 functions recorded so far
-		const std::unordered_set<std::string>* m_HostSymbols = nullptr; // a script compile's host table (docs/runtime/04)
+		std::unordered_map<Core::String, uint32> m_FirstClaimant; // each symbol's first record's unit
+		std::unordered_map<Core::String, std::vector<uint32>> m_CollidedSymbols;
+		const AskedNames* m_HostSymbols = nullptr; // a script compile's host table (docs/runtime/04)
 		std::unordered_map<uint32, std::unordered_set<uint32>> m_Closures;
 	};
 

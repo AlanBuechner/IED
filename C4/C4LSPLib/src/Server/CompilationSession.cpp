@@ -178,6 +178,7 @@ namespace C4LSP::Server
 	bool CompilationSession::RecompileScript()
 	{
 		m_Compiler = NewCompiler();
+		if (m_ScriptHost->index) m_HostQuestions = std::make_unique<Scripting::HostQuestions>(*m_ScriptHost->index); // outlives the compiler's model, which asks it
 		m_LoweringErrors.Clear();
 		m_SetupProblem.clear();
 		if (!m_ScriptHost->error.empty())
@@ -186,7 +187,8 @@ namespace C4LSP::Server
 		{
 			Scripting::ErrorTracker checks;
 			std::optional<Scripting::ScriptUnits> units =
-				Scripting::AnalyzeScript(*m_Compiler, m_ScriptHost->host, *m_ScriptHost->index, ScriptOptions(), checks, &m_SetupProblem);
+				Scripting::AnalyzeScript(*m_Compiler, m_ScriptHost->host, *m_ScriptHost->index, *m_HostQuestions, ScriptOptions(),
+					Scripting::InterfaceParse::Whole, checks, &m_SetupProblem);
 			if (units)
 			{
 				RunLoweringPass(units->interfaceUnits); // the host's bodies are its own

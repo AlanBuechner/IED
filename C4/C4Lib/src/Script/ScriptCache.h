@@ -1,5 +1,6 @@
 #pragma once
 #include "Core/Core.h"
+#include "Script/HostAssumptions.h"
 #include "Script/HostInterface.h"
 #include <optional>
 #include <string>
@@ -16,16 +17,18 @@ namespace Scripting
 		std::string diagnostics;               // its warnings
 		std::vector<std::string> threadLocals; // as CompiledScript's
 		std::string layer;                     // an extensible script's layer (SerializeLayer); empty for none
+		HostAssumptions assumptions;           // what its code assumed of its host, checked before it is used
 	};
 
 	/// What code compiled over a layer depends on: its interface and those below it, not its bodies (section 5.2). A script
 	/// over it whose layer's digest is the same links its kept machine code to the new layer.
 	std::string LayerDigest(const std::string& below, const std::string& serializedLayer);
 
-	/// Compiled scripts kept in a folder (docs/runtime/04 section 4.6): a script whose files, options, host build and
-	/// compiler are those of an earlier compile links from that compile's machine code. One entry is kept per script
-	/// name (without a trailing `#<tag>`, as `go#7` is `go`) and optimization level; writing one removes the entry it
-	/// replaces.
+	/// Compiled scripts kept in a folder (docs/runtime/04 section 4.6): a script whose files, options, compiler and what
+	/// it reads of its host - the interface files its project reaches, by their digests (InterfaceDigests) - are those of
+	/// an earlier compile links from that compile's machine code, once that compile's HostAssumptions hold. A host build
+	/// that changes no file a script reads, beyond its function bodies, keeps its entry. One entry is kept per script name
+	/// (without a trailing `#<tag>`, as `go#7` is `go`) and optimization level; writing one removes the entry it replaces.
 	class ScriptCache
 	{
 	public:
@@ -33,8 +36,9 @@ namespace Scripting
 		ScriptCache(std::string folder, std::string compiler) : m_Folder(std::move(folder)), m_Compiler(std::move(compiler)) {}
 
 		/// The entry a compile of `options` against `host` would have: a file of the folder named for the script and
-		/// a digest of every input that decides its code. Empty when a script file does not read.
-		std::string EntryFor(const HostInterface& host, const ScriptCompileOptions& options) const;
+		/// a digest of every input that decides its code, `digests` the host's files'. Empty when a script file does not
+		/// read.
+		std::string EntryFor(const HostInterface& host, InterfaceDigests& digests, const ScriptCompileOptions& options) const;
 		/// The entry's compile, or nothing when there is none or it does not read whole.
 		std::optional<CachedScript> Read(const std::string& entry) const;
 		/// Keeps `script` as the entry and removes the script's other entries. A cache that cannot be written is only

@@ -46,8 +46,6 @@ Next ID: **BUG-462**
 | BUG-421 | C4LSP puts a dependency's declarations in the root project of a multi-project program | Tools | Low |
 | BUG-435 | Intermittent internal compiler error (0xC0000005) or corrupt partition bitcode compiling a large split program | Codegen | High |
 | BUG-441 | `threading.thread.sleep_is_precise` fails in the gates while the machine is busy: sleeps land on the 15.6 ms tick | Runtime | Medium |
-| BUG-460 | Every script compile parses, models and lowers its host's whole interface: over a second each against a large host | Runtime | Low |
-| BUG-461 | The compiled-script cache is keyed on the host's build id: any rebuild of the host compiles every script again | Runtime | Low |
 
 ---
 
@@ -108,41 +106,6 @@ Next ID: **BUG-462**
   dispatched it (`CompilerMessageQueue` now hands a response over only when it is released).
 
 ## Interop, runtime and Bedrock
-
-### BUG-460 Every script compile parses, models and lowers its host's whole interface: over a second each against a large host
-- **Area:** Runtime
-- **Severity:** Low
-- **Status:** Open
-- **Found:** 2026-11-16
-- **Symptom:** Claymore's editor (a 71 MB `.c4i`: ~1,400 interface files, 7.6 MB of text) opening a project of 29 packages with no
-  cache compiled them in 79 s on four processors; each compile, the smallest too, spent ~370 ms parsing, ~500 ms building the model
-  and ~300 ms lowering (19,900 host functions declared up front, static state and reflection walking the whole model) before its
-  own code: 35 s of the 79. Each layer adds its files to every script over it.
-- **Where:** `Script/ScriptCompiler.cpp` (`AnalyzeScript`: `CompileAll`, `AnalyzeProgram`), `Backend/CodeGen/CodeGenDriver.cpp`
-  (`LowerTypes`, `DeclareWrittenFunctions`, `EmitStaticState`, `EmitReflection`).
-- **Notes:** a package reaches 100-415 of the files by its includes (11-14% of the text), but parsing only those is wrong:
-  declaration-level names resolve program-wide (`docs/language/01-program-model.md` 1.4: Claymore's `Windowing/Window.ch` names
-  `WindowBackend` without including it), and templates' out-of-line definitions, specializations and extensions attach program-wide
-  (`MemberTemplates::AttachDefinitions`, `FunctionTemplates::Visible`). Directions: the host build records, per interface file, the
-  files its declarations resolved to (and the template files), and a script parses the closure of those from its own files; or a
-  layer's front end overlaps the back end of the layer below (its symbols are known only after `-O2` drops unused `linkonce_odr`
-  instances); or a script's codegen splits across threads. 2026-11-16: the macro pass no longer reads interface files again and the
-  inline-body import reads only the chunks it needs (`InlineBodyIndex`), which took 15 s of the 92 s before.
-
-### BUG-461 The compiled-script cache is keyed on the host's build id: any rebuild of the host compiles every script again
-- **Area:** Runtime
-- **Severity:** Low
-- **Status:** Open
-- **Found:** 2026-11-16
-- **Symptom:** After any rebuild of a host - an edit to one function body of Claymore's editor - every script it compiles misses
-  the cache (`ScriptCache::EntryFor` digests `host.buildId`): the editor's next open of a 29-package project took 97 s instead of
-  7.5 s. Where the host is rebuilt often, most opens are cold.
-- **Where:** `Script/ScriptCache.cpp` (`AddInputs`).
-- **Notes:** what decides a script's code is the interface's text (bodies cut, so a body edit leaves only blank lines), the host
-  symbols the compile asked for, the reflected types, the inline bodies it imported, the target and the compiler. A key of the
-  interface's tokens with the symbols and types, and each entry keeping the imported bodies' digests to check, would survive
-  rebuilds that change no declaration; the symbol table changes with most edits (lambdas, template instances), so it wants the
-  queried names alone, which the model asks for every host function.
 
 ## Tools
 

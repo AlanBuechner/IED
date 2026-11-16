@@ -22,6 +22,20 @@ namespace Scripting
 		// one declaration in the script compile, as in the host's (ModelBuilder::RepeatsBinding).
 		uint32 bindingsLine = 0;
 		std::vector<MacroDefinition> macros; // what an includer receives
+		// The templates it declares (a class with a member template counts), and those it adds to - by a specialization, a
+		// member defined out of line, an extension - as Script/TemplateNames.h names them (qualified; an addition with the
+		// namespace it is written in): a template's additions apply wherever it is used, so a script compile reading the
+		// template reads the files that add to it (section 4, step 3).
+		std::vector<std::string> templates;
+		std::vector<std::string> extendedTemplates;
+	};
+
+	/// A function symbol two functions or more had (SymbolTable::CollidedSymbols): the later ones got `_<n>` in the order
+	/// their records came in, so which one is which follows from those units.
+	struct CollidedSymbol
+	{
+		std::string symbol;
+		std::vector<uint32> units; // the units that declared them, in that order
 	};
 
 	struct InterfaceProject
@@ -48,6 +62,9 @@ namespace Scripting
 		std::vector<std::string> symbols;          // the symbol table's entries, in its order
 		std::vector<std::string> reflectedTypes;   // the qualified names of the types the host registered
 		std::vector<std::string> inlineBodies;     // chunks of LLVM bitcode (Script/InlineBodies.h); none for none
+		// Its function symbols two functions had: a script compile reading one of their units reads all of them
+		// (section 4, step 3), so their suffixes come out as in the host.
+		std::vector<CollidedSymbol> collidedSymbols;
 	};
 
 	/// The interface as the bytes of a `.c4i` file: magic `C4IF`, a format version, then each field in order.

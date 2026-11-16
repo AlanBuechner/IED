@@ -171,14 +171,16 @@ namespace Scripting
 		void Settle(Built& built, const ScriptCompileOptions& options, std::optional<ScriptLayer> layer);
 		/// Links an earlier compile's machine code; nothing linked when it does not link.
 		Built LinkCached(const ScriptCompileOptions& options, CachedScript cached);
-		/// Compiles and links; `generated`, when given, gets the machine code and `layer` the serialized layer.
-		Built CompileAndLink(const ScriptCompileOptions& options, std::string* generated, std::string* layer);
+		/// Compiles and links; `generated`, when given, gets the machine code, `layer` the serialized layer and `assumptions`
+		/// what the code assumed of the host.
+		Built CompileAndLink(const ScriptCompileOptions& options, std::string* generated, std::string* layer, HostAssumptions* assumptions);
 		static void LoadOrUndo(Script& script, std::shared_ptr<LinkedScript> linked, const std::vector<std::string>& threadLocals);
 
 		/// Links a compiled script: into a DLL when scripts are debugged, else in memory.
 		std::unique_ptr<LinkedScript> Link(ScriptCode code, const ScriptCompileOptions& options, std::string* generated, std::string* error);
 
 		HostInterface m_Interface;
+		InterfaceDigests m_Digests{ m_Interface };
 		HostIndex m_Index;
 		HostSymbolTable m_Table;
 		HostRuntime m_Runtime;

@@ -111,6 +111,8 @@ namespace Ai
 		private ToolOutcome UnknownClip(Core::StringView tool, Core::StringView missing);
 		private ToolOutcome RunCall(ToolSpec* spec, ToolCallDraft* call, Segment* segment, const Serialization::DomNode& args);
 		private ToolOutcome RunMeta(ToolSpec* spec, Segment* segment, const Serialization::DomNode& args);
+		// The call run again in each of the chat's roots (ied:/) until one answers: false when none does.
+		private bool RunInRoots(ToolSpec* spec, ToolInvocation& invocation, ToolOutcome& found);
 		private bool AwaitApproval(ToolSpec* spec, Segment* segment, const ToolPlan& plan, Core::StringView why, const Serialization::DomNode& args, ToolOutcome& refused);
 		private ToolOutcome AskUser(Segment* segment, const Serialization::DomNode& args);
 		private ToolOutcome SetTasks(const Serialization::DomNode& args);

@@ -6,6 +6,7 @@
 #include "Server/ScriptScopes.h"
 #include "Macro/MacroTable.h"
 #include "Compiler/FileIo.h"
+#include "Script/ScriptCompiler.h" // HostQuestions, owned by value - the complete type is needed at destruction
 #include <functional>
 #include <map>
 #include <memory>
@@ -188,6 +189,7 @@ namespace C4LSP::Server
 		bool m_Compiled = false;
 		ScriptScope m_Script;
 		std::shared_ptr<const LoadedInterface> m_ScriptHost; // set in script mode
+		std::unique_ptr<Scripting::HostQuestions> m_HostQuestions; // what the script's model asks of its host's table, per compile
 		std::string m_SetupProblem;
 	};
 } // namespace C4LSP::Server

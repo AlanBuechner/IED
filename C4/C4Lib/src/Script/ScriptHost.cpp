@@ -243,14 +243,17 @@ namespace Scripting
 			built.script->m_Diagnostics = "error: the script '" + options.name + "' extends one that was not compiled extensible, or has unloaded\n";
 			return built;
 		}
-		if (Debugged(options)) return CompileAndLink(options, nullptr, nullptr); // a debug script's module is not cached
-		const std::string entry = m_Cache ? m_Cache->EntryFor(m_Interface, options) : "";
+		if (Debugged(options)) return CompileAndLink(options, nullptr, nullptr, nullptr); // a debug script's module is not cached
+		const std::string entry = m_Cache ? m_Cache->EntryFor(m_Interface, m_Digests, options) : "";
 		if (std::optional<CachedScript> cached = entry.empty() ? std::nullopt : m_Cache->Read(entry))
-			if (Built built = LinkCached(options, std::move(*cached)); built.linked) return built;
+			if (AssumptionsHold(cached->assumptions, IndexFor(options), m_Interface.inlineBodies, m_Digests))
+				if (Built built = LinkCached(options, std::move(*cached)); built.linked) return built;
 		std::string generated;
 		std::string layer;
-		Built built = CompileAndLink(options, entry.empty() ? nullptr : &generated, &layer);
-		if (built.linked && !generated.empty()) m_Cache->Write(entry, { std::move(generated), built.script->m_Diagnostics, built.threadLocals, std::move(layer) });
+		HostAssumptions assumptions;
+		Built built = CompileAndLink(options, entry.empty() ? nullptr : &generated, &layer, &assumptions);
+		if (built.linked && !generated.empty())
+			m_Cache->Write(entry, { std::move(generated), built.script->m_Diagnostics, built.threadLocals, std::move(layer), std::move(assumptions) });
 		return built;
 	}
 
@@ -297,7 +300,7 @@ namespace Scripting
 		return built;
 	}
 
-	ScriptHost::Built ScriptHost::CompileAndLink(const ScriptCompileOptions& options, std::string* generated, std::string* layer)
+	ScriptHost::Built ScriptHost::CompileAndLink(const ScriptCompileOptions& options, std::string* generated, std::string* layer, HostAssumptions* assumptions)
 	{
 		Built built = NewBuilt(options);
 		std::string error;
@@ -319,6 +322,11 @@ namespace Scripting
 		built.linked = Link(std::move(code), options, generated, &error);
 		if (!built.linked) built.script->m_Diagnostics += "error: " + error + "\n";
 		built.threadLocals = std::move(compiled.threadLocals);
+		if (assumptions)
+		{
+			*assumptions = std::move(compiled.assumptions);
+			if (compiled.readWholeInterface) assumptions->wholeInterface = m_Digests.Whole();
+		}
 		if (layer && compiled.layer) *layer = SerializeLayer(*compiled.layer);
 		Settle(built, options, std::move(compiled.layer));
 		return built;

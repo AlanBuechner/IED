@@ -285,6 +285,93 @@ namespace Testing
 		TEST_PASSED();
 	}
 
+	namespace
+	{
+		// Core; Engine on Core, with a template Box; Tools on Engine, specializing Engine's Box for int64 (a third party's
+		// specialization); the root Game on both.
+		const TestHost& ProjectHost()
+		{
+			static const TestHost host = MakeProjectTestHost({
+				{ "Core", {}, { { "core.ch", "namespace Core { struct Unit { public int32 v; } }\n" } } },
+				{ "Engine", { "Core" }, {
+					{ "engine.ch", "include \"core.ch\"\nnamespace Engine { template<T> struct Box { public T value; } int32 Area(int32 side); }\n" },
+					{ "engine.cf", "include \"engine.ch\"\nnamespace Engine { int32 Area(int32 side) { return side * side; } }\n" } } },
+				{ "Tools", { "Engine" }, {
+					{ "tools.ch", "include \"engine.ch\"\nnamespace Engine { template<> struct Box<int64> { public int64 value; public int64 extra; } }\n"
+						"namespace Tools { struct Kit { public int32 n; } int32 Help(); }\n" },
+					{ "tools.cf", "include \"tools.ch\"\nnamespace Tools { int32 Help() { return 7; } }\n" } } },
+				{ "Game", { "Engine", "Tools" }, {
+					{ "main.cf", "include \"tools.ch\"\nint32 main() { Engine::Box<int64> b; b.extra = 1; return Engine::Area(2) + Tools::Help() + (int32)b.extra; }\n" } } },
+			});
+			return host;
+		}
+
+		// What `name`'s body returns, when it returns a constant.
+		int64 Returned(const llvm::Module& module, const std::string& name)
+		{
+			for (const llvm::Function& f : module)
+				if (f.getName().starts_with(name))
+					for (const llvm::BasicBlock& block : f)
+						if (const auto* ret = llvm::dyn_cast<llvm::ReturnInst>(block.getTerminator()))
+							if (const auto* value = llvm::dyn_cast_or_null<llvm::ConstantInt>(ret->getReturnValue())) return value->getSExtValue();
+			return -1;
+		}
+	}
+
+	// A script whose project depends on Engine alone reads Engine and Core, and Tools for its addition to Engine's Box -
+	// not the root's main.
+	void ScriptCompilerTest::ACompileReadsOnlyWhatItsProjectReaches()
+	{
+		const TestHost& host = ProjectHost();
+		TEST_ASSERT(host.diagnostics.find("error") == std::string::npos);
+		CompiledScript script = CompileTestScript(host, "include \"engine.ch\"\nint32 Twice() { return Engine::Area(1) * 2; }\n", false, { "Engine" }, true);
+		TEST_ASSERT(Compiled(script));
+		size_t projectFiles = 0;
+		for (const InterfaceFile& file : host.interface.files) projectFiles += file.library ? 0 : 1;
+		TEST_ASSERT_EQ(projectFiles, (size_t)6);
+		TEST_ASSERT(script.interfaceFilesRead == host.interface.files.size() - 1); // all but the root's main.cf
+		TEST_ASSERT(!script.readWholeInterface);
+		CompiledScript onCore = CompileTestScript(host, "include \"core.ch\"\nint32 V(Core::Unit u) { return u.v; }\n", false, { "Core" }, true);
+		TEST_ASSERT(Compiled(onCore));
+		TEST_ASSERT(onCore.interfaceFilesRead == host.interface.files.size() - 5); // Core's file and the library
+		TEST_PASSED();
+	}
+
+	// Tools, out of the script's reach, specializes Engine's Box: the script's Box<int64> is Tools', as the host's is.
+	void ScriptCompilerTest::ASpecializationOutOfReachIsRead()
+	{
+		CompiledScript script = CompileTestScript(ProjectHost(), "include \"engine.ch\"\nint64 BoxSize() { return sizeof(Engine::Box<int64>); }\n", false, { "Engine" }, true);
+		TEST_ASSERT(Compiled(script));
+		TEST_ASSERT_EQ(Returned(*script.module, "BoxSize"), (int64)16);
+		TEST_PASSED();
+	}
+
+	// A declaration names only what its project reaches (docs/language/15 rule 4): Tools is not a script's on Engine alone.
+	void ScriptCompilerTest::ADeclarationOutOfReachIsAnError()
+	{
+		CompiledScript script = CompileTestScript(ProjectHost(), "include \"engine.ch\"\nstruct Holder { public Tools::Kit kit; }\n", false, { "Engine" }, true);
+		TEST_ASSERT(script.module == nullptr);
+		TEST_ASSERT(Has(script.diagnostics, "Kit"));
+		CompiledScript allowed = CompileTestScript(ProjectHost(), "include \"tools.ch\"\nstruct Holder { public Tools::Kit kit; }\n", false, { "Tools" }, true);
+		TEST_ASSERT(Compiled(allowed));
+		TEST_PASSED();
+	}
+
+	// No allow-list (or a path on it): the script may name everything, and reads every file.
+	void ScriptCompilerTest::AScriptWithoutAListReadsEveryFile()
+	{
+		const TestHost& host = ProjectHost();
+		CompiledScript script = CompileTestScript(host, "include \"tools.ch\"\nint32 K(Tools::Kit k) { return k.n; }\n");
+		TEST_ASSERT(Compiled(script));
+		TEST_ASSERT(script.interfaceFilesRead == host.interface.files.size());
+		CompiledScript nothing = CompileTestScript(host, "int32 One() { return 1; }\n", false, {}, true); // depends on nothing
+		TEST_ASSERT(Compiled(nothing));
+		TEST_ASSERT(nothing.interfaceFilesRead == host.interface.files.size() - 6); // the library alone
+		CompiledScript refused = CompileTestScript(host, "include \"core.ch\"\nint32 One() { return 1; }\n", false, {}, true);
+		TEST_ASSERT(refused.module == nullptr); // nothing allowed: no project's header
+		TEST_PASSED();
+	}
+
 	void ScriptCompilerTest::HostBodiesAreInlined()
 	{
 		CompiledScript script = CompileTestScript(Host(), "include \"game.ch\"\nint32 Twice(int32 v) { return Game::Add(v, v); }\n", true);

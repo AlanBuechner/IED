@@ -15,6 +15,8 @@ namespace Testing
 		TEST_FUNC(Script.HostInterface)
 		void EveryFieldRoundTrips();
 		TEST_FUNC(Script.HostInterface)
+		void ALayerRoundTrips();
+		TEST_FUNC(Script.HostInterface)
 		void AnotherFormatIsRefused();
 		TEST_FUNC(Script.HostInterface)
 		void AnotherVersionIsRefused();

@@ -25,5 +25,11 @@ namespace Testing
 		void AScriptCallingNoBodyTakesNone();
 		TEST_FUNC(Script.InlineImport)
 		void ADamagedChunkIsSaid();
+		TEST_FUNC(Script.InlineImport)
+		void ABodysDigestIsItsCodeAlone();
+		TEST_FUNC(Script.InlineImport)
+		void ADigestIsTheSameWhateverWasReadBefore();
+		TEST_FUNC(Script.InlineImport)
+		void AnInlinedBodyIsAnAssumption();
 	};
 } // namespace Testing
