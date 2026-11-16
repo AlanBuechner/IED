@@ -28,6 +28,11 @@ namespace Ied
 		Core::String recentError;
 		m_Recent.Load((FS::Path(this.m_Config.m_DataDir.View()) / "recent.json").View(), recentError);
 		if (!recentError.IsEmpty()) Log(recentError.View());
+		if (IsMaster()) {
+			Core::String knownError;
+			m_Known.Load((FS::Path(this.m_Config.m_DataDir.View()) / "workspaces.json").View(), knownError);
+			if (!knownError.IsEmpty()) Log(knownError.View());
+		}
 		Core::String schemaError;
 		if (!m_Schemas.Load(this.m_Config.m_HomeDir.View(), schemaError)) Log((Core::String("the host API schemas are missing: ") + schemaError.View()).View());
 		m_Epoch = NewEpoch();

@@ -353,7 +353,10 @@ namespace Ied
 		plan.m_Spec = spec;
 		plan.m_Version = ToolInstallVersion(spec, pin);
 		plan.m_Folder = ToolsFolder(m_Server) / spec->m_Id.View() / plan.m_Version.View();
-		plan.m_Downloads = ToolsFolder(m_Server) / ".downloads";
+		// This server's own: two windows downloading one tool at once never write, check or remove each other's file.
+		Core::StringBuilder process;
+		process.AppendInt((int64)Platform::ProcessId());
+		plan.m_Downloads = ToolsFolder(m_Server) / ".downloads" / process.View();
 		plan.m_Cwd = Core::String(entry->m_Ws->m_Root.View());
 		plan.m_Environment = EnvironmentFor(entry->m_Ws, Core::Array<Core::String>());
 		Tools* self = this;
@@ -380,10 +383,27 @@ namespace Ied
 		Core::String failure;
 		for (ToolSpec* spec : order) {
 			InstallPlan plan;
+			// Each IED window's workspace runs in a server of its own, all installing into one tools folder: one that
+			// installed this tool since this server last looked leaves it found, and installing it again would take its
+			// folder from under that window's running tool.
+			DetectJob* first = nullptr;
 			{
 				Threading::LockGuard guard(m_Server->m_Lock);
 				entry->m_Current = spec->m_Id;
 				Publish(entry);
+				first = JobFor(entry->m_Ws, spec);
+			}
+			ToolStatus* already = DetectTool(*first);
+			if (already->m_State == "found") {
+				Threading::LockGuard guard(m_Server->m_Lock);
+				Store(entry, already);
+				entry->m_Failures.Remove(spec->m_Id);
+				done.Push((spec->m_Title + " ") + already->m_Version.View());
+				Say(entry, ((Core::String("\r\n== ") + spec->m_Title.View()) + " is there already (another window may have installed it): " + already->m_Path.View() + "\r\n").View());
+				continue;
+			}
+			{
+				Threading::LockGuard guard(m_Server->m_Lock);
 				plan = PlanFor(entry, spec);
 				Say(entry, ((((Core::String("\r\n== Installing ") + spec->m_Title.View()) + " ") + plan.m_Version.View()) + " into " + plan.m_Folder.View() + "\r\n").View());
 			}

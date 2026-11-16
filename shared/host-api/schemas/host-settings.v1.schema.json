@@ -12,6 +12,12 @@
 			"x-ied-tiers": ["app"],
 			"description": "A language server none of whose documents a window shows for this many minutes stops, giving back its memory; it starts again when one of its documents is shown or asked about (docs/24). 0 keeps servers running."
 		},
+		"workspaces.reopen": {
+			"type": "boolean",
+			"default": true,
+			"x-ied-tiers": ["app"],
+			"description": "When IED's server starts again - a relaunch onto a new install, `ied stop`, a crash, the next sign-in - it opens again every workspace that was open when it stopped, each with its own id, so its windows and pages find it as they left it and its chats go on (docs/10 \"Workspaces\"). Off: only what a window or `ied` asks for opens."
+		},
 		"keyboard.bindings": {
 			"type": "array",
 			"default": [],

@@ -1,0 +1,133 @@
+include "KnownWorkspaces.ch"
+include "Trust.ch"
+include "web/Json.ch"
+
+namespace Ied
+{
+	int64 WorkspaceIdNumber(Core::StringView wsId) {
+		if (wsId.ByteLength() < 2 || wsId.ByteAt(0) != 'w') return 0;
+		Core::StringView digits = wsId.Substring(1, wsId.ByteLength() - 1);
+		for (int64 i = 0; i < digits.ByteLength(); ++i)
+			if (digits.ByteAt(i) < '0' || digits.ByteAt(i) > '9') return 0;
+		int64 number = 0;
+		return Core::ParseInt64(digits, number) && number > 0 ? number : 0;
+	}
+
+	void KnownWorkspaces::Load(Core::StringView file, Core::String& error) {
+		this.m_File = Core::String(file);
+		m_Ids.Clear();
+		m_Open.Clear();
+		m_Next = 1;
+		if (!FS::FileExists(this.m_File.CStr())) return;
+		FS::File opened = FS::File(this.m_File.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		opened.Close();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJsonc(text.View(), *doc);
+		Serialization::DomNode ids = read.Ok() ? read.root.Member("ids") : Serialization::DomNode();
+		if (ids.Kind() != Serialization::DomKind::Array) {
+			error = Core::String("ignoring ") + file + ": not a workspaces file";
+			return;
+		}
+		for (int64 i = 0; i < ids.Count(); ++i) {
+			KnownId known;
+			known.m_Root = Core::String(ids.At(i).Member("root").AsView());
+			known.m_WsId = Core::String(ids.At(i).Member("wsId").AsView());
+			known.m_Used = ids.At(i).Member("used").AsInt();
+			const int64 number = WorkspaceIdNumber(known.m_WsId.View());
+			if (known.m_Root.IsEmpty() || number == 0 || IndexOf(known.m_Root.View()) >= 0) continue;
+			bool given = false;
+			for (const KnownId& other : m_Ids)
+				if (other.m_WsId == known.m_WsId) given = true;
+			if (given) continue;
+			m_Ids.Push(known);
+			if (number >= m_Next) m_Next = number + 1;
+		}
+		const int64 next = read.root.Member("next").AsInt();
+		if (next > m_Next) m_Next = next;
+		Serialization::DomNode open = read.root.Member("open");
+		for (int64 i = 0; i < open.Count(); ++i)
+			if (!open.At(i).AsView().IsEmpty()) m_Open.Push(Core::String(open.At(i).AsView()));
+	}
+
+	int64 KnownWorkspaces::IndexOf(Core::StringView root) const {
+		Core::String key = TrustKey(root);
+		for (int64 i = 0; i < m_Ids.Count(); ++i)
+			if (TrustKey(m_Ids[i].m_Root.View()).View() == key.View()) return i;
+		return -1;
+	}
+
+	static bool Taken(const Core::Array<Core::String>& taken, Core::StringView wsId) {
+		for (const Core::String& id : taken)
+			if (id.View() == wsId) return true;
+		return false;
+	}
+
+	Core::String KnownWorkspaces::IdFor(Core::StringView root, int64 now, const Core::Array<Core::String>& taken) {
+		if (m_Next < 1) m_Next = 1;
+		const int64 at = IndexOf(root);
+		if (at >= 0 && !Taken(taken, m_Ids[at].m_WsId.View())) {
+			m_Ids[at].m_Root = Core::String(root);
+			m_Ids[at].m_Used = now;
+			Save();
+			return m_Ids[at].m_WsId;
+		}
+		if (at >= 0) m_Ids.RemoveAt(at);
+		// A new number, past any id open now too (a file edited by hand, or one that could not be written).
+		Core::StringBuilder id;
+		for (;;) {
+			id.Clear();
+			id.Append("w");
+			id.AppendInt(m_Next);
+			m_Next += 1;
+			if (!Taken(taken, id.View())) break;
+		}
+		KnownId known;
+		known.m_Root = Core::String(root);
+		known.m_WsId = id.ToString();
+		known.m_Used = now;
+		m_Ids.Push(known);
+		// Past the limit, the folder unused for longest goes; its number is not given again (m_Next only grows).
+		while (m_Ids.Count() > c_KnownIdLimit) {
+			int64 oldest = 0;
+			for (int64 i = 1; i < m_Ids.Count(); ++i)
+				if (m_Ids[i].m_Used < m_Ids[oldest].m_Used) oldest = i;
+			m_Ids.RemoveAt(oldest);
+		}
+		Save();
+		return known.m_WsId;
+	}
+
+	bool KnownWorkspaces::SetOpen(const Core::Array<Core::String>& paths) {
+		bool same = paths.Count() == m_Open.Count();
+		for (int64 i = 0; same && i < paths.Count(); ++i) same = paths[i] == m_Open[i];
+		if (same) return true;
+		m_Open = paths;
+		return Save();
+	}
+
+	bool KnownWorkspaces::Save() {
+		if (m_File.IsEmpty()) return true;
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("version", 1);
+		json.IntField("next", m_Next);
+		json.Key(Core::StringView("ids"));
+		json.BeginArray();
+		for (const KnownId& known : m_Ids) {
+			json.BeginObject();
+			json.Field("root", known.m_Root.View());
+			json.Field("wsId", known.m_WsId.View());
+			json.IntField("used", known.m_Used);
+			json.EndObject();
+		}
+		json.EndArray();
+		json.Key(Core::StringView("open"));
+		json.BeginArray();
+		for (const Core::String& path : m_Open) json.String(path.View());
+		json.EndArray();
+		json.EndObject();
+		FS::MakeDirectories(FS::Path(m_File.View()).Parent().CStr());
+		return FS::WriteFileAtomically(m_File.CStr(), (const void*)json.View().Data(), json.View().ByteLength());
+	}
+}

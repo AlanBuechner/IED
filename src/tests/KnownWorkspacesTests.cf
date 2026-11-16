@@ -1,0 +1,82 @@
+// host/knownworkspaces: each folder keeps its workspace id from run to run, whatever order folders open in; a new
+// folder gets a number no folder had; an id open now is never given to another folder; the open list is kept; the file
+// is read back.
+
+include "host/KnownWorkspaces.ch"
+
+static FS::Path KnownFile(const char* name) {
+	FS::Path folder = FS::TempDirectory() / name;
+	FS::RemoveAll(folder.CStr());
+	return folder / "workspaces.json";
+}
+
+static Core::Array<Core::String> Ids(const char* a, const char* b) {
+	Core::Array<Core::String> ids;
+	if (a) ids.Push(Core::String(a));
+	if (b) ids.Push(Core::String(b));
+	return ids;
+}
+
+[test("server.knownworkspaces")]
+class KnownWorkspacesTests {
+	[test("a_folder_keeps_its_id")]
+	public static void TestAFolderKeepsItsId() {
+		FS::Path file = KnownFile("ied-known-ids-test");
+		Core::Array<Core::String> none;
+		Ied::KnownWorkspaces known;
+		Core::String error;
+		known.Load(file.View(), error);
+		assert_true(error.IsEmpty(), "a missing file is no error");
+		assert_se("w1", known.IdFor(Core::StringView("C:/Work/Game"), 100, none).CStr(), "the first folder");
+		assert_se("w2", known.IdFor(Core::StringView("C:/Work/Engine"), 200, Ids("w1", nullptr)).CStr(), "the second");
+		// The next run opens them the other way round (the desktop app opens its windows' folders at once).
+		Ied::KnownWorkspaces again;
+		again.Load(file.View(), error);
+		assert_se("w2", again.IdFor(Core::StringView("c:\\work\\engine\\"), 300, none).CStr(), "its own id, in another spelling, opened first");
+		assert_se("w1", again.IdFor(Core::StringView("C:/Work/Game"), 400, Ids("w2", nullptr)).CStr(), "and the other's");
+		assert_se("w3", again.IdFor(Core::StringView("C:/Work/Tools"), 500, Ids("w1", "w2")).CStr(), "a new folder: a number none had");
+		FS::RemoveAll(file.Parent().CStr());
+	}
+
+	[test("an_open_id_is_never_given_twice")]
+	public static void TestAnOpenIdIsNeverGivenTwice() {
+		FS::Path file = KnownFile("ied-known-taken-test");
+		Core::Array<Core::String> none;
+		Ied::KnownWorkspaces known;
+		Core::String error;
+		known.Load(file.View(), error);
+		known.IdFor(Core::StringView("C:/A"), 1, none);
+		// A file edited by hand, or one that could not be written: w1 is open under another folder.
+		assert_se("w2", known.IdFor(Core::StringView("C:/A"), 2, Ids("w1", nullptr)).CStr(), "not the id open now");
+		assert_se("w4", known.IdFor(Core::StringView("C:/B"), 3, Ids("w1", "w3")).CStr(), "past every id open now");
+		assert_eq(2, known.Ids().Count(), "one id a folder");
+		FS::RemoveAll(file.Parent().CStr());
+	}
+
+	[test("the_open_list_and_the_file")]
+	public static void TestTheOpenListAndTheFile() {
+		FS::Path file = KnownFile("ied-known-open-test");
+		Core::Array<Core::String> none;
+		Ied::KnownWorkspaces known;
+		Core::String error;
+		known.Load(file.View(), error);
+		known.IdFor(Core::StringView("C:/Work/Game"), 10, none);
+		Core::Array<Core::String> open;
+		open.Push(Core::String("C:/Work/Game/Game.iedsln"));
+		open.Push(Core::String("C:/Work/Notes"));
+		assert_true(known.SetOpen(open), "written");
+		Ied::KnownWorkspaces read;
+		read.Load(file.View(), error);
+		assert_eq(2, read.Open().Count(), "the open workspaces read back");
+		assert_se("C:/Work/Notes", read.Open()[1].CStr(), "in their order");
+		assert_eq(10, read.Ids()[0].m_Used, "when it last opened");
+		assert_eq(0, Ied::WorkspaceIdNumber(Core::StringView("w1.2")), "a plugin's folder's id is no number of the master's");
+		assert_eq(12, Ied::WorkspaceIdNumber(Core::StringView("w12")), "w12");
+		FS::WriteFileAtomically(file.CStr(), (const void*)"{\"ids\": 3}", 10);
+		Ied::KnownWorkspaces broken;
+		broken.Load(file.View(), error);
+		assert_true(!error.IsEmpty() && broken.Ids().IsEmpty() && broken.Open().IsEmpty(), "not a workspaces file: said, and empty");
+		assert_se("w1", broken.IdFor(Core::StringView("C:/X"), 1, none).CStr(), "and it starts again from w1");
+		FS::RemoveAll(file.Parent().CStr());
+	}
+}

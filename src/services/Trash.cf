@@ -55,8 +55,11 @@ namespace Ied
 		TrashEntry entry;
 		const int64 nowMs = Platform::UnixTimeNs() / 1000000;
 		m_Made += 1;
+		// <ms>-<pid>-<n>: every workspace server shares the trash folder, and each counts from 1.
 		Core::StringBuilder id;
 		id.AppendInt(nowMs);
+		id.Append("-");
+		id.AppendInt((int64)Platform::ProcessId());
 		id.Append("-");
 		id.AppendInt(m_Made);
 		entry.m_Id = id.ToString();
@@ -77,7 +80,7 @@ namespace Ied
 		return entry.m_Id;
 	}
 
-	// An id as MoveIn makes them ("<ms>-<n>"): never a path that could leave the trash folder.
+	// An id as MoveIn makes them ("<ms>-<pid>-<n>"; before 2026-11-15 "<ms>-<n>"): never a path that could leave the trash folder.
 	bool IsTrashId(Core::StringView id) {
 		if (id.IsEmpty() || id.ByteLength() > 40) return false;
 		for (int64 i = 0; i < id.ByteLength(); ++i) {

@@ -2,6 +2,7 @@
 kept in its data folder across restarts; the owner's favorites stay; a client opens again only a listed project, never
 any path; and the server topic carries the list and its changes."""
 
+import json
 import os
 import shutil
 import tempfile
@@ -63,6 +64,11 @@ class RecentTests(ServerTestCase):
 		self.assertTrue(next(p for p in changed[-1]["data"]["recent"] if p["name"] == "First")["favorite"], "recent.changed carries the list")
 		client.abort()
 		data = self.server.data
+		# A master that opens nothing again by itself (workspaces.reopen off; test_servers checks it on): the recent
+		# projects are what is left to open them from.
+		os.makedirs(os.path.join(data, "app"), exist_ok=True)
+		with open(os.path.join(data, "app", "settings.json"), "w") as f:
+			json.dump({"workspaces.reopen": False}, f)
 		client = await self.connect(data=data)
 		recent = (await self.snapshot(client))["recent"]
 		self.assertEqual([self.path(self.second), self.path(self.first)], self.paths(recent), "kept across a restart")

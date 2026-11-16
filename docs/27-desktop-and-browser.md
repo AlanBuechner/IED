@@ -146,5 +146,5 @@ The plugin's `toolCalls` (`docs/13` T-BRW, as built), C4 functions that call the
 - Full DevTools for a server page in the desktop app (Edge serves its DevTools front end on the CDP port).
 - The egress policy (`docs/04`) for the browser: `--proxy-server` to IED's egress proxy in secure mode.
 - Downloads; file uploads (`DOM.setFileInputFiles`).
-- A restarted master reopens nothing by itself after a crash: workspace ids live for one master run, so after the watch starts it again the app opens each window's folder again (above). A workspace server that restarts keeps its id (`docs/12`). The master should keep which workspaces are open, with their ids, and open them again when it starts.
+- ~~A restarted master reopens nothing by itself~~ Done 2026-11-15 (`docs/10` "Workspaces"): the master keeps each folder's id for good and opens again, when it starts, the workspaces that were open (`workspaces.reopen`), so the app's windows - which still open their folders again after a relaunch or a restart, now all at once in any order - and a phone's pages come back to the same ids. Not yet: after a reboot only the window the app is started with opens; the others' workspaces are open on the server (the switcher lists them) but get no window of their own.
 - A jump list of recent workspaces, start on login.

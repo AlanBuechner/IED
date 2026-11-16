@@ -76,8 +76,14 @@ namespace Git
 		return Empty();
 	}
 
+	// Named for this process too: every workspace server's first repository is r1, and two windows committing at once
+	// would write and remove one message file under each other's `git commit -F`.
 	FS::Path GitTempFile(Core::StringView name, Core::StringView text) {
-		FS::Path file = FS::TempDirectory() / name;
+		Core::StringBuilder unique;
+		unique.AppendInt((int64)Platform::ProcessId());
+		unique.AppendByte('-');
+		unique.Append(name);
+		FS::Path file = FS::TempDirectory() / unique.View();
 		if (!FS::WriteFileAtomically(file.CStr(), (const void*)text.Data(), text.ByteLength())) throw IED::RpcError(IED::ErrorCode::Unavailable, (Core::String("cannot write ") + file.View()).View());
 		return file;
 	}

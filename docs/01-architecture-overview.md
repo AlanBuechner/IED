@@ -91,7 +91,7 @@ A plugin is a package (`docs/26`): C4 code compiled into the server (built-ins) 
 | `<solution>/.ied/` (committed) | solution/project settings, skills, modes, privacy rules, dictionary, sandbox definitions, evals |
 | `<solution>/.ied/local/` (gitignored) | chats, checkpoints, buffers journal, layouts, breakpoints, LSP options from builds, captures |
 | `%APPDATA%/IED/` | owner settings, keybindings, global skills/modes/plugins, prompt overrides, generic chats |
-| `%LOCALAPPDATA%/IED/` | logs (the master's `logs/server.log`, each workspace server's `logs/workspace-<key>.log`), caches, trash, bundled-service runtime state, devices; a workspace server's own state (its plugins' state folders, its script cache) in `servers/<key>/`, `key` the first 16 hex digits of the SHA-256 of the workspace folder's canonical path |
+| `%LOCALAPPDATA%/IED/` | the master's `workspaces.json` (each folder's workspace id and the workspaces open, `docs/10` "Workspaces") and `recent.json`, logs (the master's `logs/server.log`, each workspace server's `logs/workspace-<key>.log`), caches, trash, bundled-service runtime state, devices; a workspace server's own state (its plugins' state folders, its script cache) in `servers/<key>/`, `key` the first 16 hex digits of the SHA-256 of the workspace folder's canonical path |
 
 Details: `docs/03`, `docs/21`.
 

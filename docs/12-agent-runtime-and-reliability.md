@@ -225,7 +225,7 @@ Chats live in their workspace's server (`docs/01` "Processes"), so "the server r
 
 - **It exited without being asked** (a crash, a fault nothing caught, Task Manager): the master logs how it ended and starts it again at once with the same `wsId` and folder; its `server.state` is `restarting` meanwhile and its new log begins with what ended the last run. More than three such exits within a minute leave it `failed`, with its exit code and its log named, until the owner restarts it (`ws.restart`: the status bar's server item, the Workspace Servers view, the start page). Its tabs reconnect on their own; the other workspaces never notice.
 - **Someone asked** (`ws.restart`; a folder becoming a solution that the master opened): stopped as at `ied stop`, then started again.
-- **The master restarted** (a relaunch, `ied stop` with the desktop app's watch, a master crash): every workspace server stops with it - they run in its job - and the new master starts one again for each workspace the owner had open, in the order they opened, so they get their `wsId`s back.
+- **The master restarted** (a relaunch, `ied stop` with the desktop app's watch, a master crash): every workspace server stops with it - they run in its job - and the new master starts one again for each workspace the owner had open (`workspaces.reopen`), windows on it or not, each with its folder's own `wsId` (`docs/10` "Workspaces": ids are kept per folder, so the order they open in no longer matters).
 
 In each case, on its start, runs in `running` or `awaiting_user` are restored:
 

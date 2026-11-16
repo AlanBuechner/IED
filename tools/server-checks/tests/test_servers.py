@@ -291,6 +291,119 @@ class TwoWorkspaceTests(ServerTestCase):
 		self.assertIn("stopped (code 0)", "\n".join(read_lines(os.path.join(self.server.data, "logs", "server.log"))), "each was asked and stopped")
 
 
+class RestartedMasterTests(ServerTestCase):
+	"""A master that starts again on the same data (a relaunch, `ied stop`, a crash; docs/10 "Workspaces"): each folder
+	gets its id back whatever order the folders open in - the desktop app opens its windows' folders at once - and the
+	workspaces that were open come back, windows on them or not; one closed stays closed; workspaces.reopen turns the
+	reopening off; a folder open as one of its solutions is not opened a second time as another."""
+
+	def setUp(self):
+		self.root = tempfile.mkdtemp(prefix="ied-restarted-")
+		self.data = tempfile.mkdtemp(prefix="ied-restarted-data-")
+		self.alpha = os.path.join(self.root, "alpha")
+		self.beta = os.path.join(self.root, "beta")
+		write(os.path.join(self.alpha, "a.txt"), "alpha\n")
+		write(os.path.join(self.beta, "b.txt"), "beta\n")
+		self.server = None
+
+	def tearDown(self):
+		if self.server:
+			self.server.stop(remove_data=False)
+		shutil.rmtree(self.root, ignore_errors=True)
+		shutil.rmtree(self.data, ignore_errors=True)
+
+	def start(self, *folders):
+		extra = []
+		for folder in folders:
+			extra += ["--workspace", folder]
+		self.server = IedServer(data=self.data, extra=extra)
+		self.assertTrue(self.server.started, self.server.error)
+
+	def stop(self):
+		"""As `ied stop` does: asked on the pipe, its workspace servers stopped with it."""
+		listed = status(self.server)["workspaces"]
+		pipe = ControlPipe(self.server.control)
+		pipe.call("stop")
+		pipe.close()
+		self.server.process.wait(30)
+		for w in listed:
+			if w.get("server", {}).get("pid"):
+				await_gone(w["server"]["pid"])
+		self.server.stop(remove_data=False)
+		self.server = None
+
+	def ids(self, count):
+		folded = lambda path: os.path.normcase(os.path.realpath(path))
+		return {folded(w["root"]): w["wsId"] for w in await_servers(self.server, count)}
+
+	def test_each_folder_gets_its_id_back_and_the_others_open_again(self):
+		self.start(self.alpha, self.beta)
+		first = self.ids(2)
+		alpha, beta = os.path.normcase(os.path.realpath(self.alpha)), os.path.normcase(os.path.realpath(self.beta))
+		self.assertEqual({alpha: "w1", beta: "w2"}, first)
+		self.stop()
+		# The other way round, and only beta asked for: beta keeps w2, alpha opens again as w1 with no window asking.
+		self.start(self.beta)
+		self.assertEqual(first, self.ids(2), "each folder's own id, and alpha back")
+		with open(os.path.join(self.data, "workspaces.json"), encoding="utf-8") as f:
+			kept = json.load(f)
+		self.assertEqual(2, len(kept["open"]), kept)
+		self.assertEqual(3, kept["next"], kept)
+		log = "\n".join(read_lines(os.path.join(self.data, "logs", "server.log")))
+		self.assertIn("opened w1: ", log.split("start: ied-server")[-1], "this run opened alpha again")
+
+	async def test_a_closed_workspace_stays_closed_and_keeps_its_id(self):
+		self.start(self.alpha, self.beta)
+		self.ids(2)
+		await self.close_workspace("w2", self.server.sign_in())
+		self.stop()
+		self.start()
+		listed = await_servers(self.server, 1)
+		self.assertEqual(["w1"], [w["wsId"] for w in listed], "only alpha opens again")
+		pipe = ControlPipe(self.server.control)
+		try:
+			opened = pipe.call("open", {"path": self.beta})["result"]
+		finally:
+			pipe.close()
+		self.assertEqual("w2", opened["wsId"], "beta, opened again, has its own id")
+
+	async def close_workspace(self, ws_id, cookie):
+		master = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": cookie})
+		try:
+			await master.sub(["server"])
+			await master.next_frame("server")
+			await master.request("ws.close", {"wsId": ws_id})
+			await master.wait_for("server", lambda f: f.get("kind") == "workspace.closed" and f["data"]["wsId"] == ws_id, timeout=30)
+		finally:
+			master.abort()
+
+	def test_reopening_can_be_turned_off(self):
+		self.start(self.alpha)
+		self.ids(1)
+		self.stop()
+		write(os.path.join(self.data, "app", "settings.json"), json.dumps({"workspaces.reopen": False}))
+		self.start()
+		listed = status(self.server)["workspaces"]
+		roots = [os.path.normcase(os.path.realpath(w["root"])) for w in listed]
+		self.assertNotIn(os.path.normcase(os.path.realpath(self.alpha)), roots, "nothing opened again")
+
+	def test_a_folder_is_open_as_one_of_its_solutions_at_a_time(self):
+		write(os.path.join(self.alpha, "One.iedsln"), '{"version": 1, "name": "One", "projects": []}\n')
+		write(os.path.join(self.alpha, "Two.iedsln"), '{"version": 1, "name": "Two", "projects": []}\n')
+		self.start()
+		pipe = ControlPipe(self.server.control)
+		try:
+			first = pipe.call("open", {"path": os.path.join(self.alpha, "One.iedsln")})
+			self.assertIn("result", first, first)
+			second = pipe.call("open", {"path": os.path.join(self.alpha, "Two.iedsln")})
+		finally:
+			pipe.close()
+		self.assertIn("error", second, "a second server on the folder would share its .ied/local")
+		self.assertIn("is open already as the solution One.iedsln", second["error"]["message"])
+		roots = [w["root"] for w in status(self.server)["workspaces"]]
+		self.assertEqual(1, sum(1 for r in roots if os.path.normcase(os.path.realpath(r)) == os.path.normcase(os.path.realpath(self.alpha))), roots)
+
+
 class UnnamedPipeTests(ServerTestCase):
 	"""A test-hooks master started without --control (the conformance runner's) names a pipe of its own once, and its
 	workspace servers are told that one: they stay up instead of leaving a master they cannot find."""

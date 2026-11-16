@@ -70,6 +70,7 @@ static bool Prepare(Ied::Server* server, const Net::Address& at) {
 		server->Log(Core::StringView("config server beyond this machine: its API needs its tokens; the web client signs in from another machine only once an owner password is set (docs/11)"));
 	}
 	server->m_Plugins->Load();
+	server->m_Workspaces->Started();
 	if (configServer && !server->m_ConfigServer->Start(error)) {
 		Fail(server, (Core::String("the config server cannot start: ") + error.View()).View());
 		return false;

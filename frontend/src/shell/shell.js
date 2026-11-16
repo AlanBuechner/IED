@@ -19,6 +19,7 @@ import { LayoutStore } from "./layoutstore.js";
 import { DEFAULT_MODE, treeOf, withTree, withoutTree, withActivity, withPhonePane, withoutPhoneBack, withRenamedTab, phoneBack, emptyDocument, withTether, withoutTethers, withTethersMoved, partnersOf, followersClosing } from "./layoutdoc.js";
 import { activitiesOf, shownIn, withShown } from "./windowdoc.js";
 import { DockWindows } from "./dockwindows.js";
+import { namesAnotherFolder, preferredWorkspaceOf, sameRoot } from "./shownworkspace.js";
 import { tabKindOf, dockFor } from "./dockplace.js";
 import * as T from "./layouttree.js";
 import { Toasts } from "./toasts.js";
@@ -34,6 +35,7 @@ const AUTH_PROBE_AFTER_MS = 1500;
 // "Window layouts").
 const MODE_SETTLE_MS = 2000;
 const WORKSPACE_KEY = "ied.wsId";
+const ROOT_KEY = "ied.wsRoot";      // the folder of the workspace this tab shows (shownworkspace.js)
 
 
 export class Shell {
@@ -173,7 +175,9 @@ export class Shell {
 		this.server = { serverVersion: data.serverVersion, workspaces: data.workspaces || [], recent: data.recent || [], clients: data.clients || [], notifications: data.notifications || [], master: data.master || null, configServer: data.configServer || null };
 		if (this.client.setRoutes) this.client.setRoutes(data.routes);
 		this.serverChanged();
-		if (!this.wsId || !this.server.workspaces.some((w) => w.wsId === this.wsId)) this.showWorkspace(this.preferredWorkspace());
+		const shown = this.wsId ? this.server.workspaces.find((w) => w.wsId === this.wsId) : null;
+		if (shown && namesAnotherFolder(this.shownRoot, shown.root)) this.leaveAnotherFolder();
+		else if (!shown) this.showWorkspace(this.preferredWorkspace());
 		// A master that came back lists the shown workspace again: its server's socket opens again (docs/12).
 		else if (this.client.show) this.client.show(this.wsId);
 	}
@@ -244,17 +248,18 @@ export class Shell {
 
 	preferredWorkspace() {
 		if (this.startPageAsked) return null;
-		const ids = this.server.workspaces.map((w) => w.wsId);
 		const asked = new URLSearchParams(location.search).get("ws");
 		let remembered = null;
+		let root = this.shownRoot || null;
 		try {
 			remembered = sessionStorage.getItem(WORKSPACE_KEY);
+			root = root || sessionStorage.getItem(ROOT_KEY);
 		}
 		catch {
 			remembered = null;
 		}
 		const launched = this.pendingOpen ? this.pendingOpen.wsId : null;
-		return [launched, asked, remembered, ids[0]].find((id) => id && ids.includes(id)) || null;
+		return preferredWorkspaceOf({ workspaces: this.server.workspaces, launched, asked, remembered, root });
 	}
 
 	// ---------------------------------------------------------------------------------------------------------------
@@ -267,10 +272,14 @@ export class Shell {
 		this.lastWell = null;
 		if (this.settingsOverlay.shown && (wsId || null) !== this.settingsOverlay.open.wsId) this.settingsOverlay.close();
 		this.wsId = wsId;
+		// The folder it is, so a reconnect that finds the id naming another folder does not take it for this one.
+		const listed = wsId ? this.server.workspaces.find((w) => w.wsId === wsId) : null;
+		this.shownRoot = listed ? listed.root : null;
 		this.resized();
 		if (this.client.show) this.client.show(wsId);
 		try {
 			sessionStorage.setItem(WORKSPACE_KEY, wsId || "");
+			if (this.shownRoot) sessionStorage.setItem(ROOT_KEY, this.shownRoot);
 		}
 		catch {
 			// a window without storage forgets the choice
@@ -362,8 +371,21 @@ export class Shell {
 	}
 
 	workspaceSnapshot(data) {
+		if (namesAnotherFolder(this.shownRoot, data.root)) {
+			this.leaveAnotherFolder();
+			return;
+		}
+		if (!this.shownRoot && data.root) this.shownRoot = data.root;
 		Object.assign(this.workspace, { wsId: data.wsId, name: data.name, kind: data.kind, root: data.root, trusted: data.trusted !== false, solution: data.solution || null, readOnly: data.readOnly || [] });
 		this.workspaceChanged();
+	}
+
+	// The id this window shows names another folder now (a master that lost its workspaces.json, docs/10 "Workspaces"): the
+	// window goes to its own folder under the id that has it, or with that folder not open to the start page - never on
+	// into the other project. Its folder, opened again later, is the one preferredWorkspace picks (ROOT_KEY).
+	leaveAnotherFolder() {
+		const own = this.server.workspaces.find((w) => w.wsId !== this.wsId && sameRoot(w.root, this.shownRoot));
+		this.showWorkspace(own ? own.wsId : null);
 	}
 
 	// Only what changes the workspace's description or its plugins (its .ied/plugins/ edited): a tree.changed is for the

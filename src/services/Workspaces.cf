@@ -93,15 +93,29 @@ namespace Ied
 		this.m_Server = server;
 		m_Master = server->IsMaster();
 		RegisterMethods();
+		// What was open when it last ran, read before the workspaces it was given change the list (Started).
+		if (m_Master) m_Reopen = server->m_Known.Open();
 		Core::String relative;
 		for (int64 i = 0; i < server->m_Config.m_Workspaces.Count(); ++i) {
 			FS::Path given = FS::CanonicalPath(server->m_Config.m_Workspaces[i].CStr());
 			if (given.IsEmpty()) server->Log((Core::String("no such workspace: ") + server->m_Config.m_Workspaces[i].View()).View());
-			else OpenFor(given, relative);
+			else {
+				try {
+					OpenFor(given, relative);
+				}
+				catch (RpcError& error) {
+					server->Log((((Core::String("not opened: ") + given.View()) + ": ") + error.m_Message.View()).View());
+				}
+			}
 		}
+	}
+
+	void Workspaces::Started() {
+		if (!m_Master) return;
+		Reopen();
 		// The test suites' server with no workspace gets an empty one inside its data folder, which goes with it.
-		if (m_Items.IsEmpty() && server->m_Config.m_TestHooks && server->IsMaster()) {
-			FS::Path scratch = FS::Path(server->m_Config.m_DataDir.View()) / "scratch-workspace";
+		if (m_Items.IsEmpty() && m_Server->m_Config.m_TestHooks) {
+			FS::Path scratch = FS::Path(m_Server->m_Config.m_DataDir.View()) / "scratch-workspace";
 			FS::MakeDirectories(scratch.CStr());
 			Serve(Open(scratch, Core::StringView("folder")), scratch);
 		}
@@ -187,12 +201,16 @@ namespace Ied
 			relative = Core::String();
 			for (Workspace* ws : m_Items)
 				if (ws->m_Solution && TrustKey(ws->m_Solution->m_File.View()).View() == TrustKey(target.View()).View()) return ws;
-			// The master never runs two servers on one folder: an open folder whose solution this is becomes it.
+			// The master never runs two servers on one folder: an open folder whose solution this is becomes it, and a folder
+			// open as another of its solutions is not opened twice - both servers would keep their chats, layouts and state
+			// in the one .ied/local/ and servers/<key>/.
 			Workspace* folder = m_Master ? RootedAt(target.Parent()) : nullptr;
 			if (folder && !folder->m_Solution) {
 				BecomeSolution(folder, target);
 				return folder;
 			}
+			if (folder)
+				throw RpcError(ErrorCode::Conflict, (((Core::String("the folder ") + folder->m_Root.View()) + " is open already as the solution " + folder->m_Solution->m_File.FileName()) + ": a folder is one workspace at a time, so close it to open " + target.FileName()).View());
 			return OpenSolution(target);
 		}
 		const bool folder = FS::IsDirectory(target.CStr());
@@ -236,11 +254,47 @@ namespace Ied
 		return paths;
 	}
 
+	// The master starting opens again the workspaces the owner had open when it last ran, after those it was given
+	// (workspaces.reopen, docs/10 "Workspaces"): each gets its own id back (KnownWorkspaces.ch), so the pages and windows
+	// that showed them - the desktop app's, a phone's - find them as they were, and their chats go on (docs/12). The
+	// recent projects keep their order: nothing was opened anew.
+	void Workspaces::Reopen() {
+		Core::Array<Core::String> kept = m_Reopen;
+		m_Reopen.Clear();
+		Core::String setting = m_Server->m_Settings->Effective(nullptr, Core::StringView(""), Core::StringView(c_ReopenSetting));
+		if (setting.View().Trimmed() == "false") {
+			KeepOpen();
+			return;
+		}
+		for (const Core::String& path : kept) {
+			FS::Path target = FS::CanonicalPath(path.CStr());
+			if (target.IsEmpty()) {
+				m_Server->Log((Core::String("not opened again: ") + path.View() + " is not there").View());
+				continue;
+			}
+			Core::String relative;
+			try {
+				OpenOrFind(target, relative);
+			}
+			catch (RpcError& error) {
+				m_Server->Log((((Core::String("not opened again: ") + path.View()) + ": ") + error.m_Message.View()).View());
+			}
+		}
+		KeepOpen();
+	}
+
+	// What the master has open, for its next start.
+	void Workspaces::KeepOpen() {
+		if (!m_Server->IsMaster()) return;
+		if (!m_Server->m_Known.SetOpen(OwnerPaths())) m_Server->Log(Core::StringView("the open workspaces could not be kept (workspaces.json)"));
+	}
+
 	// A workspace opened (or opened again) goes first in the recent projects: a solution by its file, anything else by
 	// its folder, which is what opens it again.
 	void Workspaces::Remember(Workspace* ws) {
 		// The recent projects are the master's (docs/01 "Processes").
 		if (!m_Server->IsMaster()) return;
+		KeepOpen();
 		const bool solution = ws->m_Solution != null;
 		Core::StringView path = solution ? ws->m_Solution->m_File.View() : ws->m_Root.View();
 		if (!m_Server->m_Recent.Opened(path, ws->m_Name.View(), Core::StringView(solution ? "solution" : "folder"), Platform::UnixTimeNs() / 1000000))
@@ -354,6 +408,7 @@ namespace Ied
 			data.EndObject();
 			m_Server->m_Hub.Publish(Core::StringView("server"), "workspace.closed", data.View());
 			m_Server->Log((Core::String("closed ") + wsId).View());
+			KeepOpen();
 			return;
 		}
 	}
@@ -409,31 +464,28 @@ namespace Ied
 		m_Server->m_Hub.Publish((Core::String("ws:") + ws->m_WsId.View()).View(), "plugins.changed", Core::StringView("{}"));
 	}
 
-	// The master's ids are w1, w2, ...; a workspace server's own workspace has the id the master gave it, and a folder
-	// its plugins open the id <wsId>.<n> (docs/10 "Routing").
+	// A workspace server's own workspace has the id the master gave it, and a folder its plugins open the id <wsId>.<n>
+	// (docs/10 "Routing"); the master's ids are its folders' (Record).
 	Core::String Workspaces::NextId() {
 		m_Opened += 1;
 		Core::StringBuilder id;
-		if (m_Server->IsMaster()) {
-			id.Append("w");
-			id.AppendInt(m_Opened);
-		}
-		else {
-			id.Append(m_Server->m_Config.m_WsId.View());
-			if (m_Opened > 1) {
-				id.AppendByte('.');
-				id.AppendInt(m_Opened - 1);
-			}
+		id.Append(m_Server->m_Config.m_WsId.View());
+		if (m_Opened > 1) {
+			id.AppendByte('.');
+			id.AppendInt(m_Opened - 1);
 		}
 		return id.ToString();
 	}
 
-	// The master's record of a workspace: what it is, not what is open in it (its server has that).
+	// The master's record of a workspace: what it is, not what is open in it (its server has that). Its id is the folder's
+	// own, kept from run to run (KnownWorkspaces.ch), never one of the ids open now.
 	Workspace* Workspaces::Record(const FS::Path& folder, Core::StringView kind) {
 		Workspace* ws = new Workspace();
-		ws->m_WsId = NextId();
 		FS::Path canonical = FS::CanonicalPath(folder.CStr());
 		ws->m_Root = canonical.IsEmpty() ? folder : canonical;
+		Core::Array<Core::String> taken;
+		for (Workspace* open : m_Items) taken.Push(open->m_WsId);
+		ws->m_WsId = m_Server->m_Known.IdFor(ws->m_Root.View(), Platform::UnixTimeNs() / 1000000, taken);
 		ws->m_Name = Core::String(ws->m_Root.FileName());
 		ws->m_Kind = Core::String(kind);
 		ws->m_Trusted = m_Server->m_Trust.IsTrusted(ws->m_Root);

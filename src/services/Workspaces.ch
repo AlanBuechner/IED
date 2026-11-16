@@ -13,6 +13,9 @@ include "ReadOnly.ch"
 
 namespace Ied
 {
+	// Whether a master that starts opens again the workspaces that were open when it last ran (docs/10 "Workspaces").
+	const char* c_ReopenSetting = "workspaces.reopen";
+
 	class WorkspaceServers;
 
 	class Workspace
@@ -82,6 +85,9 @@ namespace Ied
 		public Workspace* OpenFor(const FS::Path& target, Core::String& relative);
 		// A .iedsln (a canonical path) as a solution workspace rooted at its folder.
 		public Workspace* OpenSolution(const FS::Path& file);
+		// The master, once its plugins and so its settings are loaded (before it listens): the workspaces open when it last
+		// ran open again (workspaces.reopen), each with its own id, and a test suite's server with none gets its scratch one.
+		public void Started();
 		// The master: a workspace's server closed it for good: it leaves the list (workspace.closed).
 		public void Closed(Core::StringView wsId);
 		// The master: what a workspace server says of its workspace now (master.workspace): its name, kind and trust, and
@@ -120,6 +126,8 @@ namespace Ied
 	private:
 		private Workspace* OpenOrFind(const FS::Path& target, Core::String& relative);
 		private void Remember(Workspace* ws);
+		private void Reopen();
+		private void KeepOpen();
 		// recent.changed on the server topic: the whole list.
 		private void PublishRecent();
 		private Core::String Snapshot(const Workspace* ws) const;
@@ -168,6 +176,7 @@ namespace Ied
 		private Core::Array<Workspace*> m_None;
 		private bool m_Master;    // this is the master's list of records
 		private int64 m_Opened;   // ids handed out
+		private Core::Array<Core::String> m_Reopen;   // the master's: what was open when it last ran, until Started
 		private Core::Array<int64> m_Reveals;   // reveals no client has claimed yet
 		private int64 m_RevealSeq;
 	}

@@ -23,6 +23,7 @@ include "plugins/Host.ch"
 include "plugins/CodeCalls.ch"
 include "Trust.ch"
 include "Recent.ch"
+include "KnownWorkspaces.ch"
 include "Schemas.ch"
 include "Appdata.ch"
 include "settings/Service.ch"
@@ -91,6 +92,7 @@ namespace Ied
 		public CodeRuntime* m_Code;
 		public TrustStore m_Trust;
 		public RecentProjects m_Recent;
+		public KnownWorkspaces m_Known;     // the master's: each folder's id, and the workspaces open (<data>/workspaces.json)
 		public HostSchemas m_Schemas;
 		public Settings* m_Settings;
 		public AppDataWatch m_AppWatch;

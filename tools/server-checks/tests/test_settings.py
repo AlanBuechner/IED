@@ -71,7 +71,7 @@ class SettingsTests(ServerTestCase):
 
 	async def test_schema_defaults_and_tiers(self):
 		schema = (await self.client.request("settings.schema"))["settings"]
-		self.assertEqual(["lsp.idleStopMinutes", "keyboard.bindings", "configServer.url", "configServer.token", "configServer.certificate",
+		self.assertEqual(["lsp.idleStopMinutes", "workspaces.reopen", "keyboard.bindings", "configServer.url", "configServer.token", "configServer.certificate",
 			"sample.tabSize", "sample.theme", "sample.colors", "sample.paths"], list(schema), "the host's own first")
 		self.assertEqual((["app"], "replace", "Sample", "sample"), (schema["sample.theme"]["tiers"], schema["sample.theme"]["merge"], schema["sample.theme"]["page"], schema["sample.theme"]["plugin"]))
 		values, state = await self.values()
@@ -152,10 +152,10 @@ class SettingsTests(ServerTestCase):
 
 	async def test_settings_go_with_their_plugin(self):
 		await self.client.request("plugins.setEnabled", {"id": "sample", "enabled": False})
-		self.assertEqual(["lsp.idleStopMinutes", "keyboard.bindings", "configServer.url", "configServer.token", "configServer.certificate"],
+		self.assertEqual(["lsp.idleStopMinutes", "workspaces.reopen", "keyboard.bindings", "configServer.url", "configServer.token", "configServer.certificate"],
 			list((await self.client.request("settings.schema"))["settings"]), "only the host's own stay")
 		values, state = await self.values()
-		self.assertEqual({"lsp.idleStopMinutes": (10, "default"), "keyboard.bindings": ([], "default"), "configServer.url": ("", "default"),
+		self.assertEqual({"lsp.idleStopMinutes": (10, "default"), "workspaces.reopen": (True, "default"), "keyboard.bindings": ([], "default"), "configServer.url": ("", "default"),
 			"configServer.token": (None, "default"), "configServer.certificate": ("", "default")}, values)
 		self.assertEqual("unknown setting", state["tiers"]["app"]["problems"][0]["message"])
 		await self.client.request("plugins.setEnabled", {"id": "sample", "enabled": True})
