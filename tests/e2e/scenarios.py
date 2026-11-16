@@ -2328,6 +2328,86 @@ def board_new_and_delete(run):
 	run.request("ied.board/groups", {"wsId": ws, "groups": []})
 
 
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def board_context_menus(run):
+	"""The right button on the planner's lists (owner, 2026-11-16: "right clicking on the empty space of the boards list
+	and the boards layers should have a right click menu like making a group or making a layer etc."): the Boards list's
+	empty space makes a group, a layer's row has the layer's actions, the Layers list's empty space makes a layer and
+	shows every layer again. A phone's long press is the same contextmenu event."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	suffix = "phone" if run.phone else "desk"
+	path = "menus/board-%s.iedboard" % suffix
+	group = "Menus " + suffix
+	try:
+		run.request("ied.board/create", {"wsId": ws, "path": path})
+	except Exception:
+		pass   # left by an earlier run
+	run.request("ied.board/groups", {"wsId": ws, "groups": []})
+
+	def right_click(selector, bottom=False):
+		box = page.locator(selector).first.bounding_box()
+		x, y = box["x"] + 30, box["y"] + (box["height"] - 10 if bottom else box["height"] / 2)
+		if run.phone:
+			page.evaluate("([s, x, y]) => document.querySelector(s).dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true, clientX: x, clientY: y}))", [selector, x, y])
+		else:
+			page.mouse.click(x, y, button="right")
+		page.wait_for_selector(".menu .menu-item")
+
+	run.show_activity("ied.board")
+	if run.phone:
+		page.evaluate("ied_shell.commands.run('shell.showView', { id: 'ied.board.list' })")
+	page.wait_for_selector(".board-list-row[data-path='%s']" % path, timeout=20000)
+	right_click(".board-list-window .scroll", bottom=True)
+	check(run.texts(".menu .menu-item .label")[:2] == ["New Board…", "New Group…"], "the list's menu: %r" % run.texts(".menu .menu-item .label"))
+	run.shot("list-menu")
+	page.click(".menu .menu-item:has-text('New Group')")
+	page.fill(".dialog input.input-field", group)
+	page.keyboard.press("Enter")
+	page.wait_for_selector(".board-set[data-group='%s']" % group, timeout=10000)
+
+	row = ".board-list-row[data-path='%s']" % path
+	if run.phone:
+		page.evaluate("document.querySelector(\"%s\").click()" % row.replace('"', '\\"'))
+	else:
+		page.click(row)
+	view = ".view[data-ref='board:%s']" % path
+	page.wait_for_selector(view + " .board-toolbar", timeout=20000)
+	if run.phone:
+		page.click(view + " .board-panel-toggle")
+		panel = view + " .board-sheet"
+	else:
+		page.evaluate("ied_shell.commands.run('shell.showView', { id: 'ied.board.panel' })")
+		panel = ".board-panel-window"
+	page.click(panel + " .board-panel-tab[data-panel='layers']")
+	layers = panel + " .board-layer"
+	page.wait_for_selector(layers + "[data-layer='L1']", timeout=10000)
+
+	right_click(layers + "[data-layer='L1']")
+	check(page.is_visible(".menu .menu-item:has-text('Visible') .ci:not(.blank)"), "Visible is checked")
+	check(page.is_visible(".menu .menu-item.dis:has-text('Delete Layer')"), "the only layer is never deleted")
+	run.shot("layer-menu")
+	page.click(".menu .menu-item:has-text('New Layer Above')")
+	page.wait_for_function("document.querySelectorAll(\"%s\").length === 2" % layers.replace('"', '\\"'), timeout=10000)
+
+	right_click(layers + "[data-layer='L1']")
+	page.click(".menu .menu-item:has-text('Visible')")
+	page.wait_for_function("ied_shell && document.querySelector(\"%s\").querySelector('[aria-label=\"Show layer\"]')" % (layers + "[data-layer='L1']").replace('"', '\\"'), timeout=10000)
+	right_click(panel + " .board-layers", bottom=True)
+	check(not page.is_visible(".menu .menu-item.dis:has-text('Show All Layers')"), "a hidden layer: Show All Layers is on")
+	run.shot("layers-menu")
+	page.click(".menu .menu-item:has-text('Show All Layers')")
+	page.wait_for_function("document.querySelector(\"%s\").querySelector('[aria-label=\"Hide layer\"]')" % (layers + "[data-layer='L1']").replace('"', '\\"'), timeout=10000)
+	right_click(panel + " .board-layers", bottom=True)
+	page.click(".menu .menu-item:has-text('New Layer')")
+	page.wait_for_function("document.querySelectorAll(\"%s\").length === 3" % layers.replace('"', '\\"'), timeout=10000)
+
+	deleted = run.request("ied.board/delete", {"wsId": ws, "path": path})
+	for trash_id in deleted["trashIds"]:
+		run.request("trash.purge", {"id": trash_id})
+	run.request("ied.board/groups", {"wsId": ws, "groups": []})
+
+
 @scenario(viewports=("desktop", "phone"))
 def chat_archive_and_unarchive(run):
 	"""Archiving a chat sets it aside like deleting it, but for good (owner, 2026-11-11: "like they are deleted but they

@@ -3,9 +3,44 @@
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { confirmDialog, promptDialog } from "/ui-kit/dialog.js";
+import { MenuHost } from "/ui-kit/menu.js";
 
 const PANELS = [["layers", "Layers", "layers"], ["plan", "Plan", "book"], ["history", "History", "history"]];
 const PANEL_KEY = "ied.board.panel";
+const menus = new MenuHost();
+const CHECK = "$(check)";
+
+// A layer's menu (docs/32 "Layers"): the rows for `layer` of `layers` (bottom to top) holding `count` elements. Pure, for
+// the tests.
+export function layerMenuRows(layers, layer, count) {
+	const at = layers.findIndex((l) => l.id === layer.id);
+	const others = layers.filter((l) => l.id !== layer.id);
+	return [
+		{ kind: "item", label: "New Layer Above", id: "add", enabled: true },
+		{ kind: "separator" },
+		{ kind: "item", label: "Rename…", id: "rename", enabled: true, keys: "F2" },
+		{ kind: "item", label: "Visible", id: "visible", enabled: true, icon: layer.visible ? CHECK : null },
+		{ kind: "item", label: "Locked", id: "locked", enabled: true, icon: layer.locked ? CHECK : null },
+		{ kind: "item", label: "Show Only This Layer", id: "solo", enabled: !layer.visible || others.some((l) => l.visible) },
+		{ kind: "item", label: "Select Everything on It", id: "select", enabled: count > 0 && layer.visible && !layer.locked },
+		{ kind: "separator" },
+		{ kind: "item", label: "Move Up", id: "up", enabled: at < layers.length - 1 },
+		{ kind: "item", label: "Move Down", id: "down", enabled: at > 0 },
+		{ kind: "item", label: "Merge Down", id: "merge", enabled: at > 0 },
+		{ kind: "separator" },
+		{ kind: "item", label: "Delete Layer…", id: "delete", enabled: layers.length > 1 },
+	];
+}
+
+// The Layers list's own menu, from its empty space. Pure, for the tests.
+export function layersMenuRows(layers) {
+	return [
+		{ kind: "item", label: "New Layer", id: "add", enabled: true },
+		{ kind: "separator" },
+		{ kind: "item", label: "Show All Layers", id: "showAll", enabled: layers.some((l) => !l.visible) },
+		{ kind: "item", label: "Unlock All Layers", id: "unlockAll", enabled: layers.some((l) => l.locked) },
+	];
+}
 
 function storedPanel() {
 	try {
@@ -62,7 +97,7 @@ export class LayersPanel {
 	constructor(view) {
 		this.view = view;
 		this.model = view.model;
-		this.list = h("div.board-layers", { role: "listbox", "aria-label": "Layers" });
+		this.list = h("div.board-layers", { role: "listbox", "aria-label": "Layers", on: { contextmenu: (e) => this.listMenu(e) } });
 		this.el = h("div.board-panel-body", null,
 			h("div.panel-tools", null,
 				h("button.ib", { title: "New layer", "aria-label": "New layer", on: { click: () => this.add() } }, icon("add")),
@@ -78,7 +113,22 @@ export class LayersPanel {
 		const active = this.view.activeLayer();
 		const rows = this.model.layers.slice().reverse().map((layer) => {
 			const count = this.model.all().filter((el) => el.layer === layer.id).length;
-			const row = h("div.board-layer" + (active && active.id === layer.id ? ".active" : ""), { role: "option", "aria-selected": String(active && active.id === layer.id), on: { click: () => this.view.setActiveLayer(layer.id), dblclick: () => this.rename(layer) } },
+			const row = h("div.board-layer" + (active && active.id === layer.id ? ".active" : ""), {
+				role: "option", tabindex: "0", "aria-selected": String(active && active.id === layer.id), dataset: { layer: layer.id },
+				on: {
+					click: () => this.view.setActiveLayer(layer.id),
+					dblclick: () => this.rename(layer),
+					contextmenu: (e) => this.layerMenu(e, layer),
+					keydown: (e) => {
+						if (e.target !== e.currentTarget) return;
+						if (e.key === "Enter") this.view.setActiveLayer(layer.id);
+						else if (e.key === "F2") this.rename(layer);
+						else if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) this.layerMenu(e.currentTarget, layer);
+						else return;
+						e.preventDefault();
+					},
+				},
+			},
 				h("button.ib", { title: layer.visible ? "Hide" : "Show", "aria-label": layer.visible ? "Hide layer" : "Show layer", on: { click: (e) => { e.stopPropagation(); this.update(layer, { visible: !layer.visible }); } } }, icon(layer.visible ? "eye" : "eye-closed")),
 				h("button.ib", { title: layer.locked ? "Unlock" : "Lock", "aria-label": layer.locked ? "Unlock layer" : "Lock layer", on: { click: (e) => { e.stopPropagation(); this.update(layer, { locked: !layer.locked }); } } }, icon(layer.locked ? "lock" : "unlock")),
 				h("span.name.ellip", { title: layer.name }, layer.name),
@@ -93,31 +143,69 @@ export class LayersPanel {
 		this.model.edit([{ op: "update_layer", id: layer.id, ...fields }], "layer");
 	}
 
-	async add() {
-		const active = this.view.activeLayer();
-		const result = await this.model.edit([{ op: "add_layer", name: "Layer " + (this.model.layers.length + 1), above: active ? active.id : undefined }], "add layer");
+	// Several layers changed as one undo; nothing when none changes.
+	updateAll(changes, label) {
+		const ops = changes.map(([layer, fields]) => ({ op: "update_layer", id: layer.id, ...fields }));
+		if (ops.length) this.model.edit(ops, label);
+	}
+
+	// A layer's menu (right button, Shift+F10): it becomes the active layer, then the rows of layerMenuRows.
+	layerMenu(at, layer) {
+		if (at.preventDefault) at.preventDefault();
+		this.view.setActiveLayer(layer.id);
+		const layers = this.model.layers;
+		const count = this.model.all().filter((el) => el.layer === layer.id).length;
+		menus.show({ at, label: layer.name, rows: layerMenuRows(layers, layer, count), pick: (row) => {
+			if (row.id === "add") this.add(layer);
+			else if (row.id === "rename") this.rename(layer);
+			else if (row.id === "visible") this.update(layer, { visible: !layer.visible });
+			else if (row.id === "locked") this.update(layer, { locked: !layer.locked });
+			else if (row.id === "solo") this.updateAll(this.model.layers.filter((l) => l.visible !== (l.id === layer.id)).map((l) => [l, { visible: l.id === layer.id }]), "show only " + layer.name);
+			else if (row.id === "select") this.view.input.select(this.model.all().filter((el) => el.layer === layer.id).map((el) => el.id), false);
+			else if (row.id === "up") this.shift(1, layer);
+			else if (row.id === "down") this.shift(-1, layer);
+			else if (row.id === "merge") this.merge(layer);
+			else if (row.id === "delete") this.remove(layer);
+		} });
+	}
+
+	// The list's own menu, from the empty space under the layers.
+	listMenu(event) {
+		if (event.defaultPrevented || !this.model.loaded) return;
+		event.preventDefault();
+		menus.show({ at: event, label: "Layers", rows: layersMenuRows(this.model.layers), pick: (row) => {
+			if (row.id === "add") this.add();
+			else if (row.id === "showAll") this.updateAll(this.model.layers.filter((l) => !l.visible).map((l) => [l, { visible: true }]), "show all layers");
+			else if (row.id === "unlockAll") this.updateAll(this.model.layers.filter((l) => l.locked).map((l) => [l, { locked: false }]), "unlock all layers");
+		} });
+	}
+
+	// A new layer above `below` (default: the active one), made the active one.
+	async add(below) {
+		const under = below || this.view.activeLayer();
+		const result = await this.model.edit([{ op: "add_layer", name: "Layer " + (this.model.layers.length + 1), above: under ? under.id : undefined }], "add layer");
 		const id = result && result.done && /added layer (L\d+)/.exec(result.done[0] || "");
 		if (id) this.view.setActiveLayer(id[1]);
 	}
 
-	shift(by) {
-		const active = this.view.activeLayer();
-		if (!active) return;
-		const index = this.model.layers.findIndex((l) => l.id === active.id) + by;
+	shift(by, layer) {
+		const which = layer || this.view.activeLayer();
+		if (!which) return;
+		const index = this.model.layers.findIndex((l) => l.id === which.id) + by;
 		if (index < 0 || index >= this.model.layers.length) return;
-		this.update(active, { index });
+		this.update(which, { index });
 	}
 
-	merge() {
-		const active = this.view.activeLayer();
-		if (active) this.model.edit([{ op: "merge_layer", id: active.id }], "merge layer");
+	merge(layer) {
+		const which = layer || this.view.activeLayer();
+		if (which) this.model.edit([{ op: "merge_layer", id: which.id }], "merge layer");
 	}
 
-	async remove() {
-		const active = this.view.activeLayer();
-		if (!active || this.model.layers.length < 2) return;
-		const ok = await confirmDialog({ title: "Delete layer", message: "Delete \"" + active.name + "\" and everything on it? Undo brings it back.", confirm: "Delete", danger: true });
-		if (ok) this.model.edit([{ op: "delete_layer", id: active.id }], "delete layer");
+	async remove(layer) {
+		const which = layer || this.view.activeLayer();
+		if (!which || this.model.layers.length < 2) return;
+		const ok = await confirmDialog({ title: "Delete layer", message: "Delete \"" + which.name + "\" and everything on it? Undo brings it back.", confirm: "Delete", danger: true });
+		if (ok) this.model.edit([{ op: "delete_layer", id: which.id }], "delete layer");
 	}
 
 	async rename(layer) {

@@ -1,8 +1,9 @@
 // boardlist.js - the Boards tool window (docs/32 "The board in the UI", "Groups"): the workspace's boards, live, in the
 // owner's groups - folded or open as this device left them - then the boards in none. A click opens a board; a board is
 // dragged onto a group (or between two of its boards) or moved from its menu, and deleted from it (Del: to the trash,
-// with an Undo); a group's menu renames or deletes it (its boards stay, ungrouped) and makes a board in it. The
-// arrangement lives in the workspace's .ied/boards.json, written whole through ied.board/groups.
+// with an Undo); a group's menu renames or deletes it (its boards stay, ungrouped) and makes a board in it; the empty
+// space's menu makes a board or a group and opens or folds every group. The arrangement lives in the workspace's
+// .ied/boards.json, written whole through ied.board/groups.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { MenuHost } from "/ui-kit/menu.js";
@@ -61,6 +62,22 @@ export function movedTo(groups, path, group, before) {
 	return next;
 }
 
+// The list's own menu (its empty space): a new board or group, and with groups, all of them opened or folded. Pure, for
+// the tests.
+export function listMenuRows(groups, closed) {
+	const rows = [
+		{ kind: "item", label: "New Board…", id: "board", enabled: true },
+		{ kind: "item", label: "New Group…", id: "group", enabled: true },
+	];
+	if (!groups.length) return rows;
+	const names = [...groups.map((g) => g.name), UNGROUPED];
+	return rows.concat([
+		{ kind: "separator" },
+		{ kind: "item", label: "Expand All Groups", id: "expand", enabled: names.some((name) => closed.has(name)) },
+		{ kind: "item", label: "Collapse All Groups", id: "collapse", enabled: names.some((name) => !closed.has(name)) },
+	]);
+}
+
 export class BoardListView {
 	constructor(ctx, openBoard, newBoard) {
 		this.ctx = ctx;
@@ -81,7 +98,7 @@ export class BoardListView {
 				this.filter,
 				h("button.ib", { title: "New board", "aria-label": "New board", on: { click: () => this.newBoard() } }, icon("add")),
 				h("button.ib", { title: "New group", "aria-label": "New group", on: { click: () => this.newGroup() } }, icon("new-folder"))),
-			h("div.scroll", null, this.list));
+			h("div.scroll", { on: { contextmenu: (event) => this.listMenu(event) } }, this.list));
 		this.stop = this.ied.client.subscribe("ied.board/ws:" + ctx.wsId, {
 			snap: (data) => this.show(data),
 			evt: (kind, data) => this.show(data),
@@ -307,6 +324,22 @@ export class BoardListView {
 			else if (row.id === "ungroup") this.move(board.path, UNGROUPED, null);
 			else if (row.id === "new") this.newGroup(board.path);
 			else if (row.id.startsWith("to:")) this.move(board.path, row.id.slice(3), null);
+		} });
+	}
+
+	// The list's own menu: from its empty space, the Ungrouped heading or the empty list's message (a board's row and a
+	// group's heading have their own).
+	listMenu(event) {
+		if (event.defaultPrevented) return;
+		event.preventDefault();
+		menus.show({ at: event, label: "Boards", rows: listMenuRows(this.data.groups, this.closed), pick: (row) => {
+			if (row.id === "board") this.newBoard();
+			else if (row.id === "group") this.newGroup();
+			else if (row.id === "expand" || row.id === "collapse") {
+				this.closed = new Set(row.id === "collapse" ? [...this.data.groups.map((g) => g.name), UNGROUPED] : []);
+				store(CLOSED_KEY, [...this.closed]);
+				this.render();
+			}
 		} });
 	}
 
