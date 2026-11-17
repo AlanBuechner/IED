@@ -127,7 +127,12 @@ namespace Boards
 		Core::String problem;
 		if (request.m_Params.Has("set")) {
 			Core::String text = IED::NodeJson(request.m_Params.Field("set"));
+			Core::String before;
+			Core::String unread;
+			if (!IED::ReadFile(ws, file.View(), before, unread)) before = Core::String("{}");
 			if (!IED::WriteFile(ws, file.View(), text.View(), problem)) throw IED::RpcError(IED::ErrorCode::Unavailable, problem.View());
+			// The list says which chat each board talks to: a board's new chat is told to it.
+			if (ChatIdIn(text.View()).View() != ChatIdIn(before.View()).View()) service->PublishList(open->m_WsId.View());
 			return text;
 		}
 		Core::String text;

@@ -43,6 +43,11 @@ namespace Boards
 	// state (the chat it talks to, the camera), ".history.json" its history (core/History.ch).
 	Core::String LocalFile(Core::StringView boardPath, Core::StringView suffix);
 
+	// The chat a board talks to: the `chatId` of its local state's JSON (`ChatIdIn`) or file (`ChatIdOf`); "" when it has
+	// none yet. The list carries it, so the Boards window shows which boards' chats are in a turn.
+	Core::String ChatIdIn(Core::StringView localJson);
+	Core::String ChatIdOf(const IED::Workspace& ws, Core::StringView boardPath);
+
 	// What a tool answers: its text and, for board_view, the picture's workspace path.
 	class ToolAnswer
 	{

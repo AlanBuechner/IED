@@ -6,7 +6,7 @@
 import { h, icon, iconFrom, replace } from "/ui-kit/dom.js";
 import { wellsOf, groupsOf } from "./layouttree.js";
 import { initials, startPageView } from "./workspaces.js";
-import { badgeElement } from "./badges.js";
+import { badgeElement, moreBadge } from "./badges.js";
 import { banners } from "./banners.js";
 import { ToolbarItems } from "./toolbaritems.js";
 import { PanelDock } from "./paneldock.js";
@@ -181,13 +181,18 @@ export class PhoneChrome {
 		const buttons = shown.map((slot) => h("button.pn" + (slot.pane === activityPane ? ".on" : ""), { "aria-label": slot.badge && slot.badge.title ? slot.title + " - " + slot.badge.title : slot.title, dataset: { pane: slot.pane }, on: { click: () => slot.run() } },
 			iconFrom(slot.icon, slot.base) || icon("window"), h("span", null, slot.title), badgeElement(slot.badge)));
 		while (buttons.length < SLOTS) buttons.push(h("span.pn.empty"));
-		buttons.push(h("button.pn", { "aria-label": "More", on: { click: (event) => this.showMore(event.currentTarget, more) } }, icon("menu"), h("span", null, "More")));
+		// An activity under More still shows its badge: on More, and on its row there.
+		const badged = more.filter((slot) => slot.badge);
+		const badge = moreBadge(badged.map((slot) => slot.badge));
+		const label = badged.length ? "More - " + badged.map((slot) => slot.title + (slot.badge.title ? ": " + slot.badge.title : "")).join("; ") : "More";
+		buttons.push(h("button.pn", { "aria-label": label, dataset: { pane: "more" }, on: { click: (event) => this.showMore(event.currentTarget, more) } }, icon("menu"), h("span", null, "More"), badgeElement(badge)));
 		replace(this.nav, ...buttons);
 	}
 
 	showMore(at, more) {
 		const shell = this.shell;
-		const rows = more.map((slot) => ({ kind: "item", label: slot.title, icon: slot.icon, base: slot.base, enabled: true, run: slot.run }));
+		const rows = more.map((slot) => ({ kind: "item", label: slot.title, icon: slot.icon, base: slot.base, enabled: true, run: slot.run,
+			keys: slot.badge ? slot.badge.title || String(slot.badge.count || "") : "" }));
 		if (this.panel.mounted) rows.push({ kind: "item", label: this.panel.title(), icon: "$(terminal)", base: "/", enabled: true, run: () => this.panel.setOpen(true) });
 		if (rows.length) rows.push({ kind: "separator" });
 		for (const [command, title] of [["shell.commandPalette", "Command Palette"], ["shell.showNotifications", "Notifications"], ["shell.switchWorkspace", "Switch Workspace"], ["shell.plugins", "Plugins"], ["shell.settings", "Settings"], ["shell.keyboardShortcuts", "Keyboard Shortcuts"], ["shell.resetLayout", "Reset Layout"], ["shell.about", "About IED"]]) {

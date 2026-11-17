@@ -3,6 +3,13 @@
 
 import { h } from "/ui-kit/dom.js";
 
+// The phone's More button holding activities with badges: their counts added, warn when any warns; null when none has
+// one.
+export function moreBadge(badges) {
+	if (!badges.length) return null;
+	return { count: badges.reduce((sum, b) => sum + (b.count || 0), 0), tone: badges.some((b) => b.tone === "warn") ? "warn" : "info", title: "" };
+}
+
 // A count in the badge's tone, or a dot when it has none; null for no badge.
 export function badgeElement(badge) {
 	if (!badge) return null;

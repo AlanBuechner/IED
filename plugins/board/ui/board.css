@@ -81,6 +81,10 @@
 .board-set-empty { padding: var(--space-1) var(--space-4) var(--space-2) var(--space-8); font-size: var(--font-size-xs); }
 .board-set-head.drop, .board-list-rows.drop, .board-list-row.drop { background: var(--tint-info); outline: var(--border-width) dashed var(--accent-info); outline-offset: -1px; }
 .board-list-row[draggable="true"]:active { cursor: grabbing; }
+/* A board whose chat is in a turn (boardchats.js): the chat's state in place of the board's icon, as in the Chats list,
+   and what it waits on beside the name. */
+.board-list-row .board-chat-state { flex: none; }
+.board-chat-flag { flex: none; font-size: var(--font-size-xs); color: var(--accent-warn); padding: 0 var(--space-2); border-radius: var(--radius-2); background: var(--tint-warn); white-space: nowrap; }
 
 /* New board (newboard.js): its name and its folder, the folder's suggestions under its field */
 .popup.dialog.board-new:not(.sheet) { width: min(480px, calc(100vw - 32px)); }

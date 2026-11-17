@@ -60,6 +60,7 @@ import "./boardsnap.test.js";
 import "./boardgroups.test.js";
 import "./boardnew.test.js";
 import "./boardmenus.test.js";
+import "./boardchats.test.js";
 import "./filetypes.test.js";
 import "./browser.test.js";
 import "./packages.test.js";

@@ -2245,7 +2245,7 @@ def board_groups(run):
 	check(heads == ["Sprint 3", "Later", "Ungrouped"], "groups in order, then the ungrouped: %r" % heads)
 	beta = ".board-list-row[data-path='plans/beta.iedboard']"
 	if run.phone:
-		page.evaluate("document.querySelector(\"%s\").dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, clientX: 40, clientY: 200}))" % beta.replace('"', '\\"'))
+		page.evaluate("document.querySelector(\"%s\").dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true, clientX: 40, clientY: 200}))" % beta.replace('"', '\\"'))
 		page.click(".menu .menu-item:has-text('Move to Group')")
 		page.click(".menu .menu-item:has-text('Later')")
 	else:
@@ -2305,7 +2305,7 @@ def board_new_and_delete(run):
 	row = ".board-set[data-group='Flows'] .board-list-row[data-path='%s']" % path
 	page.wait_for_selector(row, timeout=10000)
 	if run.phone:
-		page.evaluate("document.querySelector(\"%s\").dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, clientX: 40, clientY: 200}))" % row.replace('"', '\\"'))
+		page.evaluate("document.querySelector(\"%s\").dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true, clientX: 40, clientY: 200}))" % row.replace('"', '\\"'))
 	else:
 		page.click(row, button="right")
 	page.click(".menu .menu-item:has-text('Delete')")
@@ -2406,6 +2406,51 @@ def board_context_menus(run):
 	for trash_id in deleted["trashIds"]:
 		run.request("trash.purge", {"id": trash_id})
 	run.request("ied.board/groups", {"wsId": ws, "groups": []})
+
+
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def board_busy_chats(run):
+	"""The Boards activity shows its chats in a turn as the Chat activity does (owner, 2026-11-16: "it would be nice if the
+	planning board would show active chats like the chat tab does"): in the Boards window a board whose chat runs has the
+	chat's spinner in place of its icon, one waiting on an approval says so; the activity's button carries the count (on a
+	phone where Boards is under More, More does, and Boards' row there); the turn's end takes both off."""
+	page = run.open()
+	run.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"fake": {"endpoint": run.target.model_url + "/v1", "watchdog": {"prefillRate": 1000000}}}})
+	ws = page.evaluate("ied_shell.wsId")
+	path = "plans/busy-%s.iedboard" % ("phone" if run.phone else "desk")
+	opened = run.request("ied.board/create", {"wsId": ws, "path": path, "title": "Checkout"})
+	chat_id = run.request("chat.create", {"wsId": ws, "title": "Board: Checkout", "section": "Boards", "use": "board", "mode": "ask", "permission": "ask"})["chatId"]
+	run.request("ied.board/local", {"boardId": opened["boardId"], "set": {"chatId": chat_id}})
+	run.show_activity("ied.board")
+	if run.phone:
+		page.evaluate("ied_shell.commands.run('shell.showView', { id: 'ied.board.list' })")
+	row = ".board-list-row[data-path='%s']" % path
+	page.wait_for_selector(row + "[data-chat='']", timeout=20000)
+	badge = ".pn[data-pane='activity:ied.board'] .activity-badge, .pn[data-pane='more'] .activity-badge" if run.phone else ".sb-act[data-activity='ied.board'] .activity-badge"
+	check(page.query_selector(badge) is None, "no badge while the board's chat rests")
+	edit = {"path": "src/main.c", "edits": [{"old": "int main(void)", "new": "/* the entry point */\nint main(void)"}]}
+	# One request: the turn is stopped at the approval (a second script would be left for the next run to take).
+	run.target.queue_model(model_script({"text": "Reading the board.", "chunk": 6}, {"stall": 120, "keepalive": 10}, {"toolCall": {"name": "fs_edit", "arguments": edit}}, {"finish": "tool_calls"}))
+	run.request("chat.send", {"chatId": chat_id, "text": "document the entry point"})
+	page.wait_for_selector(row + "[data-chat='Running'] .board-chat-state.spin", timeout=20000)
+	page.wait_for_selector(badge.replace(".activity-badge", ".activity-badge.info"), timeout=10000)
+	check(run.texts(badge) == ["1"], "one board chat running: %r" % run.texts(badge))
+	run.shot("running")
+	page.wait_for_selector(row + "[data-chat='Needs approval'] .board-chat-flag", timeout=30000)
+	page.wait_for_selector(badge.replace(".activity-badge", ".activity-badge.warn"), timeout=10000)
+	run.shot("approval")
+	if run.phone and page.query_selector(".pn[data-pane='more'] .activity-badge"):
+		page.click(".pn[data-pane='more']")
+		page.wait_for_selector(".menu .menu-item:has-text('Boards') .kbd:has-text('1 needs you')")
+		run.shot("more")
+		page.keyboard.press("Escape")
+	run.request("chat.stop", {"chatId": chat_id})
+	page.wait_for_selector(row + "[data-chat='']", timeout=20000)
+	page.wait_for_selector(badge, state="detached", timeout=10000)
+	run.request("chat.delete", {"chatId": chat_id})
+	deleted = run.request("ied.board/delete", {"wsId": ws, "path": path})
+	for trash_id in deleted["trashIds"]:
+		run.request("trash.purge", {"id": trash_id})
 
 
 @scenario(viewports=("desktop", "phone"))

@@ -106,7 +106,7 @@ Methods (`docs/10`; a plugin's own names are `ied.board/<method>`):
 
 | Method | Params | Result |
 |---|---|---|
-| `ied.board/list` | `wsId` | `{groups: [{name, boards: [path]}], boards: [{path, boardId, title?, elements?, layers?, plans?}]}` (counts for the open ones; the groups below) |
+| `ied.board/list` | `wsId` | `{groups: [{name, boards: [path]}], boards: [{path, boardId, chatId?, title?, elements?, layers?, plans?}]}` (counts for the open ones; `chatId` the board's chat, from its per-machine state; the groups below) |
 | `ied.board/groups` | `wsId`, `groups: [{name, boards: [path]}]` | the whole arrangement written to `.ied/boards.json`, then the list as `ied.board/list` answers it; `bad_request` for a group with no name, a name over 80 characters or two of one name |
 | `ied.board/create` | `wsId, path, title?` | `{boardId, path, topic}`; `conflict` when the file exists; `bad_request` for a folder the list never looks in (`build/`, `node_modules/`, a dot folder - `Walk`'s skipped names) |
 | `ied.board/delete` | `wsId, path` | `{path, trashIds}`: the board's file, then its `<board>.assets/` when there is one, moved to the recoverable trash (`trash.restore` each to undo); `not_found` when there is no such board. "Deleting a board" below |
@@ -117,7 +117,7 @@ Methods (`docs/10`; a plugin's own names are `ied.board/<method>`):
 | `ied.board/plan` | `boardId, action: set \| delete, id?, title?, kind?, text?` | `{id}` |
 | `ied.board/image` | `boardId, blobId` (an upload, `docs/10` `PUT /w/<wsId>/api/upload`) | `{src, iw, ih}`: the PNG or JPEG kept beside the board |
 | `ied.board/tool` | `wsId, tool` (export, import, recognize, read, view), `args` | the tool's `{text, image?}`, as the owner |
-| `ied.board/local` | `boardId, set?` | the board's per-machine state (`{chatId, camera}`) |
+| `ied.board/local` | `boardId, set?` | the board's per-machine state (`{chatId, camera}`); a new `chatId` republishes the list |
 
 Topics: `ied.board/ws:<wsId>` - `{boards}`, event `boards.changed`; `ied.board/b:<boardId>` - snapshot `{boardId, path, rev, title, layers, elements, plans, history}`, events `changed {rev, change: {id, by, label, timeMs, rev, elements, undone}, put: [{at, el}], removed: [id], layers?, title?, refs?, opId?}`, `plans {plans}`, `reloaded` (a snapshot), `deleted {path}` (the board's file is gone: its windows close it, and the topic goes; a window that missed it finds the topic gone on resume, opens the path again and says it cannot).
 
@@ -148,6 +148,14 @@ Owner, 2026-11-11: "grouping boards in the planer". The Boards window shows the 
 
 - **In the window** (`plugins/board/ui/boardlist.js`): a search box, New board and New group. A board is dragged onto a group's head (to its end) or onto a board of a group (before it), or onto Ungrouped (out of its group); its menu (right button, Shift+F10) has Open, Move to Group (each other group, New Group...), Remove from Group and Delete... (Del; "Deleting a board" below). A group's head folds it (kept per device in `localStorage`); its menu has New Board in Group... (the dialog starts in the folder most of the group's boards are in), Rename Group..., Move Up, Move Down and Delete Group, which keeps its boards, ungrouped. The list's empty space, the Ungrouped heading and the empty list's message have the list's own menu (owner, 2026-11-16): New Board..., New Group... and, with groups, Expand All Groups and Collapse All Groups (`listMenuRows`).
 - **Checks**: `test_boards_are_grouped_in_the_workspaces_boards_file` (server checks), `boardgroups.test.js` (the sections and moves), e2e `board_groups` at desktop and phone width; the menus: `boardmenus.test.js` (what each offers, and when a row is off), e2e `board_context_menus` at desktop and phone width (a group made from the list's empty space, a layer added, hidden and shown again from the layer menus).
+
+## Busy board chats
+
+Owner, 2026-11-16: "it would be nice if the planning board would show active chats like the chat tab does". The Boards activity shows its boards' chats in a turn as the Chat activity shows every chat (`plugins/board/ui/boardchats.js`, from the chat plugin's `chats:<wsId>` topic - its protocol, not its modules):
+
+- **The activity's button** carries a badge while a board's chat (`use` "board") is in a turn: how many wait on the owner (approval or an answer; warn), else how many run (info), its tooltip "Boards - 1 chat running, 1 needs you". On a phone, where Boards sits under More, More carries it and Boards' row there says it (`docs/15`).
+- **The Boards window**: a board whose chat runs shows the chat's spinner in place of its icon; one that waits shows the chat's state icon and says on what ("Needs approval", "Needs an answer", "Paused") beside its name - the Chats list's icons and words. The list knows each board's chat from `chatId` in `ied.board/list` (the board's per-machine state; a board's new chat republishes the list).
+- **Checks**: server check `test_the_list_says_which_chat_each_board_talks_to`, unit `boardchats.test.js` (the badge, the marks, the rows, More's badge), e2e `board_busy_chats` at desktop and phone width (running, waiting on an approval, More on a phone, the marks gone when the turn stops).
 
 ## New board and deleting a board
 

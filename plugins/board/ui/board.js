@@ -11,6 +11,7 @@ import { PALETTE_NAMES } from "./render.js";
 import { LayersPanel, PlanPanel, HistoryPanel, PanelFrame } from "./panels.js";
 import { addBoard, removeBoard, setCurrentBoard } from "./current.js";
 import { union, EMPTY, isEmpty } from "./geom.js";
+import { CHAT_USE } from "./boardchats.js";
 
 const WIDTHS = [1, 2, 4, 8];
 const PHONE = 720;
@@ -18,7 +19,6 @@ const PHONE = 720;
 // width a board's chat takes when it opens a group of its own beside the boards.
 const PANEL_WINDOW = "ied.board.panel";
 const CHAT_SECTION = "Boards";
-const CHAT_USE = "board";   // the board's aiUses contribution
 const CHAT_SHARE = 0.3;
 const PANEL_PLACED_KEY = "ied.board.panelPlaced";
 

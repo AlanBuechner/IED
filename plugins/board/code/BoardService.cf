@@ -74,6 +74,21 @@ namespace Boards
 		return file.ToString();
 	}
 
+	Core::String ChatIdIn(Core::StringView localJson) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult parsed = Serialization::ReadJson(localJson, *doc);
+		if (!parsed.Ok() || parsed.root.Kind() != Serialization::DomKind::Object) return Core::String();
+		Serialization::DomNode chat = parsed.root.Member("chatId");
+		return chat.Kind() == Serialization::DomKind::String ? Core::String(chat.AsView()) : Core::String();
+	}
+
+	Core::String ChatIdOf(const IED::Workspace& ws, Core::StringView boardPath) {
+		Core::String text;
+		Core::String problem;
+		if (!IED::ReadFile(ws, LocalFile(boardPath, Core::StringView(".json")).View(), text, problem)) return Core::String();
+		return ChatIdIn(text.View());
+	}
+
 	void BoardService::Init(IED::PluginContext* context) {
 		m_Context = context;
 	}
@@ -197,6 +212,8 @@ namespace Boards
 			json.BeginObject();
 			json.StrField("path", path.View());
 			json.StrField("boardId", BoardIdFor(ws.m_Id.View(), path.View()).View());
+			Core::String chatId = ChatIdOf(ws, path.View());
+			if (!chatId.IsEmpty()) json.StrField("chatId", chatId.View());
 			OpenBoard* open = nullptr;
 			{
 				Threading::LockGuard guard(m_Lock);

@@ -8,6 +8,7 @@ import { PanelFrame } from "./panels.js";
 import { currentBoard, onCurrentBoard } from "./current.js";
 import { BoardListView } from "./boardlist.js";
 import { showNewBoard } from "./newboard.js";
+import { badgeBoardChats } from "./boardchats.js";
 
 const name = (path) => path.split("/").pop().replace(/\.iedboard$/, "");
 
@@ -33,6 +34,7 @@ export function activate(ied) {
 		const path = args && args.path ? args.path : ied.context.get("resourcePath");
 		if (path) openBoard(ied, path);
 	});
+	badgeBoardChats(ied);
 }
 
 export function BoardDocument(ctx) {

@@ -215,6 +215,22 @@ class BoardTests(ServerTestCase):
 				await self.client.request("ied.board/groups", {"wsId": "w1", "groups": bad}, timeout=WAIT)
 			self.assertIn(why, str(refused.exception))
 
+	async def test_the_list_says_which_chat_each_board_talks_to(self):
+		"""The Boards window marks a board while its chat is in a turn (docs/32 "Busy board chats"): the list carries the
+		chatId a board's per-machine state keeps, and a board's new chat is told to every window."""
+		opened, _ = await self.open_board("design/talk")
+		await self.client.request("ied.board/create", {"wsId": "w1", "path": "design/quiet"}, timeout=WAIT)
+		topic = "ied.board/ws:w1"
+		await self.client.sub([topic])
+		snap = (await self.client.wait_for(topic, lambda f: f["t"] == "snap", timeout=WAIT))[-1]["data"]
+		self.assertEqual([None, None], [b.get("chatId") for b in snap["boards"]], "no board has a chat yet")
+		await self.client.request("ied.board/local", {"boardId": opened["boardId"], "set": {"chatId": "c7", "camera": {"x": 0, "y": 0, "zoom": 1}}}, timeout=WAIT)
+		talks = lambda f: f.get("kind") == "boards.changed" and any(b.get("chatId") for b in f["data"]["boards"])
+		frame = (await self.client.wait_for(topic, talks, timeout=WAIT))[-1]
+		self.assertEqual({"design/quiet.iedboard": None, "design/talk.iedboard": "c7"}, {b["path"]: b.get("chatId") for b in frame["data"]["boards"]})
+		listed = await self.client.request("ied.board/list", {"wsId": "w1"}, timeout=WAIT)
+		self.assertEqual([None, "c7"], [b.get("chatId") for b in listed["boards"]], "ied.board/list says it too (quiet, talk)")
+
 	async def test_a_deleted_board_goes_to_the_trash_and_comes_back(self):
 		opened, _ = await self.open_board("design/gone")
 		request = urllib.request.Request("http://%s:%d/w/w1/api/upload" % (self.server.host, self.server.port), data=png(8, 8), method="PUT", headers={"Cookie": self.cookie, "Content-Type": "image/png", "Host": "%s:%d" % (self.server.host, self.server.port), "Origin": "http://%s:%d" % (self.server.host, self.server.port)})

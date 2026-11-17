@@ -9,6 +9,7 @@ import { h, icon, replace } from "/ui-kit/dom.js";
 import { MenuHost } from "/ui-kit/menu.js";
 import { confirmDialog, promptDialog } from "/ui-kit/dialog.js";
 import { commonFolder } from "./newboard.js";
+import { chatMark, followChats } from "./boardchats.js";
 
 const menus = new MenuHost();
 const CLOSED_KEY = "ied.board.closedGroups";
@@ -99,10 +100,25 @@ export class BoardListView {
 				h("button.ib", { title: "New board", "aria-label": "New board", on: { click: () => this.newBoard() } }, icon("add")),
 				h("button.ib", { title: "New group", "aria-label": "New group", on: { click: () => this.newGroup() } }, icon("new-folder"))),
 			h("div.scroll", { on: { contextmenu: (event) => this.listMenu(event) } }, this.list));
-		this.stop = this.ied.client.subscribe("ied.board/ws:" + ctx.wsId, {
+		this.chats = new Map();   // chatId -> its summary: a board's row shows its chat in a turn (boardchats.js)
+		this.stopList = this.ied.client.subscribe("ied.board/ws:" + ctx.wsId, {
 			snap: (data) => this.show(data),
 			evt: (kind, data) => this.show(data),
 		});
+		this.stopChats = followChats(this.ied, ctx.wsId, (chats) => {
+			const before = this.busy();
+			this.chats = new Map(chats.map((c) => [c.chatId, c]));
+			// Most changes (a turn's tokens, a title) mark nothing: the list is drawn again when a mark changes.
+			if (this.busy() !== before) this.render();
+		});
+	}
+
+	// The boards' chats' marks, as a key: what the rows show of them.
+	busy() {
+		return this.data.boards.map((b) => {
+			const mark = chatMark(b.chatId ? this.chats.get(b.chatId) : null);
+			return mark ? b.path + "=" + mark.label : "";
+		}).join("|");
 	}
 
 	show(data) {
@@ -146,10 +162,13 @@ export class BoardListView {
 		return h("section.board-set" + (closed ? ".closed" : ""), { dataset: { group } }, head, rows);
 	}
 
+	// A board's row: its chat's state in place of the board's icon while the chat runs or waits (as a chat's row in the
+	// Chats list), and what it waits on (approval, an answer) said beside the name.
 	row(board, group) {
 		const open = () => this.openBoard(board.path);
-		return h("div.board-list-row", {
-			role: "treeitem", tabindex: "0", title: board.path, draggable: "true", dataset: { path: board.path, group },
+		const mark = chatMark(board.chatId ? this.chats.get(board.chatId) : null);
+		return h("div.board-list-row" + (mark && mark.attention ? ".attn" : ""), {
+			role: "treeitem", tabindex: "0", title: board.path + (mark ? " - its chat: " + mark.label : ""), draggable: "true", dataset: { path: board.path, group, chat: mark ? mark.label : "" },
 			on: Object.assign({
 				click: open,
 				keydown: (e) => {
@@ -177,8 +196,9 @@ export class BoardListView {
 				},
 			}, this.dropOn(group, board.path)),
 		},
-		icon("edit"),
+		mark ? icon(mark.icon, "board-chat-state " + mark.tone + (mark.spin ? " spin" : "")) : icon("edit"),
 		h("span.ellip.grow", null, board.title || boardName(board.path)),
+		mark && mark.attention ? h("span.board-chat-flag", null, mark.label) : null,
 		h("span.muted.ellip", null, board.path.includes("/") ? board.path.slice(0, board.path.lastIndexOf("/")) : ""));
 	}
 
@@ -369,6 +389,7 @@ export class BoardListView {
 	}
 
 	dispose() {
-		this.stop();
+		this.stopList();
+		this.stopChats();
 	}
 }
