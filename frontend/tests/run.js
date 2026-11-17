@@ -76,6 +76,7 @@ import "./websearch.test.js";
 import "./mcp.test.js";
 import "./explorersearch.test.js";
 import "./definitionlinks.test.js";
+import "./grammars.test.js";
 import "./hoverpassthrough.test.js";
 
 run(document.getElementById("results"));

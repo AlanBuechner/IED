@@ -26,7 +26,7 @@
 		"root": [
 			["^\\s*#\\s*[a-z]+", "keyword.directive"],
 			["^\\s*include\\b", "keyword.directive"],
-			["^\\s*\\[\\s*[a-zA-Z_]\\w*", "annotation"],
+			["^(\\s*)(\\[)(\\s*)([a-zA-Z_]\\w*)", ["", "@brackets", "", "annotation"]],
 			["[a-zA-Z_]\\w*", { "cases": { "@typeKeywords": "keyword.type", "@controlKeywords": "keyword.flow", "@keywords": "keyword", "@default": "identifier" } }],
 			{ "include": "@whitespace" },
 			["[{}()\\[\\]]", "@brackets"],
