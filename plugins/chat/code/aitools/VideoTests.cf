@@ -17,6 +17,28 @@ static Imaging::Rgba Flat(int32 width, int32 height, uint8 grey) {
 	return frame;
 }
 
+// A fresh temporary folder holding `frames` as 00000.png, 00001.png, ... and, when `emptyLast`, one more file that is empty
+// (a frame cut short as its program was stopped).
+static Core::String FrameFolder(const Core::Array<Imaging::Rgba>& frames, bool emptyLast) {
+	Core::StringBuilder name;
+	name.Append("ied-video-");
+	name.AppendInt(Platform::UnixTimeNs());
+	FS::Path root = FS::TempDirectory() / name.ToString().View();
+	FS::MakeDirectories(root.CStr());
+	for (int64 i = 0; i <= frames.Count(); i += 1) {
+		if (i == frames.Count() && !emptyLast) break;
+		Core::StringBuilder file;
+		if (i < 10) file.Append("0000");
+		else file.Append("000");
+		file.AppendInt(i);
+		file.Append(".png");
+		Core::Array<uint8> png;
+		if (i < frames.Count()) Imaging::EncodePng(frames[i], 6, png);
+		FS::WriteFileAtomically((root / file.ToString().View()).CStr(), (const void*)png.Data(), png.Count());
+	}
+	return Core::String(root.View());
+}
+
 static void SetPixel(Imaging::Rgba& frame, int32 x, int32 y, uint8 grey) {
 	int64 at = ((int64)y * frame.width + x) * 4;
 	for (int32 k = 0; k < 3; k += 1) frame.pixels[at + k] = grey;
@@ -78,6 +100,23 @@ class VideoTests {
 		Imaging::Rgba sheet = Ai::ContactSheet(frames, 2, 8);
 		assert_true(sheet.width == 8 * 2 + 4 && sheet.height == 4 * 2 + 4, "two to a row, a gap between");
 		assert_true(sheet.pixels[(1 * sheet.width + 9) * 4] == 40, "the gap is grey");
+	}
+
+	[test("a_recording_that_changes_size_is_watched_up_to_the_change")]
+	public static void ChangesSize() {
+		// An opening screen's three frames, then the program's two of another size, then a frame cut short.
+		Core::Array<Imaging::Rgba> frames = { Flat(8, 4, 10), Flat(8, 4, 20), Flat(8, 4, 30), Flat(16, 8, 40), Flat(16, 8, 50) };
+		Core::String folder = FrameFolder(frames, true);
+		Core::Array<Core::String> files = Ai::FrameFiles(folder.View());
+		assert_eq((int64)6, files.Count(), "five frames and the empty one");
+		int64 width = 0;
+		int64 height = 0;
+		assert_true(Ai::PngFrameSize(((folder + "/") + files[3].View()).View(), width, height) && width == 16 && height == 8, "a frame's size from its header");
+		assert_true(!Ai::PngFrameSize(((folder + "/") + files[5].View()).View(), width, height), "an empty file has none");
+		assert_eq((int64)3, Ai::FramesOfFirstSize(folder.View(), files, 0, 6), "from the first: up to the size's change");
+		assert_eq((int64)2, Ai::FramesOfFirstSize(folder.View(), files, 3, 3), "from the change: up to the frame cut short");
+		assert_eq((int64)2, Ai::FramesOfFirstSize(folder.View(), files, 1, 2), "no more than were asked for");
+		assert_eq((int64)0, Ai::FramesOfFirstSize(folder.View(), files, 5, 1), "none when the first cannot be read");
 	}
 
 	[test("frames_spread_and_series_shown")]

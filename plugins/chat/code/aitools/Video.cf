@@ -6,6 +6,7 @@ include "Images.ch"
 namespace Ai
 {
 	static const char* c_VideoFolder = ".ied/local/video";
+	static const int64 c_PngHeaderBytes = 24;   // the signature, then the IHDR chunk's length, type, width and height
 
 	public Core::Array<Core::String> FrameFiles(Core::StringView folder) {
 		Core::Array<Core::String> files;
@@ -63,6 +64,40 @@ namespace Ai
 		for (int32 i = 0; i < 6; i += 1)
 			if (lower.View().EndsWith(Core::StringView(extensions[i]))) return true;
 		return false;
+	}
+
+	static int64 BigEndian32(const Core::Array<uint8>& bytes, int64 at) {
+		return ((int64)bytes[at] << 24) | ((int64)bytes[at + 1] << 16) | ((int64)bytes[at + 2] << 8) | (int64)bytes[at + 3];
+	}
+
+	public bool PngFrameSize(Core::StringView file, int64& width, int64& height) {
+		Core::Array<uint8> header;
+		header.Resize(c_PngHeaderBytes);
+		FS::File opened = FS::File(Core::String(file).CStr(), "rb");
+		if (!opened.IsOpen() || opened.ReadAll((void*)header.Data(), c_PngHeaderBytes) != c_PngHeaderBytes) return false;
+		const char* signature = "\x89PNG\r\n\x1a\nxxxxIHDR";
+		for (int64 i = 0; i < 16; i += 1)
+			if ((i < 8 || i >= 12) && header[i] != (uint8)signature[i]) return false;   // 8 to 11: the chunk's length
+		width = BigEndian32(header, 16);
+		height = BigEndian32(header, 20);
+		return true;
+	}
+
+	public int64 FramesOfFirstSize(Core::StringView folder, const Core::Array<Core::String>& files, int64 first, int64 count) {
+		int64 width = 0;
+		int64 height = 0;
+		for (int64 i = 0; i < count; i += 1) {
+			int64 frameWidth = 0;
+			int64 frameHeight = 0;
+			Core::String path = (Core::String(folder) + "/") + files[first + i].View();
+			if (!PngFrameSize(path.View(), frameWidth, frameHeight)) return i;
+			if (i == 0) {
+				width = frameWidth;
+				height = frameHeight;
+			}
+			else if (frameWidth != width || frameHeight != height) return i;
+		}
+		return count;
 	}
 
 	static bool ReadFrame(Core::StringView file, Imaging::Rgba& image, Core::String& problem) {
@@ -175,6 +210,23 @@ namespace Ai
 		int64 first = Math::Min(request.m_From, files.Count());
 		int64 count = Math::Min(request.m_Count, files.Count() - first);
 		if (count < 2) return ToolError(Core::StringView("video_view: fewer than two frames from frame `from` on"));
+		// A recording may change size (an opening screen before the program's frames, a resized window): what is watched is
+		// the frames of the first's size, and the answer says where the others begin.
+		int64 sameSize = FramesOfFirstSize(folder.View(), files, first, count);
+		if (sameSize < 2) {
+			Core::StringBuilder refused;
+			refused.Append("video_view: ");
+			refused.Append(files[first + sameSize].View());
+			if (sameSize == 0) refused.Append(" is not a PNG file that can be read");
+			else {
+				refused.Append(" is not the size of the frame before it (or cannot be read): the recording changes size there; from: ");
+				refused.AppendInt(first + sameSize);
+				refused.Append(" watches the frames from it on");
+			}
+			return ToolError(refused.ToString().View());
+		}
+		bool cut = sameSize < count;
+		count = sameSize;
 		Core::Array<int64> sheetAt = EvenlySpread(count, request.m_Sheet);
 		int32 cellWidth = (c_VideoSheetWidth - (c_VideoSheetColumns - 1) * 4) / c_VideoSheetColumns;
 		VideoAccumulator video;
@@ -218,6 +270,15 @@ namespace Ai
 		said.AppendInt(analysis.m_Height);
 		if (request.m_Crop) said.Append(" (the region asked for)");
 		said.Append(". Brightness is luma 0-255.\n");
+		if (cut) {
+			said.Append("The frames end there: ");
+			said.Append(files[first + count].View());
+			said.Append(" (frame ");
+			said.AppendInt(first + count);
+			said.Append(") is another size or cannot be read - the recording changes size there (an opening screen before the program's frames, a resized window); from: ");
+			said.AppendInt(first + count);
+			said.Append(" watches the frames from it on.\n");
+		}
 		said.Append("The first image: frames ");
 		for (int64 i = 0; i < sheetAt.Count(); i += 1) {
 			if (i > 0) said.Append(", ");
@@ -255,7 +316,7 @@ namespace Ai
 	void AddVideoTool(ToolRegistry& registry) {
 		ToolSpec* view = new ToolSpec();
 		view->m_Name = Core::String("video_view");
-		view->m_Description = Core::String("Watch a recording - a folder of PNG frames in name order, as a program saves them frame by frame (Claymore: --record FOLDER): a contact sheet of its frames, a heat map of where the brightness flickers from frame to frame, the change and brightness by frame, and the cells that change most with their brightness over time (flicker, pulsing, popping). Video files are not decoded yet: extract their frames first. Example: video_view({\"path\": \".ied/local/rec/trees\", \"region\": [400, 200, 320, 240]})");
+		view->m_Description = Core::String("Watch a recording - a folder of PNG frames in name order, as a program saves them frame by frame (Claymore: --record FOLDER): a contact sheet of its frames, a heat map of where the brightness flickers from frame to frame, the change and brightness by frame, and the cells that change most with their brightness over time (flicker, pulsing, popping). The frames watched are those of the first's size: where the recording changes size (an opening screen, a resized window) it says so and the `from` that watches the rest. Video files are not decoded yet: extract their frames first. Example: video_view({\"path\": \".ied/local/rec/trees\", \"region\": [400, 200, 320, 240]})");
 		view->m_Parameters = Core::String("{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"a workspace folder of PNG frames\"}, \"from\": {\"type\": \"integer\", \"minimum\": 0, \"description\": \"the first frame (an index into the sorted files)\"}, \"count\": {\"type\": \"integer\", \"minimum\": 2, \"maximum\": 600, \"description\": \"frames to read (all, up to 600)\"}, \"sheet\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 16, \"description\": \"frames on the contact sheet (8)\"}, \"region\": {\"type\": \"array\", \"items\": {\"type\": \"integer\"}, \"minItems\": 4, \"maxItems\": 4, \"description\": \"[x, y, width, height]: only this part of each frame, at full resolution\"}}, \"required\": [\"path\"], \"additionalProperties\": false}");
 		view->m_ToolClass = ToolClass::Read;
 		view->m_ParallelSafe = true;

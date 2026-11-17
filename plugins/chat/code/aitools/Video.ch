@@ -24,4 +24,9 @@ namespace Ai
 	Core::Array<int64> EvenlySpread(int64 total, int64 count);
 	// A series as text, `values` of it at most (evenly picked), each with one decimal.
 	Core::String SeriesText(const Core::Array<double>& series, int64 values);
+	// The width and height a PNG file's header gives (no pixels read); false when it is no PNG or cannot be read.
+	bool PngFrameSize(Core::StringView file, int64& width, int64& height);
+	// How many of `count` frames of `files` (names in `folder`) from `first` on have the first's size, up to the first one
+	// of another size or that cannot be read; 0 when the first cannot be read.
+	int64 FramesOfFirstSize(Core::StringView folder, const Core::Array<Core::String>& files, int64 first, int64 count);
 }
