@@ -17,6 +17,10 @@
 			{ "id": "inline", "title": "Inline chat", "description": "Ctrl+I in the editor: a change to the selected lines, shown as a diff to accept or discard, or a question about them.", "model": "editor.inlineChat.model", "effort": "editor.inlineChat.effort" }
 		],
 		"bindings": {
+			"consumes": [
+				{ "name": "chat.modelMenu", "version": "1", "optional": true },
+				{ "name": "chat.modelLabel", "version": "1", "optional": true }
+			],
 			"provides": [
 				{
 					"name": "editor.colorize",

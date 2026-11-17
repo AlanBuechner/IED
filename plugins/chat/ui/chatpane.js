@@ -14,7 +14,7 @@ import { PREVIEW_ROWS, SidePanel } from "./sidepanel.js";
 import { MentionSource, keptMentions } from "./mentions.js";
 import { workspaceFileUrl } from "./userchips.js";
 import { stored, store } from "./stored.js";
-import { choicesFrom } from "./modelpicker.js";
+import { modelChoices } from "./modelmenu.js";
 import { askToNotify, notifySetting } from "./turnnotices.js";
 
 const NEAR_BOTTOM_PX = 80;
@@ -583,13 +583,15 @@ export class ChatPane {
 		if (await this.request("settings.set", { tier: "app", key: "ai.permissions", value: Object.assign({}, current, { allow }) })) await this.approve(approval, "allow");
 	}
 
-	// What the Model menu lists: the models of the settings, the default chain as pacing has it now - the model a turn on
-	// it uses - and the Claude models the CLI offers (aiusage; none when the server cannot say) (modelpicker.js).
+	// What the Model menu lists (modelmenu.js modelChoices); a failure is told, and the menu waits.
 	async choices() {
-		const [settings, usage] = await Promise.all([this.request("settings.get", { wsId: this.wsId }), this.ied.client.request("ai.usage", {}).catch(() => null)]);
-		const chains = usage && usage.claude && usage.claude.chains ? usage.claude.chains : [];
-		const uses = this.ied.contributions ? this.ied.contributions("aiUses").map((c) => c.value) : [];
-		return settings && settings.values ? choicesFrom(settings.values, chains, usage && usage.claude ? usage.claude.models : [], uses) : null;
+		try {
+			return await modelChoices(this.ied, this.wsId);
+		}
+		catch (e) {
+			this.ied.toast(e.message, { level: "error" });
+			return null;
+		}
 	}
 
 	openFile(path, line) {

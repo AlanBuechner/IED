@@ -2054,7 +2054,8 @@ def inline_chat(run):
 	"""Ctrl+I in the editor (F-EDT-100, docs/04 "Inline chat"): a box above the caret's line; what is asked goes to an
 	inline chat whose reply streams in as a diff over the line - the box and the diff come back after a reload mid-reply -
 	and Ctrl+Enter (Accept on a phone) puts the change in the document as one undo step, closing the session on the
-	server. A phone opens the box from the Edit menu's command."""
+	server. A phone opens the box from the Edit menu's command. The box's model button opens the chat's Model menu: an
+	effort picked there before asking is the chat's and goes with its request."""
 	page = run.open()
 	run.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"fake": {"endpoint": run.target.model_url + "/v1", "watchdog": {"prefillRate": 1000000}}}})
 	ws = page.evaluate("ied_shell.wsId")
@@ -2079,6 +2080,23 @@ def inline_chat(run):
 		page.keyboard.press("Control+Enter")
 		check(editor_text(page) == before, "the editor's keys leave the document alone while the box has the focus")
 	run.shot("asking")
+	# The model button (owner, 2026-11-17): the inline use's default - the default chain's model here - and the chat's own
+	# Model menu at it; an effort picked before asking is the chat's, and goes with its request.
+	run.wait_text(".ic-widget .ic-pick-model", "fake")
+	run.wait_text(".ic-widget .ic-pick-effort", "Default")
+	pick = page.evaluate("(() => { const r = (s) => document.querySelector('.ic-widget ' + s).getBoundingClientRect(); return {under: r('.ic-pick').top >= r('.ic-input').bottom - 1, input: r('.ic-input').width, box: r('.ic-head').width}; })()")
+	check(pick["under"] == run.phone, "a phone's narrow box has the model button under the input: %s" % pick)
+	check(pick["input"] >= 0.6 * pick["box"], "and the input keeps its room: %s" % pick)
+	page.click(".ic-widget .ic-pick")
+	page.wait_for_selector(".chat-picker" + (".sheet" if run.phone else "") + " .chat-picker-effort .chat-effort-slider", timeout=10000)
+	check(run.texts(".chat-picker .chat-picker-row.grp .sub") == ["now fake"], "Default: the default chain's model: %r" % run.texts(".chat-picker .chat-picker-row.grp .sub"))
+	page.click(".chat-picker .chat-effort-tick[data-effort='high']")
+	run.wait_text(".ic-widget .ic-pick-effort", "High")
+	run.shot("model")
+	page.keyboard.press("Escape")
+	page.wait_for_selector(".chat-picker", state="detached")
+	check(page.evaluate("document.activeElement && document.activeElement.classList.contains('ic-pick')"), "Esc closes the menu, back on the button")
+	check(page.is_visible(".ic-widget"), "and leaves the box open")
 	reply = ("Checks what `core_run` returns:\n\n```c\n\tint result = core_run();\n\tif (result != 0)\n\t\treturn result;\n\treturn 0;\n```\n\n"
 		"A failure of `core_run` now reaches whoever started the program; otherwise `main` returns 0 as before. Nothing else in "
 		"`main` changes, and `core_run` is still called once, before anything else runs.")
@@ -2095,6 +2113,7 @@ def inline_chat(run):
 	summary = [c for c in run.request("chat.list", {"wsId": ws})["chats"] if c["chatId"] == chat_id][0]
 	check(summary["use"] == "inline" and summary["section"] == "Inline" and summary["meta"]["inline"]["startLine"] == line, "an inline chat about line %d: %s" % (line, summary))
 	check(summary["mode"] == "ask" and summary["permission"] == "plan", "it reads and never writes")
+	check(summary["effort"] == "high" and summary["pinnedModel"] == "", "made with the effort picked in the box, on its default model: %s" % summary)
 	check(summary["state"] == "running", "still replying as the page goes: %s, %s" % (summary["state"], summary.get("lastStop")))
 	# The browser is disposable: the reply goes on on the server, and the session comes back where it was.
 	run.reload()
@@ -2115,6 +2134,8 @@ def inline_chat(run):
 	first = [m for m in sent["body"]["messages"] if m["role"] == "user"][-1]
 	content = first["content"] if isinstance(first["content"], str) else " ".join(p.get("text", "") for p in first["content"])
 	check("Inline edit in the editor: src/main.c line %d" % line in content and "return core_run();" in content, "the model got the line and the file: %s" % content[:300])
+	check(sent["body"].get("chat_template_kwargs") == {"reasoning_effort": "high"}, "at the effort picked: %s" % sent["body"].get("chat_template_kwargs"))
+	run.wait_text(".ic-widget .ic-pick-effort", "High")
 	if not run.phone:
 		# The session is a chat like any other: Open in Chat shows its transcript, kept in the Chats list's Inline section.
 		page.click(".ic-widget .ic-link:has-text('Open in Chat')")

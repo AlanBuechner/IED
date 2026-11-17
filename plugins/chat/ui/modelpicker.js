@@ -114,7 +114,11 @@ export function defaultNow(choices) {
 // `setEffort(effort)` a change of effort ("" the default), which leaves it open. Returns the function that closes it.
 export function showModelPicker(at, choices, current, pick, setEffort) {
 	const sheet = window.matchMedia(PHONE).matches;
+	let open = true;
+	// Once: a caller closing it again later (chat.modelMenu's close) does not take the focus back to the button.
 	const close = () => {
+		if (!open) return;
+		open = false;
 		document.removeEventListener("pointerdown", outside, true);
 		popup.remove();
 		if (at.isConnected) at.focus({ preventScroll: true });

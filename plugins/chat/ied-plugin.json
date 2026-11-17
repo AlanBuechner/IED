@@ -45,6 +45,23 @@
 					"description": "Whether a chat is in a turn: {chatId} -> {state, running}; a deleted chat answers {state: \"deleted\", running: false, deleted: true}, and a page its AI opened closes (docs/27)."
 				},
 				{
+					"name": "chat.modelMenu",
+					"version": "1",
+					"kind": "function",
+					"side": "client",
+					"description": "The chat's Model menu at another plugin's element, for a chat of its own or one it will make (the editor's inline chat): {at, wsId?, use, model?, effort?, now?, defaultEffort?, onChange} -> {close}; onChange gets {model} (\"\" its default; the menu closes) or {effort} (\"\" the default), and the caller keeps the choice - chat.set on its chat, or chat.create's model and effort (docs/04 \"Which model a turn uses\").",
+					"params": { "type": "object", "required": ["at", "onChange"], "properties": { "at": { "description": "The element the menu opens at" }, "wsId": { "type": "string" }, "use": { "type": "string" }, "model": { "type": "string" }, "effort": { "type": "string" }, "now": { "type": "string" }, "defaultEffort": { "type": ["string", "null"] }, "onChange": { "description": "A function: {model} or {effort}" } } }
+				},
+				{
+					"name": "chat.modelLabel",
+					"version": "1",
+					"kind": "function",
+					"side": "client",
+					"description": "What a chat's Model button names for a choice (chat.modelMenu's arguments without at and onChange): {model, effort, title} - the model the next turn starts on by its label, and its effort (\"Medium (Inline chat)\" when it names none).",
+					"params": { "type": "object", "properties": { "wsId": { "type": "string" }, "use": { "type": "string" }, "model": { "type": "string" }, "effort": { "type": "string" }, "now": { "type": "string" }, "defaultEffort": { "type": ["string", "null"] } } },
+					"result": { "type": "object", "properties": { "model": { "type": "string" }, "effort": { "type": "string" }, "title": { "type": "string" } } }
+				},
+				{
 					"name": "ai.claude.account",
 					"version": "1.0.0",
 					"kind": "function",

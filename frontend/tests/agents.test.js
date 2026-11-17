@@ -2,8 +2,9 @@
 // "Background tasks"): the Model menu's families, label and choices; sub-agents edited on the Model Groups page; a
 // sub-agent's chat under its parent in the Chats list; a task's time.
 
-import { test, assertEqual } from "./harness.js";
+import { test, assertEqual, assertTrue } from "./harness.js";
 import { choiceLabel, choicesFrom, defaultNow, familyOf, modelFamilies, nextModel } from "/plugins/ied.chat/ui/modelpicker.js";
+import { currentOf, labelOf } from "/plugins/ied.chat/ui/modelmenu.js";
 import { keptBySection, nestAgents, rootsOf } from "/plugins/ied.chat/ui/chatsview.js";
 import { taskTime } from "/plugins/ied.chat/ui/sidepanel.js";
 
@@ -34,6 +35,21 @@ test("model menu: the model a chat's next turn starts on, never just Default", (
 	assertEqual(nextModel(choices, { model: "", now: "", use: "chat" }), "claude-opus", "a chat not sent yet: its use's default model");
 	assertEqual(nextModel(choices, { model: "", now: "", use: "board" }), "claude-haiku", "a use's model that is not a model: the default chain's now");
 	assertEqual(nextModel(null, { model: "", now: "", use: "chat" }), "", "nothing while the models are not known");
+});
+
+test("model menu for other plugins: their button names the model and effort a chat of theirs runs on", () => {
+	const values = { "ai.models": { value: { "claude-opus": { provider: "claude-code", label: "Opus 5.5" }, "claude-haiku": { provider: "claude-code", label: "Haiku 5.5" } } },
+		"editor.inlineChat.model": { value: "claude-haiku" }, "editor.inlineChat.effort": { value: "low" } };
+	const uses = [{ id: "inline", title: "Inline chat", model: "editor.inlineChat.model", effort: "editor.inlineChat.effort" }];
+	const choices = choicesFrom(values, [{ role: "primary", now: "claude-opus" }], [], uses);
+	const before = labelOf(choices, currentOf({ use: "inline" }));
+	assertEqual([before.model, before.effort], ["Haiku 5.5", "Low (Inline chat)"], "a chat not made yet: its use's defaults");
+	assertTrue(before.title.includes("the default for Inline chat"), before.title);
+	const own = labelOf(choices, currentOf({ use: "inline", model: "claude-opus", effort: "max" }));
+	assertEqual([own.model, own.effort], ["Opus 5.5", "Max"], "its own model and effort");
+	const now = labelOf(choices, currentOf({ use: "inline", now: "claude-opus", defaultEffort: "" }));
+	assertEqual(now.model, "Opus 5.5", "what its snapshot says the next turn starts on");
+	assertEqual(labelOf(null, currentOf({ use: "inline" })).effort, "...", "not known yet");
 });
 
 test("model menu: the models, the default chain and what a turn on it uses now", () => {

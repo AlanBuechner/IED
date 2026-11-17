@@ -657,7 +657,8 @@ What is typed there and sent (Enter; Shift+Enter breaks the line) goes to a chat
 - **The chat.** `chat.create {use: "inline", section: "Inline", mode: "ask", permission: "plan", meta: {inline}}`,
   titled by where and what ("main.c:5 check the result"): the AI reads what it likes - code navigation, other files -
   and permission "plan" refuses every write and command, so a change reaches the document only through the box. It runs
-  on the `inline` use's model and effort ("Defaults by use"; a fast model suits it), sits in the Chats list's Inline
+  on the `inline` use's model and effort ("Defaults by use"; a fast model suits it) unless the box's model button
+  picks others (below), sits in the Chats list's Inline
   section (closed until opened, "Chat sections"), and is a chat like any other: Open in Chat shows its transcript, a
   turn ending there does not toast while the box shows it (`[data-shows-chat]`, `turnnotices.js`).
 - **What the model is told.** The first message is the request, then where (`src/main.c lines 3-6`, or an empty line
@@ -685,11 +686,22 @@ What is typed there and sent (Enter; Shift+Enter breaks the line) goes to a chat
   where it was: at its lines when their text still hashes the same, else the nearest place it does, else where they were
   with a note that they changed. In a window, a session's lines follow edits around them (a tracked range); a follow-up
   writes where they are now back to `meta.inline`.
+- **Model and effort** (owner, 2026-11-17: "we should still be able to change the model and effort from the default in
+  the inline chat"). The box's model button, beside Send, names what the next turn runs on and at what effort, as a
+  chat's Model button does ("Haiku 5.5 Low (Inline chat)": the inline use's defaults until the session picks its own),
+  and opens the chat's own Model menu at it - Default, the models, the effort slider; a bottom sheet on a phone. The
+  editor plugin reaches it through the chat plugin's client bindings `chat.modelMenu` and `chat.modelLabel` (`docs/02`
+  "Client bindings as built"), never its modules. A pick before the first message is kept in the box and made with the
+  chat (`chat.create {model, effort}`); after, it is the chat's (`chat.set`: a model from its next turn, an effort from
+  its next step), so it shows in the chat's tab, on a reload and on other devices, and a pick in the chat's tab shows in
+  the box. In a box narrower than 440 px (a phone) the button has a row of its own under the input.
 
 Checks: unit `inline chat: ...` (`frontend/tests/inlinechat.test.js`: the proposal, the diff, finding the lines again, the
 messages, and a session in a real Monaco against a scripted server - asked, streamed, accepted as one undo step, closed
-from elsewhere), e2e `inline_chat` (real server and fake model, desktop and phone: Ctrl+I, the diff streaming, a reload
-mid-reply, Open in Chat, Ctrl+Enter or Accept, the session closed on the server, one undo).
+from elsewhere, its model and effort picked before and after the chat is made), `model menu for other plugins: ...`
+(`agents.test.js`), e2e `inline_chat` (real server and fake model, desktop and phone: Ctrl+I, an effort picked in the
+box's Model menu reaching the model's request, the diff streaming, a reload mid-reply, Open in Chat, Ctrl+Enter or
+Accept, the session closed on the server, one undo).
 
 ## Unsent messages (built, 2026-11-11)
 

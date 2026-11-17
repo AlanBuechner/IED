@@ -6,7 +6,9 @@
 // document, one undo step; Discard (Esc) drops it; anything typed after the first message asks again in the same chat.
 // The session is the chat's: its file, lines and state are the chat's `meta.inline`, so a reload, another device or
 // another editor of the file shows it where it was, and accepting or discarding anywhere closes it everywhere. The chat
-// plugin's protocol is used as the profiler's and the board's are, never its modules (AGENTS.md rule 7).
+// plugin's protocol is used as the profiler's and the board's are, never its modules (AGENTS.md rule 7); the box's model
+// button opens the chat's own Model menu through its client bindings (chat.modelMenu, chat.modelLabel): the inline
+// use's default model and effort (Settings > AI > Defaults), or the session's own, kept on its chat.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { renderMarkdown } from "/ui-kit/markdown.js";
@@ -17,6 +19,7 @@ import {
 
 const RENDER_MS = 80;          // a streaming reply redraws the diff at most this often
 const WIDGET_MOST_WIDTH = 760;
+const NARROW_WIDTH = 440;      // a box this narrow (a phone) has its model button on a row of its own, under the input
 const PROPOSAL_KEY = "inlineChatProposal";
 // Escape in the lines closes the session only when nothing else of the editor's wants it: a selection to clear, a widget
 // or a hover to close.
@@ -212,6 +215,14 @@ class InlineSession {
 		this.zones = [];
 		this.diffKey = "";
 		this.sentOnce = false;       // the first message reached the chat (a chat whose send failed gets it again)
+		// The model and effort: its own ("" the inline use's default), kept here until the chat is made, then the chat's.
+		const summary = this.chatId ? chats.chats.get(this.chatId) : null;
+		this.pinned = (summary && summary.pinnedModel) || "";
+		this.effort = (summary && summary.effort) || "";
+		this.model = "";             // the model its next turn starts on, as its chat's snapshot says
+		this.defaultEffort = null;   // the effort a turn gets when it names none, as the snapshot says; null before one
+		this.labelKey = "";
+		this.closeMenu = null;
 		const model = editor.model;
 		const lastColumn = model.getLineMaxColumn(endLine);
 		this.range = editor.editor.createDecorationsCollection([{
@@ -247,6 +258,10 @@ class InlineSession {
 			placeholder: "Ask to change these lines, or ask about them",
 			on: { keydown: (e) => this.key(e), input: () => this.grow() },
 		});
+		this.modelName = h("span.ic-pick-model", null, "...");
+		this.effortName = h("span.ic-pick-effort");
+		this.modelButton = h("button.ic-pick", { title: "Pick the model and effort this chat runs on", "aria-haspopup": "dialog", hidden: !this.ied.bindings || !this.ied.bindings.has("chat.modelMenu"),
+			on: { click: () => this.pickModel() } }, this.modelName, this.effortName, icon("chevron-down"));
 		this.sendButton = h("button.ic-btn", { title: "Send (Enter)", "aria-label": "Send", on: { click: () => this.send() } }, icon("send"));
 		this.stopButton = h("button.ic-btn", { title: "Stop", "aria-label": "Stop", hidden: true, on: { click: () => this.stop() } }, icon("debug-stop"));
 		const closeButton = h("button.ic-btn", { title: "Discard (Esc)", "aria-label": "Close", on: { click: () => this.discard() } }, icon("close"));
@@ -258,7 +273,7 @@ class InlineSession {
 		this.chatLink = h("button.ic-link", { title: "Show this inline chat in the Chat activity", on: { click: () => this.openChat() } }, "Open in Chat");
 		this.actions = h("div.ic-actions", { hidden: true }, this.acceptButton, this.discardButton, this.counts, this.chatLink);
 		this.node = h("div.ic-widget", { role: "group", "aria-label": "Inline chat", on: { focusin: () => this.focusMoved(), focusout: () => setTimeout(() => this.focusMoved()) } },
-			h("div.ic-head", null, icon("sparkle", "ic-glyph"), this.input, this.sendButton, this.stopButton, closeButton),
+			h("div.ic-head", null, icon("sparkle", "ic-glyph"), this.input, this.modelButton, this.sendButton, this.stopButton, closeButton),
 			this.status, this.answer, this.actions);
 		this.overlay = {
 			getId: () => "ied.inlineChat." + Math.random().toString(36).slice(2),
@@ -286,7 +301,9 @@ class InlineSession {
 		const layout = this.editor.editor.getLayoutInfo();
 		const room = layout.width - layout.contentLeft - layout.verticalScrollbarWidth - (layout.minimap ? layout.minimap.minimapWidth : 0) - 12;
 		this.left = layout.contentLeft + 2;
-		this.node.style.width = Math.max(160, Math.min(WIDGET_MOST_WIDTH, room)) + "px";
+		const width = Math.max(160, Math.min(WIDGET_MOST_WIDTH, room));
+		this.node.style.width = width + "px";
+		this.node.classList.toggle("narrow", width < NARROW_WIDTH);
 		this.editor.editor.layoutOverlayWidget(this.overlay);
 	}
 
@@ -395,7 +412,7 @@ class InlineSession {
 				this.turns = (data.turns || []).map((t) => ({ turnId: t.turnId, model: t.model, stop: t.stop, segments: (t.segments || []).map((s) => Object.assign({}, s)) }));
 				this.state = data.state || "idle";
 				this.stateReason = data.stateReason || "";
-				this.model = data.model || "";
+				this.choiceFrom(data);
 				this.approval = (data.pendingApprovals || []).find((a) => !a.decision) || null;
 				this.question = data.pendingQuestion || null;
 				this.scheduleRender();
@@ -429,7 +446,7 @@ class InlineSession {
 		else if (kind === "chat.changed") {
 			this.state = data.state || this.state;
 			this.stateReason = data.stateReason || "";
-			if (data.model) this.model = data.model;
+			this.choiceFrom(data);
 		}
 		else if (kind === "approval.request") this.approval = data;
 		else if (kind === "approval.resolved") this.approval = null;
@@ -446,6 +463,62 @@ class InlineSession {
 	summaryChanged(summary) {
 		this.inline = inlineOf(summary);
 		if (summary.state && summary.state !== this.state && !this.stopChat) this.state = summary.state;
+		this.choiceFrom(summary);
+		this.scheduleRender();
+	}
+
+	// The chat's model and effort from a summary, a snapshot or its chat.changed: its own, and - a snapshot's - what a turn
+	// would use now.
+	choiceFrom(data) {
+		if ("pinnedModel" in data) this.pinned = data.pinnedModel || "";
+		if ("effort" in data) this.effort = data.effort || "";
+		if (data.model) this.model = data.model;
+		if ("defaultEffort" in data) this.defaultEffort = data.defaultEffort || "";
+	}
+
+	// The chat's Model menu at the box's button (chat.modelMenu): a choice before the first message is kept for the chat
+	// it makes; after, it goes to the chat (chat.set), a model from its next turn, an effort from its next step.
+	async pickModel() {
+		if (this.closeMenu) this.closeMenu();
+		this.closeMenu = null;
+		try {
+			const menu = await this.ied.bindings.call("chat.modelMenu", Object.assign(this.choiceArgs(), { at: this.modelButton, onChange: (change) => this.setChoice(change) }));
+			if (this.closed && menu) menu.close();
+			else this.closeMenu = menu ? menu.close : null;
+		}
+		catch (e) {
+			this.failed("Could not show the models: " + e.message);
+		}
+	}
+
+	setChoice(change) {
+		if (this.closed) return;
+		if ("model" in change) this.pinned = change.model || "";
+		if ("effort" in change) this.effort = change.effort || "";
+		this.render();
+		if (this.chatId) this.ied.client.request("chat.set", Object.assign({ chatId: this.chatId }, change)).catch((e) => this.failed("Could not change the model: " + e.message));
+	}
+
+	choiceArgs() {
+		return { wsId: this.editor.ctx.wsId, use: INLINE_USE, model: this.pinned, effort: this.effort, now: this.pinned ? "" : this.model, defaultEffort: this.defaultEffort };
+	}
+
+	// The button names the model the next turn starts on and its effort, as a chat's Model button does (chat.modelLabel).
+	refreshModel() {
+		if (this.modelButton.hidden) return;
+		const args = this.choiceArgs();
+		const key = JSON.stringify(args);
+		if (key === this.labelKey) return;
+		this.labelKey = key;
+		this.ied.bindings.call("chat.modelLabel", args).then((label) => {
+			if (this.closed || key !== this.labelKey || !label) return;
+			this.modelName.textContent = label.model;
+			this.effortName.textContent = label.effort;
+			this.modelButton.title = label.title;
+		}).catch((e) => {
+			if (key === this.labelKey) this.modelName.textContent = "Model";
+			this.ied.report("inline chat: " + e.message, e);
+		});
 	}
 
 	async send() {
@@ -467,10 +540,14 @@ class InlineSession {
 				this.chats.creating.add(editor.path);
 				let made;
 				try {
-					made = await this.ied.client.request("chat.create", {
+					const create = {
 						wsId: editor.ctx.wsId, title: titleOf(editor.path, where.startLine, where.endLine, prompt), section: INLINE_SECTION,
 						use: INLINE_USE, mode: "ask", permission: "plan", meta: { inline },
-					});
+					};
+					// The model and effort picked in the box before it asked; none: the inline use's defaults.
+					if (this.pinned) create.model = this.pinned;
+					if (this.effort) create.effort = this.effort;
+					made = await this.ied.client.request("chat.create", create);
 				}
 				finally {
 					this.chats.creating.delete(editor.path);
@@ -577,6 +654,8 @@ class InlineSession {
 		if (this.closed) return;
 		this.closed = true;
 		clearTimeout(this.renderTimer);
+		if (this.closeMenu) this.closeMenu();
+		this.closeMenu = null;
 		if (this.stopChat) this.stopChat();
 		this.resize.disconnect();
 		const ed = this.editor.editor;
@@ -645,6 +724,7 @@ class InlineSession {
 		this.discardButton.textContent = ready ? "Discard" : "Close";
 		this.counts.hidden = !proposal;
 		this.node.classList.toggle("running", running);
+		this.refreshModel();
 		this.chats.updateContext();
 		this.fit();
 	}

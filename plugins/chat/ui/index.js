@@ -14,6 +14,7 @@ import { ModelsPage } from "./modelsettings.js";
 import { DefaultsPage } from "./defaultssettings.js";
 import { ClaudePage, ClaudeStatusView } from "./claudeusage.js";
 import { TurnNotices, notifySetting } from "./turnnotices.js";
+import { modelLabel, modelMenu } from "./modelmenu.js";
 
 const tabViews = new Set();   // this window's chat tabs, the one focused last at the end
 const pendingInput = new Map();   // chatId -> {text, untilMs}: ied.chat.focusInput for a chat whose tab is still opening
@@ -64,6 +65,9 @@ export function activate(ied) {
 	ied.commands.handle("ied.chat.claudeUsage", () => ied.commands.run("shell.settings", { page: "custom:ied.chat.claude" }));
 	ied.commands.handle("ied.chat.focusInput", (args) => focusInput(args));
 	ied.tabs.kind("chat", { view: "ChatTab", title: (arg) => (arg === DRAFT ? "New chat" : "Chat"), icon: (arg) => (arg === DRAFT ? "$(add)" : "$(comment-discussion)") });
+	// The Model menu for another plugin's chats (modelmenu.js): the editor's inline chat picks its model and effort there.
+	ied.bindings.provide("chat.modelMenu", (args) => modelMenu(ied, args));
+	ied.bindings.provide("chat.modelLabel", (args) => modelLabel(ied, args));
 	badgeActiveChats(ied);
 }
 

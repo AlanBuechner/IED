@@ -78,14 +78,21 @@ function scriptedServer() {
 		request: async (method, params) => {
 			server.requests.push({ method, params });
 			if (method === "chat.create") {
-				const summary = { chatId: "c1", wsId: "w1", use: params.use, section: params.section, title: params.title, meta: params.meta, state: "idle" };
+				const summary = { chatId: "c1", wsId: "w1", use: params.use, section: params.section, title: params.title, meta: params.meta, state: "idle", pinnedModel: params.model || "", effort: params.effort || "" };
 				server.chats.push(summary);
 				server.emit("chats:w1", "chat.created", summary);
 				return summary;
 			}
 			if (method === "chat.send") return { turnId: "u" + server.requests.length };
 			if (method === "chat.set") {
-				const summary = Object.assign(server.chats.find((c) => c.chatId === params.chatId), { meta: params.meta });
+				// Only what it names changes, as on the server; `model` is the summary's pinnedModel.
+				const change = Object.assign({}, params);
+				delete change.chatId;
+				if ("model" in change) {
+					change.pinnedModel = change.model;
+					delete change.model;
+				}
+				const summary = Object.assign(server.chats.find((c) => c.chatId === params.chatId), change);
 				server.emit("chats:w1", "chat.changed", summary);
 				return summary;
 			}
@@ -105,10 +112,26 @@ function scriptedServer() {
 
 const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms || 0));
 
+// The chat plugin's Model menu bindings as a test plays them: the menu's arguments kept, its label from the choice.
+function chatBindings() {
+	const bindings = { menus: [], labels: [] };
+	bindings.has = (name) => name === "chat.modelMenu" || name === "chat.modelLabel";
+	bindings.call = async (name, args) => {
+		if (name === "chat.modelMenu") {
+			const menu = { args, closed: false, close: () => (menu.closed = true) };
+			bindings.menus.push(menu);
+			return menu;
+		}
+		bindings.labels.push(args);
+		return { model: args.model || args.now || "Haiku 5.5", effort: args.effort || "Low (Inline chat)", title: "t" };
+	};
+	return bindings;
+}
+
 async function setUpEditor(server, text) {
 	const context = new Map();
 	const ied = {
-		client: server.client, workspace: { wsId: "w1" }, report: () => {},
+		client: server.client, workspace: { wsId: "w1" }, report: () => {}, bindings: chatBindings(),
 		context: { set: (key, value) => context.set(key, value), get: (key) => context.get(key) },
 		commands: { run: async () => {} }, tabs: { open: () => {} }, contributions: Object.assign(() => [], { on: () => () => {} }),
 	};
@@ -194,6 +217,48 @@ test("inline chat: a session comes back after a reload and closes when its chat 
 		assertEqual([session.startLine(), session.endLine()], [4, 5], "where its lines went");
 		server.emit("chats:w1", "chat.changed", { chatId: "c9", wsId: "w1", use: "inline", meta: { inline: Object.assign({}, inline, { state: "discarded" }) }, state: "idle" });
 		assertEqual(t.chats.of(t.editor).length, 0, "discarded on another device: gone here");
+	}
+	finally {
+		t.done();
+	}
+});
+
+test("inline chat: the model and effort picked in the box are its chat's", async () => {
+	const server = scriptedServer();
+	const t = await setUpEditor(server, "int main(void)\n{\n\treturn core_run();\n}\n");
+	try {
+		t.editor.editor.setSelection(new t.monaco.Selection(3, 1, 3, 1));
+		t.chats.start(t.editor);
+		const session = t.chats.of(t.editor)[0];
+		const bindings = t.ied.bindings;
+		await tick();
+		assertTrue(!session.modelButton.hidden, "the box has a model button");
+		assertEqual([session.modelName.textContent, session.effortName.textContent], ["Haiku 5.5", "Low (Inline chat)"], "named as the chat plugin says: the inline use's defaults");
+		assertEqual(bindings.labels[0].use, "inline");
+		await session.pickModel();
+		const menu = bindings.menus[0];
+		assertEqual([menu.args.at, menu.args.use, menu.args.model, menu.args.effort], [session.modelButton, "inline", "", ""], "the chat's Model menu, at the button");
+		menu.args.onChange({ effort: "high" });
+		menu.args.onChange({ model: "claude-opus" });
+		await tick();
+		assertEqual([session.modelName.textContent, session.effortName.textContent], ["claude-opus", "high"]);
+		assertEqual(server.requests.filter((r) => r.method === "chat.set").length, 0, "no chat yet: kept in the box");
+		session.input.value = "check the result";
+		await session.send();
+		const create = server.requests.find((r) => r.method === "chat.create").params;
+		assertEqual([create.model, create.effort], ["claude-opus", "high"], "the chat is made with them");
+		await session.pickModel();
+		assertTrue(menu.closed, "a second menu closes the first");
+		bindings.menus[1].args.onChange({ effort: "" });
+		const set = server.requests.filter((r) => r.method === "chat.set").pop().params;
+		assertEqual(set, { chatId: "c1", effort: "" }, "after: the chat's effort changes, back to its default");
+		assertEqual(server.chats[0].meta.inline.state, "open", "and the session stays");
+		server.emit("chats:w1", "chat.changed", Object.assign({}, server.chats[0], { pinnedModel: "claude-sonnet" }));
+		await tick(120);
+		assertEqual(session.pinned, "claude-sonnet", "a model picked in the chat's tab shows here");
+		assertEqual(t.chats.of(t.editor).length, 1);
+		session.discard();
+		assertTrue(bindings.menus[1].closed, "closing the box closes its menu");
 	}
 	finally {
 		t.done();
