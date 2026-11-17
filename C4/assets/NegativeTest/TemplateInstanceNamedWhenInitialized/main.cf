@@ -1,0 +1,6 @@
+namespace Ns { template<T> struct Box { public T* p; } struct Holder { template<T> public Box<T> Get() const { Box<T> b; return b; } } }
+int32 main() {
+	Ns::Holder h;
+	int32* x = h.Get<int32>();
+	return 0;
+}

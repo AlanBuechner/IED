@@ -1,6 +1,7 @@
 #include "Backend/HIR/ExprLowerer.h"
 #include "Backend/HIR/ReferenceBinding.h"
 #include "Backend/HIR/ConstantOperands.h"
+#include <algorithm>
 #include <tuple>
 #include "Backend/HIR/ReadOnly.h"
 #include "Backend/HIR/Lifecycle.h"
@@ -65,6 +66,39 @@ namespace Scripting
 			"', which is not a pointer; use '.' instead (e.g. `value." + member + "`).");
 	}
 
+	QueryResult<Value> ExprLowerer::ArrowBase(const MemberAccessNode* n, const Value& base)
+	{
+		static const Core::String arrow = "->";
+		static const size_t maxHops = 16;   // past cycles, a bound on chains of ever new types
+		Value through = ArrayAsPointer(base);
+		std::vector<const Type*> followed;
+		auto chain = [&]() {
+			Core::String names;
+			for (const Type* t : followed) names += (names.empty() ? "'" : ", then '") + t->GetName() + "'";
+			return names;
+		};
+		for (;;)
+		{
+			const Type* type = TypeHandle::UnwrapToValue(through.type);
+			if (!type || type->GetKind() != TypeKind::Object || (through.isLValue && IsThisObject(through.lvalue))) return through;
+			auto op = m_Ctx.queries().QueryOperator(arrow, type, nullptr, m_Ctx.unitId, m_Ctx.enclosingType, AccessOf(through));
+			if (op.error == QueryError::ReadOnly) return m_Ctx.Fail(n, QueryResult<Value>::Fail(op.error, op.message));
+			if (!op.Ok() || !op.value.record)
+			{
+				if (followed.empty()) return through;   // no operator: CheckAccessOperator says '->' wants a pointer
+				return m_Ctx.Fail(n, QueryResult<Value>::Fail(QueryError::NotAValue, "'->' on " + chain() + " gives a '" + type->GetName() +
+					"', which is neither a pointer nor an object with an [operator(\"->\")]"));
+			}
+			if (std::find(followed.begin(), followed.end(), type) != followed.end() || followed.size() == maxHops)
+				return m_Ctx.Fail(n, QueryResult<Value>::Fail(QueryError::NotAValue, "'->' never reaches a pointer: " + chain() +
+					" lead on to '" + type->GetName() + "' through their [operator(\"->\")]"));
+			followed.push_back(type);
+			auto called = EmitOperatorCall(n, op.value, through, Value());
+			if (!called.Ok()) return called;
+			through = called.value;
+		}
+	}
+
 	// Walk an lvalue chain (field/deref/indexop) reporting the first node that makes a WRITE illegal:
 	// ephemeral (rooted in a by-value call temp - the store would be discarded) or constRooted (passes
 	// through a `const T*`). Returns true and fills `why` when a store must be rejected; false means the
@@ -127,7 +161,11 @@ namespace Scripting
 
 		auto base = ResolveExpr(n->GetBaseObject().Get());
 		if (!base.Ok()) return base;
-		if (n->IsArrowAccess()) base.value = ArrayAsPointer(base.value);   // `array->x` is its first element's x, as in C++
+		if (n->IsArrowAccess())
+		{
+			base = ArrowBase(n, base.value);
+			if (!base.Ok()) return base;
+		}
 		if (auto spelled = CheckAccessOperator(n, base.value); !spelled.Ok())
 			return m_Ctx.Fail(n, QueryResult<Value>::Fail(spelled.error, spelled.message));
 		const Type* baseType = nullptr; const LValue* baseLoc = nullptr;

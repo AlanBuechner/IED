@@ -1,0 +1,8 @@
+struct Ping { public int32 x; [operator("->")] public Pong Arrow() const; }
+struct Pong { public int32 y; [operator("->")] public Ping Arrow() const; }
+public Pong Ping::Arrow() const { Pong pong; return pong; }
+public Ping Pong::Arrow() const { Ping ping; return ping; }
+int32 main() {
+	Ping ping;
+	return ping->x;
+}

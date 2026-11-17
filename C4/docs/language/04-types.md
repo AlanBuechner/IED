@@ -120,8 +120,10 @@ both work.
 - Address-of `&x`, dereference `*p`, member access `p->f`, indexing `p[i]`, pointer arithmetic with
   integer offsets and the difference of two pointers (an `int64` count of elements) work as in C.
 - `.` and `->` are different operators, as in C++: `.` reaches a member of an object or a reference, `->` one
-  through a pointer. `p.f` on a pointer is an error that names `->` (the editor offers the fix), and `o->f` on an
-  object is an error that names `.`. `this` takes either spelling (`this.x`, `this->x`).
+  through a pointer, or through an object's `[operator("->")]` (a handle, a checked reference:
+  [06 6.13](06-lifecycle-and-operators.md#613-member-access-through-an-object-arrow)). `p.f` on a pointer is an error
+  that names `->` (the editor offers the fix), and `o->f` on an object without that operator is an error that names
+  `.`. `this` takes either spelling (`this.x`, `this->x`).
 - `null` converts to any pointer and to any `funcptr`.
 - `void*` is the universal pointer: any pointer converts to `void*` and back implicitly (including
   `T**` <-> `void**`, which COM out-parameters need).

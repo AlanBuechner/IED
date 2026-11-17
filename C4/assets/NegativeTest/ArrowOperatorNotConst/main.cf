@@ -1,0 +1,9 @@
+struct Gauge { public int32 level; }
+struct Ref { public Gauge* target; [operator("->")] public Gauge* Arrow() { return this.target; } }
+int32 Read(const Ref& ref) {
+	return ref->level;
+}
+int32 main() {
+	Ref r;
+	return Read(r);
+}

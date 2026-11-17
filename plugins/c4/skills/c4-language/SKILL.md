@@ -295,7 +295,8 @@ class Counter
 
 - Operators are methods of the left operand's type (`2.0f * v` needs an extension method of `float`). Token or name:
   `"+"` / `"add"`, `"+="` / `"add_assign"`, `"-"` (one parameter: subtract; none: negate), `"=="`, `"<"`,
-  `"index"` / `"index_assign"`, `"call"`, `"hash"`, `"begin"` / `"end"` for range-for, `"cast"`. Lifecycle:
+  `"index"` / `"index_assign"`, `"call"`, `"->"` / `"arrow"` (no parameter, returns a pointer: `ref->x` and
+  `ref->M()` reach what it points to, as C++'s `operator->`), `"hash"`, `"begin"` / `"end"` for range-for, `"cast"`. Lifecycle:
   `"create"`, `"copy"`, `"delete"` (the only destructor; `"destroy"` is an error). No move operator: objects relocate;
   `take(x)` moves out of a variable. Construction zeroes, builds the base (a base create called as the first statement:
   `Base::Init(x);`), the members, then runs the body; creates are not inherited.

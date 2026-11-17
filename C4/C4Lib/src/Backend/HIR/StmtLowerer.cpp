@@ -31,6 +31,7 @@
 #include "Parser/Nodes/Expressions/TernaryExpressionNode.h"
 #include "Model/TypeHandle.h"
 #include "Model/Types/AliasType.h"
+#include "Model/Types/QualifiedName.h"
 #include <algorithm>
 
 namespace Scripting
@@ -328,8 +329,8 @@ namespace Scripting
 		if (converted.Ok() || converted.error == QueryError::Ambiguous || dynamic_cast<const SignatureType*>(rv)) return m_Ctx.Fail(n, converted);
 		const Type* got = TypeHandle::UnwrapToValue(v.value.type);
 		return m_Ctx.Fail(n, QueryResult<const HIRNode*>::Fail(converted.error, "return type mismatch in '" +
-			FunctionName() + "': got '" + Core::String(got ? got->GetName() : "?") +
-			"', function returns '" + rv->GetName() + "': " + converted.message));
+			FunctionName() + "': got '" + Core::String(got ? DisplayName(got) : "?") +
+			"', function returns '" + DisplayName(rv) + "': " + converted.message));
 	}
 
 	QueryResult<const HIRNode*> StmtLowerer::FullExpression(const AstNode* e)

@@ -4,6 +4,7 @@
 #include "Model/ProgramModel.h"
 #include "Model/TypeHandle.h"
 #include "Model/Types.h"
+#include "Model/Types/ClassHierarchy.h"
 #include "Parser/Nodes/Expressions/ArrayIndexNode.h"
 #include "Parser/Nodes/Expressions/CastExpressionNode.h"
 #include "Parser/Nodes/Expressions/IdentifierExpressionNode.h"
@@ -67,8 +68,9 @@ namespace Scripting
 		{
 			auto base = ExpressionType(member->GetBaseObject().Get(), unitId);
 			if (!base.Ok()) return base;
-			const Type* value = TypeHandle::UnwrapToValue(base.value);
-			if (const auto* p = dynamic_cast<const PointerType*>(value); p && member->GetAccessOperatorToken().GetType() == TokenType::Arrow)
+			const bool arrow = member->GetAccessOperatorToken().GetType() == TokenType::Arrow;
+			const Type* value = TypeHandle::UnwrapToValue(arrow ? ClassHierarchy::ThroughArrowOperators(base.value) : base.value);
+			if (const auto* p = dynamic_cast<const PointerType*>(value); p && arrow)
 				value = TypeHandle::UnwrapToValue(p->GetPointeeType());
 			const auto* object = dynamic_cast<const ObjectType*>(value);
 			const ObjectType::FieldInfo* field = object ? object->GetFieldByName(member->GetMemberNameToken().GetText()) : nullptr;

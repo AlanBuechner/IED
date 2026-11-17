@@ -1,5 +1,6 @@
 #include "Server/SemanticResolver.h"
 #include "Model/TypeHandle.h" // TypeHandle::UnwrapToValue (alias/reference -> value type)
+#include "Model/Types/ClassHierarchy.h"
 #include "Parser/Nodes/Declarations/NamespaceNode.h"
 #include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
@@ -65,9 +66,11 @@ namespace C4LSP::Server
 			return dynamic_cast<const Scripting::ObjectType*>(Scripting::TypeHandle::UnwrapToValue(t));
 		}
 
-		/// What `->` reaches: the type a pointer points to (past aliases and references to it); `t` itself otherwise (BUG-353).
+		/// What `->` reaches: the type a pointer points to (past aliases and references to it, BUG-353), an object's through
+		/// its [operator("->")]; `t` itself otherwise.
 		const Scripting::Type* Pointee(const Scripting::Type* t)
 		{
+			t = Scripting::ClassHierarchy::ThroughArrowOperators(t);
 			const auto* pointer = dynamic_cast<const Scripting::PointerType*>(Scripting::TypeHandle::UnwrapToValue(t));
 			return pointer ? pointer->GetPointeeType() : t;
 		}

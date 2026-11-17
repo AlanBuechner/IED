@@ -96,5 +96,9 @@ namespace Testing
 		// BUG-353: a member reached with `->` through a pointer (`server->documents->ApplyEdit(...)`) resolves.
 		TEST_FUNC(Lsp.Navigation.References)
 		void TestMembersReachedThroughPointersResolve();
+
+		// A member reached with `->` through an object's [operator("->")] (`ref->Hurt(...)`), a template's too, resolves.
+		TEST_FUNC(Lsp.Navigation.Hover)
+		void TestMembersReachedThroughArrowOperatorsResolve();
 	};
 }

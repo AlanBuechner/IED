@@ -111,6 +111,34 @@ namespace IED
 int32 main() { return 0; }
 )";
 
+	static const char* kArrowOperators =
+		R"(namespace Ied
+{
+	struct Health
+	{
+		public int32 m_Value;
+		public int32 Hurt(int32 by) { return m_Value - by; }
+	};
+
+	struct HealthRef
+	{
+		[operator("->")] public Health* Arrow() const { return m_Target; }
+		public Health* m_Target;
+	};
+
+	template<T> struct Ref
+	{
+		[operator("->")] public T* Arrow() const { return m_Target; }
+		public T* m_Target;
+	};
+
+	int32 Plain(HealthRef health) { return health->Hurt(health->m_Value); }
+	int32 Templated(Ref<Health> health) { return health->Hurt(2); }
+}
+
+int32 main() { return 0; }
+)";
+
 	static const DocumentSymbol* Named(const Core::Vector<DocumentSymbol>& symbols, const std::string& name)
 	{
 		for (const auto& symbol : symbols)
@@ -519,6 +547,19 @@ int32 main() { return 0; }
 		}
 		TEST_ASSERT(hooks);
 		TEST_ASSERT(through);
+		TEST_PASSED();
+	}
+
+	void LspNavigationTest::TestMembersReachedThroughArrowOperatorsResolve()
+	{
+		auto session = Testing::Lsp::MakeSession("ArrowOperators.cf", kArrowOperators);
+		const std::string uri = Testing::Lsp::UriFor("ArrowOperators.cf");
+		auto method = Hover::At(session, uri, Testing::Lsp::PositionOf(kArrowOperators, "Hurt(health"));
+		TEST_ASSERT(Contains(method.contents, "public int32 Ied::Health::Hurt(int32 by)"));
+		auto field = Hover::At(session, uri, Testing::Lsp::PositionOf(kArrowOperators, "m_Value); }"));
+		TEST_ASSERT(Contains(field.contents, "public int32 Ied::Health::m_Value"));
+		auto templated = Hover::At(session, uri, Testing::Lsp::PositionOf(kArrowOperators, "Hurt(2)"));
+		TEST_ASSERT(Contains(templated.contents, "public int32 Ied::Health::Hurt(int32 by)"));
 		TEST_PASSED();
 	}
 }

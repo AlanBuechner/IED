@@ -11,6 +11,7 @@
 #include "Model/TypeHandle.h"
 #include "Model/Types/ReferenceType.h"
 #include "Model/Types/AliasType.h"
+#include "Model/Types/QualifiedName.h"
 
 namespace Scripting
 {
@@ -88,8 +89,8 @@ namespace Scripting
 		if (converted.Ok() || converted.error == QueryError::Ambiguous || dynamic_cast<const SignatureType*>(TypeHandle::UnwrapToValue(target)))
 			return converted;
 		const Type* from = source.type ? TypeHandle::UnwrapToValue(source.type) : nullptr;
-		return Result::Fail(converted.error, "cannot initialize '" + TypeHandle::UnwrapToValue(target)->GetName() + "' from '" +
-			(from ? from->GetName() : Core::String("?")) + "': " + converted.message);
+		return Result::Fail(converted.error, "cannot initialize '" + DisplayName(TypeHandle::UnwrapToValue(target)) + "' from '" +
+			(from ? DisplayName(from) : Core::String("?")) + "': " + converted.message);
 	}
 
 	QueryResult<const HIRNode*> BindArgument(LoweringContext& ctx, const Value& arg, const HIRNode* loaded, const Type* param,

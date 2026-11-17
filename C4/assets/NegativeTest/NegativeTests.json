@@ -1606,7 +1606,35 @@
     },
     "ArrowOnValue": {
         "expect": ["main.cf (4:9) error: Cannot use '->' on 'Point', which is not a pointer; use '.' instead (e.g. `value.x`)."],
-        "reason": "BUG-200: '->' dereferences a pointer; an object has no operator '->' to call."
+        "reason": "BUG-200: '->' dereferences a pointer; an object without an [operator(\"->\")] has none to call."
+    },
+    "TemplateInstanceNamedWhenInitialized": {
+        "expect": ["main.cf (4:2) error: cannot initialize 'int32*' from 'Box<int32>': a 'Box<int32>' is not a pointer"],
+        "reason": "BUG-462: a class template's instance is named with its arguments; the bare 'Box' names no type."
+    },
+    "TemplateInstanceNamedInTernary": {
+        "expect": ["the branches of '?:' have no common type: 'Box<int32>' and 'void*'"],
+        "reason": "BUG-462: the branches name an instance with its arguments."
+    },
+    "TemplateInstanceNamedInReturn": {
+        "expect": ["return type mismatch in 'First': got 'Box<int32>', function returns 'int32*'"],
+        "reason": "BUG-462: a return names an instance with its arguments."
+    },
+    "TemplateInstanceNamedAsArgument": {
+        "expect": ["argument 1 of Read has type 'Box<int32>' but parameter 'p' expects 'int32*'"],
+        "reason": "BUG-462: an argument names an instance with its arguments."
+    },
+    "ArrowOperatorGivesNoPointer": {
+        "expect": ["main.cf (5:9) error: '->' on 'Wrap' gives a 'Inner', which is neither a pointer nor an object with an [operator(\"->\")]"],
+        "reason": "An [operator(\"->\")] returns a pointer, or an object '->' goes on through; anything else has no member to reach."
+    },
+    "ArrowOperatorCycle": {
+        "expect": ["main.cf (7:9) error: '->' never reaches a pointer: 'Ping', then 'Pong' lead on to 'Ping' through their [operator(\"->\")]"],
+        "reason": "Arrow operators that return one another by value would be followed without end."
+    },
+    "ArrowOperatorNotConst": {
+        "expect": ["main.cf (4:9) error: the operator '->' is not a const method, so it cannot be used on a const object"],
+        "reason": "'->' through a const object calls a const arrow operator, as any operator on it does."
     },
     "ConstantShiftOutOfRange": {
         "expect": ["main.cf (1:7) error: unresolved type for variable 'tooWide': the array size '1 << 64' is not a constant expression: the shift count 64 is outside 0 to 63"],

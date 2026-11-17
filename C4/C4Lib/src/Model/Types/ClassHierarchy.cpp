@@ -1,4 +1,5 @@
 #include "Model/Types/ClassHierarchy.h"
+#include "Model/TypeHandle.h"
 
 namespace Scripting
 {
@@ -94,6 +95,31 @@ namespace Scripting
 				if (!sameEntity) hit.ambiguous = true;
 			}
 			return hit;
+		}
+
+		const ObjectType::MethodInfo* FindOperatorMethod(const ObjectType* type, const Core::String& annotation)
+		{
+			if (!type) return nullptr;
+			if (const Core::Vector<uint32>* with = type->MethodsWithOperator(annotation); with && !with->Empty())
+				return &type->GetMethods()[(*with)[0]];
+			for (const ObjectType* base : type->GetBaseTypes())
+				if (base && base->IsValid())
+					if (const ObjectType::MethodInfo* inBase = FindOperatorMethod(base, annotation)) return inBase;
+			return nullptr;
+		}
+
+		const Type* ThroughArrowOperators(const Type* type)
+		{
+			static const Core::String arrow = "arrow";
+			static const uint32 maxHops = 16;   // as HIR's ArrowBase: operators leading back to one another end there
+			for (uint32 hops = 0; hops < maxHops; ++hops)
+			{
+				const auto* object = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(type));
+				const ObjectType::MethodInfo* method = FindOperatorMethod(object, arrow);
+				if (!method || !method->m_ReturnType) return type;
+				type = method->m_ReturnType;
+			}
+			return type;
 		}
 
 		QueryResult<void> CheckBaseList(const ObjectType* type)

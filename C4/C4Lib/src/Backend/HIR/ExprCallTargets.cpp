@@ -136,6 +136,7 @@ namespace Scripting
 	{
 		if (auto onType = CheckTypeReceiver(ma); !onType.Ok()) return m_Ctx.Fail(ma, QueryResult<CallTarget>::Fail(onType.error, onType.message));
 		auto base = ResolveExpr(ma->GetBaseObject().Get());
+		if (base.Ok() && ma->IsArrowAccess()) base = ArrowBase(ma, base.value);   // `ref->M()` calls M on what the ref's '->' gives
 		if (!base.Ok()) return QueryResult<CallTarget>::Fail(base.error, base.message);
 		if (auto spelled = CheckAccessOperator(ma, base.value); !spelled.Ok())
 			return m_Ctx.Fail(ma, QueryResult<CallTarget>::Fail(spelled.error, spelled.message));

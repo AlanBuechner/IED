@@ -205,6 +205,7 @@ An exception leaving a full expression destroys its temporaries too.
 | `[]` | `index` | - |
 | `[]=` | `index_assign` | - |
 | `()` | `call` | - |
+| `->` | - | `arrow` |
 | `+=` `-=` `*=` `/=` `%=` | `add_assign` `subtract_assign` `multiply_assign` `divide_assign` `modulo_assign` | - |
 | `&=` `\|=` `^=` | `and_assign` `or_assign` `xor_assign` | - |
 | `<<=` `>>=` | `shift_left_assign` `shift_right_assign` | - |
@@ -216,6 +217,9 @@ assignment operator is `=` or `assign` (6.4).
 
 `call` takes any number of arguments: `x(a, b)` on an object calls its `[operator("call")]` method
 ([07](07-functions-and-lambdas.md#712-the-call-operator)).
+
+`arrow` takes no argument: `x->member` and `x->M()` on an object call its `[operator("->")]` method and reach the
+member through what it returns, as C++'s `operator->` does (section 6.13).
 
 `**` is built in for numbers (docs/language/10); `[operator("power")]` gives an object one.
 
@@ -366,6 +370,7 @@ See [09-statements-and-control-flow](09-statements-and-control-flow.md) for rang
 | placement new, `std::destroy_at`, relocation | `new (p) T(...)`, `destroy(p)`, `relocate(dst, src)` ([14.1](14-builtins.md#1-compiler-intrinsics)) |
 | `operator+` function names | `[operator("+")]` or `[operator("add")]` on any method |
 | `begin()` / `end()` naming convention | `[operator("begin")]` / `[operator("end")]` |
+| `T* operator->()` | `[operator("->")]` or `[operator("arrow")]`, taking nothing (6.13) |
 | `operator T()` | `[operator("cast")]`, explicit casts only |
 | `std::hash` specialization | `[operator("hash")]` custom operator |
 | free-function operators | must be members or `extends` extension methods |
@@ -411,3 +416,35 @@ Log& Shared() {
   destroyed after `main` returns (or on `exit`), the last started first; an array's elements last first.
   An exception escaping one of these destroys stops the program: `an exception escaped the destruction
   of a global or static object at exit`.
+
+## 6.13 Member access through an object: `arrow`
+
+**Status:** **Implemented**
+
+A handle, a reference-counted pointer or a checked reference gives the object it stands for through `->`, as C++'s
+`operator->` does:
+
+```c4
+template<T> struct Ref
+{
+	public T* m_Target;
+	[operator("->")] public T* Get() const { return m_Target; }   // or [operator("arrow")]
+}
+
+Ref<Health> health = ...;
+health->m_Value -= 10;   // health.Get()->m_Value
+health->Heal(5);         // health.Get()->Heal(5)
+```
+
+- The method takes no parameter. `x->member` and `x->M()` on an object call it and reach `member` or `M` through
+  what it returns: a pointer, or another object with an arrow operator, which `->` goes on through (a chain of them
+  is followed to its pointer). Anything else is an error naming the chain (`'->' on 'Wrap' gives a 'Inner', which is
+  neither a pointer nor an object with an [operator("->")]`), and so are operators that lead back to a type already
+  followed (`'->' never reaches a pointer: 'Ping', then 'Pong' lead on to 'Ping' ...`).
+- `.` stays the object's own: `ref.Get()`, `ref.m_Target`. A pointer to such an object reaches the object's own
+  members with `->` (`p->m_Target`), as in C++, and `this->x` in its methods is always its own field.
+- On a const object (a `const T&`) only a const arrow operator is used, as for any operator; a type can give both
+  (`T* Arrow()` and `const T* Arrow() const`) and the object's constness picks one.
+- A by-value call result works: `MakeRef()->m_Value = 5` writes through the returned pointer, and the temporary
+  ref is destroyed at the end of the statement (6.4, Temporaries).
+- The generic call is `x.operator_arrow()` (6.9). The editor's hover, definition and references follow it too.

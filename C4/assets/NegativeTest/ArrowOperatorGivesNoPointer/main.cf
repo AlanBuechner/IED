@@ -1,0 +1,6 @@
+struct Inner { public int32 x; }
+struct Wrap { public Inner inner; [operator("->")] public Inner Arrow() const { return this.inner; } }
+int32 main() {
+	Wrap w;
+	return w->x;
+}

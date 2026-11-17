@@ -47,6 +47,8 @@ namespace Scripting
 		{ "[]=", "index_assign", nullptr },
 		// the call operator (D-23): `x(args)` on an object
 		{ "()", "call", nullptr },
+		// member access through an object (`ref->x`, `ref->M()`): what its arrow operator returns is accessed
+		{ "->", nullptr, "arrow" },
 		// assignment (docs/language/06 6.4): `=` and `assign` are one operator
 		{ "=", "assign", nullptr },
 		// compound assignment (in-place form preferred; plain-op fallback is PlainFormFor)

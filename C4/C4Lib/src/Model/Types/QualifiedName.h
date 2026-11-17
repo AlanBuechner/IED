@@ -13,6 +13,10 @@ namespace Scripting
 	/// never share one, so reflection can key types by it.
 	Core::String QualifiedName(const Type* type);
 
+	/// A type as diagnostics name it: its own name as written (`String`, `Point*`), a class template's instance with its
+	/// arguments (`Box<int32>`, `Ref<Point>*` - never the bare `Box`, which names no type, BUG-462).
+	Core::String DisplayName(const Type* type);
+
 	/// A function's readable name: `Geo::Shape::Area` for a method, `Geo::Distance` for a free function. Overloads
 	/// share it.
 	Core::String QualifiedName(const FunctionRecord& function);

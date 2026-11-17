@@ -7,6 +7,7 @@
 #include "Model/Types/ClassHierarchy.h"
 #include "Model/Types/EnumType.h"
 #include "Model/Types/PointerType.h"
+#include "Model/Types/QualifiedName.h"
 
 namespace Scripting
 {
@@ -62,7 +63,7 @@ namespace Scripting
 		if (toThen) return t;
 		if (toElse) return e;
 		return QueryResult<const Type*>::Fail(QueryError::NotAValue,
-			"the branches of '?:' have no common type: '" + t->GetName() + "' and '" + e->GetName() + "'");
+			"the branches of '?:' have no common type: '" + DisplayName(t) + "' and '" + DisplayName(e) + "'");
 	}
 
 	QueryResult<const HIRNode*> ConditionalBranches::BranchValue(LoweringContext& ctx, const Value& branch, const Type* type)

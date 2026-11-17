@@ -149,6 +149,7 @@ include "OperatorOverloads/UnaryTokens.ch"
 include "OperatorOverloads/ShiftAssign.ch"
 include "OperatorOverloads/ScalarLeftExtension.ch"
 include "OperatorOverloads/CallOperator.ch"
+include "OperatorOverloads/ArrowOperator.ch"
 include "Types/InjectedClassName.ch"
 include "Types/FuncPtrTables.ch"
 include "Types/RefToArrayIndex.ch"
@@ -412,6 +413,7 @@ int32 main() {
 	TestShiftAssign();
 	TestScalarLeftExtension();
 	TestCallOperator();
+	TestArrowOperator();
 	TestInjectedClassName();
 	TestFuncPtrTables();
 	TestRefToArrayIndex();

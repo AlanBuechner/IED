@@ -7,6 +7,7 @@
 #include "Model/Types/ObjectType.h"
 #include "Model/Types/ClassHierarchy.h" // derived -> base conversions through any base
 #include "Model/Types/PointerType.h"
+#include "Model/Types/QualifiedName.h"
 #include "Model/Types/SwizzleType.h" // packed swizzle binds a by-value packed-vector param
 #include "Model/Types/SignatureType.h"
 #include "Model/Types/AggregateSlots.h"
@@ -329,8 +330,8 @@ namespace Scripting
 			if (!args[i] || ParamCost(param.m_Type, args[i]) >= 0) continue;
 			const Core::String paramName = c.record && i < c.record->paramNames.Count() ? c.record->paramNames[i] : param.mName;
 			const Core::String named = paramName.empty() ? "" : "'" + paramName + "' ";
-			return { (int32)i, "argument " + std::to_string(i + 1) + " of " + name + " has type '" + args[i]->GetName() +
-				"' but parameter " + named + "expects '" + param.m_Type->GetName() + "'" + ConversionAdvice(args[i], param.m_Type) };
+			return { (int32)i, "argument " + std::to_string(i + 1) + " of " + name + " has type '" + DisplayName(args[i]) +
+				"' but parameter " + named + "expects '" + DisplayName(param.m_Type) + "'" + ConversionAdvice(args[i], param.m_Type) };
 		}
 		return {};
 	}

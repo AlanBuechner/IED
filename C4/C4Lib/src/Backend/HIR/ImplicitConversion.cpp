@@ -5,6 +5,7 @@
 #include "Model/Types/ClassHierarchy.h"
 #include "Model/Types/EnumType.h"
 #include "Model/Types/SwizzleType.h"
+#include "Model/Types/QualifiedName.h"
 #include "Model/ConstEvaluator.h"
 #include "Model/ConversionAdvice.h"
 #include "Parser/Nodes/Expressions/ParenthesizedExpressionNode.h"
@@ -28,7 +29,7 @@ namespace Scripting::ImplicitConversion
 		bool PointerLike(const Type* t) { return t->GetKind() == TypeKind::Pointer || t->GetKind() == TypeKind::FunPtr; }
 		bool Aggregate(const Type* t) { return t->GetKind() == TypeKind::Object || t->GetKind() == TypeKind::Array || t->GetKind() == TypeKind::Union; }
 		bool ScopedEnum(const Type* t) { return t->GetKind() == TypeKind::Enum && static_cast<const EnumType*>(t)->IsScoped(); }
-		Core::String Quoted(const Type* t) { return "'" + t->GetName() + "'"; }
+		Core::String Quoted(const Type* t) { return "'" + DisplayName(t) + "'"; }
 
 		// D-32: an enum class converts from and to integers (and other enums) only through a cast.
 		Core::String EnumProblem(const Type* from, const Type* to)

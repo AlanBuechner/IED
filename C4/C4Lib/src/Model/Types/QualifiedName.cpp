@@ -68,6 +68,62 @@ namespace Scripting
 		}
 	}
 
+	namespace
+	{
+		// Whether a template instance is the type or what it points to, refers to or holds.
+		bool HoldsInstance(const Type* type)
+		{
+			if (!type) return false;
+			switch (type->GetKind())
+			{
+			case TypeKind::Alias: return HoldsInstance(static_cast<const AliasType*>(type)->GetAliasedType());
+			case TypeKind::Pointer: return HoldsInstance(static_cast<const PointerType*>(type)->GetPointeeType());
+			case TypeKind::Reference: return HoldsInstance(static_cast<const ReferenceType*>(type)->GetReferentType());
+			case TypeKind::Array: return HoldsInstance(static_cast<const ArrayType*>(type)->GetElementType());
+			case TypeKind::Object: return !static_cast<const ObjectType*>(type)->GetTemplateArguments().Empty();
+			default: return false;
+			}
+		}
+
+		Core::String InstanceDisplay(const Type* type)
+		{
+			switch (type->GetKind())
+			{
+			case TypeKind::Alias: return InstanceDisplay(static_cast<const AliasType*>(type)->GetAliasedType());
+			case TypeKind::Pointer:
+			{
+				const auto* pointer = static_cast<const PointerType*>(type);
+				return (pointer->IsConstReferent() ? "const " : "") + DisplayName(pointer->GetPointeeType()) + "*";
+			}
+			case TypeKind::Reference:
+			{
+				const auto* reference = static_cast<const ReferenceType*>(type);
+				return (reference->IsConstReferent() ? "const " : "") + DisplayName(reference->GetReferentType()) + "&";
+			}
+			case TypeKind::Array:
+			{
+				const auto* array = static_cast<const ArrayType*>(type);
+				return DisplayName(array->GetElementType()) + "[" + std::to_string(array->GetElementCount()) + "]";
+			}
+			default:
+			{
+				const auto& instance = static_cast<const ObjectType&>(*type);
+				Core::String text;
+				for (const ObjectType::TemplateArgument& argument : instance.GetTemplateArguments())
+					text += (text.empty() ? "" : ", ") + (argument.type ? DisplayName(argument.type) : ConstantText(argument.value));
+				return instance.GetName() + "<" + text + ">";
+			}
+			}
+		}
+	}
+
+	// A type without an instance in it keeps the name it always had: its pointers' and references' own spelling.
+	Core::String DisplayName(const Type* type)
+	{
+		if (!type) return "void";
+		return HoldsInstance(type) ? InstanceDisplay(type) : type->GetName();
+	}
+
 	Core::String TemplateArgumentsText(const ObjectType& instance)
 	{
 		Core::String text;

@@ -57,6 +57,12 @@ namespace Scripting
 		};
 		FieldHit FindField(const ObjectType* type, const Core::String& name);
 
+		/// The first method with the canonical operator `annotation` ("arrow", "index"): the type's own, then its bases'.
+		const ObjectType::MethodInfo* FindOperatorMethod(const ObjectType* type, const Core::String& annotation);
+		/// What '->' on a value of `type` reaches through: past each object with an [operator("->")] to what the last one
+		/// returns; `type` itself when it is no such object. For typing an access (sizeof, the editor) - HIR calls them.
+		const Type* ThroughArrowOperators(const Type* type);
+
 		/// The base-list rules: no base is final; at most one class base, and it is written first; an interface
 		/// derives only from interfaces; an interface has no instance fields.
 		QueryResult<void> CheckBaseList(const ObjectType* type);

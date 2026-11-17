@@ -2,6 +2,7 @@
 #include "Backend/HIR/CallResults.h"
 #include "Backend/HIR/CallArguments.h"
 #include "Model/Types/SignatureType.h"
+#include "Model/Types/QualifiedName.h"
 
 namespace Scripting
 {
@@ -23,7 +24,7 @@ namespace Scripting
 			auto converted = ConvertedValue(ctx, value.isLValue ? value : Value::R(arg, arg->type), param);
 			if (converted.Ok()) return converted;
 			const Type* actual = arg->type ? TypeHandle::UnwrapToValue(arg->type) : nullptr;
-			return fail("has type '" + (actual ? actual->GetName() : Core::String("?")) + "', expected '" + TypeHandle::UnwrapToValue(param)->GetName() +
+			return fail("has type '" + (actual ? DisplayName(actual) : Core::String("?")) + "', expected '" + DisplayName(TypeHandle::UnwrapToValue(param)) +
 				"': " + converted.message);
 		}
 	}

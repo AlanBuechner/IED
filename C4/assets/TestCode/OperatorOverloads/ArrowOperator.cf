@@ -1,0 +1,77 @@
+include "../Framework/Assert.ch"
+include "ArrowOperator.ch"
+
+namespace ArrowOperatorTest
+{
+	struct Gauge {
+		public int32 level;
+		public int32 Raise(int32 by) { this.level = this.level + by; return this.level; }
+		public int32 Read() const { return this.level; }
+	}
+
+	struct GaugeRef {
+		public Gauge* target;
+		[operator("->")] public Gauge* Arrow() const { return this.target; }
+	}
+
+	template<T> struct Handle {
+		public T* target;
+		public int32* uses;
+		[operator("create")] public void Init(T* t, int32* u) { this.target = t; this.uses = u; }
+		[operator("delete")] public void Destroy() { if (this.uses != null) *this.uses = *this.uses + 1; }
+		[operator("copy")] public void CopyFrom(const Handle<T>& other) { this.target = other.target; this.uses = other.uses; }
+		[operator("arrow")] public T* Get() const { return this.target; }
+		// `this->` is the handle's own field even though the type has an arrow operator.
+		public T* Own() const { return this->target; }
+	}
+
+	// An arrow operator returning another object with one: `->` follows both, as C++ does.
+	struct Outer {
+		public GaugeRef inner;
+		[operator("->")] public GaugeRef Arrow() const { return this.inner; }
+	}
+
+	struct BothArrows {
+		public Gauge* target;
+		[operator("->")] public Gauge* Arrow() { return this.target; }
+		[operator("->")] public const Gauge* ArrowConst() const { return this.target; }
+	}
+
+	Handle<Gauge> MakeHandle(Gauge* gauge, int32* uses) { return Handle<Gauge>(gauge, uses); }
+
+	int32 ReadThrough(const GaugeRef& ref) { return ref->Read(); }
+}
+
+void TestArrowOperator() {
+	ArrowOperatorTest::Gauge gauge; gauge.level = 3;
+	ArrowOperatorTest::GaugeRef ref; ref.target = &gauge;
+	AssertIntEquals(3, ref->level, "a field read through the arrow operator");
+	ref->level = 5;
+	AssertIntEquals(5, gauge.level, "a field written through it");
+	AssertIntEquals(7, ref->Raise(2), "a method called through it");
+	AssertIntEquals(7, ArrowOperatorTest::ReadThrough(ref), "a const method through a const reference's const arrow operator");
+	AssertIntEquals(7, ref.operator_arrow()->level, "the generic call names it 'arrow'");
+
+	int32 uses = 0;
+	ArrowOperatorTest::Handle<ArrowOperatorTest::Gauge> handle(&gauge, &uses);
+	AssertIntEquals(8, handle->Raise(1), "a template's arrow operator, by its name 'arrow'");
+	Assert(handle.Own() == &gauge, "this-> inside the type reaches its own field");
+	ArrowOperatorTest::MakeHandle(&gauge, &uses)->level = 20;
+	AssertIntEquals(20, gauge.level, "a write through a by-value call result reaches the target");
+	AssertIntEquals(1, uses, "and the temporary handle is destroyed once");
+	AssertIntEquals(21, ArrowOperatorTest::MakeHandle(&gauge, &uses)->Raise(1), "a method through a by-value call result");
+	AssertIntEquals(2, uses, "its temporary destroyed too");
+
+	ArrowOperatorTest::Outer outer; outer.inner = ref;
+	AssertIntEquals(21, outer->level, "an arrow operator returning an object with one is followed");
+	outer->Raise(4);
+	AssertIntEquals(25, gauge.level, "a method through the chain");
+
+	ArrowOperatorTest::GaugeRef* pointer = &ref;
+	Assert(pointer->target == &gauge, "a pointer to an object with an arrow operator reaches the object's own members");
+
+	ArrowOperatorTest::BothArrows both; both.target = &gauge;
+	both->level = 30;
+	const ArrowOperatorTest::BothArrows& constBoth = both;
+	AssertIntEquals(30, constBoth->level, "a const object picks the const arrow operator");
+}

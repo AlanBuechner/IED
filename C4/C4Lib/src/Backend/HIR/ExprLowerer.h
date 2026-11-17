@@ -268,6 +268,9 @@ namespace Scripting
 		void DerefForAccess(const Value& base, const Type*& outType, const LValue*& outLoc) const;
 		/// '.' reaches a member of an object, '->' one through a pointer; `this` takes either.
 		QueryResult<void> CheckAccessOperator(const MemberAccessNode* n, const Value& base) const;
+		/// What '->' reaches through: an array its first element's address; an object with an [operator("->")] what
+		/// that returns - a pointer, or again such an object, followed as C++ follows it; any other base as it is.
+		QueryResult<Value> ArrowBase(const MemberAccessNode* n, const Value& base);
 
 		LoweringContext& m_Ctx; // the per-function state (slots, arena, queries)
 	};
