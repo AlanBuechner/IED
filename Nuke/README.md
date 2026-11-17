@@ -359,7 +359,10 @@ lists `plugins/*`. Every later Nuke command on the workspace (`nuke build`, `nuk
 the solution's `generator` is `nuke init --ied` and the toolchain resolves - a pull that adds a project needs no
 `nuke init --ied` - and says so only when a file changed: files it wrote
 are rewritten, files of projects gone are removed, and a file it did not write, or one edited since, is left as it
-is with a warning (`.ied/local/generated.json` keeps the digest of each file it wrote). The files it wrote under the
+is with a warning (`.ied/local/generated.json` keeps the digest of each file it wrote), which the refresh gives only
+with `-v` - but a solution so kept that shows projects outside the folders their `group` names (one added since lands
+in none) is named by every command, with those projects, until it is deleted and `nuke init --ied` writes it again.
+A solution kept by hand that agrees with the manifests stays quiet. The files it wrote under the
 names before (`<Workspace>.ied.sln`, `build/ied/*.ied.proj`) go once the new ones are written. The projects' `group`s
 become the solution's `groups`, the Solution Explorer's folders (sorted by name, `"Engine/Tools"` nested). Every
 package's project is in the solution, in the "Packages" folder, wherever it is built from: one built from a checkout

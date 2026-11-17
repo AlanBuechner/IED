@@ -177,6 +177,38 @@ class IedSolutionTests(WorkspaceTest):
 		code, out = self.nuke("clean")
 		self.assertNotIn("IED solution refreshed", out, "nothing changed, nothing said")
 
+	def test_a_hand_edited_solution_that_misplaces_projects_is_said_on_every_command(self):
+		"""A solution edited by hand is kept, so a project added after it shows in no folder: every command says which,
+		not only with -v, until the solution is deleted and written again. A hand edit that misplaces nothing stays quiet."""
+		self.files({"nuke.toml": "[workspace]\nname = \"Game\"\ntoolchain = \"1.0.0\"\n",
+			"Plugins/Wind/nuke.toml": "[project]\nkind = \"module\"\ngroup = \"Plugins\"\n", "Game/nuke.toml": "[project]\n"})
+		code, out = self.nuke("init", "--ied")
+		self.assertEqual(code, 0, out)
+		with open(self.path("Game.iedsln"), "a", encoding="utf-8") as f:
+			f.write(" ")
+		code, out = self.nuke("clean")
+		self.assertEqual(code, 0, out)
+		self.assertNotIn("warning", out, "the hand edit places every project where its manifest says")
+		self.files({"Plugins/Wind/Editor/nuke.toml": "[project]\nname = \"WindEditor\"\nkind = \"module\"\ngroup = \"Plugins/Editor\"\n",
+			"Plugins/Foliage/nuke.toml": "[project]\nkind = \"module\"\ngroup = \"Plugins\"\n", "Tools/nuke.toml": "[project]\nkind = \"custom\"\n"})
+		for _ in range(2):
+			code, out = self.nuke("clean")
+			self.assertEqual(code, 0, out)
+			self.assertIn("warning: Game.iedsln was edited by hand since `nuke init --ied` wrote it", out)
+			self.assertIn("2 project(s) show outside the folders their nuke.toml `group` names (Foliage, WindEditor)", out,
+				"Tools names no group: anywhere is its place")
+		self.assertNotIn("Foliage", read(self.path("Game.iedsln")), "the hand edit stays")
+		code, out = self.nuke("init", "--ied")
+		self.assertEqual(1, out.count("Game.iedsln was"), "one warning, not the general one too")
+		self.assertIn("delete it and run `nuke init --ied`", out)
+		os.remove(self.path("Game.iedsln"))
+		code, out = self.nuke("init", "--ied")
+		self.assertNotIn("warning", out)
+		code, out = self.nuke("clean")
+		self.assertNotIn("warning", out)
+		self.assertEqual([{"name": "Plugins", "projects": ["Foliage", "Wind"], "groups": [{"name": "Editor", "projects": ["WindEditor"]}]}],
+			self.solution()["groups"])
+
 	def test_a_command_writes_no_solution_nuke_does_not_make(self):
 		self.files({"nuke.toml": "[workspace]\nname = \"Game\"\ntoolchain = \"1.0.0\"\n\n[project]\nname = \"Game\"\n", "Game.iedsln": "{\"mine\": true}"})
 		code, out = self.nuke("clean")

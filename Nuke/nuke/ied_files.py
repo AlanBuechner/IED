@@ -173,6 +173,33 @@ def groups(projects, items=()):
 	return written(root)
 
 
+def folders_of(groups, path=""):
+	"""Project name -> the solution folder it shows in ("Plugins/Editor"), from a solution's `groups`."""
+	found = {}
+	for group in groups if isinstance(groups, list) else []:
+		if not isinstance(group, dict):
+			continue
+		folder = "/".join(part for part in (path, str(group.get("name") or "")) if part)
+		for name in group.get("projects") or []:
+			found.setdefault(str(name), folder)
+		for name, inner in folders_of(group.get("groups"), folder).items():
+			found.setdefault(name, inner)
+	return found
+
+
+def misplaced(text, body):
+	"""The projects a solution kept as edited by hand (`text`) shows outside the folder their manifests' `group` names -
+	in another folder or in none - where `body`, the solution Nuke would write, puts them; by name. A project whose
+	manifest names no group may sit anywhere, and a solution that is no JSON says nothing (IED says it cannot load it)."""
+	try:
+		kept = json.loads(text)
+	except ValueError:
+		return []
+	shown = {name.lower(): folder for name, folder in folders_of(kept.get("groups") if isinstance(kept, dict) else None).items()}
+	wanted = folders_of(body.get("groups"))
+	return sorted((name for name, folder in wanted.items() if shown.get(name.lower()) != folder), key=str.lower)
+
+
 def package_items(workspace, specs):
 	"""(group, workspace-relative manifest) of every package manifest that is no project's own - a folder above projects
 	whose nuke.toml has [package] alone (Claymore's Core/nuke.toml, an installed Renderer/nuke.toml) - for the solution
@@ -401,18 +428,24 @@ def refresh(workspace, store, log):
 	except NukeError as error:
 		log.detail(f"IED solution not refreshed: {error}")
 		return 0
-	changed = generate(workspace, toolchain, _Quiet(log))
+	changed = generate(workspace, toolchain, log, quiet=True)
 	if changed:
 		log.note(f"IED solution refreshed: {changed} file(s) written or removed to match the manifests")
 	return changed
 
 
-def generate(workspace, toolchain, log):
-	"""Writes the solution and project files; returns the number of files written or removed."""
+def generate(workspace, toolchain, log, quiet=False):
+	"""Writes the solution and project files; returns the number of files written or removed. `quiet` (the refresh every
+	command makes) turns its warnings into details - all but a solution kept as edited by hand that shows projects
+	outside the folders their manifests name, which no later command would put right."""
+	loud, log = log, (_Quiet(log) if quiet else log)
 	generated = Generated(workspace)
 	plugin = plugin_dir(toolchain) if toolchain else None
 	plugins = plugin_projects(workspace)
-	changed = int(generated.write(solution_path(workspace), _text(solution(workspace, plugin, plugins))))
+	body = solution(workspace, plugin, plugins)
+	changed = int(generated.write(solution_path(workspace), _text(body)))
+	solution_key = _relative(solution_path(workspace), workspace.dir)
+	stale = misplaced(fsutil.read_text(solution_path(workspace)) or "", body) if solution_key in generated.kept else []
 	wanted = set()
 	for spec in listed_projects(workspace):
 		path = project_path(workspace, spec)
@@ -429,7 +462,13 @@ def generate(workspace, toolchain, log):
 		changed += int(generated.remove(old_solution_path(workspace)))
 	generated.save()
 	for key in generated.kept:
-		log.warn(f"{key} was not written by `nuke init --ied` or was edited since; left as it is (delete it to regenerate)")
+		if key != solution_key or not stale:
+			log.warn(f"{key} was not written by `nuke init --ied` or was edited since; left as it is (delete it to regenerate)")
+	if stale:
+		names = ", ".join(stale[:5]) + (f" and {len(stale) - 5} more" if len(stale) > 5 else "")
+		loud.warn(f"{solution_key} was edited by hand since `nuke init --ied` wrote it, so Nuke no longer updates it, and "
+			f"{len(stale)} project(s) show outside the folders their nuke.toml `group` names ({names}): delete it and "
+			f"run `nuke init --ied`")
 	for entry in workspace.spec.ied_plugins:
 		if not _entry_plugin_folders(workspace, entry):
 			log.warn(f"{workspace.spec.file}: ied-plugins entry '{entry}' finds no folder with an {PLUGIN_MANIFEST}")
