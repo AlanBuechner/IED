@@ -46,7 +46,12 @@ export function effortLabel(effort, fallback) {
 // What the default stop means: "Medium, Opus 5.5's own", "High, Planning board's default", "the model's own".
 export function effortDefaultDetail(fallback) {
 	if (!fallback || !fallback.effort) return "the model's own";
-	return effortName(fallback.effort) + ", " + (fallback.use ? fallback.use + "'s default" : (fallback.model ? fallback.model + "'s own" : "the model's own"));
+	return effortName(fallback.effort) + ", " + (fallback.use ? possessive(fallback.use) + " default" : (fallback.model ? possessive(fallback.model) + " own" : "the model's own"));
+}
+
+// A name as an owner: "Planning board's", "Chats'" (never "Chats's").
+export function possessive(name) {
+	return /s$/i.test(name) ? name + "'" : name + "'s";
 }
 
 // The efforts a model profile (ai.models' entry) takes: those its `efforts` lists (a Claude model's, as the CLI says),
@@ -355,7 +360,7 @@ export class ChatModel {
 }
 
 function summaryOf(data) {
-	const keys = ["chatId", "wsId", "title", "section", "mode", "permission", "group", "effort", "pinnedModel", "endless", "state", "stateReason", "turnCount", "updatedMs", "tasksDone", "tasksTotal", "approvalsWaiting",
+	const keys = ["chatId", "wsId", "title", "section", "use", "mode", "permission", "group", "effort", "pinnedModel", "endless", "state", "stateReason", "turnCount", "updatedMs", "tasksDone", "tasksTotal", "approvalsWaiting",
 		"backgroundRunning", "agent", "parentChatId", "owes", "awaits"];
 	const summary = {};
 	for (const key of keys) if (data[key] !== undefined) summary[key] = data[key];

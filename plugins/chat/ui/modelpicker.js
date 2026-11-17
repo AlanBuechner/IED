@@ -10,7 +10,7 @@
 // Enter picks, Esc closes; a phone shows a bottom sheet.
 
 import { h, icon } from "/ui-kit/dom.js";
-import { EFFORTS, effortDefaultDetail, effortStops, effortsOf } from "./chatmodel.js";
+import { EFFORTS, effortDefaultDetail, effortStops, effortsOf, possessive } from "./chatmodel.js";
 import { catalogEfforts, familyName, follows, runsOf, versionsOf } from "./claudecatalog.js";
 
 const PHONE = "(max-width: 719px)";
@@ -134,11 +134,11 @@ export function showModelPicker(at, choices, current, pick, setEffort) {
 	const byUse = use && use.model && choices.models.some((m) => m.name === use.model);
 	const defaultRow = h("button.chat-picker-row.grp" + (current.model ? "" : ".on"), {
 		type: "button", "aria-pressed": current.model ? "false" : "true", dataset: { default: "1", now },
-		title: byUse ? use.title + "'s default model (Settings > AI > Defaults): " + label(use.model)
+		title: byUse ? possessive(use.title) + " default model (Settings > AI > Defaults): " + label(use.model)
 			: "The default chain (ai.defaultModel): " + (now ? label(now) + " now" : "no model") + "; with Claude it steps down to lighter models while the plan runs ahead of its pace",
 		on: { click: () => chosen({ model: "" }) },
 	}, icon(current.model ? "layers" : "check"), h("span.grp-text", null, h("span.name", null, "Default"),
-		h("span.sub", null, byUse ? label(use.model) + ", " + use.title + "'s default" : now ? "now " + label(now) : "no model yet")));
+		h("span.sub", null, byUse ? label(use.model) + ", " + possessive(use.title) + " default" : now ? "now " + label(now) : "no model yet")));
 	const list = h("div.chat-picker-col", { role: "group", "aria-label": "Models" }, defaultRow, h("div.chat-picker-head", null, "Models"),
 		...modelRows(choices.models, current, chosen));
 	const popup = h("div.popup.chat-picker" + (sheet ? ".sheet" : ""), { role: "dialog", "aria-label": "Run this chat on", on: { keydown: (event) => key(event, popup, close) } },
@@ -170,7 +170,7 @@ function modelRows(models, current, chosen) {
 			rows.push(...items);
 			continue;
 		}
-		rows.push(...fold(family.name, main.length, items, open, "Show or fold " + family.name + "'s models", ""));
+		rows.push(...fold(family.name, main.length, items, open, "Show or fold " + possessive(family.name) + " models", ""));
 	}
 	return rows;
 }

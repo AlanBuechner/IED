@@ -85,21 +85,21 @@ export class DefaultsPage {
 		const chosen = typeof model.value === "string" ? model.value : "";
 		const runs = chosen || chainNow || "";
 		const profile = choices.models.find((m) => m.name === runs);
-		const modelSelect = h("select.input-field", { "aria-label": use.title + " model", dataset: { key: use.model }, on: { change: (event) => this.write(use.model, event.target.value) } },
+		const modelSelect = h("select.input-field", { id: "set-default-" + use.model, "aria-label": use.title + " model", dataset: { key: use.model }, on: { change: (event) => this.write(use.model, event.target.value) } },
 			h("option", { value: "" }, emptyModel),
 			...this.modelOptions(choices, chosen));
 		modelSelect.value = chosen;
-		const parts = [h("label.set-default-field", null, h("span", null, "Model"), modelSelect, this.source(use.model, model))];
+		const parts = [this.field("Model", use.model, model, modelSelect)];
 		if (effort) {
 			const own = profile && profile.defaultEffort ? effortName(profile.defaultEffort) : "";
 			const takes = profile ? profile.efforts : EFFORTS.map(([id]) => id);
 			const value = typeof effort.value === "string" ? effort.value : "";
 			const levels = EFFORTS.filter(([id]) => takes.includes(id) || id === value);
-			const effortSelect = h("select.input-field", { "aria-label": use.title + " effort", dataset: { key: use.effort }, on: { change: (event) => this.write(use.effort, event.target.value) } },
+			const effortSelect = h("select.input-field", { id: "set-default-" + use.effort, "aria-label": use.title + " effort", dataset: { key: use.effort }, on: { change: (event) => this.write(use.effort, event.target.value) } },
 				h("option", { value: "" }, own ? "The model's own (" + own + ")" : "The model's own"),
 				...levels.map(([id, name]) => h("option", { value: id }, takes.includes(id) ? name : name + " (" + (profile ? profile.label : "the model") + " does not take it)")));
 			effortSelect.value = value;
-			parts.push(h("label.set-default-field", null, h("span", null, "Effort"), effortSelect, this.source(use.effort, effort)));
+			parts.push(this.field("Effort", use.effort, effort, effortSelect));
 		}
 		return h("div.set-model.set-default", { dataset: { use: use.id } },
 			h("div.set-model-head", null, h("b", null, use.title), h("span.grow"), h("span.mono.muted", null, use.model + (use.effort ? ", " + use.effort : ""))),
@@ -116,6 +116,14 @@ export class DefaultsPage {
 		if (versions.length) out.push(h("optgroup", { label: "Claude versions" }, ...versions.map(option)));
 		if (chosen && !choices.models.some((m) => m.name === chosen)) out.push(h("option", { value: chosen }, chosen + " (not a model here)"));
 		return out;
+	}
+
+	// A choice: its name with where its value comes from (or Reset) on the line above its select, a line as tall with
+	// neither, so the selects line up in a card's columns and from card to card whichever tier sets them.
+	field(name, key, value, select) {
+		return h("div.set-default-field", null,
+			h("div.set-default-label", null, h("label", { for: select.id }, name), h("span.grow"), this.source(key, value)),
+			select);
 	}
 
 	// Where the value in effect comes from, and Reset when the tier being edited sets it.

@@ -414,12 +414,16 @@ button.chat-sec-row:hover { background: var(--veil); color: var(--text-0); }
 .set-model-facts { display: flex; gap: var(--space-5); flex-wrap: wrap; color: var(--text-1); }
 .set-page h2.set-sub { font-size: var(--font-size-ui); font-weight: var(--font-weight-semibold); color: var(--text-0); margin: var(--space-6) 0 var(--space-3); }
 .set-claude-models { display: grid; gap: var(--space-4); }
-.set-defaults { display: grid; gap: var(--space-4); }
-.set-default-fields { display: flex; gap: var(--space-5); flex-wrap: wrap; align-items: flex-end; }
-.set-default-field { display: grid; gap: var(--space-2); min-width: 0; flex: 1 1 220px; max-width: 360px; }
-.set-default-field > span:first-child { color: var(--text-1); }
+.set-defaults { display: grid; gap: var(--space-4); max-width: 980px; }
+/* Model and Effort in two fixed columns, top-aligned: a choice's source or Reset sits on its name's line (as tall with
+   neither), so the selects line up in a card and from card to card. */
+.set-default-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 360px)); gap: var(--space-3) var(--space-5); align-items: start; }
+.set-default-field { display: grid; gap: var(--space-1); min-width: 0; }
+.set-default-label { display: flex; align-items: center; gap: var(--space-3); min-height: var(--input-h); color: var(--text-1); }
+.set-default-label .grow { flex: 1; }
 .set-default-field select { width: 100%; }
-.set-default-source, .set-default-reset { justify-self: start; }
+.set-default-source { font-size: var(--font-size-xs); color: var(--text-2); }
+.set-default-reset { margin-right: calc(-1 * var(--space-3)); }
 .set-claude-models > p { margin: 0; }
 .set-claude-versions { border: var(--border-width) solid var(--border-0); border-radius: var(--radius-3); padding: var(--space-3) var(--space-5); font-size: var(--font-size-sm); }
 .set-claude-versions > summary { cursor: pointer; color: var(--text-0); }
@@ -517,6 +521,7 @@ button.chat-sec-row:hover { background: var(--veil); color: var(--text-0); }
 .claude-hover-foot { color: var(--text-2); font-size: var(--font-size-xs); }
 
 @media (max-width: 719px) {
+	.set-default-fields { grid-template-columns: minmax(0, 1fr); }
 	.claude-windows { grid-template-columns: 1fr auto auto; grid-auto-flow: row dense; }
 	.claude-window .claude-bar { grid-column: 1 / -1; }
 	.claude-window .muted { grid-column: 1 / -1; margin-bottom: var(--space-3); }

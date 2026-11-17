@@ -103,6 +103,10 @@ test("model menu: what the default effort is and whose, and a use's default mode
 	assertEqual([document.querySelector(".chat-picker .chat-picker-effort").dataset.model, document.querySelector(".chat-picker .chat-effort-value").textContent],
 		["claude-fable", "Default (High, Planning board's default)"], "a chat not sent yet: its use's model and effort, as the settings have them");
 	closeDraft();
+	const chats = choicesFrom(Object.assign({ "ai.chats.model": { value: "claude-opus" } }, values), [{ role: "primary", now: "claude-opus" }], catalog, uses);
+	const closeChat = showModelPicker(at, chats, { model: "", effort: "", now: "claude-opus", use: "chat", defaultEffort: "" }, () => {}, () => {});
+	assertEqual(document.querySelector(".chat-picker .chat-picker-row.grp .sub").textContent, "Opus 5.5, Chats' default", "a use named in the plural owns it plainly");
+	closeChat();
 	at.remove();
 });
 

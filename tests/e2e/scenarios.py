@@ -2982,10 +2982,30 @@ def ai_defaults_by_use(run):
 		page.wait_for_selector(".set-default[data-use='chat'] .set-default-reset")
 		values = run.request("settings.get", {"wsId": page.evaluate("ied_shell.wsId")})["values"]
 		check(values["ai.chats.effort"] == {"value": "high", "source": "app"}, "written to the User tier: %s" % values["ai.chats.effort"])
+		if not run.phone:
+			# Model and Effort in two columns that line up in a card and from card to card, a Reset on its choice's
+			# name line or not (owner, 2026-11-16: the Reset under one select pushed the other out of line).
+			fields = page.eval_on_selector_all(".set-default .set-default-field select", "els => els.map(e => [e.dataset.key, Math.round(e.getBoundingClientRect().left), Math.round(e.getBoundingClientRect().top)])")
+			columns = {}
+			for key, left, _ in fields:
+				columns.setdefault("effort" if key.endswith("effort") else "model", set()).add(left)
+			check(sorted(columns) == ["effort", "model"] and all(len(lefts) == 1 for lefts in columns.values()), "one column for Model, one for Effort: %r" % fields)
+			tops = dict((key, top) for key, _, top in fields)
+			check(tops["ai.chats.model"] == tops["ai.chats.effort"] and tops["board.ai.model"] == tops["board.ai.effort"], "a card's selects on one line: %r" % tops)
 		run.shot("defaults")
 		page.click(".settings-overlay-close")
 		run.wait_text(".chat-selectors .chat-model-dd .chat-dd-effort", "High (Chats)")
 		run.shot("use-effort")
+		# A board's chat: its Model menu's Default is the Planning board's default model (owner, 2026-11-16: it said the
+		# Chats' one, the summary having dropped what the chat is for).
+		run.request("settings.set", {"tier": "app", "key": "board.ai.model", "value": "claude-fable"})
+		run.request("chat.set", {"chatId": run.chat_id, "use": "board"})
+		run.wait_text(".chat-selectors .chat-model-dd > span:first-child", "Fable 5.2")
+		page.click(".chat-selectors .chat-model-dd")
+		run.wait_text(".chat-picker .chat-picker-row.grp .sub", "Fable 5.2, Planning board's default")
+		run.shot("board-default")
+		page.keyboard.press("Escape")
+		run.request("chat.set", {"chatId": run.chat_id, "use": "chat"})
 		if not run.phone:
 			# A chat not sent yet has no snapshot: it names what it will start on from the Chats use's settings.
 			run.request("settings.set", {"tier": "app", "key": "ai.chats.model", "value": "claude-fable"})
@@ -2995,7 +3015,7 @@ def ai_defaults_by_use(run):
 			run.wait_text(draft + " .chat-dd-effort", "High (Chats)")
 			run.shot("new-chat")
 	finally:
-		for key in ("ai.models", "ai.defaultModel", "ai.chats.model", "ai.chats.effort"):
+		for key in ("ai.models", "ai.defaultModel", "ai.chats.model", "ai.chats.effort", "board.ai.model"):
 			run.request("settings.reset", {"tier": "app", "key": key})
 
 

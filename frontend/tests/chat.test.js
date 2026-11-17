@@ -2,7 +2,7 @@
 // segments, tool states and what the chat waits on; the list of chats; and the small facts the views show.
 
 import { test, assertEqual } from "./harness.js";
-import { ChatList, ChatModel, MODE_CHOICES, ago, argsLine, chatLook, compact, contextBar, diffRows, duration, effortDefaultDetail, effortLabel, effortStops, effortsOf, keptFor, modeChange, modeChoice, tokensPerSecond } from "/plugins/ied.chat/ui/chatmodel.js";
+import { ChatList, ChatModel, MODE_CHOICES, ago, argsLine, chatLook, compact, contextBar, diffRows, duration, effortDefaultDetail, effortLabel, effortStops, effortsOf, keptFor, modeChange, modeChoice, possessive, tokensPerSecond } from "/plugins/ied.chat/ui/chatmodel.js";
 import { chatBadge, chatStatusText } from "/plugins/ied.chat/ui/index.js";
 import { CodeColors } from "/plugins/ied.chat/ui/codecolors.js";
 
@@ -169,6 +169,7 @@ test("chat: the composer's effort - the chat's pick, else what the default is an
 	assertEqual([effortLabel("low", own), effortLabel("", own), effortLabel("", board), effortLabel("", { effort: "", model: "qwen" }), effortLabel("", null)],
 		["Low", "Medium (default)", "High (Planning board)", "Default", "Default"], "the model's own named; its use's by the use; no one says: Default");
 	assertEqual([effortDefaultDetail(own), effortDefaultDetail(board), effortDefaultDetail(null)], ["Medium, Opus 5.5's own", "High, Planning board's default", "the model's own"]);
+	assertEqual([effortDefaultDetail({ effort: "low", use: "Chats" }), possessive("Profiler questions"), possessive("Claude")], ["Low, Chats' default", "Profiler questions'", "Claude's"], "never \"Chats's\"");
 	const all = ["low", "medium", "high", "xhigh", "max"];
 	assertEqual(effortStops("", all, own).map((s) => [s.value, s.label, s.detail]), [["", "Default", "Medium, Opus 5.5's own"], ["low", "Low", ""], ["medium", "Medium", ""], ["high", "High", ""], ["xhigh", "Extra high", ""], ["max", "Max", ""]],
 		"the default first, saying what it is");
@@ -177,8 +178,9 @@ test("chat: the composer's effort - the chat's pick, else what the default is an
 	assertEqual(effortStops("max", ["low", "high"], null).map((s) => [s.value, s.detail]), [["", "the model's own"], ["low", ""], ["high", ""], ["max", "this model does not take it"]], "the chat's pick kept, said to be one it does not take");
 	assertEqual([effortsOf({ provider: "claude-code" }), effortsOf({ endpoint: "http://q/v1", effort: { low: {}, max: { a: 1 } } }), effortsOf({ endpoint: "http://q/v1", effort: {} })], [all, ["low", "max"], []], "a profile's mapping names what it takes");
 	const model = new ChatModel();
-	model.snapshot(Object.assign(snapshot(), { effort: "low", defaultEffort: "high" }));
+	model.snapshot(Object.assign(snapshot(), { effort: "low", defaultEffort: "high", use: "board" }));
 	assertEqual([model.summary.effort, model.defaultEffort], ["low", "high"], "the use's default as the snapshot says it");
+	assertEqual(model.summary.use, "board", "the summary keeps what the chat is for: its Model menu's Default is its use's");
 	const summaryNow = Object.assign({}, model.summary, { state: "idle" });
 	model.event("chat.changed", Object.assign({}, summaryNow, { model: "other", defaultEffort: "max" }));
 	assertEqual([model.model === "other", model.defaultEffort], [false, "high"], "a chat.changed that changes no choice: a turn's end keeps what it ran on");
