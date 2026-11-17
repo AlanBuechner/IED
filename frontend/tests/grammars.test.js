@@ -39,3 +39,15 @@ test("grammars: a C4 annotation's opening [ is a bracket like its ], only the na
 	const lambda = tokenize("[](int i) -> int { return i; }");
 	assertEqual(lambda[0], ["[]", typeOf(operator, "]")], "a line opening on a lambda's []: brackets, no annotation");
 });
+
+test("grammars: C4's modifiers the parser knows by their text read as keywords, as static and virtual do", async () => {
+	const tokenize = await grammarLanguage("c4", "grammars/c4.monarch.json");
+	const method = tokenize("public inline float Half() const noexcept { return side / 2; }");
+	assertEqual(["public", "inline", "const", "noexcept"].map((word) => typeOf(method, word)), ["keyword.c4", "keyword.c4", "keyword.c4", "keyword.c4"], JSON.stringify(method));
+	const type = tokenize("abstract class Shape");
+	assertEqual([typeOf(type, "abstract"), typeOf(type, "Shape")], ["keyword.c4", "identifier.c4"]);
+	const sealed = tokenize("final class Square");
+	assertEqual(typeOf(sealed, "final"), "keyword.c4");
+	const operators = tokenize("alignof(T) + dynamic_cast<B*>(p) + const_cast<A*>(q)");
+	assertEqual(["alignof", "dynamic_cast", "const_cast"].map((word) => typeOf(operators, word)), ["keyword.c4", "keyword.c4", "keyword.c4"], JSON.stringify(operators));
+});

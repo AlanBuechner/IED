@@ -71,6 +71,7 @@ namespace Scripting
 			lexer.NextCompoundToken(); // recovery
 			return;
 		}
+		m_KindToken = kindToken;
 		lexer.NextCompoundToken();
 
 		// 3. Path string literal.
@@ -163,14 +164,17 @@ namespace Scripting
 					def.name = first;
 					def.value = value;
 					m_Defines.Push(def);
+					m_DirectiveTokens.Push(t);
 				}
 				else if (directive == "include_dir")
 				{
 					m_IncludeDirs.Push(first);
+					m_DirectiveTokens.Push(t);
 				}
 				else if (directive == "lib")
 				{
 					m_Libraries.Push(first);
+					m_DirectiveTokens.Push(t);
 				}
 				else
 				{

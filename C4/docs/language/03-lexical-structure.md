@@ -55,10 +55,14 @@ These are ordinary identifiers that carry meaning only in specific positions:
 | `typename`, `class` | template parameter | Implemented |
 | `source`, `define`, `include_dir`, `lib` | `extern` interop blocks | Implemented (see [13-interop](13-interop.md)) |
 | `abstract`, `final` | before a class kind, and as method modifiers | Implemented (see [05-objects](05-objects.md#59-virtual-methods)) |
+| `inline` | function modifier | Implemented (see [07-functions](07-functions-and-lambdas.md#71-function-declarations)) |
 | `noexcept` | trailing function qualifier | Implemented (see [07-functions](07-functions-and-lambdas.md#71-function-declarations)) |
 | `volatile`, `thread_local` | variable modifiers | Implemented (see [04-types](04-types.md#413-storage-modifiers-volatile-and-thread_local)) |
 
 `concurrent` is not a C4 modifier: writing it is the error `'concurrent' is not a C4 modifier` (D-29).
+
+C4LSP's semantic tokens color each of these as a keyword where it carries its meaning (a root `include` as a
+directive), and as the identifier it is anywhere else (a local named `final` reads as a variable).
 
 ## 3.4 Operators and punctuation
 

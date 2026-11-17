@@ -32,6 +32,7 @@ namespace Scripting
 		// --- Getters ---
 		const Core::String& Language() const { return m_Language; }
 		Kind GetKind() const { return m_Kind; }
+		const Token& GetKindToken() const { return m_KindToken; }
 		bool IsInclude() const { return m_Kind == Kind::Include; }
 		bool IsSource() const { return m_Kind == Kind::Source; }
 		const Core::String& FilePath() const { return m_PathToken.GetText(); }
@@ -39,6 +40,8 @@ namespace Scripting
 		const Core::Vector<Define>& Defines() const { return m_Defines; }
 		const Core::Vector<Core::String>& IncludeDirs() const { return m_IncludeDirs; }
 		const Core::Vector<Core::String>& Libraries() const { return m_Libraries; }
+		/// The config block's directive names as written (`define`, `include_dir`, `lib`).
+		const Core::Vector<Token>& GetDirectiveTokens() const { return m_DirectiveTokens; }
 
 		/// Factory: peeks for the `extern` keyword, creates a Ref<ExternDeclarationNode>,
 		/// and calls member ParseBody. Returns an empty Ref on failure without consuming
@@ -57,9 +60,11 @@ namespace Scripting
 	private:
 		Core::String m_Language; // "c" or "c++"
 		Kind m_Kind = Kind::Include;
+		Token m_KindToken; // `include` or `source`
 		Token m_PathToken; // path string token (content without quotes)
 		Core::Vector<Define> m_Defines;
 		Core::Vector<Core::String> m_IncludeDirs;
 		Core::Vector<Core::String> m_Libraries;
+		Core::Vector<Token> m_DirectiveTokens;
 	};
 }

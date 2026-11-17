@@ -67,6 +67,12 @@ namespace Testing
 		TEST_FUNC(Lsp.Features.SemanticTokens)
 		void TestAccessModifiersAndQualifiersAreKeywordKind();
 
+		// BUG-464: modifiers the parser commits by their text (`inline`, `abstract`, `final`, `noexcept`, `volatile`,
+		// `thread_local`, `packed`, extern's `source` and its block's `define` / `include_dir` / `lib`, `sizeof` and
+		// the casts) are keywords where they carry that meaning; a local named `final` stays a variable.
+		TEST_FUNC(Lsp.Features.SemanticTokens)
+		void TestContextualModifiersAreKeywordKind();
+
 		TEST_FUNC(Lsp.Features.SemanticTokens)
 		void TestNumberLiteralIsNumberKind();
 

@@ -35,7 +35,9 @@ namespace Scripting
 		const Token& GetAccessModifierToken() const { return m_AccessModifierToken; }
 
 		bool IsAbstract() const { return m_IsAbstract; }
+		const Token& GetAbstractToken() const { return m_AbstractToken; }
 		bool IsFinal() const { return m_IsFinal; }
+		const Token& GetFinalToken() const { return m_FinalToken; }
 		ObjectKind Kind() const { return m_Kind; }
 		const Token& GetObjectKindToken() const { return m_ObjectKindToken; }
 

@@ -10,6 +10,7 @@
 #include "Parser/Nodes/Declarations/EnumDefinitionNode.h"
 #include "Parser/Nodes/Declarations/UnionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/AliasDefinitionNode.h"
+#include "Parser/Nodes/Declarations/ExternDeclarationNode.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
 #include "Parser/Nodes/Declarations/ParameterNode.h"
@@ -19,7 +20,9 @@
 #include "Parser/Nodes/Declarations/SwizzleViewNode.h"
 #include "Parser/Nodes/Declarations/TemplateDefinitionNode.h"
 #include "Parser/Nodes/Declarations/TemplateParameterNode.h"
+#include "Parser/Nodes/Expressions/CastExpressionNode.h"
 #include "Parser/Nodes/Expressions/FunctionCallNode.h"
+#include "Parser/Nodes/Expressions/TypeOfExpressionNode.h"
 #include "Parser/Nodes/Expressions/IdentifierExpressionNode.h"
 #include "Parser/Nodes/Expressions/MemberAccessNode.h"
 #include "Parser/Nodes/Expressions/StaticAccessNode.h"
@@ -69,6 +72,14 @@ namespace C4LSP::Features::TokenWalk
 		return static_cast<const Scripting::FunctionCallNode*>(path[path.Count() - 2])->GetCallee().Get() == &node;
 	}
 
+	/// A modifier the parser commits by its text (`inline`, `final`, `volatile`, ...): the lexer gives it as an identifier,
+	/// so it reads as a keyword only when its node records it. A modifier the declaration does not have is an unset token,
+	/// which RecordOffset skips.
+	void RecordContextualKeyword(Ctx& ctx, const Scripting::Token& token)
+	{
+		RecordOffset(ctx, token.GetStartLocation(), TokInfo{ K(SemanticTokenKind::Keyword), None });
+	}
+
 	// --- AST walk -----------------------------------------------------------
 	void Walk(const Scripting::AstNode& node, Ctx& ctx, const Core::Vector<const Scripting::AstNode*>& pathIn, int objectDepth, bool directMember)
 	{
@@ -89,6 +100,8 @@ namespace C4LSP::Features::TokenWalk
 		}
 		case Scripting::NodeType::ObjectDefinition: {
 			const auto& obj = static_cast<const Scripting::ObjectDefinitionNode&>(node);
+			RecordContextualKeyword(ctx, obj.GetAbstractToken());
+			RecordContextualKeyword(ctx, obj.GetFinalToken());
 			TokInfo info{ ObjectKindToToken(obj.Kind()), SemanticTokenModifiers::Definition };
 			RecordOffset(ctx, obj.GetNameToken().GetStartLocation(), info);
 			RecordName(ctx, obj.GetNameToken().GetStartLocation(), obj.GetNameToken().GetText(), info);
@@ -149,6 +162,19 @@ namespace C4LSP::Features::TokenWalk
 			RecordName(ctx, al.GetNameToken().GetStartLocation(), al.GetNameToken().GetText(), info);
 			break;
 		}
+		case Scripting::NodeType::CastExpression:
+			RecordContextualKeyword(ctx, static_cast<const Scripting::CastExpressionNode&>(node).GetCastKeywordToken());
+			break;
+		case Scripting::NodeType::TypeOfExpression:
+			RecordContextualKeyword(ctx, static_cast<const Scripting::TypeOfExpressionNode&>(node).GetKeywordToken());
+			break;
+		case Scripting::NodeType::ExternDeclaration: {
+			const auto& ext = static_cast<const Scripting::ExternDeclarationNode&>(node);
+			RecordContextualKeyword(ctx, ext.GetKindToken());
+			for (const Scripting::Token& directive : ext.GetDirectiveTokens())
+				RecordContextualKeyword(ctx, directive);
+			break;
+		}
 		case Scripting::NodeType::TemplateDefinition: {
 			const auto& tpl = static_cast<const Scripting::TemplateDefinitionNode&>(node);
 			for (uint32 pi = 0; pi < tpl.ParameterCount(); ++pi)
@@ -173,6 +199,8 @@ namespace C4LSP::Features::TokenWalk
 		}
 		case Scripting::NodeType::FunctionDefinition: {
 			const auto& fn = static_cast<const Scripting::FunctionDefinitionNode&>(node);
+			for (const Scripting::Token* modifier : { &fn.GetInlineToken(), &fn.GetFinalToken(), &fn.GetAbstractToken(), &fn.GetNoexceptToken() })
+				RecordContextualKeyword(ctx, *modifier);
 			if (fn.GetName())
 			{
 				const auto& qn = *fn.GetName();
@@ -226,6 +254,8 @@ namespace C4LSP::Features::TokenWalk
 		}
 		case Scripting::NodeType::VariableDefinition: {
 			const auto& var = static_cast<const Scripting::VariableDefinitionNode&>(node);
+			RecordContextualKeyword(ctx, var.GetVolatileToken());
+			RecordContextualKeyword(ctx, var.GetThreadLocalToken());
 			uint32 kind = directMember ? K(SemanticTokenKind::Field) : K(SemanticTokenKind::Variable);
 			uint32 mods = SemanticTokenModifiers::Definition;
 			if (var.IsStatic())
@@ -247,7 +277,9 @@ namespace C4LSP::Features::TokenWalk
 			break;
 		}
 		case Scripting::NodeType::QualType: {
-			ClassifyTypeSegments(static_cast<const Scripting::QualTypeNode&>(node), ctx, path);
+			const auto& qt = static_cast<const Scripting::QualTypeNode&>(node);
+			RecordContextualKeyword(ctx, qt.GetPackedToken());
+			ClassifyTypeSegments(qt, ctx, path);
 			break;
 		}
 		case Scripting::NodeType::AnnotationItem: {

@@ -4,8 +4,9 @@
 	"keywords": [
 		"namespace", "class", "struct", "interface", "enum", "union", "public", "private", "protected", "virtual", "override",
 		"const", "static", "extern", "alias", "template", "extends", "is", "as", "new", "delete", "this", "true", "false",
-		"null", "nullptr", "funcptr", "func", "asm", "sizeof", "static_cast", "reinterpret_cast", "volatile", "mutable",
-		"thread_local", "typedef", "using", "auto"
+		"null", "nullptr", "funcptr", "func", "asm", "sizeof", "alignof", "offsetof", "nameof", "__uuidof", "static_cast",
+		"dynamic_cast", "reinterpret_cast", "const_cast", "volatile", "mutable",
+		"thread_local", "typedef", "using", "auto", "inline", "abstract", "final", "noexcept"
 	],
 	"controlKeywords": [
 		"if", "else", "for", "while", "do", "switch", "case", "default", "break", "continue", "return", "defer", "goto",

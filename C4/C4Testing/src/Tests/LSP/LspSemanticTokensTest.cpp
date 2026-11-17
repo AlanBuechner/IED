@@ -352,6 +352,58 @@ int32 Use(Outer* p) {
 		TEST_PASSED();
 	}
 
+	void LspSemanticTokensTest::TestContextualModifiersAreKeywordKind()
+	{
+		const std::string program =
+			R"(extern "c" source "native.c" { define("FAST", "1"); include_dir("sdk"); lib("m"); }
+abstract class Shape {
+	public abstract float Area() const;
+}
+final class Square : public Shape {
+	public float side;
+	public float Area() const override { return side * side; }
+	public inline float Half() const noexcept { return side / 2; }
+}
+class Tagged {
+	public virtual int32 Id() const final { return 7; }
+}
+volatile int32 g_ticks = 0;
+thread_local int32 t_depth = 0;
+int32 main() {
+	int32 final = 1;
+	int64 size = sizeof(Square) + alignof(int64);
+	float wide = static_cast<float>(size);
+	packed float[4] lanes;
+	return final;
+}
+)";
+		auto session = Make("Modifiers.cf", program);
+		auto result = SemanticTokens::ForDocument(session, Testing::Lsp::UriFor("Modifiers.cf"));
+		const uint32 keyword = (uint32)SemanticTokenKind::Keyword;
+		const uint32 variable = (uint32)SemanticTokenKind::Variable;
+
+		TEST_ASSERT_EQ(TokenAt(result, program, "source", 1).kind, keyword);
+		TEST_ASSERT_EQ(TokenAt(result, program, "define", 1).kind, keyword);
+		TEST_ASSERT_EQ(TokenAt(result, program, "include_dir", 1).kind, keyword);
+		TEST_ASSERT_EQ(TokenAt(result, program, "lib", 1).kind, keyword);
+		TEST_ASSERT_EQ(TokenAt(result, program, "abstract", 1).kind, keyword); // abstract class
+		TEST_ASSERT_EQ(TokenAt(result, program, "abstract", 2).kind, keyword); // abstract method
+		TEST_ASSERT_EQ(TokenAt(result, program, "final", 1).kind, keyword);    // final class
+		TEST_ASSERT_EQ(TokenAt(result, program, "inline", 1).kind, keyword);
+		TEST_ASSERT_EQ(TokenAt(result, program, "noexcept", 1).kind, keyword);
+		TEST_ASSERT_EQ(TokenAt(result, program, "final", 2).kind, keyword);    // `const final` after the parameters
+		TEST_ASSERT_EQ(TokenAt(result, program, "volatile", 1).kind, keyword);
+		TEST_ASSERT_EQ(TokenAt(result, program, "thread_local", 1).kind, keyword);
+		TEST_ASSERT_EQ(TokenAt(result, program, "sizeof", 1).kind, keyword);
+		TEST_ASSERT_EQ(TokenAt(result, program, "alignof", 1).kind, keyword);
+		TEST_ASSERT_EQ(TokenAt(result, program, "static_cast", 1).kind, keyword);
+		TEST_ASSERT_EQ(TokenAt(result, program, "packed", 1).kind, keyword);   // `packed float[4]`, a SIMD value type
+
+		TEST_ASSERT_EQ(TokenAt(result, program, "final", 3).kind, variable);   // `int32 final = 1;`
+		TEST_ASSERT_EQ(TokenAt(result, program, "final", 4).kind, variable);   // `return final;`
+		TEST_PASSED();
+	}
+
 	void LspSemanticTokensTest::TestNumberLiteralIsNumberKind()
 	{
 		auto session = Make("S.cf", kFixture);
