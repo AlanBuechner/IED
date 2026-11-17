@@ -1,7 +1,7 @@
 ---
 name: board
-description: Work on the owner's planning boards (.iedboard) - read their freehand sketch, turn it into a clean diagram, convert it to and from Mermaid, change a design on request, write the plan, and build from it - with the board_* tools.
-keywords: [board, planning board, whiteboard, sketch, drawing, diagram, architecture, design, mermaid, flowchart, plan, frame, layer, recognize, clean up, tidy, layout]
+description: Work on the owner's planning boards (.iedboard) - read their freehand sketch, turn it into a clean diagram, draw architecture, data flow, timelines, state machines and memory layouts the owner can read zoomed out, convert to and from Mermaid, change a design on request, write the plan, and build from it - with the board_* tools.
+keywords: [board, planning board, whiteboard, sketch, drawing, diagram, architecture, design, mermaid, flowchart, plan, frame, layer, recognize, clean up, tidy, layout, memory layout, struct layout, timeline, sequence diagram, state machine, data flow, readable, zoom]
 ---
 
 # Planning boards
@@ -59,6 +59,68 @@ your own judgment (an ellipse made a cylinder, a note's wording).
 - A node between two others: `insert` on their connector (it makes room), or `place` with `between`.
 - Read the answer's warnings (overlaps, connectors through nodes, frame membership) and fix them in the next call.
 - `color` is the outline and ink, `fill` a tint inside; both take the palette's names.
+
+## Readable at every zoom
+
+The owner reads a board two ways: zoomed out, to see its shape and find their way, and zoomed in, to read one part.
+Draw for both.
+
+- **Check it as the owner first sees it**: `board_view` of the whole board, no `region`. A label you cannot read in
+  that picture the owner cannot read zoomed out either: shorten it, enlarge it, or move the detail into a note or `desc`.
+- **Short labels**: a node's label is its name, 1-4 words ("Asset cache", not "Caches decoded assets between frames").
+  What it does goes in its `desc` (it reaches the export and the plan) or in a note `about` it.
+- **One size per role**, set with `fontSize` and kept the same across the board: the board's title 40 (a `text` at the
+  top left), a heading over a group of frames 28, node labels 16-18 (16 is the default; 20 for the few that matter
+  most), notes and annotations 14, never below 12. Mixed sizes for one role read as noise.
+- **Frames are the map**: group with frames, each titled in 1-3 words. Zoomed out, frame titles are what the owner can
+  still read - the canvas names every frame on the screen just above it - so leave about 60 units clear above a frame
+  and nest frames at most two deep.
+- **Room**: 60-120 between nodes (120 when the connector between them has a label), 100 or more between frames. Line
+  things up (`tidy`, `align`, `distribute`) so the eye can follow rows and columns.
+- **One reading direction** per diagram - left to right for flows and pipelines, top down for layers and hierarchies -
+  with the main path straight and side paths off it. Number the steps when order matters ("1 Load", "2 Decode").
+- **Color means something**: one hue per kind, the same across the board (blue for the program's own code, green for
+  storage, orange for external systems, red for problems and hot paths), a legend note when you use more than two, and
+  `fill` only for the few elements that matter most.
+- **Connectors** carry a short label of what crosses them ("draw calls", "16 KB/frame", "owns"); leave the obvious ones
+  bare. `style: "dashed"` for asynchronous, optional or weak links.
+- **Big boards**: several diagrams side by side as frames, in reading order under headings, the overview at the top
+  left and each closer look to its right or below it, with a note at the top left saying what the board shows and
+  where to start.
+
+## Kinds of diagrams
+
+Draw the picture that answers the owner's question, and let its frame's title say what it shows ("Frame loop",
+"Transform: 48 bytes"). One level of detail per diagram: for the next level, a frame of its own beside it, named after
+what it opens up ("Renderer, inside").
+
+- **Architecture**: components as boxes, boundaries (process, thread, module, machine) as frames, stores as `cylinder`,
+  external systems and hardware APIs as `hexagon`, data and messages as `parallelogram`. Layers top down (tools and UI,
+  systems, engine core, platform) with dependencies pointing down; connectors say what crosses (calls, events, data).
+- **Data flow and pipelines**: stages left to right, with the data between them as a `parallelogram` or a connector
+  label giving its shape and size ("vertices, 32 B each"). Frames mark where it changes thread or goes to the GPU.
+- **Sequence and timelines**: a column per actor or thread (a header node with a dashed `line` down), time going down,
+  numbered arrows between columns. For timing within a frame, a horizontal timeline instead: one row per thread,
+  blocks whose widths are proportional to time (a note gives the scale: "100 units = 1 ms"), sync points as diamonds.
+- **State machines**: `round` states, connectors labeled "event / action", the start state marked with a `fill`.
+- **Memory layouts**: a row of `rect` cells edge to edge (no gap), widths proportional to bytes at one scale for the
+  whole picture - about 16 units per byte, so a cell holds its name; a field too narrow for its name gets it above it.
+  Label a cell "name: type", put its offset over it as a `text` of fontSize 12 (`0x00`, `0x08`), draw padding as
+  dashed gray cells labeled "pad", cache line (64 B) boundaries as dashed vertical `line`s, and the size and alignment
+  at the row's end ("48 B, align 16"). An array: its first cells, a "..." cell, its last. A pointer: a connector from
+  its cell to the row it points at. Compare layouts (array of structs against struct of arrays, before and after
+  reordering fields) as rows one above another at the same scale and left edge, so the difference shows. Give every
+  cell its `x`, `y`, `w` and `h`: here arithmetic beats `place`.
+- **Tables** (an archetype's component columns, a lookup table, a packet header): a frame holding rows of edge-to-edge
+  rects, the header row with a `fill`. Bit fields are memory layouts at a scale per bit.
+- **Ownership and lifetime**: a solid connector for owns, dashed for borrows or refers to, frames for arenas and
+  allocators, a note saying when each is freed.
+- **Concurrency**: a frame per thread or job, queues between them as `cylinder`s, locks and fences as diamonds,
+  connectors labeled with what is handed over.
+
+Explain as you draw: a short note `about` each surprising or important point ("8 B of padding here: reorder to save
+it"), and a summary note at the top left. Then `board_view` the whole board and each part, and tell the owner what each
+picture shows.
 
 ## Mermaid both ways
 

@@ -2409,6 +2409,44 @@ def board_context_menus(run):
 
 
 @scenario(viewports=("desktop", "phone"), targets=("real",))
+def board_readable_zoomed_out(run):
+	"""Board text at every zoom (owner, 2026-11-16: "it can be hard to read things when zoomed out and i need to zoom in to
+	much to read things"): zoomed out, labels grow as far as their boxes allow and frame titles within their band; far out
+	the frames' titles are plates over everything. Shots at 100%, 50% and 30%."""
+	page = run.open()
+	ws = page.evaluate("ied_shell.wsId")
+	path = "plans/readable-%s.iedboard" % ("phone" if run.phone else "desk")
+	made = run.request("ied.board/create", {"wsId": ws, "path": path, "title": "Engine"})
+	node = lambda ref, kind, text, x, y: {"op": "add", "ref": ref, "type": kind, "text": text, "x": x, "y": y, "w": 160, "h": 56}
+	link = lambda a, b, text: {"op": "add", "type": "connector", "from": "@" + a, "to": "@" + b, "text": text}
+	run.request("ied.board/edit", {"boardId": made["boardId"], "ops": [
+		{"op": "add", "type": "text", "text": "Engine architecture", "x": 0, "y": -120, "fontSize": 40},
+		node("ui", "rect", "Editor UI", 0, 0), node("vp", "rect", "Viewport", 0, 160),
+		node("ecs", "round", "ECS World", 420, 0), node("sim", "rect", "Simulation", 420, 160), node("rnd", "rect", "Renderer", 420, 320),
+		node("rhi", "hexagon", "RHI (DX12)", 840, 160), node("assets", "cylinder", "Asset cache", 840, 320),
+		{"op": "add", "type": "frame", "text": "Editor", "around": ["@ui", "@vp"]},
+		{"op": "add", "type": "frame", "text": "Runtime", "around": ["@ecs", "@sim", "@rnd"]},
+		{"op": "add", "type": "frame", "text": "Platform", "around": ["@rhi", "@assets"]},
+		link("ui", "ecs", "edits"), link("vp", "rnd", "draws"), link("sim", "ecs", "updates"), link("rnd", "rhi", "commands"), link("assets", "rnd", "textures"),
+		{"op": "add", "type": "note", "text": "One frame: simulate, snapshot the world, record and submit.", "x": 0, "y": 320, "w": 240, "h": 90},
+	]})
+	run.show_activity("ied.board")
+	page.evaluate("(p) => ied_shell.commands.run('ied.board.open', { path: p })", path)
+	view = ".view[data-ref='board:%s']" % path
+	page.wait_for_selector(view + " canvas.board-canvas", timeout=20000)
+	page.wait_for_function("(v) => { const b = document.querySelector(v); return b && b.boardView && b.boardView.model.loaded && b.boardView.model.all().length > 10; }", arg=view, timeout=20000)
+	for zoom in (1, 0.5, 0.3):
+		page.evaluate("""([v, z]) => { const c = document.querySelector(v).boardView.canvas; c.fit(); const box = c.model.all().reduce((b, el) => { const e = c.model.boundsOf(el);
+			return { x0: Math.min(b.x0, e.x0), y0: Math.min(b.y0, e.y0), x1: Math.max(b.x1, e.x1), y1: Math.max(b.y1, e.y1) }; }, { x0: 1e9, y0: 1e9, x1: -1e9, y1: -1e9 });
+			c.camera = { zoom: z, x: (box.x0 + box.x1) / 2 - c.width / 2 / z, y: z === 1 ? box.y0 - 40 : (box.y0 + box.y1) / 2 - c.height / 2 / z }; c.zoomedAt = 0; c.invalidateAll(); }""", [view, zoom])
+		time.sleep(0.4)
+		run.shot("zoom-%d" % round(zoom * 100))
+	deleted = run.request("ied.board/delete", {"wsId": ws, "path": path})
+	for trash_id in deleted["trashIds"]:
+		run.request("trash.purge", {"id": trash_id})
+
+
+@scenario(viewports=("desktop", "phone"), targets=("real",))
 def board_busy_chats(run):
 	"""The Boards activity shows its chats in a turn as the Chat activity does (owner, 2026-11-16: "it would be nice if the
 	planning board would show active chats like the chat tab does"): in the Boards window a board whose chat runs has the

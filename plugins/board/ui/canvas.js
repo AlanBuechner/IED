@@ -6,7 +6,7 @@
 // device pixels, so what is on the screen is the tile's pixels unscaled.
 
 import { overlaps, union, EMPTY, isEmpty } from "./geom.js";
-import { Palette, drawElement } from "./render.js";
+import { LABEL_PX, OVERVIEW_ZOOM, Palette, drawElement, drawFrameLabel, fontOf, frameLabels } from "./render.js";
 
 const TILE_PX = 512;       // a tile's side in CSS pixels (in device pixels, rounded)
 const MOST_TILES = 320;
@@ -232,7 +232,7 @@ export class BoardCanvas {
 				target.clearRect(0, 0, px, px);
 			}
 			target.setTransform(k, 0, 0, k, -t.tx * px, -t.ty * px);
-			for (const el of els) drawElement(target, this.palette, el, this.model, this.images);
+			for (const el of els) drawElement(target, this.palette, el, this.model, this.images, t.s);
 			if (target !== ctx) {
 				ctx.setTransform(1, 0, 0, 1, 0, 0);
 				ctx.globalAlpha = opacity;
@@ -241,6 +241,20 @@ export class BoardCanvas {
 			}
 		}
 		t.dirty = false;
+	}
+
+	// Zoomed out past where a frame's title fits its band (tiles of scale `s` below OVERVIEW_ZOOM leave it out), the
+	// frames' names on the screen above them (render.js frameLabels), drawn over the tiles every frame.
+	drawFrameLabels(ctx, s) {
+		if (s >= OVERVIEW_ZOOM) return;
+		const shown = new Set(this.model.layers.filter((l) => l.visible).map((l) => l.id));
+		const view = this.viewBox();
+		const frames = this.model.all().filter((el) => el.type === "frame" && shown.has(el.layer) && el.x <= view.x1 && el.x + el.w >= view.x0 && el.y <= view.y1 && el.y + el.h >= view.y0);
+		if (!frames.length) return;
+		ctx.font = fontOf(this.palette, LABEL_PX, "600");
+		const labels = frameLabels(frames, this.camera.zoom, (x, y) => this.toScreen(x, y), (text) => ctx.measureText(text).width);
+		ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+		for (const label of labels) drawFrameLabel(ctx, this.palette, label);
 	}
 
 	// Drops the tiles of a settled zoom the camera has left (powers of two stay, for zooming), then the least recently
@@ -291,6 +305,9 @@ export class BoardCanvas {
 				else ctx.drawImage(t.canvas, tx * shown - ox, ty * shown - oy, shown, shown);
 			}
 		ctx.save();
+		this.drawFrameLabels(ctx, s);
+		ctx.restore();
+		ctx.save();
 		ctx.setTransform(zd, 0, 0, zd, -ox, -oy);
 		// Elements drawn live (being moved or edited), in their layers' order and opacity.
 		if (this.hidden.size) {
@@ -299,7 +316,7 @@ export class BoardCanvas {
 				ctx.globalAlpha = layer.opacity ?? 1;
 				for (const id of this.hidden) {
 					const el = this.model.get(id);
-					if (el && el.layer === layer.id && !el._erasing) drawElement(ctx, this.palette, el, this.model, this.images);
+					if (el && el.layer === layer.id && !el._erasing) drawElement(ctx, this.palette, el, this.model, this.images, z);
 				}
 			}
 			ctx.globalAlpha = 1;

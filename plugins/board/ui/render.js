@@ -137,22 +137,124 @@ export function fontOf(palette, size, weight) {
 	return (weight || "") + " " + size + "px " + palette.font;
 }
 
-function textIn(ctx, palette, text, x, y, w, h, size, color, centered, pad) {
+// Text at every zoom (docs/32 "Readable boards"; owner, 2026-11-16: "it can be hard to read things when zoomed out and i
+// need to zoom in to much to read things"). Zoomed out, a label grows toward READABLE_PX on the screen as far as its box
+// has room, text small on the screen is drawn semibold, text too small to read is drawn as a faint bar, and a frame's
+// title grows within the band layout leaves above its members; further out the titles leave the tiles and the canvas
+// names the frames on the screen instead (frameLabels), so a board seen whole reads as its frames.
+export const READABLE_PX = 11;
+const SEMIBOLD_PX = 12;
+const GREEK_PX = 4;
+const TITLE_PX = 15;
+const TITLE_BAND = 24;            // the most a title grows in place: layout leaves 36 above a frame's members
+export const OVERVIEW_ZOOM = READABLE_PX / TITLE_BAND;   // below it a title in its band is too small to read
+
+function weightAt(size, zoom) {
+	return size * zoom < SEMIBOLD_PX ? "600" : "";
+}
+
+// The size a label is drawn at: its own, else - when that is small on the screen - larger toward READABLE_PX while the
+// text, wrapped, still fits `w` x `h`.
+export function fittedSize(ctx, palette, text, size, zoom, w, h) {
+	const want = READABLE_PX / zoom;
+	if (size >= want || w <= 0 || h <= 0) return size;
+	const fits = (s) => {
+		ctx.font = fontOf(palette, s, weightAt(s, zoom));
+		const lines = wrap(ctx, text, Math.max(s, w));
+		return lines.length * s * 1.3 <= h && lines.every((ln) => ctx.measureText(ln).width <= w);
+	};
+	if (fits(want)) return want;
+	if (!fits(size)) return size;
+	let lo = size, hi = want;
+	for (let i = 0; i < 7; i++) {
+		const mid = (lo + hi) / 2;
+		if (fits(mid)) lo = mid;
+		else hi = mid;
+	}
+	return lo;
+}
+
+// Text in a box: `fit` [w, h] the room it may grow into when zoomed out (none: its own size).
+function textIn(ctx, palette, text, x, y, w, h, size, color, centered, pad, zoom, fit) {
 	if (!text) return;
-	ctx.font = fontOf(palette, size);
+	const s = fit ? fittedSize(ctx, palette, text, size, zoom, fit[0], fit[1]) : size;
+	ctx.font = fontOf(palette, s, weightAt(s, zoom));
 	ctx.fillStyle = color;
 	ctx.textBaseline = "top";
-	const lines = wrap(ctx, text, Math.max(size, w - pad * 2));
-	const lh = size * 1.3;
+	const lines = wrap(ctx, text, Math.max(s, w - pad * 2));
+	const lh = s * 1.3;
 	let ty = centered ? y + h / 2 - (lh * lines.length) / 2 : y + pad;
+	const greek = s * zoom < GREEK_PX;
 	for (const ln of lines) {
 		const tw = ctx.measureText(ln).width;
-		ctx.fillText(ln, centered ? x + (w - tw) / 2 : x + pad, ty + size * 0.12);
+		const tx = centered ? x + (w - tw) / 2 : x + pad;
+		if (greek) {
+			ctx.globalAlpha *= 0.35;
+			ctx.fillRect(tx, ty + s * 0.3, tw, s * 0.5);
+			ctx.globalAlpha /= 0.35;
+		}
+		else ctx.fillText(ln, tx, ty + s * 0.12);
 		ty += lh;
 	}
 }
 
-function node(ctx, palette, el) {
+// A frame's title in its place: 15 units, larger when zoomed out up to the title band, never wider than the frame.
+function frameTitle(ctx, palette, el, color, zoom) {
+	if (!el.text) return;
+	let s = Math.max(TITLE_PX, Math.min(READABLE_PX / zoom, TITLE_BAND));
+	ctx.font = fontOf(palette, s, "600");
+	const room = el.w - 20;
+	const tw = ctx.measureText(el.text).width;
+	if (s > TITLE_PX && tw > room) s = Math.max(TITLE_PX, s * room / tw);
+	ctx.font = fontOf(palette, s, "600");
+	ctx.fillStyle = color;
+	ctx.textBaseline = "top";
+	ctx.fillText(el.text, el.x + 10, el.y + 8);
+}
+
+// Frame names on the screen, below OVERVIEW_ZOOM (where a title in its band is too small): each frame's title at
+// LABEL_PX, just above its top left corner, the largest frames first and none over another's - the canvas draws them
+// over the tiles every frame, as a design tool names its frames. `frames` the frames shown, `toScreen(x, y)` the
+// camera, `measure(text)` a label's text width at LABEL_PX. [{id, text, color, x, y, w, h}] in CSS pixels. Pure, for the
+// tests.
+export const LABEL_PX = 12;
+const LABEL_PAD = 4;
+export function frameLabels(frames, zoom, toScreen, measure) {
+	if (zoom >= OVERVIEW_ZOOM) return [];
+	const labels = [];
+	const sorted = frames.filter((f) => f.text && f.w * zoom >= 40).sort((a, b) => b.w * b.h - a.w * a.h || (a.id < b.id ? -1 : 1));
+	for (const f of sorted) {
+		const [sx, sy] = toScreen(f.x, f.y);
+		const room = f.w * zoom;
+		const w = Math.min(measure(f.text) + LABEL_PAD * 2, room);
+		const h = LABEL_PX + LABEL_PAD * 2 - 2;
+		const label = { id: f.id, text: f.text, color: f.color, x: sx, y: sy - h - 2, w, h };
+		if (labels.some((o) => label.x < o.x + o.w && o.x < label.x + label.w && label.y < o.y + o.h && o.y < label.y + label.h)) continue;
+		labels.push(label);
+	}
+	return labels;
+}
+
+// One frame name (frameLabels'), in CSS pixels: on the board's surface, its frame's color at its edge.
+export function drawFrameLabel(ctx, palette, label) {
+	ctx.save();
+	ctx.beginPath();
+	ctx.rect(label.x, label.y, label.w, label.h);
+	ctx.clip();
+	ctx.globalAlpha = 0.9;
+	ctx.fillStyle = palette.surface;
+	ctx.fillRect(label.x, label.y, label.w, label.h);
+	ctx.globalAlpha = 1;
+	ctx.fillStyle = label.color ? palette.color(label.color) : palette.muted;
+	ctx.fillRect(label.x, label.y, 2, label.h);
+	ctx.font = fontOf(palette, LABEL_PX, "600");
+	ctx.fillStyle = palette.ink;
+	ctx.textBaseline = "middle";
+	ctx.fillText(label.text, label.x + LABEL_PAD + 1, label.y + label.h / 2 + 0.5);
+	ctx.restore();
+}
+
+function node(ctx, palette, el, zoom) {
 	const color = palette.color(el.color);
 	const pts = el.type === "round" ? roundedOutline(el.x, el.y, el.w, el.h, 12) : el.type === "cylinder" ? null : outline(el);
 	ctx.lineWidth = el.width ?? 2;
@@ -184,12 +286,17 @@ function node(ctx, palette, el) {
 		ctx.stroke();
 	}
 	ctx.setLineDash([]);
-	const inset = el.type === "diamond" || el.type === "ellipse" ? el.w * 0.16 : 8;
-	textIn(ctx, palette, el.text, el.x + inset, el.y, el.w - inset * 2, el.h, el.fontSize ?? 16, palette.ink, true, 0);
+	const narrow = el.type === "diamond" || el.type === "ellipse";
+	const inset = narrow ? el.w * 0.16 : 8;
+	// The room a label may grow into: the box inside its outline (a diamond's and an ellipse's middle).
+	const fit = [el.w - inset * 2, narrow ? el.h * 0.62 : el.h - 8];
+	textIn(ctx, palette, el.text, el.x + inset, el.y, el.w - inset * 2, el.h, el.fontSize ?? 16, palette.ink, true, 0, zoom, fit);
 }
 
-// Draws one element. `model` gives a connector its ends; `images` loads pictures (returns an image or null).
-export function drawElement(ctx, palette, el, model, images) {
+// Draws one element. `model` gives a connector its ends; `images` loads pictures (returns an image or null); `zoom` is the
+// scale it is drawn at (text stays readable when it is small, above; below OVERVIEW_ZOOM a frame's title is the canvas's
+// frame label instead).
+export function drawElement(ctx, palette, el, model, images, zoom = 1) {
 	ctx.save();
 	ctx.globalAlpha *= el.opacity ?? 1;
 	ctx.lineCap = "round";
@@ -219,9 +326,11 @@ export function drawElement(ctx, palette, el, model, images) {
 			if (pts.length < 4) break;
 			line(ctx, el, pts, el.color ? color : palette.muted, true);
 			if (el.text) {
+				// Its size stays: a connector's bounds hold its route, not its label, so a label grown when zoomed out
+				// would be cut at the tiles' edges. Small on the screen it is semibold.
 				const size = 13;
 				const [cx, cy] = behind(pts, false, polyLength(pts) / 2);
-				ctx.font = fontOf(palette, size);
+				ctx.font = fontOf(palette, size, weightAt(size, zoom));
 				const tw = ctx.measureText(el.text).width;
 				ctx.fillStyle = palette.surface;
 				ctx.globalAlpha *= 0.9;
@@ -234,7 +343,8 @@ export function drawElement(ctx, palette, el, model, images) {
 			break;
 		}
 		case "text":
-			textIn(ctx, palette, el.text, el.x, el.y, Math.max(el.w, 4) + 100000, el.h, el.fontSize ?? 16, color, false, 0);
+			// Free text is fitted to its words: it has no room to grow (a heading is given a larger fontSize).
+			textIn(ctx, palette, el.text, el.x, el.y, Math.max(el.w, 4) + 100000, el.h, el.fontSize ?? 16, color, false, 0, zoom, null);
 			break;
 		case "note": {
 			const fill = palette.color(el.fill || "yellow");
@@ -245,7 +355,7 @@ export function drawElement(ctx, palette, el, model, images) {
 			ctx.strokeStyle = fill;
 			ctx.lineWidth = 1;
 			ctx.strokeRect(el.x, el.y, el.w, el.h);
-			textIn(ctx, palette, el.text, el.x, el.y, el.w, el.h, el.fontSize ?? 16, palette.ink, false, 10);
+			textIn(ctx, palette, el.text, el.x, el.y, el.w, el.h, el.fontSize ?? 16, palette.ink, false, 10, zoom, [el.w - 20, el.h - 20]);
 			break;
 		}
 		case "frame": {
@@ -262,10 +372,7 @@ export function drawElement(ctx, palette, el, model, images) {
 			}
 			ctx.stroke();
 			ctx.setLineDash([]);
-			ctx.font = fontOf(palette, 15, "600");
-			ctx.fillStyle = c;
-			ctx.textBaseline = "top";
-			ctx.fillText(el.text || "", el.x + 10, el.y + 8);
+			if (zoom >= OVERVIEW_ZOOM) frameTitle(ctx, palette, el, c, zoom);
 			break;
 		}
 		case "image": {
@@ -283,7 +390,7 @@ export function drawElement(ctx, palette, el, model, images) {
 			break;
 		}
 		default:
-			if (isNode(el.type)) node(ctx, palette, el);
+			if (isNode(el.type)) node(ctx, palette, el, zoom);
 	}
 	ctx.restore();
 }

@@ -366,6 +366,10 @@ class BoardChatTests(ServerTestCase):
 		self.assertTrue(view["result"]["images"][0]["path"].startswith(".ied/local/boards/views/"), view)
 		parts = self.model.requests()[-1]["body"]["messages"][-1]["content"]
 		self.assertIn("image_url", [p["type"] for p in parts], "the picture reaches the model")
+		# The board's section of the system message reaches the model whole: its skill pointer and its last rule.
+		system = self.model.requests()[0]["body"]["messages"][0]["content"]
+		self.assertIn("Read the board skill (skill_read board) before working on a board", system)
+		self.assertIn("Never delete the owner's sketch: clean work goes on a layer of its own.", system, "not cut by the section's token budget")
 		read = (await self.client.request("plugins.call", {"name": "board.query", "wsId": "w1", "args": {"wsId": "w1", "tool": "read", "args": {"board": "design/plan.iedboard"}}}))["result"]["text"]
 		self.assertIn('e1 rect "Server"', read)
 		self.assertIn("(by ai)", read, "the AI's element says so")
