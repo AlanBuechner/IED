@@ -437,6 +437,12 @@ namespace Ai
 		Serialization::DomNode args = call.m_Args.Member("args");
 		for (int64 i = 0; i < args.Count(); ++i) info.arguments.Push(Core::String(args.At(i).AsView()));
 		info.workingDirectory = Core::String((FS::Path(call.m_Ws.m_Root.View()) / IED::NormalizePath(call.m_Args.Member("cwd").AsView()).View()).View());
+		// Said plainly: Windows reports only that "the directory name is invalid", naming no folder.
+		if (!FS::IsDirectory(info.workingDirectory.CStr())) {
+			problem = Core::String("program_run: no folder ") + info.workingDirectory.View() + " to run in: cwd is a folder of " + call.m_Ws.m_Root.View() +
+				" (an ied:/ program runs in IED's checkout, so its cwd is one of ied:/ too)";
+			return result;
+		}
 		Core::String input;
 		if (call.m_Args.Member("stdin").IsValid()) {
 			FS::File file = FS::File((FS::Path(call.m_Ws.m_Root.View()) / IED::NormalizePath(call.m_Args.Member("stdin").AsView()).View()).CStr(), "rb");
@@ -638,7 +644,7 @@ namespace Ai
 		shell->m_Run = ShellRun;
 		registry.Add(shell);
 		ToolSpec* program = WorkSpec("program_run", "Run a program with arguments - no shell, so nothing needs quoting - and get its exit code, its time, CPU and peak memory, its standard output and its standard error apart (their ends); repeat runs it again for timing. For trying or timing a command-line program: the program's path in the workspace (as its build prints it), in developer mode IED's own as ied:/build/bin/... (never a full C:/ path), or a name on PATH; stdin names a file the program reads as its input. Example: program_run({\"program\": \"build/bin/Development-windows-x64/tool/tool.exe\", \"args\": [\"data/in.txt\", \"5\"]})",
-			"{\"type\": \"object\", \"properties\": {\"program\": {\"type\": \"string\", \"minLength\": 1}, \"args\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"stdin\": {\"type\": \"string\", \"description\": \"a workspace file given to the program as its standard input\"}, \"cwd\": {\"type\": \"string\", \"description\": \"workspace-relative folder; left out (or '.') for the workspace root\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 1800}, \"repeat\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 10, \"description\": \"runs, for timing: each run's time and the median\"}}, \"required\": [\"program\"], \"additionalProperties\": false}",
+			"{\"type\": \"object\", \"properties\": {\"program\": {\"type\": \"string\", \"minLength\": 1}, \"args\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"stdin\": {\"type\": \"string\", \"description\": \"a workspace file given to the program as its standard input\"}, \"cwd\": {\"type\": \"string\", \"description\": \"workspace-relative folder; left out (or '.') for the workspace root. An ied:/ program runs in IED's checkout: its cwd is a folder of ied:/\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 1800}, \"repeat\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 10, \"description\": \"runs, for timing: each run's time and the median\"}}, \"required\": [\"program\"], \"additionalProperties\": false}",
 			ToolClass::Exec, false);
 		program->m_Plan = ProgramPlan;
 		program->m_Run = ProgramRun;

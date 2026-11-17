@@ -106,6 +106,13 @@ class WorkToolTests(CodeToolCase):
 		self.assertIn("median", results["p2"], "repeated runs for timing")
 		self.assertIn("does not exist now", results["p3"], "a path that names no file: said plainly (a build may be replacing it)")
 
+	async def test_running_in_a_folder_that_is_not_there(self):
+		# Windows says only "the directory name is invalid": the tool names the folder and whose it is.
+		results = await self.results(("p1", "program_run", {"program": self.program(), "cwd": "no-such-folder"}), permission="auto")
+		self.assertIn("no folder", results["p1"], results["p1"])
+		self.assertIn("no-such-folder to run in", results["p1"], "the folder named")
+		self.assertNotIn("directory name is invalid", results["p1"], "not Windows' words")
+
 	async def test_a_task_update_before_any_task(self):
 		results = await self.results(("u1", "task_update", {"id": "t1", "status": "in_progress"}))
 		self.assertIn("the chat has no tasks yet", results["u1"], results["u1"])
