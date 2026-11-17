@@ -3,7 +3,7 @@
 Every open bug in the C4 compiler, runtime, Bedrock and tools. Add an entry when a bug is found;
 delete it when the fix lands.
 
-Next ID: **BUG-463**
+Next ID: **BUG-464**
 
 ## Rules for this file
 

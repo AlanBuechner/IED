@@ -42,6 +42,11 @@ namespace C4LSP::Server
 		/// declarations visible at the node and the enclosing type/scope context.
 		NodeResolution ResolveReference(const Scripting::AstNode& node, const Core::Vector<const Scripting::AstNode*>& path) const;
 
+		/// Whether `node` (inside `parent`, null at the root) names something where code uses it: an identifier, a member or
+		/// static access, or a qualified name with template arguments written as a value (`Box<int32>{1}`, `[Holds(Box<int32>)]`)
+		/// - not the name a function declaration declares or a type node is made of.
+		static bool IsReference(const Scripting::AstNode& node, const Scripting::AstNode* parent);
+
 		/// Resolve a bare identifier NAME at a position (no AST node available yet - e.g. completion while
 		/// typing) using the same locals-then-model resolution as an IdentifierExpression reference.
 		NodeResolution ResolveIdentifier(const std::string& name, const Core::Vector<const Scripting::AstNode*>& path) const;

@@ -7,7 +7,7 @@
 
 namespace Reflection
 {
-	enum class AnnotationArg : uint32 { None = 0, Int = 1, Float = 2, Bool = 3, String = 4 }
+	enum class AnnotationArg : uint32 { None = 0, Int = 1, Float = 2, Bool = 3, String = 4, Type = 5 }
 
 	// What a registered entity is (the runtime's reflect_KIND_* values).
 	enum class EntityKind : uint32 { Object = 14, Enum = 15, Union = 16, Variable = 17, Function = 18 }
@@ -32,8 +32,9 @@ namespace Reflection
 	}
 
 	// An annotation the compiler does not act on (D-42), such as `[Range(0, 1)]`: its name as written and its
-	// arguments, folded at compile time. Every entity handle has AnnotationCount, AnnotationAt and
-	// FindAnnotation; a missing name gives an invalid Annotation.
+	// arguments, folded at compile time - a constant, or a type it names (`[Requires(Render::MeshRenderer)]`), whose
+	// StringArg is the type's name. Every entity handle has AnnotationCount, AnnotationAt and FindAnnotation; a missing
+	// name gives an invalid Annotation.
 	class Annotation
 	{
 	public:
@@ -46,6 +47,11 @@ namespace Reflection
 		public double FloatArg(int64 i) const { return reflect_annotation_arg_float(handle, (uint32)i); }
 		public bool BoolArg(int64 i) const { return reflect_annotation_arg_int(handle, (uint32)i) != 0; }
 		public const char* StringArg(int64 i) const { return reflect_annotation_arg_string(handle, (uint32)i); }
+		// The type a Type argument names; invalid for another kind, or a type the registry does not hold.
+		public Type TypeArg(int64 i) const {
+			if (ArgKind(i) != AnnotationArg::Type) return Type(nullptr);
+			return Type(reflect_type(StringArg(i)));
+		}
 
 	private:
 		private void* handle = nullptr;

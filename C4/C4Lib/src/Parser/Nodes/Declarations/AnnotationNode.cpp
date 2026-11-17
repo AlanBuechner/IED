@@ -227,6 +227,42 @@ namespace Scripting
 		group.annotations.Push(item);
 	}
 
+	namespace
+	{
+		bool EndsArgument(TokenType type) { return type == TokenType::Comma || type == TokenType::CloseParen; }
+
+		// The argument's tokens as a type that ends the argument, read ahead and rolled back; null when they do not read as one.
+		Ref<QualTypeNode> ArgumentAsType(ParserState& state)
+		{
+			Lexer& lexer = state.GetLexer();
+			auto undo = LexerUndoScope(lexer);
+			state.GetErrorTracker().SuppressErrors();
+			Ref<QualTypeNode> type = QualTypeNode::TryParse(state);
+			const bool fits = type && !state.GetErrorTracker().SpeculationFailed() && EndsArgument(lexer.PeekCompound().GetType());
+			state.GetErrorTracker().DiscardSuppressedErrors();
+			undo.Cancel();
+			return fits ? type : nullptr;
+		}
+
+		// The argument as an expression that ends it, consumed; null, with nothing consumed, when it does not read as one.
+		Ref<AstNode> ArgumentAsExpression(ParserState& state)
+		{
+			Lexer& lexer = state.GetLexer();
+			auto undo = LexerUndoScope(lexer);
+			state.GetErrorTracker().SuppressErrors();
+			Ref<AstNode> expression = PrattParser::ParseExpression(state);
+			if (!expression || state.GetErrorTracker().SpeculationFailed() || !EndsArgument(lexer.PeekCompound().GetType()))
+			{
+				state.GetErrorTracker().DiscardSuppressedErrors();
+				undo.Cancel();
+				return nullptr;
+			}
+			state.GetErrorTracker().CommitSuppressedErrors();
+			undo.Commit();
+			return expression;
+		}
+	}
+
 	void AnnotationNode::ParseArguments(ParserState& state, AnnotationItem& item)
 	{
 		Lexer& lexer = state.GetLexer();
@@ -234,17 +270,34 @@ namespace Scripting
 		while (true)
 		{
 			Token argStart = lexer.PeekCompound();
-			Ref<AstNode> argument = argStart.GetType() == TokenType::CloseParen ? nullptr : PrattParser::ParseExpression(state);
-			if (!argument)
+			if (!ParseArgument(state, item))
 			{
 				state.GetErrorTracker().AddError(argStart.GetStartLocation(),
 					Core::StringFormat::Format("Expected annotation argument expression, got '{0}'", argStart.GetText()), ErrorSeverity::Error);
 				return;
 			}
-			item.m_Arguments.Push(argument);
 			if (lexer.PeekCompound().GetType() != TokenType::Comma) return;
 			lexer.NextCompoundToken(); // consume ','
 		}
+	}
+
+	// An expression, kept with the same tokens read as a type when they read as one (a name is a constant or a type: the
+	// model decides); a type alone when only that reads (`int32*`); else the expression as far as it parses, its errors said.
+	bool AnnotationNode::ParseArgument(ParserState& state, AnnotationItem& item)
+	{
+		if (state.GetLexer().PeekCompound().GetType() == TokenType::CloseParen) return false;
+		Ref<QualTypeNode> type = ArgumentAsType(state);
+		Ref<AstNode> argument = ArgumentAsExpression(state);
+		if (!argument && type)
+		{
+			type = QualTypeNode::TryParse(state);
+			argument = type;
+		}
+		if (!argument) argument = PrattParser::ParseExpression(state);
+		if (!argument) return false;
+		item.m_Arguments.Push(argument);
+		item.m_ArgumentTypes.Push(type);
+		return true;
 	}
 
 	void AnnotationNode::CheckCompilerArguments(ParserState& state, const AnnotationItem& item)

@@ -114,7 +114,7 @@ namespace C4LSP::Features
 			if (node->Type() == NodeType::LambdaExpression)
 				break; // a lambda is a function of its own: the declaration around it is not what its code names
 
-			if (node->Type() == NodeType::IdentifierExpression || node->Type() == NodeType::MemberAccess || node->Type() == NodeType::StaticAccess)
+			if (Server::SemanticResolver::IsReference(*node, i > 0 ? located.path[i - 1] : nullptr))
 			{
 				Server::NodeResolution res = resolver.ResolveReference(*node, located.path);
 				if (res.type || res.declaration)

@@ -5,6 +5,7 @@
 #include "Model/Types/ObjectType.h"
 #include "Model/Types/UnionType.h"
 #include "Model/Types/ArrayType.h"
+#include "Model/Types/QualifiedName.h"
 #include <unordered_set>
 #include "Parser/Nodes/Expressions/LiteralNode.h"
 #include "Parser/Nodes/Expressions/ParenthesizedExpressionNode.h"
@@ -166,6 +167,7 @@ namespace Scripting
 		case TypeOfExpressionNode::Kind::OffsetOf: return Measure(OffsetOfField(operandType, query.GetFieldPath()));
 		case TypeOfExpressionNode::Kind::HoldsNativeBytes: return Holding("holds_native_bytes", operandType, HoldsNative);
 		case TypeOfExpressionNode::Kind::HoldsPointers: return Holding("holds_pointers", operandType, TypeHandle::MayHoldPointers);
+		case TypeOfExpressionNode::Kind::NameOf: return QueryResult<ConstantValue>::Success(ConstantValue::String(QualifiedName(operandType), 1));
 		default: return QueryResult<ConstantValue>::Fail(QueryError::NotAValue, "'" + query.ToString() + "' is not a constant");
 		}
 	}

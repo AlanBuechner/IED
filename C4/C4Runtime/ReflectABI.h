@@ -32,13 +32,14 @@
 #define reflect_ARG_FLOAT  2
 #define reflect_ARG_BOOL   3
 #define reflect_ARG_STRING 4
+#define reflect_ARG_TYPE   5   // a type the argument names (`[Requires(Render::MeshRenderer)]`): its registered name
 
 // One argument of a reflected annotation, folded at compile time.
 typedef struct c4_annotation_arg {
     uint32_t kind;                 // reflect_ARG_*
     int64_t intValue;              // INT, and BOOL as 0 or 1
     double floatValue;             // FLOAT
-    const char* stringValue;       // STRING (UTF-8), "" for the other kinds
+    const char* stringValue;       // STRING (UTF-8), TYPE's qualified name; "" for the other kinds
 } c4_annotation_arg;
 
 // An annotation the compiler does not act on (`[Range(0, 1)]`): its name as written and its arguments.

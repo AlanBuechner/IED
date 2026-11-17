@@ -83,7 +83,7 @@ namespace C4LSP::Features
 		// declaration whose own name token covers the position. Both resolve through the same logic
 		// Rename::At uses to pick its target, so prepare and rename can never disagree about the symbol.
 		const Scripting::AstNode* ref = nullptr;
-		if (ReferenceScanner::IsReferenceNode(*located.node))
+		if (ReferenceScanner::IsReferenceNode(*located.node, ReferenceScanner::ParentOfLast(located.path)))
 		{
 			if (session.GetResolver().ResolveReference(*located.node, located.path).declaration)
 				ref = located.node;

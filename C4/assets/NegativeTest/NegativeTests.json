@@ -1588,6 +1588,14 @@
         "expect": ["an annotation argument must be a constant number, bool or string"],
         "reason": "A reflected annotation's arguments fold at compile time (D-42); a mutable global is not a constant."
     },
+    "AnnotationArgumentUnknownName": {
+        "expect": ["main.cf (3:11) error: an annotation argument must be a constant number, bool or string, or a type: 'Render::MeshRendrer' is neither a constant ("],
+        "reason": "A name in an annotation is a constant or a type (D-42); a misspelt one is neither, and the error says what each lookup found."
+    },
+    "AnnotationTypeArgumentUnknown": {
+        "expect": ["main.cf (1:9) error: an annotation argument must be a constant number, bool or string, or a type: 'Nowhere*' names no type"],
+        "reason": "An argument that reads only as a type must name one."
+    },
     "CompilerAnnotationNotLiteral": {
         "expect": ["'group' takes string literal arguments"],
         "reason": "The compiler's own annotations take string literals; a constant name used to be ignored silently."

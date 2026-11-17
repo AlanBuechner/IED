@@ -1,5 +1,7 @@
 #include "Server/SemanticResolver.h"
 #include "Model/TypeHandle.h" // TypeHandle::UnwrapToValue (alias/reference -> value type)
+#include "Features/TypeText.h" // DeclarationOfNamedType
+#include "Parser/Nodes/Declarations/QualTypeNode.h"
 #include "Model/Types/ClassHierarchy.h"
 #include "Parser/Nodes/Declarations/NamespaceNode.h"
 #include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
@@ -569,12 +571,37 @@ namespace C4LSP::Server
 				res.type = callee.type;
 			break;
 		}
+		case Scripting::NodeType::NamespaceQualifiedName: {
+			// Written as a value, the name is a type's (`Box<int32>{1}`): resolved as a type node made of it would be.
+			Ref<Scripting::NamespaceQualifiedNameNode> name(const_cast<Scripting::NamespaceQualifiedNameNode*>(static_cast<const Scripting::NamespaceQualifiedNameNode*>(&node)));
+			const Ref<Scripting::QualTypeNode> written = Scripting::QualTypeNode::FromParts(name, nullptr, {}, false);
+			auto type = m_Model.ResolveTypeInUnitContext(*written, unitId, ContextFor(path).scope);
+			if (type.Ok())
+			{
+				res.type = type.value;
+				res.declaration = Features::DeclarationOfNamedType(type.value);
+			}
+			break;
+		}
 		default:
 			break;
 		}
 
 		m_RefCache[&node] = res;
 		return res;
+	}
+
+	bool SemanticResolver::IsReference(const Scripting::AstNode& node, const Scripting::AstNode* parent)
+	{
+		switch (node.Type())
+		{
+		case Scripting::NodeType::IdentifierExpression: case Scripting::NodeType::MemberAccess: case Scripting::NodeType::StaticAccess:
+			return true;
+		case Scripting::NodeType::NamespaceQualifiedName:
+			return !parent || (parent->Type() != Scripting::NodeType::QualType && parent->Type() != Scripting::NodeType::FunctionDefinition);
+		default:
+			return false;
+		}
 	}
 
 	const Scripting::Type* SemanticResolver::ResolveQualType(const Scripting::QualTypeNode& qt,

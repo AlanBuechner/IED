@@ -72,7 +72,8 @@ build that changed nothing and 100 MB more at the peak; 256 saves no more and co
 The image is the program's largest piece of data (13 MB in the IED server) and was built on the coordinator after
 the fixed point. It is made in two steps: `DescribeReflectionImage` reads the model, on the coordinator, into an
 `ImageDescription` (rows of numbers, texts, references to tables and the names of the functions and globals it
-points at), folding annotation arguments and reporting those that do not fold as before; `ReflectionTables::Build`
+points at), folding annotation arguments (the model checked them all as it was built, `AnnotationCheck`, and made the
+template instances they name, so this fold finds every type made already); `ReflectionTables::Build`
 makes the LLVM constants from it and reads no model. One partition builds it in place, sharing the module's strings.
 A split program keeps the description (`CodeGenDriver::KeepImageApart`) with its key, a 128-bit hash of every value
 in it and of the target (`ImageDescription::Key`), and partition 0 declares the image. The output keeps the image's

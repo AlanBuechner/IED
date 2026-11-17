@@ -18,6 +18,23 @@ struct RaShip {
 [Declared] int32 RaSplit(int32 a);
 [Defined] int32 RaSplit(int32 a) { return a; }
 
+// Types as arguments: qualified, unqualified from the declaration's namespace, a template instance nothing else uses, an
+// alias, a builtin, a pointer; a constant name still folds as a constant, and nameof is a string.
+namespace RaRender {
+	struct RaMesh { public int32 vertices; }
+	[Requires(RaMesh)] struct RaRenderer { public int32 pass; }
+}
+template<T> struct RaBox { public T value; }
+alias RaMeshAlias = RaRender::RaMesh;
+
+const char* kRaMeshName = nameof(RaRender::RaMesh);   // a constant now (BUG-463)
+
+[Requires(RaRender::RaMesh, RaBox<int32>), Holds(int32, RaRender::RaMesh*), Named(nameof(RaRender::RaMesh)), Limit(RaLimits::kMax)]
+struct RaCollider {
+	[Of(RaMeshAlias)] public int32 shape;
+	[Bind(RaRender::RaRenderer)] public void Attach([From(RaRender::RaMesh)] int32 id) { shape = id; }
+}
+
 [test("reflect.annotations")]
 class ReflectionAnnotationTests {
 	[test("type")]
@@ -63,6 +80,46 @@ class ReflectionAnnotationTests {
 		assert_eq(1, (int32)grouped.AnnotationCount(), "only Tag");
 		assert_eq(7, (int32)grouped.AnnotationAt(0).IntArg(0), "its argument");
 		assert_eq(0, (int32)Reflection::FindType("ReflectionAnnotationTests").AnnotationCount(), "test is the compiler's");
+	}
+
+	[test("type_arguments")]
+	public static void TestTypeArguments() {
+		Reflection::Annotation requires = Reflection::FindType("RaCollider").FindAnnotation("Requires");
+		assert_true(requires.ArgKind(0) == Reflection::AnnotationArg::Type ? 1 : 0, "a type argument");
+		assert_se("RaRender::RaMesh", requires.StringArg(0), "its name");
+		assert_se("RaRender::RaMesh", requires.TypeArg(0).Name(), "and the type it names");
+		assert_eq(0, (int32)requires.IntArg(0), "no number");
+		assert_se("RaBox<int32>", requires.StringArg(1), "a template instance");
+		assert_true(requires.TypeArg(1).IsValid() ? 1 : 0, "made and registered though nothing else uses it");
+		assert_eq(4, (int32)requires.TypeArg(1).SizeOf(), "with its layout");
+		Reflection::Annotation holds = Reflection::FindType("RaCollider").FindAnnotation("Holds");
+		assert_se("int32", holds.StringArg(0), "a builtin");
+		assert_true(holds.ArgKind(1) == Reflection::AnnotationArg::Type ? 1 : 0, "a pointer reads as a type alone");
+		assert_se("RaRender::RaMesh*", holds.StringArg(1), "its name");
+	}
+
+	[test("names_and_constants_beside_types")]
+	public static void TestNamesAndConstantsBesideTypes() {
+		Reflection::Type collider = Reflection::FindType("RaCollider");
+		Reflection::Annotation named = collider.FindAnnotation("Named");
+		assert_true(named.ArgKind(0) == Reflection::AnnotationArg::String ? 1 : 0, "nameof is a string (BUG-463)");
+		assert_se("RaRender::RaMesh", named.StringArg(0), "the type's name");
+		assert_true(!named.TypeArg(0).IsValid() ? 1 : 0, "a string names no type");
+		assert_se("RaRender::RaMesh", kRaMeshName, "a const global started by nameof");
+		Reflection::Annotation limit = collider.FindAnnotation("Limit");
+		assert_true(limit.ArgKind(0) == Reflection::AnnotationArg::Int ? 1 : 0, "a constant's name is the constant");
+		assert_eq(10, (int32)limit.IntArg(0), "its value");
+	}
+
+	[test("type_arguments_everywhere")]
+	public static void TestTypeArgumentsEverywhere() {
+		assert_se("RaRender::RaMesh", Reflection::FindType("RaRender::RaRenderer").FindAnnotation("Requires").StringArg(0),
+			"an unqualified name, from the declaration's namespace");
+		Reflection::Type collider = Reflection::FindType("RaCollider");
+		assert_se("RaRender::RaMesh", collider.FindField("shape").FindAnnotation("Of").StringArg(0), "a field's, through an alias");
+		Reflection::Method attach = collider.FindMethod("Attach");
+		assert_se("RaRender::RaRenderer", attach.FindAnnotation("Bind").StringArg(0), "a method's");
+		assert_se("RaRender::RaMesh", attach.ParamAt(0).FindAnnotation("From").TypeArg(0).Name(), "a parameter's");
 	}
 
 	[test("declaration_and_definition")]

@@ -18,8 +18,8 @@ namespace Scripting
 	QueryResult<int64> AlignOfType(const Type* type);
 	QueryResult<int64> OffsetOfField(const Type* type, const Core::Vector<Token>& path);
 
-	/// The value of `sizeof` / `alignof` / `offsetof` (an int64) or `holds_native_bytes` / `holds_pointers` (a bool) once
-	/// its operand's type is known.
+	/// The value of `sizeof` / `alignof` / `offsetof` (an int64), `holds_native_bytes` / `holds_pointers` (a bool) or `nameof`
+	/// (the type's QualifiedName, a string) once its operand's type is known.
 	QueryResult<ConstantValue> CompileTimeQueryValue(const TypeOfExpressionNode& query, const Type* operandType);
 
 	/// `sizeof("text")` measures the literal's array, its terminator too, as in C++; nothing for any other query.

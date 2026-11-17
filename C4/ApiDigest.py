@@ -230,7 +230,8 @@ def write_digest(root, out, title):
 		"Every public type and function of the library's headers, one section each: the declarations as written (bodies cut), "
 		"with the first sentence of each doc comment. [create] is a constructor (`T x = T(args);`), [delete] the destructor, "
 		"[==], [index], [call] and the like the operators a method defines. A type marked range-for works in `for (T& x : c)`. "
-		"The header named under each heading has the full comments.", ""]
+		"The header named under each heading has the full comments. This file is generated from the headers by C4/ApiDigest.py "
+		"as the toolchain is built: change a header's declarations or comments, never this file.", ""]
 	for s in sections:
 		if not s.lines and not s.doc:
 			continue

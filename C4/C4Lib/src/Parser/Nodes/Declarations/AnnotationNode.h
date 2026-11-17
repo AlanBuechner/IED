@@ -1,6 +1,7 @@
 #pragma once
 #include "Parser/AstNode.h"
 #include "Parser/ParserState.h"
+#include "Parser/Nodes/Declarations/QualTypeNode.h"
 #include "Lexer/Token.h"
 #include "Core/Core.h"
 
@@ -25,8 +26,12 @@ namespace Scripting
 		/// Number of identifier components in the qualified name.
 		uint32 GetNameTokenCount() const { return m_NameTokens.Count(); }
 
-		/// Optional parenthesized arguments (expressions), empty if none provided.
+		/// Optional parenthesized arguments, empty if none provided: each an expression, or a type when its tokens read only as
+		/// one (`int32*`).
 		const Core::Vector<Ref<AstNode>>& GetArguments() const { return m_Arguments; }
+		/// Argument `index` read as a type when its tokens read as one (`Render::MeshRenderer`, `Box<int32>`, `int32*`), else
+		/// null: a name is a constant or a type, which the model decides. An argument that reads only as a type is this node.
+		const Ref<QualTypeNode>& GetArgumentType(uint32 index) const { return m_ArgumentTypes[index]; }
 
 		/// One of the compiler's own annotations (operator, test, test_setup, test_teardown, group, link, uuid, target):
 		/// its arguments are string literals and reflection does not keep it (D-42).
@@ -45,6 +50,7 @@ namespace Scripting
 		Core::Vector<Token> m_NameTokens;
 		Core::String m_Name;
 		Core::Vector<Ref<AstNode>> m_Arguments;
+		Core::Vector<Ref<QualTypeNode>> m_ArgumentTypes; // one per argument
 
 		friend struct AnnotationNode; // allow AnnotationNode to populate fields during parsing
 	};
@@ -92,6 +98,7 @@ namespace Scripting
 
 		void ParseAnnotation(ParserState& state, BracketGroup& group);
 		static void ParseArguments(ParserState& state, AnnotationItem& item);
+		static bool ParseArgument(ParserState& state, AnnotationItem& item);
 		static void CheckCompilerArguments(ParserState& state, const AnnotationItem& item);
 		void ParseSingleBracketGroup(ParserState& state); // parses exactly one [ ... ] group
 	};

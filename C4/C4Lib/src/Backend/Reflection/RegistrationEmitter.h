@@ -3,6 +3,7 @@
 #include "Compiler/AskedNames.h"
 #include "Compiler/ErrorTracker.h"
 #include "Backend/Reflection/ImageDescription.h"
+#include "Model/ReflectedEntities.h"
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -50,13 +51,6 @@ namespace Scripting
 		const AskedNames* types = nullptr;
 		uint32 interfaceUnits = 0; // units 1..interfaceUnits are the host's files: what they declare is the host's
 	};
-
-	/// Whether reflection registers `function`: the program's own functions, not builtins, runtime entry points
-	/// (`c4_` names), functions local to a body or functions the compiler wrote (BUG-238).
-	bool ReflectedFunction(const FunctionRecord& function);
-
-	/// Whether reflection registers the object type: a defined one with a name, not a closure or a return list.
-	bool ReflectedType(const ProgramModel& model, const ObjectType* object);
 
 	/// The symbol of a function's own invoke thunk: `__c4_invoke_` plus the function's symbol, escaped
 	/// (`QualifiedName.h` EscapedText).

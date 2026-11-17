@@ -39,6 +39,8 @@ Key `Type` accessors: `Name()`, `SizeOf()`, `AlignOf()`, `IsVirtualType()`, `Bas
 
 Names: types register under qualified, argument-aware names (`Geo::Point`, `Geo::Box<int32>`), free functions and globals under qualified names (`Geo::Area`, `Type::s_count` for a static member), methods under their plain name. Each overload is its own `Function` (keyed by symbol); `FindFunction(name)` returns the first, `FunctionAt(i)` iterates all. There is no capacity limit.
 
+Annotations: every entity has `AnnotationCount()/AnnotationAt(i)/FindAnnotation(name)` for the annotations the compiler does not act on (`[Range(0, 1)]`). An `Annotation`'s arguments fold at compile time: `ArgKind(i)` is `Int`, `Float`, `Bool`, `String` or `Type` - a type written as an argument (`[Requires(Render::MeshRenderer)]`, `[Holds(Box<int32>)]`), which the editor navigates and completes like code; its `StringArg(i)` is the type's qualified name and `TypeArg(i)` the registered type. Prefer a type to its name in a string: a typo is a compile error (in the editor too), and go-to-definition, completion and rename reach it. A name is a constant when it names one, else a type; `nameof(T)` is a string.
+
 Registry-level free functions: `TypeCount()`, `VariableCount()`, `FunctionCount()`, `GroupNameCount()` / `GroupNameAt(i)` (enumerate groups), and group access via `Reflection::Group g = Group("name");` then `g.Count()` / `g.Item(i)` / `g.KindOf(item)`.
 
 ## Low-level builtins

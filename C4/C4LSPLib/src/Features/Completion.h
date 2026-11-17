@@ -23,8 +23,9 @@ namespace C4LSP::Features
 	{
 	public:
 		// Candidates visible at `position`: after a dotted/arrow accessor (`a.` / `a->`) the base
-		// object's members (fields, methods, extension and inherited members); otherwise enclosing
-		// params/locals, innermost class members and all types/globals. Deduped (innermost wins)
+		// object's members (fields, methods, extension and inherited members); after a qualifier
+		// (`Render::`, `Render::Pass::`) what it names holds - a namespace's names, a type's members;
+		// otherwise enclosing params/locals, innermost class members and all types/globals. Deduped (innermost wins)
 		// and filtered to the typed prefix. Resolution drives the shared SemanticResolver, so the
 		// base type is exactly what the compiler resolves it to.
 		static Core::Vector<CompletionItem> At(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position);
@@ -77,6 +78,16 @@ namespace C4LSP::Features
 		static void CollectClassMembers(const Core::Vector<const Scripting::AstNode*>& path, Core::Vector<Candidate>& out);
 		/// Add every symbol registered in file/namespace/class scopes (globals, functions, types).
 		static void CollectGlobalSymbols(const Server::SemanticResolver& resolver, Core::Vector<Candidate>& out);
+
+		/// The names before the word being typed and its `::` (`Render::Pass` for `Render::Pass::Gl|`); empty when the word
+		/// is not reached through `::` after names (a leading `::`, a template's arguments).
+		static std::string QualifierBefore(const std::string& text, size_t offset);
+		/// Add what `qualifier` names holds, as seen from `path`: a namespace's names, or a type's members. False, adding
+		/// nothing, when it names neither.
+		static bool CollectQualified(const Server::SemanticResolver& resolver, uint32 unitId, const Core::Vector<const Scripting::AstNode*>& path,
+			const std::string& qualifier, Core::Vector<Candidate>& out);
+		/// Add every name registered in `scope` itself (a namespace's).
+		static void AddScopeSymbols(const Scripting::Scope& scope, Core::Vector<Candidate>& out);
 
 		static void AddCandidate(Core::Vector<Candidate>& out, const std::string& name, int kind, const std::string& detail);
 		static Core::Vector<CompletionItem> Filter(const Core::Vector<Candidate>& candidates, const std::string& prefix);

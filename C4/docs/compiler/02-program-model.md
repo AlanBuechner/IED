@@ -105,6 +105,11 @@ declarations, then finalizes:
    every template specialization it names, so those types are concrete before HIR runs. This is the only
    place the model opens a body.
 4. **Layouts.** `TypeStore::FinalizeLayouts` computes size/alignment for every object type (memoized).
+5. **Annotations.** `AnnotationCheck` (`Model/Builder/AnnotationCheck`) folds the annotations of every entity
+   reflection registers (`Model/ReflectedEntities`: types, their fields, enums, unions, globals, functions and their
+   parameters), after the layouts so an argument may be a `sizeof`. An argument that is neither a constant nor a type is
+   an error here, so an editor shows it; a template instance an argument names is made here, and when one was, steps
+   3 and 4 run again for it, so the model never makes a type while the reflection image reads it.
 
 Build-time type resolution is program-wide (unit 0). Errors (duplicate definitions, unresolved types) are
 reported through the builder's error tracker.
@@ -320,7 +325,8 @@ under a shared lock and filled under their own.
 
 `ConstEvaluator` (`Model/ConstEvaluator.h`) folds compile-time expressions: integer/float/bool literals,
 arithmetic, bitwise, logical (`&&`, `||`) and comparison operators, unary `+ - !`, parentheses, `sizeof`
-(resolved in a template's binding layer), `sizeof...`, fold expressions, and references to other constants
+(resolved in a template's binding layer, its type named from where the constant is written), `nameof` (the type's
+QualifiedName, a string), `sizeof...`, fold expressions, and references to other constants
 (const variables, enum members, template non-type parameters) resolved through the model.
 
 - **On demand:** `Evaluate(expr, unitId, bindingScope)` folds any expression when asked (array sizes, enum

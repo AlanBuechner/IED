@@ -97,7 +97,7 @@ namespace C4LSP::Features
 		if (node.Type() == NodeType::FunctionCall)
 		{
 			const Scripting::AstNode* callee = static_cast<const Scripting::FunctionCallNode&>(node).GetCallee().Get();
-			if (callee && ReferenceScanner::IsReferenceNode(*callee))
+			if (callee && ReferenceScanner::IsReferenceNode(*callee, &node))
 			{
 				Core::Vector<const Scripting::AstNode*> calleePath = path;
 				calleePath.Push(callee);

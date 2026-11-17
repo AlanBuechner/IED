@@ -1,4 +1,5 @@
 #include "Model/Builder/ModelBuilder.h"
+#include "Model/Builder/AnnotationCheck.h"
 #include "Parser/Nodes/Statements/AsmStatementNode.h"
 #include "Model/Templates/MemberTemplates.h"
 #include "Model/Types/AliasType.h"
@@ -322,6 +323,7 @@ namespace Scripting
 
 		model.m_Types->FinalizeLayouts(); // size/alignment fixed point for mutually-recursive types
 		CheckObjectTypes(ctx, model);
+		CheckAnnotations(ctx, model); // after the layouts: an argument may be a sizeof
 
 		// Anything still pending is a genuine error (unknown type, cycle, ...). Report it.
 		for (const auto& v : m_PendingVars)
@@ -352,6 +354,21 @@ namespace Scripting
 			if (auto r = ConstEvaluator(*ctx.model).EvaluateConstant(*info); r.error == QueryError::CyclicDependency)
 				ErrorAt(ctx, info->initializer, r.message);
 		});
+	}
+
+	// A template instance an annotation names, made here, has its bodies opened and its layout fixed as the others had.
+	void ModelBuilder::CheckAnnotations(Context& ctx, ProgramModel& model)
+	{
+		AnnotationCheck annotations(model, *ctx.errors);
+		constexpr int kRounds = 8; // as GAP A's: an instance's annotations may name another
+		for (int round = 0; round < kRounds; ++round)
+		{
+			const uint32 types = model.ObjectTypes().Count();
+			annotations.CheckNew();
+			if (model.ObjectTypes().Count() == types) return;
+			ModelResolver().InstantiateBodyReferences(*this, ctx);
+			model.m_Types->FinalizeLayouts();
+		}
 	}
 
 	void ModelBuilder::VisitUnit(Context& ctx, const AstNode* root)

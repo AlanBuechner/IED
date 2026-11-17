@@ -209,8 +209,10 @@ namespace Scripting
 				return Rows(ImageShape::Pointer, std::move(names));
 			}
 
-			ImageRow ArgumentRow(const ConstantValue& value)
+			ImageRow ArgumentRow(const ReflectedArgument& argument)
 			{
+				if (argument.type) return { U32(reflect_ARG_TYPE), I64(0), F64(0), TypeText(argument.type) };
+				const ConstantValue& value = argument.value;
 				switch (value.kind)
 				{
 				case ConstantValue::Kind::Bool:
@@ -238,7 +240,7 @@ namespace Scripting
 				for (const ReflectedAnnotation& annotation : folded.value)
 				{
 					std::vector<ImageRow> arguments;
-					for (const ConstantValue& argument : annotation.arguments) arguments.push_back(ArgumentRow(argument));
+					for (const ReflectedArgument& argument : annotation.arguments) arguments.push_back(ArgumentRow(argument));
 					const Table table = Rows(ImageShape::AnnotationArg, std::move(arguments));
 					rows.push_back({ Text(annotation.name), table.count, table.rows });
 				}
@@ -372,17 +374,6 @@ namespace Scripting
 		};
 	}
 
-	bool ReflectedFunction(const FunctionRecord& function)
-	{
-		return function.type && !function.isLocal && !function.isBuiltin && function.synthesized == LifecycleOp::None &&
-			!function.mangledName.empty() && function.mangledName.rfind("c4_", 0) != 0;
-	}
-
-	bool ReflectedType(const ProgramModel& model, const ObjectType* object)
-	{
-		return object && object->IsDefined() && !model.ClosureOf(object) && !object->IsReturnList() && !object->GetName().empty();
-	}
-
 	std::string InvokeThunkSymbol(const FunctionRecord& function) { return "__c4_invoke_" + EscapedText(function.mangledName); }
 
 	std::string SharedInvokeThunkSymbol(const FunctionRecord& function) { return "__c4_invoke_sig_" + EscapedText(InvokeSignature(function)); }
@@ -406,8 +397,10 @@ namespace Scripting
 		auto hostSymbol = [&](const Core::String& symbol) { return host.symbols && host.symbols->Has(symbol.c_str()); };
 		auto hostUnit = [&](uint32 unit) { return unit >= 1 && unit <= host.interfaceUnits; };
 		ImageWriter writer(module, model, thunks, types, errors);
-		for (const ObjectType* object : model.ObjectTypes())
-			if (ReflectedType(model, object) && !hostType(object)) writer.AddType(*object);
+		// By index: an annotation naming a template instance nothing made before (the model checks them all, D-42) makes it here.
+		const Core::Vector<const ObjectType*>& objects = model.ObjectTypes();
+		for (uint32 i = 0; i < objects.Count(); ++i)
+			if (ReflectedType(model, objects[i]) && !hostType(objects[i])) writer.AddType(*objects[i]);
 		for (const EnumType* en : model.EnumTypes())
 			if (en && !en->GetName().empty() && !hostType(en)) writer.AddEnum(*en);
 		for (const UnionType* un : model.UnionTypes())

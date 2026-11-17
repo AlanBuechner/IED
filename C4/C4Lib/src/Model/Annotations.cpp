@@ -19,25 +19,70 @@ namespace Scripting
 			return &static_cast<const Node*>(node)->GetAnnotations();
 		}
 
-		bool Reflectable(ConstantValue::Kind kind)
+		using ArgumentResult = QueryResult<ReflectedArgument>;
+		constexpr const char* kArgumentRule = "an annotation argument must be a constant number, bool or string, or a type";
+
+		bool Reflectable(const ConstantValue& value)
 		{
-			return kind == ConstantValue::Kind::Int64 || kind == ConstantValue::Kind::Float64 || kind == ConstantValue::Kind::Bool;
+			switch (value.kind)
+			{
+			case ConstantValue::Kind::Int64: case ConstantValue::Kind::Float64: case ConstantValue::Kind::Bool: return true;
+			case ConstantValue::Kind::String: return value.unitWidth == 1; // nameof(T)
+			default: return false;
+			}
 		}
 
-		QueryResult<ConstantValue> FoldArgument(const ProgramModel& model, const AstNode& argument, const Scope* scope)
+		ArgumentResult Constant(const ConstantValue& value)
 		{
-			using Result = QueryResult<ConstantValue>;
+			ReflectedArgument argument;
+			argument.value = value;
+			return ArgumentResult::Success(argument);
+		}
+
+		ArgumentResult Named(const Type* type)
+		{
+			ReflectedArgument argument;
+			argument.type = type;
+			return ArgumentResult::Success(argument);
+		}
+
+		ArgumentResult StringLiteral(const LiteralNode& literal)
+		{
+			if (literal.GetUnitWidth() != 1)
+				return ArgumentResult::Fail(QueryError::NotAValue, "an annotation string argument is a UTF-8 literal", literal.startLocation);
+			return Constant(ConstantValue::String(literal.GetValue()));
+		}
+
+		// What the argument reads as is a constant, or else the type its tokens name.
+		ArgumentResult FoldExpression(const ProgramModel& model, const AstNode& argument, const QualTypeNode* type, const Scope* scope)
+		{
+			const uint32 unit = argument.startLocation.sourceId;
+			auto value = ConstEvaluator(model, scope).Evaluate(&argument, unit);
+			if (value.Ok() && Reflectable(value.value)) return Constant(value.value);
+			const Core::String constant = value.Ok() ? "'" + argument.ToString() + "' is no number, bool or string" : value.message;
+			if (!type) return ArgumentResult::Fail(QueryError::NotAValue, Core::String(kArgumentRule) + ": " + constant, argument.startLocation);
+			auto named = model.ResolveTypeInUnitContext(*type, unit, scope);
+			if (named.Ok()) return Named(named.value);
+			return ArgumentResult::Fail(QueryError::NotAValue, Core::String(kArgumentRule) + ": '" + argument.ToString() + "' is neither a constant (" +
+				constant + ") nor a type (" + named.message + ")", argument.startLocation);
+		}
+
+		ArgumentResult FoldType(const ProgramModel& model, const QualTypeNode& type, const Scope* scope)
+		{
+			auto named = model.ResolveTypeInUnitContext(type, type.startLocation.sourceId, scope);
+			if (named.Ok()) return Named(named.value);
+			return ArgumentResult::Fail(QueryError::NotFound, Core::String(kArgumentRule) + ": '" + type.ToString() + "' names no type (" + named.message + ")",
+				type.startLocation);
+		}
+
+		ArgumentResult FoldArgument(const ProgramModel& model, const AnnotationItem& item, uint32 index, const Scope* scope)
+		{
+			const AstNode& argument = *item.GetArguments()[index];
+			const QualTypeNode* type = item.GetArgumentType(index).Get();
 			if (const auto* literal = dynamic_cast<const LiteralNode*>(&argument); literal && literal->GetKind() == LiteralNode::LiteralKind::String)
-			{
-				if (literal->GetUnitWidth() != 1)
-					return Result::Fail(QueryError::NotAValue, "an annotation string argument is a UTF-8 literal", argument.startLocation);
-				return Result::Success(ConstantValue::String(literal->GetValue()));
-			}
-			auto value = ConstEvaluator(model, scope).Evaluate(&argument, argument.startLocation.sourceId);
-			if (value.Ok() && Reflectable(value.value.kind)) return value;
-			Core::String why = "an annotation argument must be a constant number, bool or string";
-			if (!value.Ok() && !value.message.empty()) why += ": " + value.message;
-			return Result::Fail(QueryError::NotAValue, why, argument.startLocation);
+				return StringLiteral(*literal);
+			if (&argument == type) return FoldType(model, *type, scope);
+			return FoldExpression(model, argument, type, scope);
 		}
 
 		QueryResult<void> Collect(const ProgramModel& model, const AnnotationNode& node, const Scope* scope, Core::Vector<ReflectedAnnotation>& out)
@@ -48,11 +93,11 @@ namespace Scripting
 					if (!item || item->IsCompilerAnnotation()) continue;
 					ReflectedAnnotation annotation;
 					annotation.name = item->GetName();
-					for (const auto& argument : item->GetArguments())
+					for (uint32 i = 0; i < item->GetArguments().Count(); ++i)
 					{
-						auto value = FoldArgument(model, *argument, scope);
-						if (!value.Ok()) return QueryResult<void>::Fail(value.error, value.message, value.loc);
-						annotation.arguments.Push(value.value);
+						auto argument = FoldArgument(model, *item, i, scope);
+						if (!argument.Ok()) return QueryResult<void>::Fail(argument.error, argument.message, argument.loc);
+						annotation.arguments.Push(argument.value);
 					}
 					out.Push(std::move(annotation));
 				}

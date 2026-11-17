@@ -23,7 +23,8 @@ The compiler emits the program's tables into its own module: constant rows in th
 `__c4_reflect_init`, that calls `c4_reflect_register_image(tag, &image)` before every other static
 constructor, so the program's global starts can already use reflection. The runtime registers the whole image
 under one hold of its lock. A script's loader registers its image the same way
-([scripting](04-scripting.md)). An annotation argument that does not fold is a compile error.
+([scripting](04-scripting.md)). An annotation argument that is neither a constant nor a type is a compile error, reported
+as the program's model is built.
 
 What is registered:
 
@@ -135,7 +136,7 @@ missing name or index gives an invalid handle, so check `IsValid()`.
 |---|---|
 | `Type` | `IsValid, Name, Tag, Kind, SizeOf, AlignOf, IsVirtualType, BaseName, FieldCount, FindField(name), FieldAt(i), MethodCount, FindMethod(name), MethodAt(i), EnumCount, EnumAt(i), FindByName(name)`; range-for over fields; `Methods()` and `Enums()` views for range-for; `HoldsPointers, IsDefaultConstructible, IsCopyable, IsAbstract, IsTriviallyDestructible, IsTriviallyCopyable`, `Construct(object)` (the storage zeroed, then the type's start; false when it is not default constructible), `Destroy(object)`, `CopyTo(to, from)` (false when it cannot be copied) |
 | `Field` | `IsValid, Name, Offset, SizeOf, TypeName, TypeOf, IsConst, IsAlias, AddressIn(object), Get(object, out), Set(object, value)` |
-| `Annotation` | `IsValid, Name, ArgCount, ArgKind(i)` (an `AnnotationArg`: `Int`, `Float`, `Bool`, `String`)`, IntArg(i), FloatArg(i), BoolArg(i), StringArg(i)` |
+| `Annotation` | `IsValid, Name, ArgCount, ArgKind(i)` (an `AnnotationArg`: `Int`, `Float`, `Bool`, `String`, `Type`)`, IntArg(i), FloatArg(i), BoolArg(i), StringArg(i)` (a `Type`'s qualified name too)`, TypeArg(i)` (the type a `Type` argument names; invalid for another kind)` |
 | `Method` | `IsValid, Name, ParamCount, IsVirtual, IsStatic, IsConst, ParamAt(i), ReturnTypeName, ReturnType, OperatorRole, HasOperatorRole(role), IsInvokable, Invoke(object, result, arguments), Call(object, result, args...)` |
 | `Param` | `IsValid, Name, TypeName, TypeOf` |
 | `EnumValue` | `IsValid, Name, Value` |
@@ -253,11 +254,13 @@ Reflection::FindType("Animal").FindMethod("Legs").Call(&bird, &r);   // dispatch
 Every annotation the compiler does not act on (D-42, [12 - Annotations](../language/12-annotations.md)) is
 registered with its entity: types, enums, fields, methods, their parameters, functions and variables. An
 annotation keeps its name as written (`Game::Serialize`) and its arguments folded at compile time, each an
-integer, float, bool or string. The compiler's own annotations (`operator`, `test`, `group`, ...) are not
-listed; groups have their own API.
+integer, float, bool or string - or a type, kind `Type`, whose `StringArg` is the type's qualified name (as `nameof`
+writes it) and whose `TypeArg` is the registered type (a template instance only an annotation names is made and
+registered too). The compiler's own annotations (`operator`, `test`, `group`, ...) are not listed; groups have their
+own API.
 
 ```c4
-[Serialize, Range(-1, Limits::kMax * 2)]
+[Serialize, Range(-1, Limits::kMax * 2), Requires(Geo::Hull)]
 struct Ship {
 	[Range(0.0, 1.0)] public float speed;
 	[Command("go", true)] public void Go([Units("m")] float distance) { }
@@ -268,6 +271,7 @@ Reflection::Annotation range = ship.FindAnnotation("Range");
 int64 low = range.IntArg(0);                                     // -1
 double top = ship.FindField("speed").FindAnnotation("Range").FloatArg(1);
 const char* units = ship.FindMethod("Go").ParamAt(0).FindAnnotation("Units").StringArg(0);
+Reflection::Type hull = ship.FindAnnotation("Requires").TypeArg(0); // Geo::Hull; StringArg(0) is "Geo::Hull"
 ```
 
 A function declared and defined apart lists the declaration's annotations, then the definition's.

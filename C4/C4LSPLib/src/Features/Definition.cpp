@@ -325,9 +325,7 @@ namespace C4LSP::Features
 			if (node->Type() == Scripting::NodeType::LambdaExpression)
 				break; // a lambda is a function of its own: the call it is an argument of is not what its code names
 
-			if (node->Type() == Scripting::NodeType::IdentifierExpression ||
-				node->Type() == Scripting::NodeType::MemberAccess ||
-				node->Type() == Scripting::NodeType::StaticAccess)
+			if (Server::SemanticResolver::IsReference(*node, i > 0 ? located.path[i - 1] : nullptr))
 			{
 				if (const Scripting::AstNode* declaration = resolver.ResolveReference(*node, located.path).declaration)
 					return declaration;

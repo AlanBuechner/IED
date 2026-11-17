@@ -1,0 +1,4 @@
+[Points(Nowhere*)]
+struct Gauge { public int32 value; }
+
+int32 main() { Gauge g; return g.value; }

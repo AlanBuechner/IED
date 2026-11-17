@@ -35,7 +35,7 @@ namespace Scripting
 	{
 		if (query.GetTargetType())
 		{
-			auto type = m_Model.ResolveTypeInternal(*query.GetTargetType(), unitId, bindingScope, m_Model.m_Symbols->GetRoot());
+			auto type = m_Model.ResolveTypeInternal(*query.GetTargetType(), unitId, bindingScope, m_Context ? m_Context : m_Model.m_Symbols->GetRoot());
 			if (type.Ok() || !query.GetOperand()) return type;
 		}
 		return ExpressionType(query.GetOperand().Get(), unitId);

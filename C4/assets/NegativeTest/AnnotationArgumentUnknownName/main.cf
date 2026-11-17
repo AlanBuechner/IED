@@ -1,0 +1,6 @@
+namespace Render { struct MeshRenderer { public int32 mesh; } }
+
+[Requires(Render::MeshRendrer)]
+struct Collider { public int32 shape; }
+
+int32 main() { Collider c; return c.shape; }

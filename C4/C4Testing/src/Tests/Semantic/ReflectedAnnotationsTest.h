@@ -27,5 +27,29 @@ namespace Testing
 
 		TEST_FUNC(Semantic.ReflectedAnnotations)
 		void NoAnnotations();
+
+		TEST_FUNC(Semantic.ReflectedAnnotations)
+		void TypeArgumentsResolve();
+
+		TEST_FUNC(Semantic.ReflectedAnnotations)
+		void ConstantNamesStayConstants();
+
+		TEST_FUNC(Semantic.ReflectedAnnotations)
+		void UnknownNameIsNeither();
+
+		TEST_FUNC(Semantic.ReflectedAnnotations)
+		void UnknownTypeNamesNoType();
+
+		TEST_FUNC(Semantic.ReflectedAnnotations)
+		void NameOfIsAString();
+
+		TEST_FUNC(Semantic.ReflectedAnnotations)
+		void TheModelReportsWhatDoesNotFold();
+
+		TEST_FUNC(Semantic.ReflectedAnnotations)
+		void TheModelMakesTheInstancesTheyName();
+
+		TEST_FUNC(Semantic.ReflectedAnnotations)
+		void ArgumentsReadAsTypes();
 	};
 }

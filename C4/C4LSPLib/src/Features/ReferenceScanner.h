@@ -28,8 +28,12 @@ namespace C4LSP::Features
 			bool spellsTarget = true;                 // false for a construction: a rename leaves it as it is
 		};
 
-		static bool IsReferenceNode(const Scripting::AstNode& node);
-		/// The name a reference node names: `Next` of `c.Next` or `Counter::Next`, the whole of an identifier.
+		/// Whether `node`, written inside `parent`, is a reference (SemanticResolver::IsReference).
+		static bool IsReferenceNode(const Scripting::AstNode& node, const Scripting::AstNode* parent);
+		/// The parent of the last node of `path` (the node a reference is written in); null for a path of one.
+		static const Scripting::AstNode* ParentOfLast(const Core::Vector<const Scripting::AstNode*>& path);
+		/// The name a reference node names: `Next` of `c.Next` or `Counter::Next`, `Slot` of `Render::Slot<int32>`, the whole of
+		/// an identifier.
 		static NameRange NameOf(const Scripting::AstNode& reference);
 
 		/// Every occurrence of `targetDecl` in `sourceId`'s unit; empty when the target is null.

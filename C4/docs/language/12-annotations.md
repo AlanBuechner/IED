@@ -34,16 +34,24 @@ Grammar:
 ```text
 annotations  : bracket_group+
 bracket_group: '[' annotation (',' annotation)* ']'
-annotation   : qualified_name ( '(' ( expression (',' expression)* )? ')' )?
+annotation   : qualified_name ( '(' ( argument (',' argument)* )? ')' )?
+argument     : expression | type
 qualified_name: identifier ('::' identifier)*
 ```
 
-- Arguments are expressions. The compiler's own annotations (section 2) take **string literals**; anything
-  else is the error `'group' takes string literal arguments`. The arguments of every other annotation are
-  **constant expressions** (D-42): numbers, bools, string literals (`"a" "b"` joins) and named constants
-  (`Limits::kMax * 2`), folded where the declaration is written. A template's parameters are not constants
-  there. An argument that does not fold is an error (`an annotation argument must be a constant number,
-  bool or string`), and so is a wide string (`u"..."`: reflection stores UTF-8).
+- Arguments are expressions, or types. The compiler's own annotations (section 2) take **string literals**;
+  anything else is the error `'group' takes string literal arguments`. The arguments of every other annotation
+  are **constant expressions** (D-42): numbers, bools, string literals (`"a" "b"` joins), named constants
+  (`Limits::kMax * 2`) and `nameof(T)` (a string), folded where the declaration is written - **or a type**:
+  `[Requires(Render::MeshRenderer)]`, `[Holds(Box<int32>)]`, `[Points(int32*)]`. A name is a constant when it
+  names one, else the type it names, looked up from the declaration's namespace and in the files its file
+  includes, as a type written there would be; an alias is the type it names, and a template instance an
+  annotation names is made. Reflection keeps a type as an argument of kind `Type` whose string is the type's
+  qualified name ([runtime/02-reflection.md](../runtime/02-reflection.md) section 3.3), so the editor finds the
+  type, completes it and renames it as anywhere in code. A template's parameters are neither constants nor
+  types there. An argument that is neither is an error, said as the program's model is built, so an editor
+  shows it too (`an annotation argument must be a constant number, bool or string, or a type: 'Render::Mesh'
+  is neither a constant (...) nor a type (...)`), and so is a wide string (`u"..."`: reflection stores UTF-8).
 - `[Name]` and `[Name()]` both have no arguments.
 - Annotation names may be namespace-qualified (`[Game::Serialize]`); the compiler-recognized names
   below are unqualified.
@@ -95,6 +103,9 @@ serializer's `[Serialize]`, an editor's `[Range(0, 1)]`). See
 ```c4
 [Serialize, Range(-1, Limits::kMax * 2)]
 struct Ship { [Tooltip("speed" "\n" "boost")] public float speed; }
+
+[Component, Requires(Render::MeshRenderer)]   // a type: the editor's go-to-definition and completion know it
+struct MeshCollider { public bool convex; }
 ```
 
 A function declared and defined apart carries both lists, the declaration's first.

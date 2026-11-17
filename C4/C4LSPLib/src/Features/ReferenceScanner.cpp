@@ -94,11 +94,14 @@ namespace C4LSP::Features
 		return std::set<const Scripting::AstNode*>(declarations.begin(), declarations.end());
 	}
 
-	bool ReferenceScanner::IsReferenceNode(const Scripting::AstNode& node)
+	bool ReferenceScanner::IsReferenceNode(const Scripting::AstNode& node, const Scripting::AstNode* parent)
 	{
-		return node.Type() == Scripting::NodeType::IdentifierExpression ||
-			node.Type() == Scripting::NodeType::MemberAccess ||
-			node.Type() == Scripting::NodeType::StaticAccess;
+		return Server::SemanticResolver::IsReference(node, parent);
+	}
+
+	const Scripting::AstNode* ReferenceScanner::ParentOfLast(const Core::Vector<const Scripting::AstNode*>& path)
+	{
+		return path.Count() >= 2 ? path[path.Count() - 2] : nullptr;
 	}
 
 	ReferenceScanner::NameRange ReferenceScanner::NameOf(const Scripting::AstNode& reference)
@@ -116,6 +119,10 @@ namespace C4LSP::Features
 		case Scripting::NodeType::StaticAccess: {
 			const auto& sa = static_cast<const Scripting::StaticAccessNode&>(reference);
 			return { sa.GetMemberNameToken().GetStartLocation(), sa.GetMemberNameToken().GetEndLocation() };
+		}
+		case Scripting::NodeType::NamespaceQualifiedName: {
+			const auto& name = static_cast<const Scripting::NamespaceQualifiedNameNode&>(reference);
+			return { name.GetLastIdentifierToken().GetStartLocation(), name.GetLastIdentifierToken().GetEndLocation() };
 		}
 		case Scripting::NodeType::QualType: {
 			const auto& type = static_cast<const Scripting::QualTypeNode&>(reference);
@@ -191,7 +198,7 @@ namespace C4LSP::Features
 	// qualifiers of an out-of-line definition, a lambda's captures, and constructions calling a target create operator.
 	void ReferenceScanner::Visit(const Search& search, const Scripting::AstNode& node, const Core::Vector<const Scripting::AstNode*>& path)
 	{
-		if (IsReferenceNode(node))
+		if (IsReferenceNode(node, ParentOfLast(path)))
 		{
 			if (search.targets.count(search.resolver.ResolveReference(node, path).declaration) > 0)
 				search.sink(Occurrence{ &node, NameOf(node), true }, path);

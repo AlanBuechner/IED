@@ -54,7 +54,7 @@ namespace C4LSP::Features
 		Core::Vector<Constructions::Construction> OfCall(const Scripting::FunctionCallNode& n, const Path& path, const Server::SemanticResolver& resolver)
 		{
 			const Scripting::AstNode* callee = n.GetCallee().Get();
-			if (!callee || !ReferenceScanner::IsReferenceNode(*callee)) return {};
+			if (!callee || !ReferenceScanner::IsReferenceNode(*callee, &n)) return {};
 			const auto& arguments = n.GetArguments();
 			if (arguments.Count() == 1 && arguments[0] && arguments[0]->Type() == Scripting::NodeType::BracedInitializer) return {};
 			Path calleePath = path;

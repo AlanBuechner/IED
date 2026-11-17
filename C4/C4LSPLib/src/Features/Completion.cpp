@@ -42,8 +42,14 @@ namespace C4LSP::Features
 		std::string prefix = WordPrefix(text, position);
 
 		size_t offset = OffsetAt(text, position);
-		size_t baseEnd = FindMemberAccessBaseEnd(text, offset); // member access in progress? (a. / a->)
 		const Server::SemanticResolver& resolver = session.GetResolver();
+		if (const std::string qualifier = QualifierBefore(text, offset); !qualifier.empty())
+		{
+			Core::Vector<Candidate> members;
+			if (CollectQualified(resolver, sourceId, located.path, qualifier, members))
+				return Filter(members, prefix);
+		}
+		size_t baseEnd = FindMemberAccessBaseEnd(text, offset); // member access in progress? (a. / a->)
 
 		Core::Vector<Candidate> candidates;
 		if (located.Found())
@@ -365,6 +371,56 @@ namespace C4LSP::Features
 			std::string detail = gs.fn ? FunctionSignature(gs.fn->type)
 				: (gs.type ? gs.type->ToString() : "");
 			AddCandidate(out, gs.name, SymbolKindToLsp(gs.kind), detail);
+		}
+	}
+
+	std::string Completion::QualifierBefore(const std::string& text, size_t offset)
+	{
+		size_t at = std::min(offset, text.size());
+		while (at > 0 && IsIdentChar(text[at - 1])) --at; // the word being typed
+		std::string qualifier;
+		while (at >= 2 && text[at - 1] == ':' && text[at - 2] == ':')
+		{
+			const size_t nameEnd = at - 2;
+			size_t nameStart = nameEnd;
+			while (nameStart > 0 && IsIdentChar(text[nameStart - 1])) --nameStart;
+			if (nameStart == nameEnd)
+				return {};
+			const std::string name = text.substr(nameStart, nameEnd - nameStart);
+			qualifier = qualifier.empty() ? name : name + "::" + qualifier;
+			at = nameStart;
+		}
+		return qualifier;
+	}
+
+	bool Completion::CollectQualified(const Server::SemanticResolver& resolver, uint32 unitId, const Core::Vector<const Scripting::AstNode*>& path,
+		const std::string& qualifier, Core::Vector<Candidate>& out)
+	{
+		const Scripting::SymbolInfo* named = resolver.Lookup(qualifier, unitId, &path);
+		if (!named)
+			return false;
+		if (named->kind == Scripting::SymbolKind::Namespace && named->scope)
+		{
+			AddScopeSymbols(*named->scope, out);
+			return true;
+		}
+		if (named->kind == Scripting::SymbolKind::Type && named->type)
+		{
+			CollectMembersOf(Deref(named->type), out);
+			return true;
+		}
+		return false;
+	}
+
+	void Completion::AddScopeSymbols(const Scripting::Scope& scope, Core::Vector<Candidate>& out)
+	{
+		Core::Vector<std::pair<Core::String, Scripting::SymbolInfo*>> entries;
+		scope.Enumerate(entries);
+		for (const auto& [name, info] : entries)
+		{
+			if (Scripting::IsExtensionMethodKey(name)) continue; // a member of the type it extends
+			const std::string detail = !info->functions.Empty() ? FunctionSignature(info->functions[0]->type) : (info->type ? info->type->ToString() : "");
+			AddCandidate(out, name, SymbolKindToLsp(info->kind), detail);
 		}
 	}
 

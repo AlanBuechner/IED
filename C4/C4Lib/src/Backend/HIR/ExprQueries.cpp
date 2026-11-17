@@ -90,7 +90,7 @@ namespace Scripting
 		auto operand = QueryOperandType(n);
 		if (!operand.Ok()) return m_Ctx.Fail(n, QueryResult<Value>::Fail(operand.error, "nameof: " + operand.message));
 		TypeStore* types = m_Ctx.queries().TypeStore();
-		return Constant(types->Pointer(types->Builtin(TypeKind::Char8)), ConstantValue::String(QualifiedName(operand.value), 1));
+		return Constant(types->Pointer(types->Builtin(TypeKind::Char8)), CompileTimeQueryValue(*n, operand.value).value);
 	}
 
 	// __uuidof(T): the [uuid("...")] a type carries (CBind emits it for __declspec(uuid) / MIDL_INTERFACE), else the
