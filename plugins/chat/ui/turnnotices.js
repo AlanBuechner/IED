@@ -40,7 +40,8 @@ export function askToNotify(setting) {
 
 // The window's ways, as a test replaces them.
 const PAGE = {
-	shown: (chatId) => [...document.querySelectorAll(".view[data-ref='chat:" + chatId + "']")].some((view) => view.getClientRects().length > 0),
+	// A chat's tab, or what another plugin shows of it ([data-shows-chat]: the editor's inline chat box).
+	shown: (chatId) => [...document.querySelectorAll(".view[data-ref='chat:" + chatId + "'], [data-shows-chat='" + chatId + "']")].some((view) => view.getClientRects().length > 0),
 	inFront: () => document.visibilityState === "visible" && document.hasFocus(),
 	wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 	// Whether this window takes `key` (no other window of the browser took it), taking it.

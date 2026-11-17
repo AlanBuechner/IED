@@ -13,6 +13,7 @@ include "chats/DefaultChain.ch"
 namespace Ai
 {
 	const int64 c_TitleMostBytes = 48;
+	const int64 c_ChatMetaMostBytes = 4096;
 	const int64 c_ProbeWaitSliceNs = 50000000;
 
 	Core::String ChatsTopic(Core::StringView wsId) { return Core::String("chats:") + wsId; }
@@ -499,6 +500,16 @@ namespace Ai
 		return ListSnapshot(OpenWorkspace(params.Str("wsId").View()).m_Id.View());
 	}
 
+	// chat.create / chat.set {meta}: what the plugin that made the chat keeps on it (docs/04 "A plugin's data on a chat"),
+	// a JSON object replaced whole; null or {} keeps none.
+	static Core::String ReadMeta(const Serialization::DomNode& meta) {
+		if (meta.Kind() == Serialization::DomKind::Null) return Core::String();
+		if (meta.Kind() != Serialization::DomKind::Object) throw IED::RpcError(IED::ErrorCode::BadRequest, "meta must be an object or null");
+		Core::String text = IED::NodeJson(meta);
+		if (text.ByteLength() > c_ChatMetaMostBytes) throw IED::RpcError(IED::ErrorCode::BadRequest, "meta is at most 4 KiB");
+		return text == "{}" ? Core::String() : text;
+	}
+
 	static void ReadSettings(Chat* chat, const IED::Params& params) {
 		if (params.Has("title")) {
 			chat->m_Title = params.Str("title");
@@ -509,6 +520,7 @@ namespace Ai
 		// `group` is no longer offered (model groups are gone): a chat runs on its model or the default chain.
 		// A plugin's own chats (a board's) in a section of their own in the Chats list (docs/04 "Chat sections").
 		if (params.Has("section")) chat->m_Section = params.Str("section");
+		if (params.Has("meta")) chat->m_Meta = ReadMeta(params.Field("meta"));
 		if (params.Has("endless")) chat->m_Endless = params.Bool("endless", false);
 		if (params.Has("effort")) {
 			Core::String effort = params.Str("effort");

@@ -584,6 +584,28 @@ class ChatTests(ChatCase):
 		await self.client.request("chat.set", {"chatId": mine, "section": ""})
 		self.assertNotIn("section", await self.summary(mine), "and leaves it")
 
+	async def test_a_plugins_data_is_kept_on_its_chat(self):
+		meta = {"inline": {"path": "src/a.c", "startLine": 3, "endLine": 5, "state": "open"}}
+		made = await self.client.request("chat.create", {"wsId": "w1", "title": "Inline: a.c", "section": "Inline", "meta": meta})
+		self.assertEqual(meta, made["meta"], "the summary carries it")
+		self.assertNotIn("meta", (await self.client.request("chat.create", {"wsId": "w1"})), "a chat without any has none")
+		listed = [c for c in (await self.client.request("chat.list", {"wsId": "w1"}))["chats"] if c["chatId"] == made["chatId"]]
+		self.assertEqual(meta, listed[0]["meta"], "chat.list gives it")
+		for wrong in ("text", [1], {"x": "y" * 5000}):
+			with self.assertRaises(RpcFailure) as raised:
+				await self.client.request("chat.set", {"chatId": made["chatId"], "meta": wrong})
+			self.assertEqual("bad_request", raised.exception.code, "refused: %r" % (wrong,))
+		meta["inline"]["state"] = "accepted"
+		await self.client.request("chat.set", {"chatId": made["chatId"], "meta": meta})
+		self.client.abort()
+		self.server.stop(remove_data=False)
+		self.server = self.start_server()
+		self.assertTrue(self.server.started, self.server.error)
+		await self.connect()
+		self.assertEqual(meta, (await self.summary(made["chatId"]))["meta"], "replaced whole, and kept across a restart")
+		await self.client.request("chat.set", {"chatId": made["chatId"], "meta": None})
+		self.assertNotIn("meta", await self.summary(made["chatId"]), "null takes it away")
+
 	async def test_an_unsent_message_is_kept_until_it_is_sent(self):
 		chat_id, topic = await self.chat()
 		mentions = [{"kind": "file", "ref": "notes.md", "label": "notes.md"}]

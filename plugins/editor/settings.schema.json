@@ -3,6 +3,20 @@
 	"title": "Text editor settings",
 	"type": "object",
 	"properties": {
+		"editor.inlineChat.model": {
+			"type": "string",
+			"default": "",
+			"x-ied-tiers": ["app", "solution"],
+			"x-ied-group": "AI",
+			"description": "The model the inline chat (Ctrl+I) runs on: a profile of ai.models, or a version Claude Code offers (claude-sonnet-5-5). Empty: the default chain (ai.defaultModel). A fast model suits it: it rewrites a few lines at a time. Settings > AI > Defaults sets every use's (docs/04 Defaults by use)."
+		},
+		"editor.inlineChat.effort": {
+			"enum": ["", "low", "medium", "high", "xhigh", "max"],
+			"default": "",
+			"x-ied-tiers": ["app", "solution"],
+			"x-ied-group": "AI",
+			"description": "The effort the inline chat (Ctrl+I) runs at: low, medium, high, xhigh or max. Empty: the model's own (Claude Code says what it is for each model)."
+		},
 		"editor.renderWhitespace": {
 			"enum": ["all", "trailing", "boundary", "selection", "none"],
 			"default": "all",

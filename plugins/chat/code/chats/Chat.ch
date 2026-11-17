@@ -349,6 +349,7 @@ namespace Ai
 		public bool m_TitledByAi;                       // chat_title named it, and it may again (docs/04 "Chat names")
 		public Core::String m_Section;                  // the Chats list's section it is kept in (docs/04 "Chat sections"); empty: the owner's own
 		public Core::String m_Use;                      // what it is for, a use a plugin contributes (Uses.ch): its defaults; empty: chat
+		public Core::String m_Meta;                     // what the plugin that made it keeps on it, a JSON object (docs/04 "A plugin's data on a chat"); empty: none
 		public Draft m_Draft;                           // the owner's unsent message (docs/04 "Unsent messages")
 		public ChatMode m_Mode;
 		public PermissionMode m_Permission;

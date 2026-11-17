@@ -208,3 +208,96 @@
 .bp-dot.bp-disabled { border: 2px solid var(--text-3); }
 .bp-grid .ib { opacity: 0; }
 .bp-grid:hover .ib, .bp-grid:focus-within .ib { opacity: 1; }
+
+/* The inline chat (inlinechat.js, F-EDT-100): the box above the lines it is about, their mark in the margin, and the
+   proposal's diff - the lines it removes tinted red in place, those it adds in green zones under them. */
+.ic-widget {
+	box-sizing: border-box;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	padding: var(--space-2) var(--space-3);
+	background: var(--bg-1);
+	border: var(--border-width) solid var(--border-1);
+	border-left: 2px solid var(--accent-ai);
+	border-radius: var(--radius-2);
+	box-shadow: var(--shadow-popup);
+	font-family: var(--font-ui);
+	font-size: var(--font-size-ui);
+	color: var(--text-0);
+	z-index: 10;
+}
+.ic-head { display: flex; align-items: flex-start; gap: var(--space-2); }
+.ic-glyph { flex: none; margin-top: 5px; color: var(--accent-ai); }
+.ic-widget.running .ic-glyph { opacity: 0.5; }
+.ic-input {
+	flex: 1;
+	min-width: 0;
+	box-sizing: border-box;
+	min-height: 24px;
+	max-height: 160px;
+	padding: 3px var(--space-3);
+	resize: none;
+	overflow-y: auto;
+	background: var(--bg-3);
+	color: var(--text-0);
+	border: var(--border-width) solid var(--border-1);
+	border-radius: var(--radius-2);
+	font: inherit;
+	line-height: 16px;
+}
+.ic-input:focus { outline: none; border-color: var(--text-2); }
+.ic-btn {
+	flex: none;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	padding: 0;
+	background: transparent;
+	border: none;
+	border-radius: var(--radius-2);
+	color: var(--text-1);
+	cursor: pointer;
+}
+.ic-btn:hover { background: var(--veil); color: var(--text-0); }
+.ic-btn[hidden] { display: none; }
+.ic-status { display: flex; align-items: center; gap: var(--space-3); min-width: 0; font-size: var(--font-size-sm); color: var(--text-1); }
+.ic-status > span:not(.ci) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ic-status .ic-model { margin-left: auto; flex: none; color: var(--text-2); }
+.ic-status[hidden], .ic-answer[hidden], .ic-actions[hidden] { display: none; }
+.ic-answer {
+	max-height: 200px;
+	overflow-y: auto;
+	padding: 0 var(--space-2);
+	color: var(--prose-text);
+	font-size: var(--font-size-ui);
+	line-height: 1.5;
+}
+.ic-answer > :first-child { margin-top: 0; }
+.ic-answer > :last-child { margin-bottom: 0; }
+.ic-answer p { margin: var(--space-2) 0; }
+.ic-answer code { color: var(--prose-code); background: var(--prose-code-bg); border-radius: var(--radius-1); padding: 0 var(--space-1); font-family: var(--font-mono); font-size: 0.92em; }
+.ic-answer pre { margin: var(--space-2) 0; padding: var(--space-2) var(--space-3); background: var(--bg-2); overflow-x: auto; }
+.ic-answer pre code { background: none; padding: 0; color: var(--text-0); }
+.ic-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
+.ic-actions .btn { height: 24px; }
+.ic-actions .btn[hidden] { display: none; }
+.ic-key { margin-left: var(--space-3); font-weight: normal; opacity: 0.6; font-size: var(--font-size-xs); }
+.ic-counts { display: inline-flex; gap: var(--space-2); font-family: var(--font-mono); font-size: var(--font-size-sm); }
+.ic-counts[hidden] { display: none; }
+.ic-plus { color: var(--accent-saved); }
+.ic-minus { color: var(--accent-error); }
+.ic-link { margin-left: auto; padding: 0; background: none; border: none; color: var(--link); font: inherit; font-size: var(--font-size-sm); cursor: pointer; }
+.ic-status .ic-link { margin-left: 0; flex: none; }
+.ic-link:hover { text-decoration: underline; }
+.monaco-editor .ic-range-mark { width: 2px !important; margin-left: 5px; background: var(--accent-ai); }
+.monaco-editor .ic-removed { background: var(--diff-del-bg); }
+.monaco-editor .ic-removed-mark { width: 3px !important; margin-left: 4px; background: var(--diff-del-gutter); }
+.monaco-editor .ic-added { background: var(--diff-add-bg); min-width: 100%; }
+.monaco-editor .ic-line { white-space: pre; }
+.monaco-editor .ic-added-mark { position: absolute; top: 0; bottom: 0; width: 3px; background: var(--diff-add-gutter); }
+@media (max-width: 719px) {
+	.ic-key { display: none; }
+}

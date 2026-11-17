@@ -36,6 +36,7 @@ namespace Ai
 		if (chat->m_TitledByAi) json.BoolField("titledByAi", true);
 		if (!chat->m_Section.IsEmpty()) json.Field("section", chat->m_Section.View());
 		if (!chat->m_Use.IsEmpty()) json.Field("use", chat->m_Use.View());
+		if (!chat->m_Meta.IsEmpty()) json.RawField("meta", chat->m_Meta.View());
 		if (!chat->m_Draft.m_Text.IsEmpty()) {
 			json.Key(Core::StringView("draft"));
 			WriteDraft(json, chat->m_Draft);
@@ -190,6 +191,7 @@ namespace Ai
 		chat->m_TitledByAi = header.Member("titledByAi").AsBool();
 		chat->m_Section = Core::String(header.Member("section").AsView());
 		chat->m_Use = Core::String(header.Member("use").AsView());
+		if (header.Member("meta").Kind() == Serialization::DomKind::Object) chat->m_Meta = IED::NodeJson(header.Member("meta"));
 		chat->m_Draft.m_Text = Core::String(header.Member("draft").Member("text").AsView());
 		ReadMentions(header.Member("draft").Member("mentions"), chat->m_Draft.m_Mentions);
 		ReadChatMode(header.Member("mode").AsView(), chat->m_Mode);

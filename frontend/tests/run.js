@@ -25,6 +25,7 @@ import "./navigation.test.js";
 import "./headersource.test.js";
 import "./gotoall.test.js";
 import "./linediff.test.js";
+import "./inlinechat.test.js";
 import "./fileuris.test.js";
 import "./paths.test.js";
 import "./markdown.test.js";

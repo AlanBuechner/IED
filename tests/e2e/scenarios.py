@@ -2045,6 +2045,106 @@ def chat_clipboard(run):
 	run.shot("clipboard")
 
 
+def inline_session(page):
+	return page.evaluate("(() => { const s = document.querySelector('.ic-widget'); return s ? {shows: s.dataset.showsChat || '', status: (s.querySelector('.ic-status') || {}).textContent || ''} : null; })()")
+
+
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def inline_chat(run):
+	"""Ctrl+I in the editor (F-EDT-100, docs/04 "Inline chat"): a box above the caret's line; what is asked goes to an
+	inline chat whose reply streams in as a diff over the line - the box and the diff come back after a reload mid-reply -
+	and Ctrl+Enter (Accept on a phone) puts the change in the document as one undo step, closing the session on the
+	server. A phone opens the box from the Edit menu's command."""
+	page = run.open()
+	run.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"fake": {"endpoint": run.target.model_url + "/v1", "watchdog": {"prefillRate": 1000000}}}})
+	ws = page.evaluate("ied_shell.wsId")
+	for left in run.request("chat.list", {"wsId": ws})["chats"]:
+		if left.get("use") == "inline" and left.get("meta", {}).get("inline", {}).get("state") == "open":
+			run.request("chat.set", {"chatId": left["chatId"], "meta": {"inline": dict(left["meta"]["inline"], state="discarded")}})
+	open_main_c(run, page)
+	take_over(page)
+	before = editor_text(page)
+	# Earlier scenarios may have changed main.c (an AI's comment above main): the line is found by its text.
+	line = before.split("\n").index("\treturn core_run();") + 1
+	caret_in_line = "(line) => { const e = ied_shell.views.entries.get('doc:src/main.c').instance.editor; e.setPosition({lineNumber: line, column: 2}); e.focus(); }"
+	page.evaluate(caret_in_line, line)
+	if run.phone:
+		page.evaluate("ied_shell.commands.run('ied.editor.inlineChat')")
+	else:
+		page.keyboard.press("Control+I")
+	page.wait_for_selector(".ic-widget .ic-input", timeout=10000)
+	page.wait_for_function("document.activeElement && document.activeElement.classList.contains('ic-input')", timeout=5000)
+	if not run.phone:
+		page.keyboard.press("Control+D")
+		page.keyboard.press("Control+Enter")
+		check(editor_text(page) == before, "the editor's keys leave the document alone while the box has the focus")
+	run.shot("asking")
+	reply = ("Checks what `core_run` returns:\n\n```c\n\tint result = core_run();\n\tif (result != 0)\n\t\treturn result;\n\treturn 0;\n```\n\n"
+		"A failure of `core_run` now reaches whoever started the program; otherwise `main` returns 0 as before. Nothing else in "
+		"`main` changes, and `core_run` is still called once, before anything else runs.")
+	# 29 chunks, 0.3 s apart (the fake model runs at 0.05 of its delays), the server holding back the last 48 bytes as
+	# it streams: the first changed line shows about 3 s in, the reply ends about 6 s later, and the reload lands between.
+	run.target.queue_model({"description": "e2e", "stopClass": "none", "harness": "-", "responses": [{"chunkDelayMs": 6000, "steps": [{"role": "assistant"}, {"text": reply, "chunk": 12}, {"finish": "stop"}, {"usage": True}, {"done": True}]}]})
+	page.fill(".ic-input", "check the result")
+	page.press(".ic-input", "Enter")
+	page.wait_for_selector(".monaco-editor .ic-added .ic-line", timeout=20000)
+	page.wait_for_selector(".monaco-editor .ic-removed")
+	run.shot("streaming")
+	chat_id = inline_session(page)["shows"]
+	check(chat_id, "the box shows its chat")
+	summary = [c for c in run.request("chat.list", {"wsId": ws})["chats"] if c["chatId"] == chat_id][0]
+	check(summary["use"] == "inline" and summary["section"] == "Inline" and summary["meta"]["inline"]["startLine"] == line, "an inline chat about line %d: %s" % (line, summary))
+	check(summary["mode"] == "ask" and summary["permission"] == "plan", "it reads and never writes")
+	check(summary["state"] == "running", "still replying as the page goes: %s, %s" % (summary["state"], summary.get("lastStop")))
+	# The browser is disposable: the reply goes on on the server, and the session comes back where it was.
+	run.reload()
+	if run.phone:
+		page.evaluate("ied_shell.commands.run('ied.editor.goTo', {path: 'src/main.c', line: 4})")
+		page.wait_for_function("ied_shell.views.entries.get('doc:src/main.c') && ied_shell.views.entries.get('doc:src/main.c').instance && ied_shell.views.entries.get('doc:src/main.c').instance.sync.version > 0", timeout=20000)
+	else:
+		open_main_c(run, page)
+	take_over(page)
+	page.wait_for_selector(".ic-widget[data-shows-chat='%s']" % chat_id, timeout=20000)
+	if page.is_visible(".ic-widget.running"):
+		run.shot("resumed")
+	page.wait_for_selector(".ic-widget .ic-accept:not([hidden])", timeout=30000)
+	page.wait_for_function("document.querySelectorAll('.monaco-editor .ic-added .ic-line').length === 4", timeout=10000)
+	check("core_run" in run.texts(".ic-widget .ic-answer")[0], "the words around the block: %s" % run.texts(".ic-widget .ic-answer"))
+	run.shot("proposed")
+	sent = run.target.model_requests()[-1]
+	first = [m for m in sent["body"]["messages"] if m["role"] == "user"][-1]
+	content = first["content"] if isinstance(first["content"], str) else " ".join(p.get("text", "") for p in first["content"])
+	check("Inline edit in the editor: src/main.c line %d" % line in content and "return core_run();" in content, "the model got the line and the file: %s" % content[:300])
+	if not run.phone:
+		# The session is a chat like any other: Open in Chat shows its transcript, kept in the Chats list's Inline section.
+		page.click(".ic-widget .ic-link:has-text('Open in Chat')")
+		page.wait_for_selector(".view[data-ref='chat:%s'] .chat-turn" % chat_id, timeout=20000)
+		run.wait_text(".view[data-ref='chat:%s'] .chat-turn" % chat_id, "returns 0 as before")
+		run.shot("in-chat")
+		run.show_activity("ied.editor")
+		page.wait_for_selector(".ic-widget[data-shows-chat='%s'] .ic-accept:not([hidden])" % chat_id, timeout=10000)
+	if run.phone:
+		page.click(".ic-widget .ic-accept")
+	else:
+		page.evaluate(caret_in_line, line)
+		page.wait_for_function("ied_shell.context.get('inlineChatProposal') === true", timeout=5000)
+		page.keyboard.press("Control+Enter")
+	page.wait_for_selector(".ic-widget", state="detached", timeout=10000)
+	text = editor_text(page)
+	check("\tint result = core_run();\n\tif (result != 0)\n\t\treturn result;\n\treturn 0;\n}" in text, "accepted into the document: %r" % text)
+	run.shot("accepted")
+	for _ in range(50):
+		summary = [c for c in run.request("chat.list", {"wsId": ws})["chats"] if c["chatId"] == chat_id][0]
+		if summary["meta"]["inline"]["state"] == "accepted":
+			break
+		time.sleep(0.1)
+	check(summary["meta"]["inline"]["state"] == "accepted", "the session is closed on the server: %s" % summary["meta"])
+	page.evaluate("(() => { const e = ied_shell.views.entries.get('doc:src/main.c').instance.editor; e.focus(); e.trigger('e2e', 'undo', null); })()")
+	settled(page)
+	check(editor_text(page) == before, "one undo takes it back")
+	run.request("settings.reset", {"tier": "app", "key": "ai.models"})
+
+
 @scenario(viewports=("desktop", "phone"))
 def chat_effort(run):
 	"""A chat's effort in the Model menu (owner, 2026-10-26: "move the effort from the dropdown and put it into the model
@@ -3461,7 +3561,7 @@ def editor_keys_and_keyboard_page(run):
 	page.wait_for_selector(".kb-row[data-command='ied.editor.duplicate'] .kb-key.user[data-chord='ctrl+shift+d']")
 	run.shot("changed")
 	values = run.request("settings.get", {})["values"]["keyboard.bindings"]["value"]
-	check(values == [{"command": "ied.editor.duplicate", "key": "ctrl+d", "remove": True}, {"command": "ied.editor.duplicate", "key": "ctrl+shift+d", "when": "activeTabKind == 'doc'"}], "keyboard.bindings: %s" % values)
+	check(values == [{"command": "ied.editor.duplicate", "key": "ctrl+d", "remove": True}, {"command": "ied.editor.duplicate", "key": "ctrl+shift+d", "when": "activeTabKind == 'doc' && !inlineChatFocus"}], "keyboard.bindings: %s" % values)
 	# Settings is over the shell (docs/07): closed, the editor is there again.
 	page.click(".settings-overlay-close")
 	page.wait_for_selector(".settings-overlay", state="detached")

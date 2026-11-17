@@ -66,6 +66,7 @@ on its agent's model and effort.
 | `chat` | chat | `ai.chats.model`, `ai.chats.effort` | the chats you start (`chat.create`'s default) |
 | `board` | board | `board.ai.model`, `board.ai.effort` | a planning board's chat (a board's chat made earlier is given the use when the board finds it) |
 | `profiler` | profiler | `profiler.ai.model`, `profiler.ai.effort` | Ask AI on a capture or a zone |
+| `inline` | editor | `editor.inlineChat.model`, `editor.inlineChat.effort` | the editor's inline chat, Ctrl+I ("Inline chat" below) |
 
 **A chat the AI starts is not a use with defaults** (owner, 2026-11-11: "when an AI starts a new chat it should be able
 to decide the model and effort that is best for the job rather then having it pre decided in the settings though it
@@ -77,7 +78,7 @@ each Claude model with what it is for (the CLI's description), the efforts it ta
 an informed one; `chat_set_model` takes `effort` too. The chat it starts is of use `agent`, which no plugin contributes,
 so no setting changes what the AI chose.
 
-Inline chat (Ctrl+I, F-EDT-100) is not built yet; it will contribute its own use the same way. Each use's settings are
+The editor's inline chat (Ctrl+I, F-EDT-100) contributes its own, `inline` ("Inline chat" below). Each use's settings are
 the User and Solution tiers' (a solution can say its boards run on Fable at High; `docs/07` "Which tier a setting belongs
 in"). **Settings > AI > Defaults** (`defaultssettings.js`) sets them all in one place: the default chain's first model
 (`ai.defaultModel`), then each use - the chat plugin's own first - with a Model choice (the default chain with the model it
@@ -635,6 +636,60 @@ Owner, 2026-11-05: "agents should make a name for the tab so i can better find a
 ## Chat sections (built, 2026-11-11)
 
 Owner, 2026-11-11: "in the chat window there should be a separate section under the recent that is for board chats collapsed by default that way it is out of the way for normal chat usage". A chat a plugin makes for its own work - a planning board's (`docs/32`) - carries a **section**: `chat.create {section}` / `chat.set {section}` (empty: none), kept in `chat.json` and in the chat's summary (`section`, only when it has one). The Chats list keeps such chats - with the sub-agent chats they ran - out of Open and Recent, in a section of that name after them, sections in name order before Deleted; one is closed until the owner opens it (`ied.chat.listOpened` in the browser's storage) and a search opens them all. A chat with a section starts with its details panel closed, open or closed after that as the owner leaves it for that chat (`ied.chat.panelOf`), not for every chat. The section is the plugin's name for its chats and nothing else: the chat runs, is named and is deleted as any other. Server check `test_a_plugins_chat_is_kept_in_its_section`, unit `chats list: a plugin's chats in a section of their own`.
+
+## A plugin's data on a chat (built, 2026-11-16)
+
+A plugin that makes chats for its own work may keep what it needs to find and show them again on the chat itself:
+`chat.create {meta}` / `chat.set {meta}` (`docs/10`) take a JSON object - at most 4 KiB, replaced whole, `null` or `{}`
+for none - kept in `chat.json` and carried by the chat's summary (`meta`, only when it has some), so every client sees
+it in `chat.list` and on `chats:<wsId>`, and a change reaches them as `chat.changed`. The server never reads it: it is
+the plugin's, by convention under a key naming its feature (`meta.inline` is the inline chat's). Server check
+`test_a_plugins_data_is_kept_on_its_chat`.
+
+## Inline chat (built, 2026-11-16)
+
+Owner, 2026-11-16: "we should have an inline chat for the text editor that will open with crtl+i" (F-EDT-100, F-EDT-101,
+US-INL-1; `plugins/editor/ui/inlinechat.js`, `inlineedit.js`). **Ctrl+I** in a document (also Edit > Inline Chat and the
+editor's right-click menu, which is how a phone opens it) opens a box above the selected lines - the caret's line when
+nothing is selected, a selection ending at a line's start leaving that line out - with the lines marked in the margin.
+What is typed there and sent (Enter; Shift+Enter breaks the line) goes to a chat of its own:
+
+- **The chat.** `chat.create {use: "inline", section: "Inline", mode: "ask", permission: "plan", meta: {inline}}`,
+  titled by where and what ("main.c:5 check the result"): the AI reads what it likes - code navigation, other files -
+  and permission "plan" refuses every write and command, so a change reaches the document only through the box. It runs
+  on the `inline` use's model and effort ("Defaults by use"; a fast model suits it), sits in the Chats list's Inline
+  section (closed until opened, "Chat sections"), and is a chat like any other: Open in Chat shows its transcript, a
+  turn ending there does not toast while the box shows it (`[data-shows-chat]`, `turnnotices.js`).
+- **What the model is told.** The first message is the request, then where (`src/main.c lines 3-6`, or an empty line
+  where the caret is), how to answer - the new text of all those lines, at their indentation, in one fenced code block,
+  at most a sentence outside it; no file edits; a question answered without a block - and the lines themselves, fenced
+  in the document's language; the file goes along as an `@` mention, so the model reads the whole of it. A message after
+  that is the request and a one-line reminder of the lines, with their text again only when they changed since. All of
+  it is in the transcript as sent.
+- **The proposal.** The reply's last fenced block (a block still streaming shows its finished lines) replaces the lines;
+  numbers copied from `fs_read` (`12<tab>`) are taken off, and a block written flush left for lines that sit indented
+  takes their indentation. Its diff against the lines as they are now shows in the document as it streams: the lines it
+  removes tinted red in place, the lines it adds in green view zones under them, colored as the editor colors the
+  language, with +added -removed in the box and the reply's words around the block above the buttons. A follow-up that
+  asks a question keeps the last change shown.
+- **Accept** (Ctrl+Enter while the caret is in the lines or the box has the focus; Tab in an empty box; the button)
+  replaces the lines as one undo step - this window takes the document's lease when nobody holds it, and says so when
+  another window or a read-only file stands in the way. **Discard** (Escape in the box, or in the lines when no Monaco
+  widget wants it; the X; the button) drops it; Escape while the reply streams stops it instead. Either sets
+  `meta.inline.state` to `accepted` or `discarded`, which closes the session in every window and device. While the box
+  has the focus (`inlineChatFocus`) the document's own keys - Ctrl+D, Ctrl+L, Ctrl+Enter and the rest of the editor's
+  keybindings - leave the document alone; Ctrl+S and the shell's keys still work.
+- **Where it lives.** The session is the chat's `meta.inline`: `{path, startLine, endLine, lines, hash, state}` (`hash`
+  the lines' text, FNV-1a). Every editor of the page follows `chats:<wsId>` and shows each open session of its file, so
+  a reload - mid-reply too, the reply going on on the server - another device, or a second editor of the file shows it
+  where it was: at its lines when their text still hashes the same, else the nearest place it does, else where they were
+  with a note that they changed. In a window, a session's lines follow edits around them (a tracked range); a follow-up
+  writes where they are now back to `meta.inline`.
+
+Checks: unit `inline chat: ...` (`frontend/tests/inlinechat.test.js`: the proposal, the diff, finding the lines again, the
+messages, and a session in a real Monaco against a scripted server - asked, streamed, accepted as one undo step, closed
+from elsewhere), e2e `inline_chat` (real server and fake model, desktop and phone: Ctrl+I, the diff streaming, a reload
+mid-reply, Open in Chat, Ctrl+Enter or Accept, the session closed on the server, one undo).
 
 ## Unsent messages (built, 2026-11-11)
 

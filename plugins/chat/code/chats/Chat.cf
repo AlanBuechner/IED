@@ -497,6 +497,7 @@ namespace Ai
 		json.Field("title", m_Title.View());
 		if (!m_Section.IsEmpty()) json.Field("section", m_Section.View());
 		json.Field("use", m_Use.IsEmpty() ? Core::StringView("chat") : m_Use.View());
+		if (!m_Meta.IsEmpty()) json.RawField("meta", m_Meta.View());
 		json.Field("mode", ChatModeName(m_Mode));
 		json.Field("permission", PermissionModeName(m_Permission));
 		json.Field("group", m_Group.View());

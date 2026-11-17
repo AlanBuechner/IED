@@ -26,6 +26,7 @@ import { DebugState, BreakpointState, DebugToolbar as DebugToolbarView, framePat
 import { BreakpointMargin } from "./breakpointmargin.js";
 import { CallStack as CallStackView, Locals as LocalsView, Watch as WatchView, Threads as ThreadsView, BreakpointsWindow } from "./debugviews.js";
 import { DiagnosticTools as DiagnosticToolsView } from "./diagtools.js";
+import { InlineChats } from "./inlinechat.js";
 
 const explorers = new Set();
 const outputs = new Set();
@@ -68,6 +69,10 @@ export function activate(ied) {
 			relabeled.dispose();
 		};
 	});
+	const inline = new InlineChats(ied, editors);
+	editors.attach((editor) => inline.attach(editor));
+	ied.commands.handle("ied.editor.inlineChat", () => inline.start(currentEditor(ied)));
+	ied.commands.handle("ied.editor.inlineChatAccept", () => inline.accept());
 	ied.contributions.on(() => relabel(ied));
 	followCounterparts(ied);
 	ied.tabs.kind("doc", { view: "TextDocument", title: fileName, icon: (path) => ied.icons.fileSpec(fileName(path)), resource: (path) => path });

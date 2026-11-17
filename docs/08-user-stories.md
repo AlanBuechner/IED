@@ -203,7 +203,7 @@ End-to-end scenarios. Each is a test script for the roadmap's exit criteria (see
 
 ### INL - Inline AI in the editor
 
-- **US-INL-1** `plan` `P1` - As Owner, Ctrl+I opens an inline chat at the cursor/selection; proposed changes appear as an inline diff I accept or reject (undoable).
+- **US-INL-1** `plan` `P1` - As Owner, Ctrl+I opens an inline chat at the cursor/selection; proposed changes appear as an inline diff I accept or reject (undoable). Built 2026-11-16 (`docs/04` "Inline chat").
 - **US-INL-2** `ext` `P1` - As Owner, AI actions sit on the right-click menu and error lightbulb: explain, fix this error, write tests, document, refactor.
 - **US-INL-3** `ext` `P1` - As Owner, ghost-text completions come from a fast local fill-in-the-middle model.
 
