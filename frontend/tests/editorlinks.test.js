@@ -3,7 +3,7 @@
 // document tab, and everything that names no file of the workspace left plain.
 
 import { test, assertEqual } from "./harness.js";
-import { fileLink, fileRef, linkIndex, linksOfLine, modelLinks, openLink } from "/plugins/ied.editor/ui/editorlinks.js";
+import { fileLink, fileRef, folderFiles, linkIndex, linksOfLine, LISTED_MS, modelLinks, openLink } from "/plugins/ied.editor/ui/editorlinks.js";
 
 const LANGUAGES = [
 	{ id: "markdown", extensions: [".md", ".markdown"] },
@@ -85,12 +85,27 @@ test("editorlinks: the file named by a word", () => {
 	assertEqual(fileLink("C:\\Work\\proj\\docs\\a.md", index), true, "separators of a drive path");
 });
 
-test("editorlinks: the links of a document, as Monaco is told them", () => {
+// The workspace's files, as a fake `fs.list` gives them, and the folders it was asked for.
+function fakeClient(paths) {
+	const asked = [];
+	const request = async (method, params) => {
+		asked.push(method + " " + params.wsId + " " + params.path);
+		const prefix = params.path ? params.path + "/" : "";
+		const names = paths.filter((p) => p.startsWith(prefix) && !p.slice(prefix.length).includes("/")).map((p) => p.slice(prefix.length));
+		if (!names.length && !paths.some((p) => p.startsWith(prefix))) throw new Error("no directory " + params.path);
+		return { path: params.path, entries: names.map((name) => ({ name, path: prefix + name, kind: "file" })) };
+	};
+	return { request, asked };
+}
+
+test("editorlinks: the links of a document, as Monaco is told them", async () => {
 	const monaco = {
 		Range: function (line, start, endLine, end) { this.toString = () => "[" + line + "," + start + " -> " + endLine + "," + end + "]"; },
 		Uri: { from: (parts) => ({ scheme: parts.scheme, authority: parts.authority, path: parts.path, toString: () => parts.scheme + "://" + parts.authority + parts.path }) },
 	};
 	const ied = { workspace: { wsId: "w1", root: "C:/Work/proj" } };
+	const client = fakeClient(["LICENSE", "docs/docs/a.md", "docs/Guide.md", "Game/Scripts/Player.cf", "Game/Scripts/Player.h", "Game/Physics/Shapes.h"]);
+	const files = folderFiles(client);
 	// A model as the editor's view makes one: of the workspace, or of a file outside it (editorview.js).
 	const model = (text, document) => {
 		const lines = text.split("\n");
@@ -98,12 +113,30 @@ test("editorlinks: the links of a document, as Monaco is told them", () => {
 			: monaco.Uri.from({ scheme: "ied", authority: "w1", path: "/" + document });
 		return { uri, getLineCount: () => lines.length, getLineContent: (n) => lines[n - 1] };
 	};
-	const shown = (text, document) => modelLinks(model(text, document), monaco, ied, index).links.map((l) => l.range.toString() + " " + l.url);
-	assertEqual(shown("see https://example.com/x and docs/a.md", "docs/here.md"),
+	const shown = async (text, document) => (await modelLinks(model(text, document), monaco, ied, index, files)).links.map((l) => l.range.toString() + " " + l.url);
+	assertEqual(await shown("see https://example.com/x and docs/a.md", "docs/here.md"),
 		["[1,5 -> 1,26] https://example.com/x", "[1,31 -> 1,40] ied://w1/docs/docs/a.md"], "an address as written, a file as the URI of its document");
-	assertEqual(shown("LICENSE", "x.md").length, 1, "a file name a language lists");
-	assertEqual(shown("see docs/a.md", "file:///C:/Lib/stdio.h"), [], "a file outside the workspace names no document to open");
-	assertEqual(shown("x.y and 1.5 and docs/", "a.md"), [], "plain words give nothing");
+	assertEqual((await shown("LICENSE", "x.md")).length, 1, "a file name a language lists");
+	assertEqual(await shown("see docs/a.md", "file:///C:/Lib/stdio.h"), [], "a file outside the workspace names no document to open");
+	assertEqual(await shown("x.y and 1.5 and docs/", "a.md"), [], "plain words give nothing");
+	assertEqual(await shown("see guide.md and gone.md", "docs/here.md"), ["[1,5 -> 1,13] ied://w1/docs/Guide.md"],
+		"a file that is there, by the name the disk gives it; one that is not is no link");
+	assertEqual(await shown('include "Physics/Shapes.h"\ninclude "Player.h"', "Game/Scripts/Player.cf"), ["[2,10 -> 2,18] ied://w1/Game/Scripts/Player.h"],
+		"an include its language reads from another folder is left to the language server; one beside the document is a link");
+	assertEqual(await shown("see nowhere/a.md", "x.md"), [], "a folder that is not there has no files");
+});
+
+test("editorlinks: one listing of a folder serves every ask for a while", async () => {
+	const client = fakeClient(["docs/a.md"]);
+	let clock = 0;
+	const files = folderFiles(client, () => clock);
+	assertEqual([...(await files("w1", "docs")).values()], ["a.md"]);
+	await files("w1", "DOCS");
+	await files("w2", "docs");
+	assertEqual(client.asked, ["fs.list w1 docs", "fs.list w2 docs"], "a folder's case does not matter; another workspace's is its own");
+	clock = LISTED_MS;
+	await files("w1", "docs");
+	assertEqual(client.asked.length, 3, "after a while the folder is listed again, to see files made or removed");
 });
 
 test("editorlinks: what a clicked link opens", () => {

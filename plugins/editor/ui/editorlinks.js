@@ -16,6 +16,11 @@
 // have, or it is one of their file names; a word with no separator in it must be just a name and an extension, so `x.y`,
 // `app.min.js` and `1.5` in code stay plain text, as does a folder's path and a site's address. A "#anchor" or "?query"
 // is dropped: nothing here can jump to a heading.
+//
+// And a path is a link only when its file is there (the folder's `fs.list`). A path a language reads another way than
+// from the document's folder - an include read from the project's source folder - is its language server's to follow,
+// by the go-to-definition Ctrl+Click runs too; a link here beside it opened a second tab saying there was no such file
+// (owner, 2026-11-18).
 
 import { canonicalFileUri, displayPath, isFileUri } from "/ui-kit/fileuris.js";
 import { resolveRelative } from "/ui-kit/paths.js";
@@ -153,26 +158,65 @@ function dirOf(path) {
 // Registers the link provider and the link opener once, on the Monaco every editor shares.
 export function registerLinks(monaco, ied) {
 	const index = () => linkIndex(ied.contributions("languages").map((c) => c.value));
-	monaco.languages.registerLinkProvider("*", { provideLinks: (model) => modelLinks(model, monaco, ied, index()) });
+	const files = folderFiles(ied.client);
+	monaco.languages.registerLinkProvider("*", { provideLinks: (model) => modelLinks(model, monaco, ied, index(), files) });
 	monaco.editor.registerLinkOpener({ open: (uri) => openLink(ied, uri) });
 }
 
+// How long one folder's listing answers for the links of every document asked about it: Monaco asks again a second after
+// each edit, and a file made or removed since shows (or loses) its link at the next ask after this.
+export const LISTED_MS = 3000;
+const MOST_LISTED = 256;
+
+// The files of a workspace's folder, as its `fs.list` says: `(wsId, folder)` to a promise of a Map from each file's name,
+// lower-cased, to the name the disk has; a folder that is not there has none. `now` is the clock (tests give theirs).
+export function folderFiles(client, now = () => Date.now()) {
+	const listed = new Map();
+	return (wsId, folder) => {
+		const key = wsId + "\n" + folder.toLowerCase();
+		const known = listed.get(key);
+		if (known && now() - known.at < LISTED_MS) return known.names;
+		if (listed.size >= MOST_LISTED)
+			for (const [other, entry] of listed) if (now() - entry.at >= LISTED_MS) listed.delete(other);
+		const names = client.request("fs.list", { wsId, path: folder }).then(
+			(answer) => new Map(answer.entries.filter((e) => e.kind === "file").map((e) => [e.name.toLowerCase(), e.name])),
+			() => new Map());
+		listed.set(key, { at: now(), names });
+		return names;
+	};
+}
+
 // A document's links, as Monaco wants them: each with its range and where it goes - an address as written, a file as the
-// URI of its document, which the opener below turns into a tab.
-export function modelLinks(model, monaco, ied, index) {
+// URI of its document, which the opener below turns into a tab. A file is one `files` (folderFiles) finds, written with
+// the name the disk gives it.
+export async function modelLinks(model, monaco, ied, index, files) {
 	if (model.getLineCount() > MAX_LINES) return { links: [] };
 	const wsId = ied.workspace.wsId || "";
 	const from = documentPath(model.uri);
 	const root = ied.workspace.root || "";
-	const links = [];
+	const found = [];
 	for (let line = 1; line <= model.getLineCount(); line++) {
 		for (const link of linksOfLine(model.getLineContent(line), index)) {
 			const target = link.kind === "url" ? link.value : from === null ? null : fileRef(from, root, link.value);
-			if (!target) continue;
-			const range = new monaco.Range(line, link.start + 1, line, link.end + 1);
-			links.push(link.kind === "url" ? { range, url: target, tooltip: target }
-				: { range, url: monaco.Uri.from({ scheme: "ied", authority: wsId, path: "/" + target }), tooltip: target });
+			if (target) found.push({ line, link, target });
 		}
+	}
+	const folders = new Map();
+	for (const { link, target } of found)
+		if (link.kind === "file" && !folders.has(dirOf(target))) folders.set(dirOf(target), files(wsId, dirOf(target)));
+	const listed = new Map();
+	await Promise.all([...folders].map(async ([folder, names]) => listed.set(folder, await names)));
+	const links = [];
+	for (const { line, link, target } of found) {
+		const range = new monaco.Range(line, link.start + 1, line, link.end + 1);
+		if (link.kind === "url") {
+			links.push({ range, url: target, tooltip: target });
+			continue;
+		}
+		const name = listed.get(dirOf(target)).get(target.slice(target.lastIndexOf("/") + 1).toLowerCase());
+		if (!name) continue;
+		const path = (dirOf(target) ? dirOf(target) + "/" : "") + name;
+		links.push({ range, url: monaco.Uri.from({ scheme: "ied", authority: wsId, path: "/" + path }), tooltip: path });
 	}
 	return { links };
 }
