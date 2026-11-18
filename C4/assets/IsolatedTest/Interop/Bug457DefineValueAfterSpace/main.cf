@@ -1,0 +1,9 @@
+// BUG-457: `define("NAME", "VALUE")` written with a space after the comma (as the docs write it) reaches the foreign
+// compile with its value (the interop pass dropped it), and a header's defines reach CBind (it skipped `-DNAME`), so a
+// macro built on one is bound. main returns 0 when the source sees 40 + 2 and the binding 40.
+extern "c" include "answer.h" { define("ANSWER_BASE", "40"); }
+extern "c" source "answer.c" { define("ANSWER_BASE", "40"); define("ANSWER_STEP", "2"); }
+
+int32 main() {
+	return answer() == 42 && ANSWER_FROM_HEADER == 40 ? 0 : 1;
+}

@@ -239,6 +239,7 @@ namespace Scripting
 					while (p < s.size() && isspace((unsigned char)s[p])) ++p;
 					if (p >= s.size() || s[p] != '(') break;
 					++p;
+					while (p < s.size() && isspace((unsigned char)s[p])) ++p;
 
 					std::string a1;
 					if (!ReadQuoted(s, p, a1)) break;
@@ -246,7 +247,13 @@ namespace Scripting
 					{
 						while (p < s.size() && isspace((unsigned char)s[p])) ++p;
 						std::string a2;
-						if (p < s.size() && s[p] == ',') { ++p; ReadQuoted(s, p, a2); out.defines.push_back(a1 + "=" + a2); }
+						if (p < s.size() && s[p] == ',')
+						{
+							++p;
+							while (p < s.size() && isspace((unsigned char)s[p])) ++p; // BUG-457: the docs write define("N", "V")
+							ReadQuoted(s, p, a2);
+							out.defines.push_back(a1 + "=" + a2);
+						}
 						else out.defines.push_back(a1);
 					}
 					else if (directive == "include_dir")
@@ -468,7 +475,7 @@ namespace Scripting
 		args.Push(outFile);
 		args.Push("--lang");
 		args.Push(flags.language);
-		for (const auto& d : flags.defines) { Core::String f("-D"); f += d; args.Push(f); }
+		for (const auto& d : flags.defines) { args.Push("-D"); args.Push(d); }
 		for (const auto& inc : flags.includeDirs) { args.Push("-I"); args.Push(inc); }
 		for (const auto& target : flags.targetFlags) args.Push(target);
 		if (flags.system == TargetSystem::Linux)

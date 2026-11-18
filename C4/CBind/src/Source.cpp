@@ -41,6 +41,7 @@ namespace
 
 	CBindArgs g_args; // set in main() before the tool runs; read by the default-constructed action
 
+	// An argument CBind does not know is refused, never skipped: one skipped silently drops a define (BUG-457).
 	bool ParseArgs(int argc, char** argv, CBindArgs& out)
 	{
 		if (argc < 3) return false;
@@ -51,12 +52,19 @@ namespace
 			std::string a = argv[i];
 			if (a == "--lang" && i + 1 < argc) out.language = argv[++i];
 			else if (a == "-D" && i + 1 < argc) out.defines.push_back(argv[++i]);
+			else if (a.size() > 2 && a.compare(0, 2, "-D") == 0) out.defines.push_back(a.substr(2));
 			else if (a == "-I" && i + 1 < argc) out.includeDirs.push_back(argv[++i]);
+			else if (a.size() > 2 && a.compare(0, 2, "-I") == 0) out.includeDirs.push_back(a.substr(2));
 			else if (a == "--winsysroot" && i + 1 < argc) out.windowsSysroot = argv[++i];
 			else if (a == "--target" && i + 1 < argc) out.system = argv[++i];
 			else if (a == "--sysroot" && i + 1 < argc) out.sysroot = argv[++i];
 			else if (a == "--resource-dir" && i + 1 < argc) out.resourceDir = argv[++i];
 			else if (a.size() > 2 && a.compare(0, 2, "-m") == 0) out.targetFlags.push_back(a);
+			else
+			{
+				std::cerr << "cbind: unknown argument '" << a << "'\n";
+				return false;
+			}
 		}
 		return !out.header.empty() && !out.outFile.empty();
 	}
