@@ -12,7 +12,7 @@ namespace Ied
 	class FileWalk
 	{
 		public FS::Path m_Root;
-		public Core::Array<Core::String> m_Exclude;   // globs; a folder or file they match is passed over
+		public Core::Array<Core::String> m_Exclude;   // globs; a folder or file they match is passed over, unless an ignore file's '!' rule re-includes it (not .git or node_modules)
 		public bool m_UseIgnoreFiles;
 		public const Threading::Atomic<bool>* m_Cancel;   // set: the walk stops soon; null: never
 

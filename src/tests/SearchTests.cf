@@ -67,6 +67,42 @@ class SearchTests {
 		assert_true(Ied::IsSearched(Core::StringView("src/a.c"), query) && !Ied::IsSearched(Core::StringView("src/a.h"), query), "includes");
 	}
 
+	[test("reincluded_folder")]
+	public static void TestReincludedFolder() {
+		FS::Path root = FS::TempDirectory() / "ied-search-reinclude-test";
+		FS::RemoveAll(root.CStr());
+		Write(root / ".gitignore", "build/\n!**/src/**/Build/\n");
+		Write(root / "build" / "int" / "out.txt", "needle in build output\n");
+		Write(root / "src" / "Pkg" / "Build" / "Atlas.txt", "needle in source\n");
+		Write(root / "src" / "Pkg" / "node_modules" / "dep.txt", "needle in a package\n");
+		Write(root / "vendor" / "lib.txt", "needle in vendor\n");
+		Ied::SearchQuery query = Query("needle", false, false);
+		query.m_Exclude = Ied::DefaultSearchExcludes();
+		query.m_UseIgnoreFiles = true;
+		Ied::SearchResult result = Ied::SearchFolder(root, query, Core::HashMap<Core::String, Core::String>(), nullptr);
+		assert_eq(1, result.m_Matches.Count(), "only the source folder named Build: the root's build output, vendor and node_modules stay skipped");
+		assert_se("src/Pkg/Build/Atlas.txt", result.m_Matches[0].m_Path.CStr(), "a folder a '!' rule re-includes is searched");
+		Write(root / ".gitignore", "build/\n");
+		assert_eq(0, Ied::SearchFolder(root, query, Core::HashMap<Core::String, Core::String>(), nullptr).m_Matches.Count(), "without the '!' rule a folder named Build is output, as before");
+		Write(root / ".gitignore", "*\n!*/\n!*.txt\n");
+		result = Ied::SearchFolder(root, query, Core::HashMap<Core::String, Core::String>(), nullptr);
+		for (const Ied::SearchMatch& match : result.m_Matches)
+			assert_true(!match.m_Path.View().Contains(Core::StringView("node_modules")), "node_modules stays skipped even when a rule re-includes every folder");
+		FS::RemoveAll(root.CStr());
+	}
+
+	[test("ignore_verdict")]
+	public static void TestIgnoreVerdict() {
+		Ied::IgnoreFile* file = new Ied::IgnoreFile();
+		file->m_Rules = Ied::ParseIgnoreRules(Core::StringView("build/\n!**/src/**/Build/\n"));
+		Core::Array<Ied::IgnoreFile*> files;
+		files.Push(file);
+		assert_true(Ied::IgnoreVerdictOf(files, Core::StringView("build"), true) == Ied::IgnoreVerdict::Ignored, "the root's build folder is ignored");
+		assert_true(Ied::IgnoreVerdictOf(files, Core::StringView("a/src/b/Build"), true) == Ied::IgnoreVerdict::Reincluded, "a '!' rule re-includes");
+		assert_true(Ied::IgnoreVerdictOf(files, Core::StringView("a/src"), true) == Ied::IgnoreVerdict::None, "nothing matches a plain folder");
+		assert_true(Ied::IsIgnored(files, Core::StringView("build"), true) && !Ied::IsIgnored(files, Core::StringView("a/src/b/Build"), true), "IsIgnored is the Ignored verdict");
+	}
+
 	[test("folder")]
 	public static void TestFolder() {
 		FS::Path root = FS::TempDirectory() / "ied-search-test";

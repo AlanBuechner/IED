@@ -22,7 +22,12 @@ namespace Ied
 	}
 
 	Core::Array<IgnoreRule> ParseIgnoreRules(Core::StringView text);
-	// Whether `path` (workspace-relative; a folder when `directory`) is ignored by `files`, the outermost first: each is
+	// What the last rule that matches a path says of it: nothing matched, it is ignored, or a '!' rule re-includes it.
+	enum class IgnoreVerdict { None, Ignored, Reincluded }
+
+	// The verdict of `files` (the outermost first) on `path` (workspace-relative; a folder when `directory`): each is
 	// asked about the paths under its folder, and a later (deeper) file's verdict wins over an earlier one's.
+	IgnoreVerdict IgnoreVerdictOf(const Core::Array<IgnoreFile*>& files, Core::StringView path, bool directory);
+	// Whether `path` is ignored by `files` (IgnoreVerdictOf says Ignored).
 	bool IsIgnored(const Core::Array<IgnoreFile*>& files, Core::StringView path, bool directory);
 }

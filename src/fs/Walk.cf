@@ -25,6 +25,12 @@ namespace Ied
 		return entries;
 	}
 
+	// A name-based exclusion (build, bin, vendor...) is a guess at generated output: a '!' rule in an ignore file says this one
+	// is source (a tracked `src/Build/` folder), so it is walked. A repository's own folder and packages stay skipped.
+	static bool IsKeptByIgnoreFiles(IgnoreVerdict verdict, Core::StringView name) {
+		return verdict == IgnoreVerdict::Reincluded && name != ".git" && name != "node_modules";
+	}
+
 	bool FileWalk::Folder(Core::StringView folder, Core::Array<IgnoreFile*> ignores, const FileVisitor& visit) {
 		FS::Path place = folder.IsEmpty() ? m_Root : m_Root / folder;
 		if (m_UseIgnoreFiles) AddIgnoreFile(place, folder, ignores);
@@ -32,7 +38,9 @@ namespace Ied
 			if (m_Cancel && m_Cancel->Load()) return false;
 			Core::String path = folder.IsEmpty() ? entry.name : (Core::String(folder) + "/") + entry.name.View();
 			const bool directory = entry.kind == FS::EntryKind::Directory;
-			if (IsIgnored(ignores, path.View(), directory) || MatchesAny(m_Exclude, path.View())) continue;
+			const IgnoreVerdict verdict = IgnoreVerdictOf(ignores, path.View(), directory);
+			if (verdict == IgnoreVerdict::Ignored) continue;
+			if (!IsKeptByIgnoreFiles(verdict, entry.name.View()) && MatchesAny(m_Exclude, path.View())) continue;
 			if (directory) {
 				if (!Folder(path.View(), ignores, visit)) return false;
 			}

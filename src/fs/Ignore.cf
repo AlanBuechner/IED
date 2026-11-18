@@ -56,14 +56,16 @@ namespace Ied
 		return true;
 	}
 
-	bool IsIgnored(const Core::Array<IgnoreFile*>& files, Core::StringView path, bool directory) {
-		bool ignored = false;
+	IgnoreVerdict IgnoreVerdictOf(const Core::Array<IgnoreFile*>& files, Core::StringView path, bool directory) {
+		IgnoreVerdict verdict = IgnoreVerdict::None;
 		for (const IgnoreFile* file : files) {
 			Core::StringView relative;
 			if (!Below(file->m_Folder.View(), path, relative)) continue;
 			for (const IgnoreRule& rule : file->m_Rules)
-				if (Matches(rule, relative, directory)) ignored = !rule.m_Negate;
+				if (Matches(rule, relative, directory)) verdict = rule.m_Negate ? IgnoreVerdict::Reincluded : IgnoreVerdict::Ignored;
 		}
-		return ignored;
+		return verdict;
 	}
+
+	bool IsIgnored(const Core::Array<IgnoreFile*>& files, Core::StringView path, bool directory) { return IgnoreVerdictOf(files, path, directory) == IgnoreVerdict::Ignored; }
 }
