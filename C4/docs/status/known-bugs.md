@@ -104,6 +104,9 @@ Next ID: **BUG-468**
   with AddressSanitizer (`-fsanitize=address` on C4, C4Lib and Core) and run it there. Found on the way and fixed:
   BUG-436, a parked parser thread could take its include response on a spurious wakeup before the scheduler
   dispatched it (`CompilerMessageQueue` now hands a response over only when it is released).
+  2026-11-15: seen again in a smaller program - Claymore's root `nuke test`, compiling the `ModelFiles` test harness,
+  `exception 0xc0000005 at C4.exe+0x15ae9ad`, while IED's `nuke test ied-server` compiled beside it (memory load);
+  `nuke test ModelFiles` alone right after passed, nothing changed between.
 
 ## Interop, runtime and Bedrock
 
