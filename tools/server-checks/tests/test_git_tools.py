@@ -146,6 +146,18 @@ class GitToolTests(GitToolCase):
 		self.assertEqual("", git(self.repo, "status", "--porcelain"))
 		self.assertIn("did not match any file", await self.refused("commit", message="Nothing there", paths=["src/never.c"]), "a path git knows nowhere is still refused")
 
+	async def test_unstaging_a_path_git_knows_nowhere_unstages_the_rest_and_says_so(self):
+		git(self.repo, "rm", "-q", "src/main.c")
+		git(self.repo, "commit", "-q", "-m", "Drop main")   # its deletion committed since the caller saw it staged
+		write(os.path.join(self.repo, "a.txt"), "changed\n")
+		git(self.repo, "add", "a.txt")
+		unstaged = await self.ask("unstage", paths=["a.txt", "src/main.c"])
+		self.assertTrue(unstaged.startswith("unstaged a.txt\nnothing was staged at src/main.c: git knows no such path (in HEAD, the index or the work tree)\nrepository . (Game)"), unstaged)
+		self.assertEqual("", git(self.repo, "diff", "--cached"), "what git knows unstaged")
+		self.assertIn(" M a.txt", git(self.repo, "status", "--porcelain"), "the work tree as it was")
+		alone = await self.ask("unstage", paths=["src/main.c"])
+		self.assertTrue(alone.startswith("nothing was staged at src/main.c: "), alone)
+
 	async def test_commits_need_something_and_amends_stay_unpushed(self):
 		self.assertIn("nothing is staged", await self.refused("commit", message="Nothing"))
 		self.assertIn("a commit needs a message", await self.refused("commit", message="   ", paths=["a.txt"]))

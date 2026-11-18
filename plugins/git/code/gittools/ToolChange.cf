@@ -68,22 +68,61 @@ namespace Git
 		return arguments;
 	}
 
+	static bool IsOnDisk(GitRepo* repo, const Core::String& path) {
+		const FS::Path onDisk = repo->m_Root / path.View();
+		return FS::FileExists(onDisk.CStr()) || FS::IsDirectory(onDisk.CStr());
+	}
+
+	// Whether a listing of git's (ls-files, ls-tree) names `path`; one that cannot run (ls-tree of an unborn HEAD) names nothing.
+	static bool GitLists(GitPlugin* git, GitRepo* repo, Core::Array<Core::String> listing, const Core::String& path) {
+		Core::Array<Core::String> one;
+		one.Push(path);
+		GitRun listed = TryRun(git, repo, WithPaths(take(listing), one));
+		return listed.Ok() && !listed.m_Output.View().Trimmed().IsEmpty();
+	}
+
 	// The paths git add can take. One whose deletion is staged already is in neither the work tree nor the index, and git add refuses the
 	// whole call for it: staging it again changes nothing, and git commit --only takes it from HEAD.
 	static Core::Array<Core::String> PathsToAdd(GitPlugin* git, GitRepo* repo, const Core::Array<Core::String>& inside) {
 		Core::Array<Core::String> kept;
-		for (const Core::String& path : inside) {
-			const FS::Path onDisk = repo->m_Root / path.View();
-			if (FS::FileExists(onDisk.CStr()) || FS::IsDirectory(onDisk.CStr())) {
-				kept.Push(path);
+		for (const Core::String& path : inside)
+			if (IsOnDisk(repo, path) || GitLists(git, repo, GitArgs("ls-files", "--cached"), path)) kept.Push(path);
+		return kept;
+	}
+
+	// Whether git knows `path` to unstage it: in the work tree, the index or HEAD (a deletion staged).
+	static bool IsKnownToGit(GitPlugin* git, GitRepo* repo, const Core::String& path) {
+		return IsOnDisk(repo, path) || GitLists(git, repo, GitArgs("ls-files", "--cached"), path) || GitLists(git, repo, GitArgs("ls-tree", "-r", "--name-only", "HEAD"), path);
+	}
+
+	// Unstages the whole `paths` (`inside`: the same in the repository) git knows. One it knows nowhere - its deletion committed
+	// since it was seen staged - has nothing staged, and git would refuse the whole call for it: the answer names it instead.
+	static Core::String UnstagePaths(GitPlugin* git, GitRepo* repo, const Core::Array<Core::String>& paths, const Core::Array<Core::String>& inside) {
+		Core::Array<Core::String> known;
+		Core::Array<Core::String> knownNames;
+		Core::Array<Core::String> unknownNames;
+		for (int64 i = 0; i < inside.Count(); ++i) {
+			if (!IsKnownToGit(git, repo, inside[i])) {
+				unknownNames.Push(paths[i]);
 				continue;
 			}
-			Core::Array<Core::String> one;
-			one.Push(path);
-			GitRun listed = TryRun(git, repo, WithPaths(GitArgs("ls-files", "--cached"), one));
-			if (!listed.Ok() || !listed.m_Output.View().Trimmed().IsEmpty()) kept.Push(path);
+			known.Push(inside[i]);
+			knownNames.Push(paths[i]);
 		}
-		return kept;
+		if (!known.IsEmpty() && IsUnborn(git, repo)) git->RunChange(repo, WithPaths(GitArgs("rm", "--cached", "-r", "--quiet"), known), IED::ErrorCode::BadRequest);
+		else if (!known.IsEmpty()) git->RunChange(repo, WithPaths(GitArgs("restore", "--staged"), known), IED::ErrorCode::BadRequest);
+		Core::StringBuilder said;
+		if (!known.IsEmpty()) {
+			said.Append("unstaged ");
+			said.Append(PathList(knownNames).View());
+		}
+		if (!known.IsEmpty() && !unknownNames.IsEmpty()) said.Append("\n");
+		if (!unknownNames.IsEmpty()) {
+			said.Append("nothing was staged at ");
+			said.Append(PathList(unknownNames).View());
+			said.Append(": git knows no such path (in HEAD, the index or the work tree)");
+		}
+		return said.ToString();
 	}
 
 	Core::String StageAnswer(GitPlugin* git, GitWorkspace* found, const Serialization::DomNode& args, bool stage) {
@@ -99,8 +138,7 @@ namespace Git
 			Core::Array<Core::String> added = PathsToAdd(git, target.m_Repo, inside);
 			if (!added.IsEmpty()) git->RunChange(target.m_Repo, WithPaths(GitArgs("add", "-A"), added), IED::ErrorCode::BadRequest);
 		}
-		else if (IsUnborn(git, target.m_Repo)) git->RunChange(target.m_Repo, WithPaths(GitArgs("rm", "--cached", "-r", "--quiet"), inside), IED::ErrorCode::BadRequest);
-		else git->RunChange(target.m_Repo, WithPaths(GitArgs("restore", "--staged"), inside), IED::ErrorCode::BadRequest);
+		else return Done(git, target.m_Repo, UnstagePaths(git, target.m_Repo, paths, inside).View());
 		return Done(git, target.m_Repo, WhatStaged(stage, paths, args.Member("hunks")).View());
 	}
 
@@ -169,6 +207,13 @@ namespace Git
 			}
 			out.Append(" of ");
 		}
+		out.Append(PathList(paths).View());
+		return out.ToString();
+	}
+
+	// "a.txt, b.txt".
+	static Core::String PathList(const Core::Array<Core::String>& paths) {
+		Core::StringBuilder out;
 		for (int64 i = 0; i < paths.Count(); ++i) {
 			if (i > 0) out.Append(", ");
 			out.Append(paths[i].View());
