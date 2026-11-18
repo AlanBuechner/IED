@@ -46,7 +46,15 @@ namespace C4LSP::Features
 		// recover the callee from raw text: find the nearest unclosed `(` before the caret, read the identifier/member/
 		// static chain that precedes it (the callee), and count top-level commas inside those parens to get the active
 		// argument slot. Returns false when there is no such call-shaped pattern at the caret.
-		static bool LexicalCall(const Scripting::Source& source, size_t caretOffset, std::string& outCalleeName, uint32& activeArg);
+		static bool LexicalCall(const Scripting::Source& source, size_t caretOffset, std::string& outCalleeName, uint32& activeArg,
+			size_t* outCalleeStart = nullptr);
+
+		// Whether the callee starting at `calleeStart` is written in an annotation group (`[Range(` of `[Range(0, 1)]`): an open
+		// `[` comes before it with no `;`, brace or open `(` between.
+		static bool InAnnotationGroup(const Scripting::Source& source, size_t calleeStart);
+
+		// Every overload of the declared annotation `name`, the one `arguments` arguments most likely mean active.
+		static bool AnnotationSignatures(const Server::SemanticResolver& resolver, const std::string& name, uint32 activeArg, SignatureHelpResult& result);
 
 		// Resolve a free function (or method) definition by its simple name so the lexical fallback can build a
 		// signature. Prefers the unit that contains the caret; falls back to any other unit in the project (the call's

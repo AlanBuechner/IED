@@ -1,24 +1,28 @@
 #include "Model/Builder/AnnotationCheck.h"
-#include "Compiler/ErrorTracker.h"
 #include "Model/Annotations.h"
 #include "Model/ProgramModel.h"
 #include "Model/ReflectedEntities.h"
 #include "Model/Types/EnumType.h"
 #include "Model/Types/ObjectType.h"
-#include "Model/Types/QualifiedName.h"
 #include "Model/Types/UnionType.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
-#include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
 #include "Parser/Nodes/Declarations/ParameterNode.h"
 
 namespace Scripting
 {
 	void AnnotationCheck::CheckNew()
 	{
-		if (!m_Declared) m_Declared = std::make_unique<DeclaredAnnotations>(m_Model);
+		CheckDeclarations();
 		CheckTypes();
 		CheckGlobals();
 		CheckFunctions();
+	}
+
+	void AnnotationCheck::CheckDeclarations()
+	{
+		if (m_DeclarationsChecked) return;
+		m_DeclarationsChecked = true;
+		for (const AnnotationDeclarationProblem& problem : m_Model.Annotations().Problems()) Report(problem.at, problem.message);
 	}
 
 	// By index: folding an annotation can make a template instance, which joins the list.
@@ -28,30 +32,31 @@ namespace Scripting
 		for (uint32 i = 0; i < objects.Count(); ++i)
 			if (ReflectedType(m_Model, objects[i]) && IsNew(objects[i])) CheckObject(*objects[i]);
 		for (const EnumType* en : m_Model.EnumTypes())
-			if (en && !en->GetName().empty() && IsNew(en)) Check(en->GetDeclNode(), en->GetDeclScope());
+			if (en && !en->GetName().empty() && IsNew(en)) Check(en->GetDeclNode(), AnnotationPlace::Enum, en->GetDeclScope());
 		for (const UnionType* un : m_Model.UnionTypes())
 		{
 			if (!un || un->GetName().empty() || !IsNew(un)) continue;
-			Check(un->GetDeclNode(), un->GetDeclScope());
+			Check(un->GetDeclNode(), AnnotationPlace::Union, un->GetDeclScope());
 			for (const auto& field : un->GetFields())
-				if (!field.m_IsStatic) Check(field.m_DeclaringNode, un->GetDeclScope());
+				if (!field.m_IsStatic) Check(field.m_DeclaringNode, AnnotationPlace::Field, un->GetDeclScope());
 		}
 	}
 
 	void AnnotationCheck::CheckObject(const ObjectType& object)
 	{
 		const Scope* scope = m_Model.TypeScope(&object);
-		Check(object.GetDeclNode(), scope);
+		Check(object.GetDeclNode(), AnnotationPlace::Type, scope);
 		for (const auto& field : object.GetFields())
-			if (!field.m_IsStatic) Check(field.m_DeclaringNode, scope);
+			if (!field.m_IsStatic) Check(field.m_DeclaringNode, AnnotationPlace::Field, scope);
 	}
 
-	// As reflection registers them: not a thread_local, which has no one address.
+	// As reflection registers them: not a thread_local, which has no one address. A type's static is a field.
 	void AnnotationCheck::CheckGlobals()
 	{
 		m_Model.Symbols()->CollectGlobalVariables([this](const SymbolInfo& variable) {
 			if (variable.kind != SymbolKind::Variable || !variable.type || variable.isThreadLocal || variable.mangledName.empty()) return;
-			if (IsNew(&variable)) Check(variable.declNode, variable.declaringScope);
+			const bool member = variable.declaringScope && variable.declaringScope->GetKind() == Scope::Kind::Class;
+			if (IsNew(&variable)) Check(variable.declNode, member ? AnnotationPlace::Field : AnnotationPlace::Variable, variable.declaringScope);
 		});
 	}
 
@@ -66,61 +71,69 @@ namespace Scripting
 	// The function's annotations and each parameter's, from every declaration that writes them.
 	void AnnotationCheck::CheckFunction(const FunctionRecord& function)
 	{
-		Check(function.declarations, function.scope);
+		Check(function.declarations, PlaceOfFunction(function), function.scope);
 		for (const AstNode* declaration : function.declarations)
 			if (const auto* written = dynamic_cast<const FunctionDefinitionNode*>(declaration))
 				for (const auto& parameter : written->GetParameters())
-					Check(parameter.Get(), function.scope);
+					Check(parameter.Get(), AnnotationPlace::Parameter, function.scope);
 	}
 
-	void AnnotationCheck::Check(const AstNode* declaration, const Scope* scope)
+	void AnnotationCheck::Check(const AstNode* declaration, AnnotationPlace place, const Scope* scope)
 	{
 		if (!declaration) return;
 		Core::Vector<const AstNode*> declarations;
 		declarations.Push(declaration);
-		Check(declarations, scope);
+		Check(declarations, place, scope);
 	}
 
-	void AnnotationCheck::Check(const Core::Vector<const AstNode*>& declarations, const Scope* scope)
+	void AnnotationCheck::Check(const Core::Vector<const AstNode*>& declarations, AnnotationPlace place, const Scope* scope)
 	{
 		for (const AstNode* declaration : declarations)
-			if (declaration) CheckNames(*declaration);
-		auto folded = ReflectedAnnotations(m_Model, declarations, scope);
-		if (!folded.Ok()) Report(folded.loc, folded.message);
-	}
-
-	// Each annotation's name, and [annotation] only where it declares one: a struct or class (a template is said where it registers).
-	void AnnotationCheck::CheckNames(const AstNode& declaration)
-	{
-		const Core::Vector<Ref<AnnotationNode>>* annotations = DeclarationAnnotations(&declaration);
-		if (!annotations) return;
-		const bool object = declaration.Type() == NodeType::ObjectDefinition;
-		for (const auto& node : *annotations)
 		{
-			if (!node) continue;
-			for (const auto& group : node->GetBracketGroups())
-				for (const auto& item : group.annotations)
-				{
-					if (!item) continue;
-					if (item->GetName() == kAnnotationDeclaration && !object)
-						Report(item->startLocation, "[annotation] declares an annotation by the struct or class it marks: put it on one");
-					else if (!item->IsCompilerAnnotation()) CheckName(*item);
-				}
+			const Core::Vector<Ref<AnnotationNode>>* annotations = DeclarationAnnotations(declaration);
+			if (!annotations) continue;
+			for (const auto& node : *annotations)
+				if (node)
+					for (const auto& group : node->GetBracketGroups())
+						for (const auto& item : group.annotations)
+							if (item) CheckItem(*item, place, scope);
 		}
 	}
 
-	void AnnotationCheck::CheckName(const AnnotationItem& item)
+	// [annotation] that reaches here declares nothing: a declaration is kept apart from the functions, and a struct or class
+	// is said where it registers.
+	void AnnotationCheck::CheckItem(const AnnotationItem& item, AnnotationPlace place, const Scope* scope)
 	{
-		const ObjectType* meant = m_Declared->MisspeltBy(item.GetName().c_str());
-		if (!meant) return;
-		const auto* written = dynamic_cast<const ObjectDefinitionNode*>(meant->GetDeclNode());
-		const Core::String name = written ? written->GetNameToken().GetText() : meant->GetName();
-		Report(item.startLocation, "unknown annotation '" + item.GetName() + "': did you mean '" + name + "', which " + QualifiedName(meant) +
-			" declares? (an annotation no [annotation] declares is kept for reflection, and nothing that reads '" + name + "' sees it)");
+		if (item.GetName() == kAnnotationDeclaration)
+		{
+			if (place != AnnotationPlace::Type)
+				Report(item.startLocation, "[annotation] declares an annotation by a function declaration at namespace scope (`[annotation] void Name(...);`): "
+					"on " + Core::String(AnnotationPlaceNoun(place)) + " it declares nothing");
+			return;
+		}
+		if (item.IsCompilerAnnotation()) return;
+		auto folded = FoldAnnotation(m_Model, item, place, scope);
+		if (!folded.Ok()) return Report(folded.loc, folded.message);
+		if (!folded.value.declaration) CheckUndeclared(item);
 	}
 
-	void AnnotationCheck::Report(const SourceLocation& at, const Core::String& message)
+	void AnnotationCheck::CheckUndeclared(const AnnotationItem& item)
 	{
-		if (m_Reported.insert({ at.sourceId, at.line, at.column }).second) m_Errors.AddError(at, message);
+		if (const DeclaredAnnotations::Overloads* meant = m_Model.Annotations().MisspeltBy(item.GetName().c_str()))
+		{
+			const AnnotationSignature& declared = *(*meant)[0];
+			return Report(item.startLocation, "unknown annotation '" + item.GetName() + "': did you mean '" + declared.name + "', which " +
+				declared.qualifiedName + " declares? (an annotation no [annotation] declares is kept for reflection, and nothing that reads '" +
+				declared.name + "' sees it)");
+		}
+		if (item.NearCompilerAnnotation()) return; // the parser warned that it is probably a compiler annotation
+		const Core::String name = item.GetOwnName();
+		Report(item.startLocation, "annotation [" + name + "] is not declared: declare it, and what it takes, with `[annotation] void " + name +
+			"(...);` (docs/language/12 section 4) so its uses are checked", ErrorSeverity::Warning);
+	}
+
+	void AnnotationCheck::Report(const SourceLocation& at, const Core::String& message, ErrorSeverity severity)
+	{
+		if (m_Reported.insert({ at.sourceId, at.line, at.column }).second) m_Errors.AddError(at, message, severity);
 	}
 } // namespace Scripting

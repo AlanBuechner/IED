@@ -121,6 +121,7 @@ private:
 		void RegisterAlias(Context& ctx, const AliasDefinitionNode& alias);
 		void RegisterVariable(Context& ctx, const VariableDefinitionNode& var);
 		void RegisterFunction(Context& ctx, const FunctionDefinitionNode& fn);
+		void RegisterAnnotation(Context& ctx, const FunctionDefinitionNode& fn);
 		void RegisterUnion(Context& ctx, const UnionDefinitionNode& un);
 		/// A file-scope `asm` block: assembly added to the program as it is, so it takes no operands.
 		void RegisterFileAssembly(Context& ctx, const AsmStatementNode& block);

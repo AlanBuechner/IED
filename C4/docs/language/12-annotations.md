@@ -71,7 +71,7 @@ qualified_name: identifier ('::' identifier)*
 | `[group("name")]` | types, functions, variables | adds the entity to a named reflection group. See [runtime/02-reflection.md](../runtime/02-reflection.md) | **Implemented** |
 | `[link("symbol")]` | function and variable declarations (a variable without an initializer), function definitions | a declaration binds to the foreign symbol of that name; a function definition is emitted under it. See [13](13-interop.md) | **Implemented** |
 | `[target("avx2", ...)]` | functions and methods | builds the function for the program's processor with these features on as well (names a `-m` flag takes, [11 section 8](11-vectors-and-swizzling.md#8-the-simd-target)): its body uses them, and no caller built without them inlines it. Call it only where `Platform::HasProcessorFeature` says the processor has them | **Implemented** |
-| `[annotation]` | structs and classes (not templates) | declares the annotation of the type's name: `[annotation] struct Requires {}` declares `[Requires]` (section 4). Takes no arguments | **Implemented** |
+| `[annotation]`, `[annotation("place", ...)]` | function declarations at namespace scope | declares the annotation of the function's name, its parameters the annotation's arguments, and where it goes (section 4) | **Implemented** |
 | `[uuid("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")]` | types | attaches a COM GUID, read by `__uuidof(T)`; CBind emits it from `__declspec(uuid(...))`. A type without one gets a calculated one (the name-based UUID of its qualified name, [14](14-builtins.md)), so `__uuidof` works for every type | **Implemented** |
 
 Details worth knowing:
@@ -95,8 +95,8 @@ Details worth knowing:
 
 **Status:** **Implemented**
 
-Any other annotation name is legal and has no compile-time effect. It is kept on the declaration and
-registered with runtime reflection (D-42): its name as written and its folded arguments, on types, enums,
+Any other annotation name is legal and has no compile-time effect beyond its check (section 4.2). It is kept on the
+declaration and registered with runtime reflection (D-42): its name as written and its folded arguments, on types, enums,
 fields, methods, parameters, functions and variables, so libraries and tools define their own (a
 serializer's `[Serialize]`, an editor's `[Range(0, 1)]`). See
 [runtime/02-reflection.md](../runtime/02-reflection.md) section 3.3.
@@ -114,42 +114,115 @@ A function declared and defined apart carries both lists, the declaration's firs
 A near miss of a compiler annotation is a warning (D-42): `[operater("+")]` says `unknown annotation
 'operater': did you mean 'operator'?`. It is still kept as a user annotation. A near miss is one edit from a
 short compiler annotation (`test`, `link`, `uuid`, `group`) or two from a longer one, so `[Test]` warns and
-`[Tag]` does not. A near miss of a *declared* annotation (section 4) is an error.
+`[Tag]` does not. A near miss of a *declared* annotation (section 4) is an error, and any other undeclared annotation a warning.
 
 ---
 
 ## 4. Declaring an annotation
 
-**Status:** **Implemented**
+**Status:** **Implemented** (D-87)
 
-A library declares the annotations it reads, so a misspelt one is a compile error rather than an annotation nothing
-reads: `[annotation]` on a struct or class declares the annotation of its name.
+A library declares the annotations it reads, with the arguments each takes, so a use is checked where it is written - a
+misspelt name, a missing or extra argument, a string where a number belongs, an annotation on the wrong kind of
+declaration - and the editor completes the name and shows the arguments as you type them. `[annotation]` on a
+function declaration declares the annotation of the function's name; its parameters are the annotation's arguments.
 
 ```c4
-namespace Scene::Annotations
+namespace Scene
 {
-	// [Requires(Type, ...)]: the components a component's entity cannot be without.
-	[annotation] struct Requires {}
+	/// [Component]: a type tools list as a component.
+	[annotation("type")] void Component();
+
+	/// [Requires(Render::MeshRenderer, ...)]: the components a component's entity cannot be without.
+	[annotation("type")] void Requires(typename component, typename... more);
+
+	/// [Range(min, max)]: the inspector's slider bounds.
+	[annotation("field", "parameter")] void Range(int64 min, int64 max);
+	[annotation("field", "parameter")] void Range(double min, double max);
+
+	/// [Step(by)]: the inspector's step; 1 when written [Step].
+	[annotation("field")] void Step(double by = 1.0);
+
+	/// [System] or [System("group", ...)]: the worlds a system is made in.
+	[annotation("type")] void System(const char*... groups);
 }
 
-[Component, Requires(Render::MeshRenderer)]   // declared: fine
-struct MeshCollider { public bool convex; }
+[Component, Requires(Render::MeshRenderer)]          // fine
+struct MeshCollider { [Range(0, 1)] public float friction; }
 
-[Component, Requiers(Physics::CharacterMover)] // error: unknown annotation 'Requiers': did you mean 'Requires',
-struct PlayerController { public float speed; } //        which Scene::Annotations::Requires declares?
+[Component, Requiers(Physics::CharacterMover)]        // error: unknown annotation 'Requiers': did you mean 'Requires'?
+[Range(0, "far")] struct Bad { }                       // error: [Range] goes on a field or parameter, not a type;
+                                                       //        and no [Range] takes a string for 'max'
 ```
 
-- An annotation is declared by its **own name**, the last part of what is written: `[Requires]` and `[Scene::Requires]`
-  both name the one `Requires` declares, wherever it is declared and whether or not the file sees its namespace.
-- An annotation **no declaration names** is as free as ever (section 3) - unless its name is a near miss of a declared
-  one (one edit from a name shorter than 6 characters, two from a longer one, case counting), which is an error where it
-  is written, naming the one it misspells. A library meaning a name close to another library's declares its own.
-- `[annotation]` goes on a struct or class that is no template, and takes no arguments; anywhere else it is an error.
-  The type is an ordinary type (reflection registers it); its doc comment says what the annotation does.
-- The editor knows a declared annotation as code: hover on its name shows the declaration and its doc comment,
-  go-to-definition leads to it, and find-references on the declaring type finds its uses.
-- Every annotation of what reflection registers is checked (types, fields, enums, unions, globals, functions and
-  their parameters), as the program's model is built, so the editor shows the error too.
+### 4.1 The declaration
+
+- `[annotation]` goes on a function declaration at namespace scope that returns `void`, has no body and is no template,
+  method or extension method; anywhere else it is an error. The function is no function: it is never called, emitted or
+  reflected, and calling it is an error. Its doc comment says what the annotation does.
+- **Overloads** are further declarations of the name with other parameters; a use takes the one its arguments fit
+  (section 4.3).
+- A parameter's type says what its argument is:
+
+  | Parameter | Argument | Reflection registers |
+  |---|---|---|
+  | `bool` | `true`, `false` or a constant bool | `Bool` |
+  | an integer type (`int8` ... `int64`, `uint8` ... `uint64`) | a constant integer the type holds | `Int` |
+  | `float`, `double` | a constant number (an integer is converted) | `Float` |
+  | `const char*` | a string literal or constant string (`nameof(T)`, `"a" "b"`) | `String` |
+  | an enum type | one of its enumerators (`Pass::Glass`) | `Int`, the enumerator's value |
+  | `typename` | a type (`Render::MeshRenderer`, `Box<int32>`, `int32*`) | `Type` |
+
+  Anything else (`Core::String`, a struct, a pointer) is an error at the parameter.
+- A trailing **pack**, `T... name`, takes zero or more arguments of `T`: `typename... more`, `const char*... groups`.
+- A parameter with a **default** (a constant of its type) may be left out; reflection registers the default, so a
+  reader always finds every parameter (`[Step]` registers `Step(1.0)`). A default is followed only by defaults or a pack.
+- `[annotation("type", "field", ...)]` says **where** the annotation goes; with no argument it goes anywhere:
+
+  | Place | Declarations |
+  |---|---|
+  | `type` | structs, classes, interfaces |
+  | `enum`, `union` | enums, unions |
+  | `field` | data members, static or not |
+  | `method` | methods, extension methods included |
+  | `function` | free functions |
+  | `parameter` | parameters of functions and methods |
+  | `variable` | variables at namespace scope |
+
+  Each overload has its own places; a use takes only an overload that goes where it is written.
+- An annotation is named by its **own name**, the last part of what is written: `[Requires]` and `[Scene::Requires]`
+  both name the one `Requires` declares, wherever it is declared and whether or not the file sees its namespace. The
+  compiler's own annotations (section 2) cannot be declared.
+
+### 4.2 Uses
+
+Every annotation of what reflection registers is checked (types, fields, enums, unions, globals, functions and their
+parameters), as the program's model is built, so the editor shows each error where it is written:
+
+- A **declared** annotation must fit one of its declarations: their places, their argument count and each argument's
+  kind. The error names the declarations it was matched against.
+- An **undeclared** name that is a near miss of a declared one (one edit from a name shorter than 6 characters, two
+  from a longer one, case counting) is an error naming the one it misspells. Any other undeclared annotation is a
+  **warning** (`annotation [Serialize] is not declared: declare it with [annotation] so its uses are checked`) and is
+  kept for reflection as written (section 3), as before.
+
+### 4.3 Choosing an overload
+
+A use's arguments are folded (section 1), then matched against each overload that goes where the use is written:
+
+1. Each argument fits its parameter as the table in 4.1 says; an argument for a pack fits the pack's type.
+2. Of the overloads that fit, the one with the fewest conversions wins (an integer for a `double` is one), then one
+   without a pack over one with. Two left that tie is the error `[Range(0, 1)] is ambiguous: ...`.
+
+Reflection registers the arguments as the chosen overload's parameters take them: `[Range(0, 1)]` against only
+`Range(double min, double max)` registers two `Float`s, so a reader asks for one kind.
+
+### 4.4 In the editor
+
+C4LSP knows a declared annotation as code: completion inside `[...]` offers the declared annotations that go where the
+caret is (and the compiler's own), signature help inside its parentheses shows every overload with the current
+argument, hover shows its declarations and doc comment, go-to-definition leads to the overload whose parameters the use's
+written arguments fit, and find-references and rename of any of its declarations reach every declaration and use.
 
 Ideas from older design notes such as `[Derive(...)]`, `[CTGen]` (compile-time code
 generation) and `[Export]` were never confirmed as part of the language and are not planned.

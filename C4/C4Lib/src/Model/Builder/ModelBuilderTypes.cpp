@@ -67,8 +67,9 @@ namespace Scripting
 	void ModelBuilder::RegisterObject(Context& ctx, const ObjectDefinitionNode& obj)
 	{
 		const Core::String& name = obj.GetNameToken().GetText();
-		if ((obj.IsTemplated() || obj.IsSpecialization()) && DeclaresAnnotation(&obj))
-			ErrorAt(ctx, &obj, "[annotation] declares an annotation by a struct or class that is no template: '" + name + "' is one");
+		if (DeclaresAnnotation(&obj))
+			ErrorAt(ctx, &obj, "[annotation] declares an annotation by a function declaration, its parameters the annotation's arguments: write `[annotation] void " +
+				name + "(...);` (docs/language/12 section 4)");
 		if (obj.IsSpecialization())
 		{
 			// `template<T> struct Box<T*> { ... }`: kept with the primary template's name; instantiation picks it.

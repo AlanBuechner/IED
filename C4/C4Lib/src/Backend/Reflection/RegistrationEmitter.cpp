@@ -61,7 +61,7 @@ namespace Scripting
 				const Table fields = Fields(object);
 				const Table methods = Methods(object);
 				const Table groups = Groups(object.GetGroups());
-				const Table annotations = Annotations(object.GetDeclNode(), m_Model.TypeScope(&object));
+				const Table annotations = Annotations(object.GetDeclNode(), AnnotationPlace::Type, m_Model.TypeScope(&object));
 				const auto known = m_TypeThunks.find(&object);
 				const TypeEntry entry = known != m_TypeThunks.end() ? known->second : TypeEntry{};
 				m_Types.push_back({ U32(reflect_KIND_OBJECT), TypeText(&object), U64(object.GetSize()),
@@ -79,7 +79,7 @@ namespace Scripting
 						rows.push_back(FieldRow(field, field.m_Offset, IsAlias(un.GetFields(), field, true), un.GetDeclScope()));
 				const Table fields = Rows(ImageShape::Field, std::move(rows));
 				const Table groups = Groups(un.GetGroups());
-				const Table annotations = Annotations(un.GetDeclNode(), un.GetDeclScope());
+				const Table annotations = Annotations(un.GetDeclNode(), AnnotationPlace::Union, un.GetDeclScope());
 				m_Types.push_back({ U32(reflect_KIND_UNION), TypeText(&un), U64(un.GetSize()),
 					U64(un.GetAlignment()), fields.count, fields.rows, U32(0), Null(), Text(""), U32(0), Null(),
 					groups.count, groups.rows, annotations.count, annotations.rows, Null(), Null(), Null(), U32(PlainTypeFlags(&un)) });
@@ -90,7 +90,7 @@ namespace Scripting
 				std::vector<ImageRow> values;
 				for (const auto& member : en.GetMembers())
 					values.push_back({ Text(member.mName), I64(member.m_Value) });
-				const Table annotations = Annotations(en.GetDeclNode(), en.GetDeclScope());
+				const Table annotations = Annotations(en.GetDeclNode(), AnnotationPlace::Enum, en.GetDeclScope());
 				m_Types.push_back({ U32(reflect_KIND_ENUM), TypeText(&en), U64(en.GetSize()),
 					U64(en.GetAlignment()), U32(0), Null(), U32(0), Null(), Text(""), U32(en.GetMemberCount()),
 					m_Image.Table(ImageShape::EnumValue, std::move(values)), U32(0), Null(), annotations.count, annotations.rows,
@@ -103,7 +103,7 @@ namespace Scripting
 				const ObjectType* owner = scope && scope->GetKind() == Scope::Kind::Class ? scope->objectType : nullptr;
 				const Core::String plain = variable.plainName.empty() ? variable.mangledName : variable.plainName;
 				const Table groups = Groups(variable.groups);
-				const Table annotations = Annotations(variable.declNode, scope);
+				const Table annotations = Annotations(variable.declNode, owner || (scope && scope->GetKind() == Scope::Kind::Class) ? AnnotationPlace::Field : AnnotationPlace::Variable, scope);
 				m_Variables.push_back({ Text(Scoped(EnclosingNames(scope), plain)), Text(variable.mangledName),
 					TypeText(variable.type), U64(variable.type->GetSize()), U64(variable.type->GetAlignment()), U32(variable.isConst ? 1 : 0),
 					Text(owner ? QualifiedName(owner) : std::string()), groups.count, groups.rows, annotations.count,
@@ -228,9 +228,9 @@ namespace Scripting
 
 			// The reflected annotations of `declarations` folded in `scope`. An argument that does not fold is reported
 			// once, and the entity keeps no annotations.
-			Table Annotations(const Core::Vector<const AstNode*>& declarations, const Scope* scope)
+			Table Annotations(const Core::Vector<const AstNode*>& declarations, AnnotationPlace place, const Scope* scope)
 			{
-				auto folded = ReflectedAnnotations(m_Model, declarations, scope);
+				auto folded = ReflectedAnnotations(m_Model, declarations, place, scope);
 				if (!folded.Ok())
 				{
 					if (m_Reported.insert({ folded.loc.sourceId, folded.loc.line, folded.loc.column }).second) m_Errors.AddError(folded.loc, folded.message);
@@ -247,11 +247,11 @@ namespace Scripting
 				return Rows(ImageShape::Annotation, std::move(rows));
 			}
 
-			Table Annotations(const AstNode* declaration, const Scope* scope)
+			Table Annotations(const AstNode* declaration, AnnotationPlace place, const Scope* scope)
 			{
 				Core::Vector<const AstNode*> declarations;
 				if (declaration) declarations.Push(declaration);
-				return Annotations(declarations, scope);
+				return Annotations(declarations, place, scope);
 			}
 
 			// A function's annotations, made once for its method entry and its function entry.
@@ -260,7 +260,7 @@ namespace Scripting
 				if (!function) return { U32(0), Null() };
 				auto known = m_RecordAnnotations.find(function);
 				if (known != m_RecordAnnotations.end()) return known->second;
-				const Table table = Annotations(function->declarations, function->scope);
+				const Table table = Annotations(function->declarations, PlaceOfFunction(*function), function->scope);
 				m_RecordAnnotations.emplace(function, table);
 				return table;
 			}
@@ -276,7 +276,7 @@ namespace Scripting
 					if (written && written->GetParameters().Count() == function->type->GetParameterCount())
 						parameters.Push(written->GetParameters()[index].Get());
 				}
-				return Annotations(parameters, function->scope);
+				return Annotations(parameters, AnnotationPlace::Parameter, function->scope);
 			}
 
 			Table Params(const FunctionRecord* function, const Core::Vector<const Type*>& types)
@@ -297,7 +297,7 @@ namespace Scripting
 
 			ImageRow FieldRow(const ObjectType::FieldInfo& field, uint64 offset, bool alias, const Scope* scope)
 			{
-				const Table annotations = Annotations(field.m_DeclaringNode, scope);
+				const Table annotations = Annotations(field.m_DeclaringNode, AnnotationPlace::Field, scope);
 				return { Text(field.mName), TypeText(field.m_Type), U64(field.m_Type->GetSize()), U64(offset),
 					U32(field.m_IsConst ? 1 : 0), U32(alias ? 1 : 0), annotations.count, annotations.rows };
 			}

@@ -1,4 +1,5 @@
 #include "Model/Annotations.h"
+#include "Model/AnnotationOverloads.h"
 #include "Model/ConstEvaluator.h"
 #include "Model/ProgramModel.h"
 #include "Parser/Nodes/Declarations/AliasDefinitionNode.h"
@@ -75,34 +76,53 @@ namespace Scripting
 				type.startLocation);
 		}
 
-		ArgumentResult FoldArgument(const ProgramModel& model, const AnnotationItem& item, uint32 index, const Scope* scope)
-		{
-			const AstNode& argument = *item.GetArguments()[index];
-			const QualTypeNode* type = item.GetArgumentType(index).Get();
-			if (const auto* literal = dynamic_cast<const LiteralNode*>(&argument); literal && literal->GetKind() == LiteralNode::LiteralKind::String)
-				return StringLiteral(*literal);
-			if (&argument == type) return FoldType(model, *type, scope);
-			return FoldExpression(model, argument, type, scope);
-		}
-
-		QueryResult<void> Collect(const ProgramModel& model, const AnnotationNode& node, const Scope* scope, Core::Vector<ReflectedAnnotation>& out)
+		QueryResult<void> Collect(const ProgramModel& model, const AnnotationNode& node, AnnotationPlace place, const Scope* scope,
+			Core::Vector<ReflectedAnnotation>& out)
 		{
 			for (const auto& group : node.GetBracketGroups())
 				for (const auto& item : group.annotations)
 				{
 					if (!item || item->IsCompilerAnnotation()) continue;
-					ReflectedAnnotation annotation;
-					annotation.name = item->GetName();
-					for (uint32 i = 0; i < item->GetArguments().Count(); ++i)
-					{
-						auto argument = FoldArgument(model, *item, i, scope);
-						if (!argument.Ok()) return QueryResult<void>::Fail(argument.error, argument.message, argument.loc);
-						annotation.arguments.Push(argument.value);
-					}
-					out.Push(std::move(annotation));
+					auto annotation = FoldAnnotation(model, *item, place, scope);
+					if (!annotation.Ok()) return QueryResult<void>::Fail(annotation.error, annotation.message, annotation.loc);
+					out.Push(std::move(annotation.value));
 				}
 			return QueryResult<void>::Success();
 		}
+	}
+
+	QueryResult<ReflectedArgument> FoldAnnotationArgument(const ProgramModel& model, const AstNode& written, const QualTypeNode* asType,
+		const Scope* scope)
+	{
+		if (const auto* literal = dynamic_cast<const LiteralNode*>(&written); literal && literal->GetKind() == LiteralNode::LiteralKind::String)
+			return StringLiteral(*literal);
+		if (&written == asType) return FoldType(model, *asType, scope);
+		return FoldExpression(model, written, asType, scope);
+	}
+
+	QueryResult<ReflectedAnnotation> FoldAnnotation(const ProgramModel& model, const AnnotationItem& item, AnnotationPlace place, const Scope* scope)
+	{
+		using Result = QueryResult<ReflectedAnnotation>;
+		Core::Vector<ReflectedArgument> folded;
+		for (uint32 i = 0; i < item.GetArguments().Count(); ++i)
+		{
+			auto argument = FoldAnnotationArgument(model, *item.GetArguments()[i], item.GetArgumentType(i).Get(), scope);
+			if (!argument.Ok()) return Result::Fail(argument.error, argument.message, argument.loc);
+			folded.Push(argument.value);
+		}
+		ReflectedAnnotation annotation;
+		annotation.name = item.GetName();
+		const DeclaredAnnotations::Overloads* overloads = model.Annotations().Find(item.GetName().c_str());
+		if (!overloads)
+		{
+			annotation.arguments = std::move(folded);
+			return Result::Success(std::move(annotation));
+		}
+		auto match = ChooseAnnotationOverload(*overloads, item, place, folded);
+		if (!match.Ok()) return Result::Fail(match.error, match.message, match.loc);
+		annotation.arguments = std::move(match.value.arguments);
+		annotation.declaration = match.value.signature;
+		return Result::Success(std::move(annotation));
 	}
 
 	// Reflection asks this of every entity it registers: the node's kind is read, not cast.
@@ -123,7 +143,7 @@ namespace Scripting
 	}
 
 	QueryResult<Core::Vector<ReflectedAnnotation>> ReflectedAnnotations(const ProgramModel& model,
-		const Core::Vector<const AstNode*>& declarations, const Scope* scope)
+		const Core::Vector<const AstNode*>& declarations, AnnotationPlace place, const Scope* scope)
 	{
 		using Result = QueryResult<Core::Vector<ReflectedAnnotation>>;
 		Core::Vector<ReflectedAnnotation> out;
@@ -131,7 +151,7 @@ namespace Scripting
 			if (const auto* annotations = DeclarationAnnotations(declaration))
 				for (const auto& node : *annotations)
 					if (node)
-						if (auto collected = Collect(model, *node, scope, out); !collected.Ok())
+						if (auto collected = Collect(model, *node, place, scope, out); !collected.Ok())
 							return Result::Fail(collected.error, collected.message, collected.loc);
 		return Result::Success(std::move(out));
 	}

@@ -25,12 +25,16 @@ namespace Scripting
 			kAnnotationDeclaration };
 	}
 
-	bool AnnotationItem::IsCompilerAnnotation() const
+	std::span<const char* const> CompilerAnnotationNames() { return kCompilerAnnotations; }
+
+	bool IsCompilerAnnotationName(const Core::String& name)
 	{
-		for (const char* name : kCompilerAnnotations)
-			if (m_Name == name) return true;
+		for (const char* compiler : kCompilerAnnotations)
+			if (name == compiler) return true;
 		return false;
 	}
+
+	bool AnnotationItem::IsCompilerAnnotation() const { return IsCompilerAnnotationName(m_Name); }
 
 	// D-42: an unknown annotation one edit from a short compiler annotation, or two from a longer one, is
 	// probably a typo of it. Null when it is not close to any.
@@ -290,12 +294,6 @@ namespace Scripting
 
 	void AnnotationNode::CheckCompilerArguments(ParserState& state, const AnnotationItem& item)
 	{
-		if (item.GetName() == kAnnotationDeclaration && !item.GetArguments().Empty())
-		{
-			state.GetErrorTracker().AddError(item.GetArguments()[0]->startLocation,
-				"'annotation' takes no arguments: the struct or class it marks declares the annotation of its name", ErrorSeverity::Error);
-			return;
-		}
 		for (const auto& argument : item.GetArguments())
 		{
 			const auto* literal = dynamic_cast<const LiteralNode*>(argument.Get());

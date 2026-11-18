@@ -1,0 +1,6 @@
+[annotation] struct Component {}
+
+[Component]
+struct Light { public float intensity; }
+
+int32 main() { Light l; return (int32)l.intensity; }

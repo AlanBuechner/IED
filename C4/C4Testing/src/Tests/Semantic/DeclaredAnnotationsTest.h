@@ -5,8 +5,10 @@
 
 namespace Testing
 {
-	// [annotation] declarations (docs/language/12 section 4): a struct or class marked [annotation] declares the annotation of its
-	// name; a near miss of a declared one is an error where it is written, and [annotation] goes on a struct or class alone.
+	// [annotation] declarations (docs/language/12 section 4, D-87): a function declaration marked [annotation] declares the
+	// annotation of its name, its parameters the arguments and its overloads the forms a use may take; a use is checked against
+	// them where it is written, an undeclared one is a warning, and reflection registers the arguments as the declaration
+	// takes them.
 	CLASS(GROUP = Testing) DeclaredAnnotationsTest : public Test
 	{
 	public:
@@ -22,15 +24,42 @@ namespace Testing
 		void EveryKindOfDeclarationIsChecked();
 
 		TEST_FUNC(Semantic.DeclaredAnnotations)
-		void NamesFarFromEveryDeclaredOneStayFree();
+		void AnUndeclaredOneIsAWarning();
 
 		TEST_FUNC(Semantic.DeclaredAnnotations)
 		void TheClosestIsNamed();
 
 		TEST_FUNC(Semantic.DeclaredAnnotations)
-		void OnlyAStructOrClassDeclaresOne();
+		void TheArgumentCountIsChecked();
 
 		TEST_FUNC(Semantic.DeclaredAnnotations)
-		void ItTakesNoArguments();
+		void EachArgumentsKindIsChecked();
+
+		TEST_FUNC(Semantic.DeclaredAnnotations)
+		void AnIntegerMustFitItsParameter();
+
+		TEST_FUNC(Semantic.DeclaredAnnotations)
+		void AnEnumParameterTakesItsEnumerators();
+
+		TEST_FUNC(Semantic.DeclaredAnnotations)
+		void OverloadsAreChosenByTheirArguments();
+
+		TEST_FUNC(Semantic.DeclaredAnnotations)
+		void ReflectionRegistersWhatTheDeclarationTakes();
+
+		TEST_FUNC(Semantic.DeclaredAnnotations)
+		void APackTakesAnyNumber();
+
+		TEST_FUNC(Semantic.DeclaredAnnotations)
+		void PlacesAreChecked();
+
+		TEST_FUNC(Semantic.DeclaredAnnotations)
+		void ADeclarationThatDeclaresNothingIsAnError();
+
+		TEST_FUNC(Semantic.DeclaredAnnotations)
+		void OnlyAFunctionDeclarationAtNamespaceScopeDeclaresOne();
+
+		TEST_FUNC(Semantic.DeclaredAnnotations)
+		void ADeclarationIsNoFunction();
 	};
 }

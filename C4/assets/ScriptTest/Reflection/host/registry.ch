@@ -8,4 +8,7 @@ namespace Registry
 	}
 
 	int32 g_unloads = 0;
+
+	// [tunable("name")]: a field the host tunes, by name (a host header declares what its scripts write).
+	[annotation("field")] void tunable(const char* name);
 }

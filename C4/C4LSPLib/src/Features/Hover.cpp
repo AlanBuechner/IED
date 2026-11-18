@@ -102,7 +102,7 @@ namespace C4LSP::Features
 		// What go-to-definition finds without a reference: an annotation's declaration, a variable a lambda captures, a
 		// declaration's own name (a range-for variable's, the type `Ring` of `Ring::Push`).
 		if (const Scripting::AstNode* annotation = Definition::AnnotationNamedAt(session, located, position))
-			return DeclarationMarkdown(session, *annotation);
+			return AnnotationMarkdown(session, *annotation);
 		if (const Scripting::AstNode* captured = Definition::CapturedAt(session, located, position))
 			return DeclarationMarkdown(session, *captured);
 		if (const Scripting::AstNode* named = Definition::DeclarationNamedAt(session, sourceId, located, position))
@@ -174,6 +174,25 @@ namespace C4LSP::Features
 		std::string doc = DocComment::Of(session, shown);
 		if (doc.empty() && &shown != &declaration)
 			doc = DocComment::Of(session, declaration);
+		return doc.empty() ? text : text + "\n\n" + doc;
+	}
+
+	std::string Hover::AnnotationMarkdown(Server::CompilationSession& session, const Scripting::AstNode& declaration)
+	{
+		const Scripting::DeclaredAnnotations& annotations = session.GetResolver().Annotations();
+		const Scripting::AnnotationSignature* declared = annotations.Declared(&declaration);
+		if (!declared) return DeclarationMarkdown(session, declaration);
+		std::string uses;
+		std::string doc = DocComment::Of(session, declaration);
+		Scripting::AnnotationPlaces places = Scripting::AnnotationPlaces::None();
+		for (const Scripting::AnnotationSignature* overload : *annotations.Find(declared->name.c_str()))
+		{
+			uses += (uses.empty() ? "[" : "\n[") + std::string(overload->ToString().c_str()) + "]";
+			places.Add(overload->places);
+			if (doc.empty()) doc = DocComment::Of(session, *overload->declaration);
+		}
+		const std::string where = places.IsEverywhere() ? "" : ", on " + std::string(places.Describe().c_str());
+		const std::string text = "annotation `" + std::string(declared->qualifiedName.c_str()) + "`" + where + "\n" + CodeBlock(uses);
 		return doc.empty() ? text : text + "\n\n" + doc;
 	}
 } // namespace C4LSP::Features

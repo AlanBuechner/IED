@@ -58,31 +58,6 @@ struct Collider { public int32 shape; }
 struct Collider { public int32 shape; }
 )";
 
-		// An annotation the library declares, documented, and its uses.
-		const char* kDeclared =
-			R"(namespace Lib
-{
-	// The components a component cannot be without.
-	[annotation] struct Requires {}
-}
-
-struct Mover { public float speed; }
-
-[Requires(Mover)]
-struct Player { public float speed; }
-
-[Lib::Requires(Mover)]
-struct Enemy { public float speed; }
-)";
-
-		const char* kTypo =
-			R"(namespace Lib { [annotation] struct Requires {} }
-struct Mover { public float speed; }
-
-[Requiers(Mover)]
-struct Player { public float speed; }
-)";
-
 		bool SamePlace(const C4LSP::Protocol::Position& a, const C4LSP::Protocol::Position& b)
 		{
 			return a.line == b.line && a.character == b.character;
@@ -196,45 +171,6 @@ struct Player { public float speed; }
 		TEST_ASSERT_EQ(diagnostics.Count(), (uint32)1);
 		TEST_ASSERT(Testing::Lsp::Contains(diagnostics[0].message, "'Render::MeshRendrer' is neither a constant"));
 		TEST_ASSERT(SamePlace(diagnostics[0].range.start, Testing::Lsp::PositionOf(kMisspelt, "Render::MeshRendrer")));
-		TEST_PASSED();
-	}
-
-	void LspAnnotationArgumentsTest::TestADeclaredAnnotationsNameLeadsToItsDeclaration()
-	{
-		auto session = Testing::Lsp::MakeSession("Annotated.cf", kDeclared);
-		const auto declared = Testing::Lsp::PositionOf(kDeclared, "Requires", 1);
-		TEST_ASSERT(LandsOn(session, Testing::Lsp::PositionOf(kDeclared, "Requires", 2), declared));
-		TEST_ASSERT(LandsOn(session, Testing::Lsp::PositionOf(kDeclared, "Requires", 3), declared)); // qualified: its last part
-		TEST_ASSERT(LandsOn(session, Testing::Lsp::PositionOf(kDeclared, "Mover)"), Testing::Lsp::PositionOf(kDeclared, "Mover"))); // its argument: the type
-		auto hover = Hover::At(session, Testing::Lsp::UriFor("Annotated.cf"), Testing::Lsp::PositionOf(kDeclared, "Requires", 2));
-		TEST_ASSERT(hover.found);
-		TEST_ASSERT(Testing::Lsp::Contains(hover.contents, "struct Lib::Requires"));
-		TEST_ASSERT(Testing::Lsp::Contains(hover.contents, "The components a component cannot be without.")); // its doc comment
-		TEST_PASSED();
-	}
-
-	void LspAnnotationArgumentsTest::TestADeclaredAnnotationsUsesAreItsReferences()
-	{
-		auto session = Testing::Lsp::MakeSession("Annotated.cf", kDeclared);
-		auto references = References::At(session, Testing::Lsp::UriFor("Annotated.cf"), Testing::Lsp::PositionOf(kDeclared, "Requires", 1), true);
-		TEST_ASSERT_EQ(references.Count(), 3u); // the declaration and both uses
-		bool plain = false, qualified = false;
-		for (const auto& location : references)
-		{
-			plain = plain || SamePlace(location.range.start, Testing::Lsp::PositionOf(kDeclared, "Requires", 2));
-			qualified = qualified || SamePlace(location.range.start, Testing::Lsp::PositionOf(kDeclared, "Requires", 3));
-		}
-		TEST_ASSERT(plain && qualified);
-		TEST_PASSED();
-	}
-
-	void LspAnnotationArgumentsTest::TestAMisspeltAnnotationIsADiagnostic()
-	{
-		auto session = Testing::Lsp::MakeSession("Annotated.cf", kTypo);
-		const auto diagnostics = Diagnostics::ForDocument(session, Testing::Lsp::UriFor("Annotated.cf"));
-		TEST_ASSERT_EQ(diagnostics.Count(), (uint32)1);
-		TEST_ASSERT(Testing::Lsp::Contains(diagnostics[0].message, "unknown annotation 'Requiers': did you mean 'Requires'"));
-		TEST_ASSERT(SamePlace(diagnostics[0].range.start, Testing::Lsp::PositionOf(kTypo, "Requiers")));
 		TEST_PASSED();
 	}
 } // namespace Testing

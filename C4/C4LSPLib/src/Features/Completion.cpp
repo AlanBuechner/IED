@@ -1,4 +1,5 @@
 #include "Features/Completion.h"
+#include "Features/AnnotationCompletion.h"
 #include "Server/CompilationSession.h"
 #include "Server/SemanticResolver.h"
 #include "SourceManager/Source.h"
@@ -84,7 +85,25 @@ namespace C4LSP::Features
 		if (baseEnd == std::string::npos)
 			CollectGlobalSymbols(resolver, candidates);
 
-		return Filter(candidates, prefix);
+		Core::Vector<CompletionItem> items;
+		if (const auto annotation = AnnotationCompletion::Find(text, offset, InTypeBody(located.path)))
+			AnnotationCompletion::Add(resolver, *annotation, items);
+		Core::Vector<CompletionItem> named;
+		for (CompletionItem& item : items)
+			if (prefix.empty() || StartsWith(item.label, prefix)) named.Push(std::move(item));
+		for (CompletionItem& item : Filter(candidates, prefix)) named.Push(std::move(item));
+		return named;
+	}
+
+	bool Completion::InTypeBody(const Core::Vector<const Scripting::AstNode*>& path)
+	{
+		for (uint32 i = path.Count(); i-- > 0;)
+		{
+			const Scripting::NodeType type = path[i]->Type();
+			if (type == Scripting::NodeType::FunctionDefinition || type == Scripting::NodeType::LambdaExpression) return false;
+			if (type == Scripting::NodeType::ObjectDefinition || type == Scripting::NodeType::UnionDefinition) return true;
+		}
+		return false;
 	}
 
 	std::string Completion::WordPrefix(const std::string& text, const Protocol::Position& position)

@@ -25,6 +25,9 @@ namespace C4LSP::Features
 		static HoverResult At(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position);
 		/// A declaration's markdown: a kind line for a parameter or a local, the `c4` block, then its doc comment.
 		static std::string DeclarationMarkdown(Server::CompilationSession& session, const Scripting::AstNode& declaration);
+		/// A declared annotation: how each overload is written, where it goes, and the doc comment of `declaration` (else the
+		/// first overload's that has one).
+		static std::string AnnotationMarkdown(Server::CompilationSession& session, const Scripting::AstNode& declaration);
 
 	private:
 		static std::string BuildHoverText(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position);

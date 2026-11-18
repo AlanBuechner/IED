@@ -10,6 +10,7 @@
 #include "Parser/Nodes/Expressions/MemberAccessNode.h"
 #include "Parser/Nodes/Expressions/StaticAccessNode.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
+#include "Model/AnnotationOverloads.h"
 #include <algorithm>
 #include <cctype>
 
@@ -52,8 +53,11 @@ namespace C4LSP::Features
 		size_t caretOffset = source.LineColumnToByteOffset(position.line + 1, position.character + 1);
 		std::string calleeName;
 		uint32 lexicalArg = 0;
-		if (LexicalCall(source, std::min(caretOffset, source.Size()), calleeName, lexicalArg))
+		size_t calleeStart = 0;
+		if (LexicalCall(source, std::min(caretOffset, source.Size()), calleeName, lexicalArg, &calleeStart))
 		{
+			if (InAnnotationGroup(source, calleeStart) && AnnotationSignatures(session.GetResolver(), calleeName, lexicalArg, result))
+				return result;
 			const Scripting::AstNode* declaration = FindFunctionByName(session, sourceId, calleeName);
 			if (declaration)
 			{
@@ -93,7 +97,8 @@ namespace C4LSP::Features
 		return false;
 	}
 
-	bool SignatureHelp::LexicalCall(const Scripting::Source& source, size_t caretOffset, std::string& outCalleeName, uint32& activeArg)
+	bool SignatureHelp::LexicalCall(const Scripting::Source& source, size_t caretOffset, std::string& outCalleeName, uint32& activeArg,
+		size_t* outCalleeStart)
 	{
 		const auto& src = source; // Source is non-copyable; the lambda must capture by reference.
 		const auto ch = [&src](size_t i) -> int { return static_cast<int>(i < src.Size() ? src.ReadCharAt(i) : -1); };
@@ -154,6 +159,48 @@ namespace C4LSP::Features
 
 		outCalleeName = std::move(calleeName);
 		activeArg = commaCount;
+		if (outCalleeStart) *outCalleeStart = nameStart;
+		return true;
+	}
+
+	bool SignatureHelp::InAnnotationGroup(const Scripting::Source& source, size_t calleeStart)
+	{
+		int parens = 0;
+		int brackets = 0;
+		for (size_t i = calleeStart; i-- > 0;)
+		{
+			const int c = static_cast<int>(source.ReadCharAt(i));
+			if (c == ')') ++parens;
+			else if (c == '(') { if (parens == 0) return false; --parens; }
+			else if (c == ']') ++brackets;
+			else if (c == '[') { if (brackets == 0) return parens == 0; --brackets; }
+			else if ((c == ';' || c == '{' || c == '}') && parens == 0) return false;
+		}
+		return false;
+	}
+
+	bool SignatureHelp::AnnotationSignatures(const Server::SemanticResolver& resolver, const std::string& name, uint32 activeArg, SignatureHelpResult& result)
+	{
+		const Scripting::DeclaredAnnotations::Overloads* overloads = resolver.Annotations().Find(name);
+		if (!overloads || overloads->Empty())
+			return false;
+		const Scripting::AnnotationSignature* likely = Scripting::LikelyOverload(*overloads, activeArg + 1);
+		for (uint32 i = 0; i < overloads->Count(); ++i)
+		{
+			const Scripting::AnnotationSignature& overload = *(*overloads)[i];
+			SignatureInfo info;
+			info.label = overload.ToString().c_str();
+			for (const Scripting::AnnotationParameter& parameter : overload.parameters)
+				info.parameters.Push(SignatureParameter{ parameter.ToString().c_str() });
+			if (&overload == likely)
+			{
+				result.activeSignature = i;
+				const uint32 count = overload.parameters.Count();
+				result.activeParameter = count == 0 ? 0 : std::min(activeArg, count - 1); // a pack takes every later argument
+			}
+			result.signatures.Push(info);
+		}
+		result.found = true;
 		return true;
 	}
 

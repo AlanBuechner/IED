@@ -23,7 +23,7 @@ namespace Testing
 				{
 					Core::Vector<const Scripting::AstNode*> declarations;
 					declarations.Push(object->GetDeclNode());
-					return Scripting::ReflectedAnnotations(model, declarations, model.TypeScope(object));
+					return Scripting::ReflectedAnnotations(model, declarations, Scripting::AnnotationPlace::Type, model.TypeScope(object));
 				}
 			return Scripting::QueryResult<Core::Vector<Scripting::ReflectedAnnotation>>::Fail(Scripting::QueryError::NotFound, name);
 		}
@@ -103,7 +103,7 @@ namespace Testing
 		for (const Scripting::FunctionRecord* record : records)
 			if (record->name == "F") f = record;
 		TEST_ASSERT(f != nullptr);
-		auto annotations = Scripting::ReflectedAnnotations(model, f->declarations, f->scope);
+		auto annotations = Scripting::ReflectedAnnotations(model, f->declarations, Scripting::AnnotationPlace::Function, f->scope);
 		TEST_ASSERT(annotations.Ok());
 		TEST_ASSERT_EQ((int)annotations.value.Count(), 2);
 		TEST_ASSERT(annotations.value[0].name == "Declared");
@@ -120,7 +120,7 @@ namespace Testing
 		TEST_ASSERT(annotations.Ok());
 		TEST_ASSERT(annotations.value.Empty());
 		Core::Vector<const Scripting::AstNode*> none;
-		TEST_ASSERT(Scripting::ReflectedAnnotations(model, none, nullptr).value.Empty());
+		TEST_ASSERT(Scripting::ReflectedAnnotations(model, none, Scripting::AnnotationPlace::Type, nullptr).value.Empty());
 		TEST_PASSED();
 	}
 

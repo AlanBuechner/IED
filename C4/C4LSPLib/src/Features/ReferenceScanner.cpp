@@ -10,7 +10,6 @@
 #include "Parser/Nodes/Expressions/FunctionCallNode.h"
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
 #include "Parser/Nodes/Declarations/AnnotationNode.h"
-#include "Model/Types/ObjectType.h"
 #include "Server/WrittenChildren.h"
 #include "Features/TypeText.h"
 #include <algorithm>
@@ -219,11 +218,12 @@ namespace C4LSP::Features
 				search.sink(Occurrence{ &node, NameOf(node), true }, path);
 			return;
 		}
-		if (node.Type() == Scripting::NodeType::AnnotationItem && AnyTypeTarget(search.targets))
+		if (node.Type() == Scripting::NodeType::AnnotationItem)
 		{
 			const auto& item = static_cast<const Scripting::AnnotationItem&>(node);
-			const Scripting::ObjectType* declaring = search.resolver.Annotations().Find(item.GetName().c_str());
-			if (declaring && search.targets.count(declaring->GetDeclNode()) > 0)
+			const Scripting::DeclaredAnnotations::Overloads* overloads = search.resolver.Annotations().Find(item.GetName().c_str());
+			if (overloads && std::any_of(overloads->begin(), overloads->end(),
+				[&](const Scripting::AnnotationSignature* overload) { return search.targets.count(overload->declaration) > 0; }))
 				search.sink(Occurrence{ &node, NameOf(node), true }, path);
 			return;   // its arguments are walked as children
 		}

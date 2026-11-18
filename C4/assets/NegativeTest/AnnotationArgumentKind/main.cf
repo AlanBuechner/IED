@@ -1,0 +1,8 @@
+namespace Editor { [annotation("field")] void Range(double min, double max); }
+
+struct Light
+{
+	[Range(0, "bright")] public float intensity;
+}
+
+int32 main() { Light l; return (int32)l.intensity; }

@@ -40,6 +40,8 @@ namespace C4LSP::Features
 		struct Candidate { std::string name; int kind; std::string detail; };
 
 		static bool IsIdentChar(char);
+		/// Whether the innermost declaration around the caret is a type's body (not a function or lambda in it).
+		static bool InTypeBody(const Core::Vector<const Scripting::AstNode*>& path);
 		static bool StartsWith(const std::string& name, const std::string& prefix);
 
 		/// The identifier characters immediately before `position` (the word being completed).

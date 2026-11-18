@@ -1,6 +1,7 @@
 #pragma once
 #include <map>
 #include "Model/TestRegistry.h"
+#include "Model/DeclaredAnnotations.h"
 #include <vector>
 #include <deque>
 #include "Model/Types.h"
@@ -333,6 +334,8 @@ namespace Scripting
 
 		/// The program's tests (docs/runtime/03), collected by the builder and read by the test harness.
 		const TestRegistry& Tests() const { return m_Tests; }
+		/// The annotations the program declares with [annotation] (docs/language/12 section 4), read once every type is known.
+		const DeclaredAnnotations& Annotations() const { return m_DeclaredAnnotations; }
 		TestRegistry& MutableTests() { return m_Tests; }
 
 	private:
@@ -449,6 +452,8 @@ namespace Scripting
 		};
 		mutable Core::Vector<TemplateMethodDef> m_TemplateMethodDefs;
 		TestRegistry m_Tests;
+		Core::Vector<AnnotationDeclarationSite> m_AnnotationSites; // each [annotation] function declaration, as registered
+		DeclaredAnnotations m_DeclaredAnnotations;
 		mutable std::deque<std::vector<SymbolInfo>> m_PackStorage; // the elements of every bound pack (stable addresses)
 		std::unordered_map<const ObjectType*, std::unique_ptr<Closure>> m_Closures; // closure type -> its captures and call method
 		std::unordered_map<Core::String, uint32> m_ClosuresByOwner;                 // lambdas made so far in each piece of code

@@ -264,6 +264,7 @@ namespace Scripting
 		ctx.errors = m_Errors;
 		ctx.scope = model.Symbols()->GetRoot();
 		m_Sources = &compiler.GetSourceManager();
+		model.m_AnnotationSites.Clear();
 
 		model.m_PreludeUnit = compiler.GetSourceManager().PreludeId();
 		model.SetProjects(&compiler.GetSourceManager().Projects(), ProjectOfEachUnit(compiler.GetSourceManager()));
@@ -359,6 +360,7 @@ namespace Scripting
 	// A template instance an annotation names, made here, has its bodies opened and its layout fixed as the others had.
 	void ModelBuilder::CheckAnnotations(Context& ctx, ProgramModel& model)
 	{
+		model.m_DeclaredAnnotations = DeclaredAnnotations(model, model.m_AnnotationSites);
 		AnnotationCheck annotations(model, *ctx.errors);
 		constexpr int kRounds = 8; // as GAP A's: an instance's annotations may name another
 		for (int round = 0; round < kRounds; ++round)

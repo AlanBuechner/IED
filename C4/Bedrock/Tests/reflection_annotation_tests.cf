@@ -1,6 +1,32 @@
-// Reflected annotations (D-42): every annotation the compiler does not act on, with its arguments folded.
+// Reflected annotations (D-42): every annotation the compiler does not act on, with its arguments folded - as the declaration
+// it takes has them (D-87): an integer for a double is a double, a default left out is there.
 
 include "bedrock.ch"
+
+namespace RaAnnotations {
+	[annotation("type")] void Serialize();
+	[annotation("type", "field")] void Range(int64 min, int64 max);
+	[annotation("type", "field")] void Range(double min, double max);
+	[annotation("type")] void Tooltip(const char* text);
+	[annotation("field")] void Hidden();
+	[annotation("method")] void Command(const char* name, bool now);
+	[annotation("parameter")] void Units(const char* units);
+	[annotation("enum")] void Flags();
+	[annotation("variable")] void Setting(const char* name);
+	[annotation("parameter")] void NotZero();
+	[annotation("function")] void Tag(int32 tag);
+	[annotation("function")] void Declared();
+	[annotation("function")] void Defined();
+	[annotation("type")] void Requires(typename component, typename... more);
+	[annotation("type")] void Holds(typename... types);
+	[annotation("type")] void Named(const char* name);
+	[annotation("type")] void Limit(int32 limit);
+	[annotation("field")] void Of(typename type);
+	[annotation("method")] void Bind(typename type);
+	[annotation("parameter")] void From(typename type);
+	[annotation("field")] void Gauge(double low, double high, double step = 0.25, const char* units = "m");
+}
+namespace Script { [annotation("function")] void Callable(); }
 
 namespace RaLimits { const int32 kMax = 10; }
 const float kRaScale = 0.5f;
@@ -33,6 +59,11 @@ const char* kRaMeshName = nameof(RaRender::RaMesh);   // a constant now (BUG-463
 struct RaCollider {
 	[Of(RaMeshAlias)] public int32 shape;
 	[Bind(RaRender::RaRenderer)] public void Attach([From(RaRender::RaMesh)] int32 id) { shape = id; }
+}
+
+struct RaDial {
+	[Gauge(0, 10)] public float level;
+	[Gauge(1, 2.5, 0.5, "kg")] public float weight;
 }
 
 [test("reflect.annotations")]
@@ -120,6 +151,19 @@ class ReflectionAnnotationTests {
 		Reflection::Method attach = collider.FindMethod("Attach");
 		assert_se("RaRender::RaRenderer", attach.FindAnnotation("Bind").StringArg(0), "a method's");
 		assert_se("RaRender::RaMesh", attach.ParamAt(0).FindAnnotation("From").TypeArg(0).Name(), "a parameter's");
+	}
+
+	[test("declared_kinds_and_defaults")]
+	public static void TestDeclaredKindsAndDefaults() {
+		Reflection::Annotation level = Reflection::FindType("RaDial").FindField("level").FindAnnotation("Gauge");
+		assert_eq(4, (int32)level.ArgCount(), "every parameter, its defaults too");
+		assert_true(level.ArgKind(0) == Reflection::AnnotationArg::Float ? 1 : 0, "an integer for a double is a double");
+		assert_true(level.FloatArg(1) == 10.0 ? 1 : 0, "its value");
+		assert_true(level.FloatArg(2) == 0.25 ? 1 : 0, "a default left out");
+		assert_se("m", level.StringArg(3), "a string default");
+		Reflection::Annotation weight = Reflection::FindType("RaDial").FindField("weight").FindAnnotation("Gauge");
+		assert_true(weight.FloatArg(2) == 0.5 ? 1 : 0, "a default written over");
+		assert_se("kg", weight.StringArg(3), "every argument as written");
 	}
 
 	[test("declaration_and_definition")]

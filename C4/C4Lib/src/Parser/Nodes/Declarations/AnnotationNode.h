@@ -7,8 +7,14 @@
 
 namespace Scripting
 {
-	/// `[annotation] struct Requires {}` declares the annotation `[Requires]` (docs/language/12 section 4).
+	/// `[annotation("type")] void Requires(typename component, typename... more);` declares the annotation `[Requires]`
+	/// (docs/language/12 section 4).
 	constexpr const char* kAnnotationDeclaration = "annotation";
+
+	/// One of the compiler's own annotations (docs/language/12 section 2), which no [annotation] declares.
+	bool IsCompilerAnnotationName(const Core::String& name);
+	/// The compiler's own annotations' names: operator, test, test_setup, ...
+	std::span<const char* const> CompilerAnnotationNames();
 
 	/// Represents a single annotation (attribute) within a bracket group.
 	///

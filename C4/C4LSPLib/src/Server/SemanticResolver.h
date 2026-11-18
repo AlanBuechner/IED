@@ -37,12 +37,12 @@ namespace C4LSP::Server
 		explicit SemanticResolver(const Scripting::ProgramModel& model) : m_Model(model) {}
 
 		/// Clear resolution caches. Called after every Recompile() so stale node facts are dropped.
-		void Invalidate() { m_RefCache.clear(); m_TypeCache.clear(); m_RecordByDeclaration.clear(); m_RecordsIndexed = false; m_Annotations.reset(); }
+		void Invalidate() { m_RefCache.clear(); m_TypeCache.clear(); m_RecordByDeclaration.clear(); m_RecordsIndexed = false; }
 
-		/// The annotations the program declares ([annotation] struct Requires), made once a compile.
+		/// The annotations the program declares (`[annotation] void Requires(typename component);`), read by the model.
 		const Scripting::DeclaredAnnotations& Annotations() const;
-		/// The declaration of the annotation whose name is at `position` (`Requires` of `[Requires(Mesh)]`, the declaring
-		/// struct); null off an annotation's name, and for a name no [annotation] declares.
+		/// The declaration of the annotation whose name is at `position` (`Requires` of `[Requires(Mesh)]`): the overload its
+		/// arguments take, else the first; null off an annotation's name, and for a name no [annotation] declares.
 		const Scripting::AstNode* AnnotationNamedAt(const Core::Vector<const Scripting::AstNode*>& path, uint32 line, uint32 column) const;
 
 		/// Resolve a reference node to its type + declaring declaration, given the enclosing AST path
@@ -104,6 +104,5 @@ namespace C4LSP::Server
 		mutable std::unordered_map<const Scripting::QualTypeNode*, const Scripting::Type*> m_TypeCache;
 		mutable std::unordered_map<const Scripting::AstNode*, const Scripting::FunctionRecord*> m_RecordByDeclaration;
 		mutable bool m_RecordsIndexed = false;
-		mutable std::unique_ptr<Scripting::DeclaredAnnotations> m_Annotations;
 	};
 } // namespace C4LSP::Server

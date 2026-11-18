@@ -257,7 +257,10 @@ annotation keeps its name as written (`Game::Serialize`) and its arguments folde
 integer, float, bool or string - or a type, kind `Type`, whose `StringArg` is the type's qualified name (as `nameof`
 writes it) and whose `TypeArg` is the registered type (a template instance only an annotation names is made and
 registered too). The compiler's own annotations (`operator`, `test`, `group`, ...) are not listed; groups have their
-own API.
+own API. A declared annotation's arguments are registered as the overload it takes has them (D-87, [12 section
+4.3](../language/12-annotations.md#43-choosing-an-overload)): an integer for a `double` parameter is a `Float`, an
+enumerator its value (`Int`), and a parameter left out its default, so a reader asks for one kind and always finds every
+parameter.
 
 ```c4
 [Serialize, Range(-1, Limits::kMax * 2), Requires(Geo::Hull)]

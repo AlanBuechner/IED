@@ -1,14 +1,13 @@
 #pragma once
 #include "Core/Core.h"
-#include "Model/DeclaredAnnotations.h"
-#include <memory>
+#include "Compiler/ErrorTracker.h"
+#include "Model/AnnotationPlaces.h"
 #include <set>
 #include <tuple>
 #include <unordered_set>
 
 namespace Scripting
 {
-	class ErrorTracker;
 	class ObjectType;
 	class ProgramModel;
 	struct AnnotationItem;
@@ -17,10 +16,11 @@ namespace Scripting
 	struct SourceLocation;
 	struct Scope;
 
-	/// The annotations reflection registers, checked while the model is built (D-42), each an error where it is written - in an
-	/// editor too: an argument that is neither a constant nor a type, a misspelt declared annotation (`[Requiers]` where
-	/// `[annotation] struct Requires` is declared), and [annotation] on anything but a struct or class. A template instance an
-	/// argument names is made before any body is lowered. Each CheckNew checks what earlier ones did not: the instances made since.
+	/// The annotations reflection registers, checked while the model is built (D-42, D-87), each an error where it is written -
+	/// in an editor too: an argument that is neither a constant nor a type, a use no declaration of its annotation takes (the
+	/// wrong place, count or kind of arguments), a misspelt declared annotation, [annotation] where it declares nothing, and a
+	/// declaration that declares nothing as written. An undeclared annotation is a warning. A template instance an argument
+	/// names is made before any body is lowered. Each CheckNew checks what earlier ones did not: the instances made since.
 	class AnnotationCheck
 	{
 	public:
@@ -29,22 +29,23 @@ namespace Scripting
 		void CheckNew();
 
 	private:
+		void CheckDeclarations();
 		void CheckTypes();
 		void CheckGlobals();
 		void CheckFunctions();
 		void CheckObject(const ObjectType& object);
 		void CheckFunction(const FunctionRecord& function);
-		void Check(const Core::Vector<const AstNode*>& declarations, const Scope* scope);
-		void Check(const AstNode* declaration, const Scope* scope);
-		void CheckNames(const AstNode& declaration);
-		void CheckName(const AnnotationItem& item);
-		void Report(const SourceLocation& at, const Core::String& message);
+		void Check(const Core::Vector<const AstNode*>& declarations, AnnotationPlace place, const Scope* scope);
+		void Check(const AstNode* declaration, AnnotationPlace place, const Scope* scope);
+		void CheckItem(const AnnotationItem& item, AnnotationPlace place, const Scope* scope);
+		void CheckUndeclared(const AnnotationItem& item);
+		void Report(const SourceLocation& at, const Core::String& message, ErrorSeverity severity = ErrorSeverity::Error);
 		bool IsNew(const void* entity) { return m_Checked.insert(entity).second; }
 
 		const ProgramModel& m_Model;
 		ErrorTracker& m_Errors;
-		std::unique_ptr<DeclaredAnnotations> m_Declared;          // made at the first CheckNew: every declaring type is there by then
+		bool m_DeclarationsChecked = false;
 		std::unordered_set<const void*> m_Checked;               // the types, globals and functions checked
-		std::set<std::tuple<uint32, uint32, uint32>> m_Reported; // failures said, by location: a template's once for all instances
+		std::set<std::tuple<uint32, uint32, uint32>> m_Reported; // diagnostics said, by location: a template's once for all instances
 	};
 } // namespace Scripting
