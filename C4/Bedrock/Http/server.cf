@@ -61,21 +61,65 @@ namespace Http
 			head.Append(header.value.View());
 			head.Append("\r\n");
 		}
-		if (StatusHasBody(response.status)) {
+		if (StatusHasBody(response.status) && response.BodyLength() < 0) head.Append("Transfer-Encoding: chunked\r\n");
+		else if (StatusHasBody(response.status)) {
 			head.Append("Content-Length: ");
-			head.AppendInt(response.body.Count());
+			head.AppendInt(response.BodyLength());
 			head.Append("\r\n");
 		}
 		if (closing) head.Append("Connection: close\r\n");
 		head.Append("\r\n");
 	}
 
-	bool Send(Connection& c, const Response& response, bool closing, bool headOnly) {
+	const int64 kStreamPieceBytes = 256 * 1024;
+
+	// A streamed body of unknown length as chunks, each what one read gave, until a read gives 0.
+	bool SendChunked(Connection& c, const StreamedBody& streamed) {
+		Core::Array<uint8> piece;
+		piece.Resize(kStreamPieceBytes);
+		int64 sent = 0;
+		while (true) {
+			const int64 got = streamed.read(sent, piece.Data(), piece.Count());
+			if (got == 0) return c.stream.SendText(Core::StringView("0\r\n\r\n"));
+			if (got < 0 || got > piece.Count()) return false;
+			Core::StringBuilder size;
+			size.AppendIntBase(got, 16, 1);
+			size.Append("\r\n");
+			if (!c.stream.SendText(size.View()) || !c.stream.SendAll((const void*)piece.Data(), got) || !c.stream.SendText(Core::StringView("\r\n"))) return false;
+			sent += got;
+		}
+		return false;
+	}
+
+	// The streamed body a piece at a time; false when the reader or the connection gives out first.
+	bool SendStreamed(Connection& c, const StreamedBody& streamed) {
+		if (streamed.length < 0) return SendChunked(c, streamed);
+		Core::Array<uint8> piece;
+		piece.Resize(streamed.length < kStreamPieceBytes ? streamed.length : kStreamPieceBytes);
+		int64 sent = 0;
+		while (sent < streamed.length) {
+			const int64 wanted = streamed.length - sent < piece.Count() ? streamed.length - sent : piece.Count();
+			const int64 got = streamed.read(sent, piece.Data(), wanted);
+			if (got <= 0 || got > wanted) return false;
+			if (!c.stream.SendAll((const void*)piece.Data(), got)) return false;
+			sent += got;
+		}
+		return true;
+	}
+
+	bool SendBody(Connection& c, const Response& response, bool closing, bool headOnly) {
 		Core::StringBuilder head;
 		WriteHead(head, response, closing);
 		if (!c.stream.SendText(head.View())) return false;
-		if (headOnly || !StatusHasBody(response.status) || response.body.IsEmpty()) return true;
+		if (headOnly || !StatusHasBody(response.status) || response.BodyLength() == 0) return true;
+		if (response.IsStreamed()) return SendStreamed(c, response.streamed);
 		return c.stream.SendAll((const void*)response.body.Data(), response.body.Count());
+	}
+
+	bool Send(Connection& c, const Response& response, bool closing, bool headOnly) {
+		const bool sent = SendBody(c, response, closing, headOnly);
+		if (response.IsStreamed() && response.streamed.finished) response.streamed.finished(sent);
+		return sent;
 	}
 
 	// A request that cannot be served: the status, why as text, and the connection closes.

@@ -1,0 +1,239 @@
+include "zip.ch"
+
+namespace Compression
+{
+	const uint32 kZipLocalSignature = 0x04034b50u;
+	const uint32 kZipCentralSignature = 0x02014b50u;
+	const uint32 kZipEndSignature = 0x06054b50u;
+	const int64 kZipLocalBytes = 30;
+	const int64 kZipCentralBytes = 46;
+	const int64 kZipEndBytes = 22;
+	const int64 kZipMostComment = 65535;
+	const int64 kZipMost32 = 4294967295;        // a 32-bit field's largest value: ZIP64 marks its fields with it
+	const int64 kZipMostEntries = 65535;
+	const uint32 kZipVersion = 20u;             // 2.0: deflate and folders
+	const uint32 kZipEncrypted = 1u;            // flag bit 0
+	const uint32 kZipUtf8Names = 2048u;         // flag bit 11: names are UTF-8
+	const uint32 kZipDosTime = 0u;              // 00:00:00
+	const uint32 kZipDosDate = 33u;             // 1980-01-01, so an archive comes out the same each time it is written
+
+	static uint32 Le16(const uint8* at) { return (uint32)at[0] | ((uint32)at[1] << 8u); }
+	static uint32 Le32(const uint8* at) { return Le16(at) | (Le16(at + 2) << 16u); }
+
+	static void Put16(Core::Array<uint8>& out, uint32 value) {
+		out.Push((uint8)(value & 0xffu));
+		out.Push((uint8)((value >> 8u) & 0xffu));
+	}
+
+	static void Put32(Core::Array<uint8>& out, uint32 value) {
+		Put16(out, value & 0xffffu);
+		Put16(out, value >> 16u);
+	}
+
+	static void PutText(Core::Array<uint8>& out, Core::StringView text) {
+		for (int64 i = 0; i < text.ByteLength(); ++i) out.Push((uint8)text.ByteAt(i));
+	}
+
+	// `count` bytes at `offset` of the file into `bytes`; false when the file has fewer.
+	static bool ReadAt(FS::File& file, int64 offset, int64 count, Core::Array<uint8>& bytes) {
+		bytes.Resize(count);
+		if (count == 0) return true;
+		return file.Seek(offset) == offset && file.Read((void*)bytes.Data(), count) == count;
+	}
+
+	bool ZipEntry::IsFolder() const { return name.View().EndsWith(Core::StringView("/")); }
+
+	// ---- ZipReader ----
+
+	bool ZipReader::Fail(const char* why) {
+		error = Core::String(why);
+		return false;
+	}
+
+	bool ZipReader::Open(const char* path) {
+		Close();
+		file = FS::File(path, "rb");
+		if (!file.IsOpen()) return Fail("the file cannot be opened");
+		const int64 size = file.Seek(0, FS::SeekOrigin::End);
+		if (size < kZipEndBytes) return Fail("not a ZIP archive: too short");
+		// The end record is the last thing in the file but for a comment of up to 65535 bytes: found from the back.
+		const int64 tail = size < kZipEndBytes + kZipMostComment ? size : kZipEndBytes + kZipMostComment;
+		Core::Array<uint8> end;
+		if (!ReadAt(file, size - tail, tail, end)) return Fail("the file cannot be read");
+		int64 at = tail - kZipEndBytes;
+		while (at >= 0 && Le32(end.Data() + at) != kZipEndSignature) at--;
+		if (at < 0) return Fail("not a ZIP archive: no end of central directory");
+		const uint8* record = end.Data() + at;
+		if (Le16(record + 4) != 0u || Le16(record + 6) != 0u) return Fail("a split archive");
+		const int64 count = (int64)Le16(record + 10);
+		const int64 directorySize = (int64)Le32(record + 12);
+		const int64 directoryOffset = (int64)Le32(record + 16);
+		if (count == kZipMostEntries || directorySize == kZipMost32 || directoryOffset == kZipMost32) return Fail("a ZIP64 archive");
+		if (directoryOffset + directorySize > size - tail + at) return Fail("a damaged archive: its directory runs past its end");
+		return ReadDirectory(directoryOffset, directorySize, count);
+	}
+
+	bool ZipReader::ReadDirectory(int64 offset, int64 size, int64 count) {
+		Core::Array<uint8> directory;
+		if (!ReadAt(file, offset, size, directory)) return Fail("the file cannot be read");
+		int64 at = 0;
+		for (int64 i = 0; i < count; ++i) {
+			if (at + kZipCentralBytes > size || Le32(directory.Data() + at) != kZipCentralSignature) return Fail("a damaged archive: a bad directory entry");
+			const uint8* header = directory.Data() + at;
+			const int64 nameBytes = (int64)Le16(header + 28);
+			const int64 extraBytes = (int64)Le16(header + 30);
+			const int64 commentBytes = (int64)Le16(header + 32);
+			if (at + kZipCentralBytes + nameBytes > size) return Fail("a damaged archive: a name runs past the directory");
+			ZipEntry entry;
+			entry.encrypted = (Le16(header + 8) & kZipEncrypted) != 0u;
+			entry.method = (int32)Le16(header + 10);
+			entry.crc = Le32(header + 16);
+			entry.compressedSize = (int64)Le32(header + 20);
+			entry.size = (int64)Le32(header + 24);
+			entry.headerOffset = (int64)Le32(header + 42);
+			entry.name = Core::String(Core::StringView((const char*)(header + kZipCentralBytes), nameBytes));
+			if (entry.compressedSize == kZipMost32 || entry.size == kZipMost32 || entry.headerOffset == kZipMost32) return Fail("a ZIP64 archive");
+			entries.Push(take(entry));
+			at += kZipCentralBytes + nameBytes + extraBytes + commentBytes;
+		}
+		error.Clear();
+		return true;
+	}
+
+	void ZipReader::Close() {
+		file.Close();
+		entries.Clear();
+		error.Clear();
+	}
+
+	const ZipEntry* ZipReader::Find(Core::StringView name) const {
+		for (int64 i = 0; i < entries.Count(); ++i)
+			if (entries[i].name.View() == name) return &entries[i];
+		return nullptr;
+	}
+
+	bool ZipReader::Read(const ZipEntry& entry, Core::Array<uint8>& out) {
+		out.Clear();
+		if (!file.IsOpen()) return Fail("no archive is open");
+		if (entry.encrypted) return Fail("the entry is encrypted");
+		if (entry.method != kZipStored && entry.method != kZipDeflated) return Fail("the entry's compression method is not stored or deflated");
+		Core::Array<uint8> local;
+		if (!ReadAt(file, entry.headerOffset, kZipLocalBytes, local) || Le32(local.Data()) != kZipLocalSignature) return Fail("a damaged archive: a bad local header");
+		// The local header's name and extra field can differ in length from the directory's.
+		const int64 dataOffset = entry.headerOffset + kZipLocalBytes + (int64)Le16(local.Data() + 26) + (int64)Le16(local.Data() + 28);
+		Core::Array<uint8> stored;
+		if (!ReadAt(file, dataOffset, entry.compressedSize, stored)) return Fail("a damaged archive: an entry runs past its end");
+		if (entry.method == kZipStored) out = take(stored);
+		else {
+			// No room is reserved from the entry's size: it comes from the archive, which may lie.
+			const InflateResult inflated = Inflate(stored.Data(), stored.Count(), out);
+			if (!inflated.ok) return Fail(inflated.error);
+		}
+		if (out.Count() != entry.size) return Fail("a damaged archive: an entry's size does not match");
+		if (Core::Crc32(out.Data(), out.Count()) != entry.crc) return Fail("a damaged archive: an entry's CRC-32 does not match");
+		return true;
+	}
+
+	// ---- ZipWriter ----
+
+	bool ZipWriter::Fail(const char* why) {
+		error = Core::String(why);
+		file.Close();
+		return false;
+	}
+
+	bool ZipWriter::WriteBytes(const Core::Array<uint8>& bytes) {
+		if (bytes.IsEmpty()) return true;
+		if (file.Write((const void*)bytes.Data(), bytes.Count()) != bytes.Count()) return Fail("the archive cannot be written");
+		offset += bytes.Count();
+		return true;
+	}
+
+	bool ZipWriter::Create(const char* path) {
+		entries.Clear();
+		offset = 0;
+		error.Clear();
+		file = FS::File(path, "wb");
+		return file.IsOpen() || Fail("the archive cannot be created");
+	}
+
+	bool ZipWriter::Add(Core::StringView name, const uint8* data, int64 size, int32 level) {
+		if (!file.IsOpen()) return Fail("no archive is being written");
+		if (entries.Count() >= kZipMostEntries - 1) return Fail("more entries than ZIP holds without ZIP64");
+		ZipEntry entry;
+		entry.name = Core::String(name);
+		entry.size = size;
+		entry.crc = Core::Crc32(data, size);
+		entry.headerOffset = offset;
+		entry.method = kZipStored;
+		Core::Array<uint8> deflated;
+		if (level != kStoreLevel && size > 0) {
+			Deflate(data, size, level, deflated);
+			if (deflated.Count() < size) entry.method = kZipDeflated;
+		}
+		entry.compressedSize = entry.method == kZipDeflated ? deflated.Count() : size;
+		if (offset + kZipLocalBytes + name.ByteLength() + entry.compressedSize >= kZipMost32 || size >= kZipMost32) return Fail("past 4 GiB, which ZIP holds only with ZIP64");
+		Core::Array<uint8> header;
+		Put32(header, kZipLocalSignature);
+		Put16(header, kZipVersion);
+		Put16(header, kZipUtf8Names);
+		Put16(header, (uint32)entry.method);
+		Put16(header, kZipDosTime);
+		Put16(header, kZipDosDate);
+		Put32(header, entry.crc);
+		Put32(header, (uint32)entry.compressedSize);
+		Put32(header, (uint32)entry.size);
+		Put16(header, (uint32)name.ByteLength());
+		Put16(header, 0u);
+		PutText(header, name);
+		if (!WriteBytes(header)) return false;
+		if (entry.method == kZipDeflated) {
+			if (!WriteBytes(deflated)) return false;
+		} else if (size > 0) {
+			if (file.Write((const void*)data, size) != size) return Fail("the archive cannot be written");
+			offset += size;
+		}
+		entries.Push(take(entry));
+		return true;
+	}
+
+	bool ZipWriter::Finish() {
+		if (!file.IsOpen()) return Fail("no archive is being written");
+		const int64 directoryOffset = offset;
+		Core::Array<uint8> directory;
+		for (const ZipEntry& entry : entries) {
+			Put32(directory, kZipCentralSignature);
+			Put16(directory, kZipVersion);
+			Put16(directory, kZipVersion);
+			Put16(directory, kZipUtf8Names);
+			Put16(directory, (uint32)entry.method);
+			Put16(directory, kZipDosTime);
+			Put16(directory, kZipDosDate);
+			Put32(directory, entry.crc);
+			Put32(directory, (uint32)entry.compressedSize);
+			Put32(directory, (uint32)entry.size);
+			Put16(directory, (uint32)entry.name.ByteLength());
+			Put16(directory, 0u);   // extra field
+			Put16(directory, 0u);   // comment
+			Put16(directory, 0u);   // disk
+			Put16(directory, 0u);   // internal attributes
+			Put32(directory, 0u);   // external attributes
+			Put32(directory, (uint32)entry.headerOffset);
+			PutText(directory, entry.name.View());
+		}
+		const int64 directorySize = directory.Count();
+		if (directoryOffset + directorySize >= kZipMost32) return Fail("past 4 GiB, which ZIP holds only with ZIP64");
+		Put32(directory, kZipEndSignature);
+		Put16(directory, 0u);
+		Put16(directory, 0u);
+		Put16(directory, (uint32)entries.Count());
+		Put16(directory, (uint32)entries.Count());
+		Put32(directory, (uint32)directorySize);
+		Put32(directory, (uint32)directoryOffset);
+		Put16(directory, 0u);
+		if (!WriteBytes(directory)) return false;
+		const bool flushed = file.Flush();
+		file.Close();
+		return flushed || Fail("the archive cannot be written");
+	}
+}

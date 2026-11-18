@@ -1,6 +1,6 @@
 // Http (D-66): request and response heads parsed (every malformed form, the limits, CRLF or LF, absolute targets),
 // body framing, chunked bodies fed whole and a byte at a time, URLs and headers; a server on loopback answering GET,
-// POST, pipelined keep-alive requests, chunked bodies, HEAD, Expect: 100-continue, HTTP/1.0, bad requests, bodies over
+// POST, pipelined keep-alive requests, chunked bodies, streamed bodies, HEAD, Expect: 100-continue, HTTP/1.0, bad requests, bodies over
 // the limit, a handler that throws, concurrent clients, and Stop; and the client reading chunked, until-close and
 // interim responses from a raw server.
 
@@ -313,6 +313,79 @@ class HttpServerTests {
 		assert_true(HttpContains(all.View(), "Content-Length: 9"), "HEAD gets the length the body would have");
 		assert_true(!HttpContains(all.View(), "HEAD /h"), "but no body");
 		rig.Finish();
+	}
+
+	[test("streamed_body")]
+	public static void TestStreamedBody() {
+		HttpRig rig;
+		// 3 MiB of a pattern only the offset decides, read 1000 bytes at a time at most: many reads per piece sent.
+		const int64 total = 3 * 1024 * 1024 + 17;
+		rig.Start([total](const Http::Request& request, Http::Response& response) {
+			if (request.path == "/cut") {
+				response.streamed.length = 100;
+				response.streamed.read = [](int64 offset, uint8* into, int64 capacity) -> int64 { return offset < 40 ? 40 : 0; };
+				return;
+			}
+			response.headers.Set(HttpText("Content-Type"), HttpText("application/octet-stream"));
+			response.streamed.length = total;
+			response.streamed.read = [](int64 offset, uint8* into, int64 capacity) -> int64 {
+				const int64 count = capacity < 1000 ? capacity : 1000;
+				for (int64 i = 0; i < count; ++i) into[i] = (uint8)((offset + i) % 251);
+				return count;
+			};
+		});
+		Http::FetchResult got = Http::Get(rig.Url("/big").View(), kHttpWaitMs);
+		assert_true(got.ok && got.response.status == 200, "a streamed body is answered 200");
+		assert_eq(total, got.response.body.Count(), "every byte arrives");
+		bool same = true;
+		for (int64 i = 0; i < got.response.body.Count(); ++i)
+			if (got.response.body[i] != (uint8)(i % 251)) same = false;
+		assert_true(same, "in order, each from its offset");
+		Core::String head = HttpExchange(rig.At(), "HEAD /big HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+		assert_true(HttpContains(head.View(), "Content-Length: 3145745"), "HEAD gets the streamed length");
+		assert_true(!HttpContains(head.View(), "\r\n\r\n\x01"), "and no body");
+		Core::String cut = HttpExchange(rig.At(), "GET /cut HTTP/1.1\r\nHost: x\r\n\r\n");
+		assert_true(HttpContains(cut.View(), "Content-Length: 100"), "a reader that gives out still promised its length");
+		assert_true(cut.View().ByteLength() < 100 + (int64)cut.View().IndexOf(HttpText("\r\n\r\n")) + 4, "and the connection closes short of it");
+		rig.Finish();
+	}
+
+	[test("streamed_body_of_unknown_length")]
+	public static void TestStreamedUnknownLength() {
+		HttpRig rig;
+		Threading::Atomic<int64> finishedWhole;
+		Threading::Atomic<int64> finishedShort;
+		Threading::Atomic<int64>* whole = &finishedWhole;
+		Threading::Atomic<int64>* cutShort = &finishedShort;
+		// Five reads of 300 000 bytes, then the end: as a program's output arrives.
+		rig.Start([whole, cutShort](const Http::Request& request, Http::Response& response) {
+			const bool failing = request.path == "/failing";
+			response.streamed.length = -1;
+			response.streamed.read = [failing](int64 offset, uint8* into, int64 capacity) -> int64 {
+				if (offset >= 1500000) return 0;
+				if (failing && offset >= 600000) return -1;
+				int64 count = capacity < 300000 ? capacity : 300000;
+				if (count > 1500000 - offset) count = 1500000 - offset;
+				for (int64 i = 0; i < count; ++i) into[i] = (uint8)((offset + i) % 253);
+				return count;
+			};
+			response.streamed.finished = [whole, cutShort](bool all) { if (all) whole->FetchAdd(1); else cutShort->FetchAdd(1); };
+		});
+		Http::FetchResult got = Http::Get(rig.Url("/unknown").View(), kHttpWaitMs);
+		assert_true(got.ok && got.response.status == 200, "answered");
+		assert_eq((int64)1500000, got.response.body.Count(), "every chunk arrives");
+		bool same = true;
+		for (int64 i = 0; i < got.response.body.Count(); ++i)
+			if (got.response.body[i] != (uint8)(i % 253)) same = false;
+		assert_true(same, "in order");
+		Core::String raw = HttpExchange(rig.At(), "GET /unknown HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+		assert_true(HttpContains(raw.View(), "Transfer-Encoding: chunked") && !HttpContains(raw.View(), "Content-Length"), "sent chunked");
+		assert_true(raw.View().EndsWith(HttpText("0\r\n\r\n")), "with the last chunk");
+		Core::String failed = HttpExchange(rig.At(), "GET /failing HTTP/1.1\r\nHost: x\r\n\r\n");
+		assert_true(!failed.View().EndsWith(HttpText("0\r\n\r\n")), "a reader that fails cuts the response short");
+		rig.Finish();
+		assert_eq((int64)2, finishedWhole.Load(), "finished(true) after each whole body");
+		assert_eq((int64)1, finishedShort.Load(), "finished(false) after the cut one");
 	}
 
 	[test("expect_continue")]

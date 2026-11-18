@@ -56,7 +56,7 @@ namespace Http
 	}
 
 	bool CompressResponse(const Request& request, Response& response, int32 level) {
-		if (response.body.Count() < kCompressFromBytes || response.headers.Has(Core::StringView(kContentEncoding))) return false;
+		if (response.IsStreamed() || response.body.Count() < kCompressFromBytes || response.headers.Has(Core::StringView(kContentEncoding))) return false;
 		if (!AcceptsCoding(request.headers.Find(Core::StringView("Accept-Encoding")), "gzip")) return false;
 		if (!CompressibleType(response.headers.Find(Core::StringView("Content-Type")))) return false;
 		Core::Array<uint8> compressed;
@@ -83,7 +83,7 @@ namespace Http
 		if (!coding || EqualsIgnoringCase(coding->View().Trimmed(), Core::StringView("identity"))) return true;
 		Core::StringView name = coding->View().Trimmed();
 		const bool known = EqualsIgnoringCase(name, Core::StringView("gzip")) || EqualsIgnoringCase(name, Core::StringView("x-gzip")) ||
-			EqualsIgnoringCase(name, Core::StringView("deflate"));
+		EqualsIgnoringCase(name, Core::StringView("deflate"));
 		if (!known) {
 			why = Core::String("the body's coding is not one this client reads: ");
 			why.Append(name);

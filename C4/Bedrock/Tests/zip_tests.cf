@@ -1,0 +1,164 @@
+// ZIP archives: one Python's zipfile wrote, archives ZipWriter writes read back, and damaged or unsupported ones refused.
+
+include "bedrock.ch"
+include "scratch.ch"
+
+// Python's zipfile: a folder "pages/", "pages/001.txt" deflated ("hello, hello, hello world"), "read me.txt" stored
+// ("stored as is"), and the archive comment "made by python".
+const uint8[353] kPythonZip = { 80u, 75u, 3u, 4u, 20u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 33u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 6u, 0u, 0u, 0u, 112u, 97u, 103u, 101u, 115u, 47u, 80u, 75u, 3u, 4u, 20u, 0u, 0u, 0u, 8u, 0u, 225u, 6u, 110u, 93u, 150u, 101u, 109u, 253u, 17u, 0u, 0u, 0u, 25u, 0u, 0u, 0u, 13u, 0u, 0u, 0u, 112u, 97u, 103u, 101u, 115u, 47u, 48u, 48u, 49u, 46u, 116u, 120u, 116u, 203u, 72u, 205u, 201u, 201u, 215u, 81u, 200u, 64u, 162u, 20u, 202u, 243u, 139u, 114u, 82u, 0u, 80u, 75u, 3u, 4u, 20u, 0u, 0u, 0u, 0u, 0u, 225u, 6u, 110u, 93u, 172u, 36u, 187u, 224u, 12u, 0u, 0u, 0u, 12u, 0u, 0u, 0u, 11u, 0u, 0u, 0u, 114u, 101u, 97u, 100u, 32u, 109u, 101u, 46u, 116u, 120u, 116u, 115u, 116u, 111u, 114u, 101u, 100u, 32u, 97u, 115u, 32u, 105u, 115u, 80u, 75u, 1u, 2u, 20u, 0u, 20u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 33u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 6u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 128u, 1u, 0u, 0u, 0u, 0u, 112u, 97u, 103u, 101u, 115u, 47u, 80u, 75u, 1u, 2u, 20u, 0u, 20u, 0u, 0u, 0u, 8u, 0u, 225u, 6u, 110u, 93u, 150u, 101u, 109u, 253u, 17u, 0u, 0u, 0u, 25u, 0u, 0u, 0u, 13u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 128u, 1u, 36u, 0u, 0u, 0u, 112u, 97u, 103u, 101u, 115u, 47u, 48u, 48u, 49u, 46u, 116u, 120u, 116u, 80u, 75u, 1u, 2u, 20u, 0u, 20u, 0u, 0u, 0u, 0u, 0u, 225u, 6u, 110u, 93u, 172u, 36u, 187u, 224u, 12u, 0u, 0u, 0u, 12u, 0u, 0u, 0u, 11u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 128u, 1u, 96u, 0u, 0u, 0u, 114u, 101u, 97u, 100u, 32u, 109u, 101u, 46u, 116u, 120u, 116u, 80u, 75u, 5u, 6u, 0u, 0u, 0u, 0u, 3u, 0u, 3u, 0u, 168u, 0u, 0u, 0u, 149u, 0u, 0u, 0u, 14u, 0u, 109u, 97u, 100u, 101u, 32u, 98u, 121u, 32u, 112u, 121u, 116u, 104u, 111u, 110u };
+const int64 kPythonDeflatedHeader = 36;   // where "pages/001.txt"'s local header starts
+const int64 kPythonDeflatedData = 79;     // and its data
+const int64 kPythonDeflatedCentral = 201; // and its directory entry (the directory starts at 149; "pages/" takes 52)
+
+Core::String ZipScratchFile(const char* name) {
+	return Core::String((TestScratch() / name).View());
+}
+
+Core::String WriteFixture(const char* name, const uint8* bytes, int64 count) {
+	Core::String path = ZipScratchFile(name);
+	FS::WriteFileAtomically(path.CStr(), (const void*)bytes, count);
+	return path;
+}
+
+Core::Array<uint8> FixtureCopy() {
+	Core::Array<uint8> bytes;
+	for (int64 i = 0; i < 353; ++i) bytes.Push(kPythonZip[i]);
+	return bytes;
+}
+
+bool HoldsZipText(const Core::Array<uint8>& bytes, const char* text) {
+	const Core::StringView expected = Core::StringView(text);
+	if (bytes.Count() != expected.ByteLength()) return false;
+	for (int64 i = 0; i < bytes.Count(); ++i)
+		if ((int32)bytes[i] != expected.ByteAt(i)) return false;
+	return true;
+}
+
+[test("zip.read")]
+class ZipReadTests {
+	[test("an_archive_python_wrote")]
+	public static void TestPythonArchive() {
+		Core::String path = WriteFixture("python.zip", &kPythonZip[0], 353);
+		Compression::ZipReader zip;
+		assert_true(zip.Open(path.CStr()), zip.Error().Data());
+		assert_eq((int64)3, zip.Entries().Count(), "three entries, the comment skipped");
+		assert_se("pages/", zip.Entries()[0].name.CStr(), "a folder");
+		assert_true(zip.Entries()[0].IsFolder(), "it is one");
+		const Compression::ZipEntry* page = zip.Find(Core::StringView("pages/001.txt"));
+		assert_true(page != nullptr, "found by name");
+		assert_true(!page->IsFolder(), "a file");
+		assert_eq(Compression::kZipDeflated, page->method, "deflated");
+		assert_eq((int64)25, page->size, "its size");
+		Core::Array<uint8> data;
+		assert_true(zip.Read(*page, data), zip.Error().Data());
+		assert_true(HoldsZipText(data, "hello, hello, hello world"), "inflated");
+		const Compression::ZipEntry* stored = zip.Find(Core::StringView("read me.txt"));
+		assert_eq(Compression::kZipStored, stored->method, "stored");
+		assert_true(zip.Read(*stored, data), zip.Error().Data());
+		assert_true(HoldsZipText(data, "stored as is"), "read as it is, replacing what the array held");
+		assert_true(zip.Read(zip.Entries()[0], data) && data.Count() == 0, "a folder has no data");
+		assert_true(zip.Find(Core::StringView("pages/002.txt")) == nullptr, "no such entry");
+		zip.Close();
+		assert_eq((int64)0, zip.Entries().Count(), "closed");
+	}
+
+	[test("refuses_what_is_not_an_archive")]
+	public static void TestNotArchives() {
+		Compression::ZipReader zip;
+		assert_true(!zip.Open(ZipScratchFile("missing.zip").CStr()), "no file");
+		assert_se("the file cannot be opened", zip.Error().Data(), "says so");
+		const char* text = "just some text, long enough to hold an end record if it were one";
+		Core::String plain = WriteFixture("text.zip", (const uint8*)text, Core::StringView(text).ByteLength());
+		assert_true(!zip.Open(plain.CStr()), "text");
+		assert_se("not a ZIP archive: no end of central directory", zip.Error().Data(), "says so");
+		Core::String tiny = WriteFixture("tiny.zip", &kPythonZip[0], 10);
+		assert_true(!zip.Open(tiny.CStr()), "too short");
+		Core::String cut = WriteFixture("cut.zip", &kPythonZip[0], 300);
+		assert_true(!zip.Open(cut.CStr()), "cut before its end record");
+	}
+
+	[test("refuses_damaged_entries")]
+	public static void TestDamagedEntries() {
+		Core::Array<uint8> flipped = FixtureCopy();
+		flipped[kPythonDeflatedData + 3] = (uint8)(flipped[kPythonDeflatedData + 3] ^ 0x10u);
+		Core::String damaged = WriteFixture("flipped.zip", flipped.Data(), flipped.Count());
+		Compression::ZipReader zip;
+		assert_true(zip.Open(damaged.CStr()), "its directory is whole");
+		Core::Array<uint8> data;
+		assert_true(!zip.Read(*zip.Find(Core::StringView("pages/001.txt")), data), "a changed byte");
+		assert_true(zip.Read(*zip.Find(Core::StringView("read me.txt")), data), "the other entries still read");
+
+		Core::Array<uint8> bzip2 = FixtureCopy();
+		bzip2[kPythonDeflatedHeader + 8] = 12u;   // the local header's method
+		bzip2[kPythonDeflatedCentral + 10] = 12u; // the directory's
+		Core::String other = WriteFixture("bzip2.zip", bzip2.Data(), bzip2.Count());
+		assert_true(zip.Open(other.CStr()), zip.Error().Data());
+		assert_true(!zip.Read(*zip.Find(Core::StringView("pages/001.txt")), data), "another method");
+		assert_se("the entry's compression method is not stored or deflated", zip.Error().Data(), "says so");
+
+		Core::Array<uint8> locked = FixtureCopy();
+		locked[kPythonDeflatedCentral + 8] = 1u;  // the directory's flags: encrypted
+		Core::String encrypted = WriteFixture("locked.zip", locked.Data(), locked.Count());
+		assert_true(zip.Open(encrypted.CStr()), zip.Error().Data());
+		assert_true(zip.Find(Core::StringView("pages/001.txt"))->encrypted, "marked");
+		assert_true(!zip.Read(*zip.Find(Core::StringView("pages/001.txt")), data), "an encrypted entry");
+		assert_se("the entry is encrypted", zip.Error().Data(), "says so");
+	}
+}
+
+[test("zip.write")]
+class ZipWriteTests {
+	[test("round_trip")]
+	public static void TestRoundTrip() {
+		Core::String path = ZipScratchFile("written.zip");
+		Core::StringBuilder text;
+		for (int32 i = 0; i < 40; ++i) text.Append("The quick brown fox jumps over the lazy dog. ");
+		Core::Array<uint8> noise;
+		uint32 state = 12345u;
+		for (int32 i = 0; i < 3000; ++i) {
+			state = state * 1103515245u + 12345u;
+			noise.Push((uint8)(state >> 24u));
+		}
+		Compression::ZipWriter writer;
+		assert_true(writer.Create(path.CStr()), writer.Error().Data());
+		assert_true(writer.Add(Core::StringView("chapter 1/"), nullptr, 0, Compression::kDefaultLevel), "a folder");
+		assert_true(writer.Add(Core::StringView("chapter 1/text.txt"), (const uint8*)text.CStr(), text.ByteLength(), Compression::kDefaultLevel), "text");
+		assert_true(writer.Add(Core::StringView("chapter 1/noise.bin"), noise.Data(), noise.Count(), Compression::kDefaultLevel), "noise");
+		assert_true(writer.Add(Core::StringView("ページ.txt"), (const uint8*)"kept", 4, Compression::kStoreLevel), "a UTF-8 name, stored");
+		assert_true(writer.Finish(), writer.Error().Data());
+
+		Compression::ZipReader zip;
+		assert_true(zip.Open(path.CStr()), zip.Error().Data());
+		assert_eq((int64)4, zip.Entries().Count(), "four entries");
+		assert_true(zip.Entries()[0].IsFolder(), "the folder");
+		const Compression::ZipEntry* textEntry = zip.Find(Core::StringView("chapter 1/text.txt"));
+		assert_eq(Compression::kZipDeflated, textEntry->method, "text deflates");
+		assert_true(textEntry->compressedSize < textEntry->size, "smaller");
+		Core::Array<uint8> data;
+		assert_true(zip.Read(*textEntry, data), zip.Error().Data());
+		assert_true(HoldsZipText(data, text.CStr()), "the text back");
+		const Compression::ZipEntry* noiseEntry = zip.Find(Core::StringView("chapter 1/noise.bin"));
+		assert_eq(Compression::kZipStored, noiseEntry->method, "noise is stored: deflating it is no smaller");
+		assert_true(zip.Read(*noiseEntry, data) && data.Count() == 3000, zip.Error().Data());
+		bool same = true;
+		for (int64 i = 0; i < 3000; ++i) same = same && data[i] == noise[i];
+		assert_true(same, "the noise back");
+		const Compression::ZipEntry* named = zip.Find(Core::StringView("ページ.txt"));
+		assert_true(named != nullptr && zip.Read(*named, data) && HoldsZipText(data, "kept"), "the UTF-8 name");
+	}
+
+	[test("refuses_without_an_archive")]
+	public static void TestNoArchive() {
+		Compression::ZipWriter writer;
+		assert_true(!writer.Add(Core::StringView("a.txt"), (const uint8*)"a", 1, Compression::kStoreLevel), "not created");
+		assert_se("no archive is being written", writer.Error().Data(), "says so");
+		assert_true(!writer.Finish(), "nothing to finish");
+		assert_true(!writer.Create(ZipScratchFile("no such folder/x.zip").CStr()), "a folder that does not exist");
+		Core::String given = ZipScratchFile("given up.zip");
+		assert_true(writer.Create(given.CStr()), writer.Error().Data());
+		assert_true(writer.Add(Core::StringView("a.txt"), (const uint8*)"a", 1, Compression::kStoreLevel), writer.Error().Data());
+		writer.Close();
+		assert_true(FS::RemoveFile(given.CStr()), "a closed writer's file can go");
+		assert_true(!writer.Finish(), "nothing left to finish");
+	}
+}

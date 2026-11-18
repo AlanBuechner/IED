@@ -62,6 +62,21 @@ namespace Http
 	// and closes the connection when it returns.
 	alias Takeover = func<void(Net::TcpStream&, Core::Array<uint8>&, const Threading::Atomic<bool>*)>;
 
+	// Reads the body's bytes from `offset` into `into`, at most `capacity` of them; how many it read, 0 or less when it
+	// cannot go on (the server then closes the connection, the response cut short).
+	alias BodyReader = func<int64(int64 offset, uint8* into, int64 capacity)>;
+
+	// A body the server sends a piece at a time as `read` gives them, in place of Response::body: a file far larger than
+	// memory (a video), read as it is sent. With `length` -1 its length is not known (a program's output): it goes
+	// chunked until `read` gives 0. `finished`, when set, is called once sending ends, with whether the whole body went
+	// (false when the client left first): the place to stop what produces it.
+	struct StreamedBody
+	{
+		public int64 length;
+		public BodyReader read;
+		public func<void(bool)> finished;
+	}
+
 	class Response
 	{
 		[operator("create")] public void Init() { status = 200; }
@@ -70,10 +85,14 @@ namespace Http
 		public Headers headers;
 		public Core::Array<uint8> body;
 		public Takeover takeover;   // with status 101
+		public StreamedBody streamed;   // with `read` set, the body (and `body` is not sent)
 
 		public Core::StringView BodyText() const { return Core::StringView((const char*)body.Data(), body.Count()); }
 		// The body, and a Content-Type saying what it is.
 		public void SetText(Core::StringView contentType, Core::StringView text);
+		public bool IsStreamed() const { return streamed.read ? true : false; }
+		// The length of the body sent: the streamed one's (-1 when not known), or `body`'s.
+		public int64 BodyLength() const { return IsStreamed() ? streamed.length : body.Count(); }
 	}
 
 	// "OK", "Not Found", ...; "Unknown" for a code with no standard reason.
