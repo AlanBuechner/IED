@@ -681,7 +681,9 @@ class ChatTests(ChatCase):
 
 	async def test_plugin_tools_load_on_demand(self):
 		"""A plugin tool is a stub in the list from the first step - its first sentence, any arguments - and tool_search
-		answers with its definition at the end; the list itself never changes (docs/13 "Loading tools on demand")."""
+		answers with its definition at the end; the list itself never changes (docs/13 "Loading tools on demand"). An
+		OpenAI-compatible server: a llama.cpp one gets every tool whole (the next case)."""
+		self.model.post("/_fake/config", {"props": False})
 		tool = lambda body, name: [t["function"] for t in body["tools"] if t["function"]["name"] == name][0]
 		chat_id, _ = await self.chat()
 		self.model.queue(call_step("tool_search", {"query": "shout"}, "s1"), text_step("Loaded."))
@@ -699,6 +701,20 @@ class ChatTests(ChatCase):
 		sent = self.model.requests()[-1]["body"]
 		self.assertEqual("Shout a file's first line.", tool(sent, "demo_shout")["description"], "ai.tools.loadAll sends them whole")
 		self.assertNotIn("# Deferred tools", sent["messages"][0]["content"])
+
+	async def test_a_llamacpp_server_gets_every_tool_whole(self):
+		"""llama.cpp keeps only the arguments a tool's schema declares, and a deferred tool's stub declares none: a model
+		could never pass it any (owner, 2026-11-13: a local model called chat_send({}) until the loop detector stopped it)."""
+		chat_id, _ = await self.chat()
+		self.model.queue(call_step("demo_shout", {"path": "src/main.c"}, "s1"), text_step("Shouted."))
+		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
+		sent = self.model.requests()[-1]["body"]
+		shout = [t["function"] for t in sent["tools"] if t["function"]["name"] == "demo_shout"][0]
+		self.assertEqual({"name": "demo_shout", "description": "Shout a file's first line.",
+			"parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}, shout)
+		self.assertFalse(any(t["function"]["description"].endswith("[deferred]") for t in sent["tools"]), "no stub at all")
+		result = [m["content"] for m in sent["messages"] if m["role"] == "tool"][0]
+		self.assertNotIn("invalid", result, "its call ran with its arguments")
 
 	# --- Tools -------------------------------------------------------------------------------------------------------
 

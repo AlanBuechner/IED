@@ -105,6 +105,7 @@ class SourceCase(ChatCase):
 
 class DeveloperTests(SourceCase):
 	async def test_the_source_is_reachable(self):
+		self.model.post("/_fake/config", {"props": False})   # an OpenAI-compatible server gets the stubs; llama.cpp every tool whole
 		chat_id, _ = await self.chat(mode="agent")
 		self.model.queue(call_step("ied_known_bugs", {}, "k1"), call_step("fs_read", {"path": "ied:/AGENTS.md"}, "r1"), text_step("Read."))
 		await self.turn(chat_id)

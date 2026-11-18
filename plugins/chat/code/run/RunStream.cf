@@ -97,7 +97,7 @@ namespace Ai
 		for (Turn* each : m_Chat->m_Turns)
 			if (!each->m_Compressed) WriteMessages(json, m_Ws, each->m_Messages, images, keepThinking && each == m_Turn);
 		json.EndArray();
-		json.RawField("tools", m_Tools->RequestTools(m_Chat->m_Mode, false, m_Chat->m_Endless).View());
+		json.RawField("tools", SentTools().View());
 		json.BoolField("stream", true);
 		if (llamaCpp) json.BoolField("return_progress", true);
 		json.Key(Core::StringView("stream_options"));
@@ -121,7 +121,7 @@ namespace Ai
 		Core::String key;
 		if (!profile->m_ApiKeyEnv.IsEmpty() && Platform::TryGetEnvironmentVariable(profile->m_ApiKeyEnv.CStr(), key)) request.m_Headers.Push(Core::String("Authorization: Bearer ") + key.View());
 		request.m_Body = RequestBody(request.m_PromptTokens);
-		m_RequestHead = (int64)(m_System.View().Hash() ^ m_Tools->RequestTools(m_Chat->m_Mode, false, m_Chat->m_Endless).View().Hash());
+		m_RequestHead = (int64)(m_System.View().Hash() ^ SentTools().View().Hash());
 		request.m_ReadTokens = ExpectedRead(request.m_PromptTokens, m_RequestHead);
 		m_RequestRead = request.m_ReadTokens;
 		double rate = profile->m_PrefillRate;
@@ -373,9 +373,9 @@ namespace Ai
 		return part;
 	}
 
-	Core::String ToolsSent(const ToolRegistry* tools, const Chat* chat, bool claude) { return tools->RequestTools(chat->m_Mode, claude, chat->m_Endless); }
+	Core::String ToolsSent(const ToolRegistry* tools, const Chat* chat, bool whole) { return tools->RequestTools(chat->m_Mode, whole, chat->m_Endless); }
 
-	Core::String TurnRun::SentTools() const { return ToolsSent(m_Tools, m_Chat, m_Candidates[m_Candidate]->IsClaude()); }
+	Core::String TurnRun::SentTools() const { return ToolsSent(m_Tools, m_Chat, m_Chats->SendsWholeTools(m_Candidates[m_Candidate])); }
 
 	Core::Array<ContextPart> ContextParts(const Chat* chat, int64 systemBytes, int64 toolsBytes) {
 		int64 messages = 0;

@@ -88,6 +88,10 @@ namespace Ai
 		// The context window of `profile`: its own contextWindow, or what its server or the CLI reported when that is
 		// smaller or the profile names none; 0 when nothing said.
 		public int64 WindowOf(const ModelProfile* profile) const;
+		// Whether `profile`'s requests carry every tool's whole schema, deferred ones too: Claude takes them all, and a
+		// llama.cpp server keeps only the arguments a tool's schema declares - a deferred tool's stub declares none, so
+		// each call of it would arrive empty, and a model that cannot pass its arguments calls it again and again.
+		public bool SendsWholeTools(const ModelProfile* profile) const;
 		// A window a server, the CLI or an error reported for `model`, kept in the plugin's state folder so the next
 		// server run knows it before asking; whether it changed.
 		public bool LearnWindow(Core::StringView model, int64 window);

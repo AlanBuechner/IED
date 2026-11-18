@@ -221,8 +221,9 @@ namespace Ai
 	// The system message a turn of `chat` whose message is `userText` is sent (docs/14). Inside the host lock.
 	Core::String TurnSystem(Chats* chats, Chat* chat, const IED::Workspace& ws, ToolRegistry* tools, Core::StringView userText, const Core::Array<ModelProfile*>& models,
 		Core::Array<Core::String>& contributed);
-	// The tool definitions a request sends: a local model the chat's loaded ones, Claude's session every tool.
-	Core::String ToolsSent(const ToolRegistry* tools, const Chat* chat, bool claude);
+	// The tool definitions a request sends: every tool whole when `whole` (Chats::SendsWholeTools), else a deferred tool
+	// the chat has not loaded as its stub.
+	Core::String ToolsSent(const ToolRegistry* tools, const Chat* chat, bool whole);
 	// What fills a chat's context, estimated (bytes / 4): the system message and tool definitions of `systemBytes` and
 	// `toolsBytes`, its messages and its tool results, the turns compression left out not counted.
 	Core::Array<ContextPart> ContextParts(const Chat* chat, int64 systemBytes, int64 toolsBytes);

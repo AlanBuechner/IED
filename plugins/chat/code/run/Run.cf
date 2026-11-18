@@ -178,11 +178,11 @@ namespace Ai
 	}
 
 	// IED's parts of what the chat's next turn would send, estimated.
-	static Core::Array<ContextPart> NextTurnParts(Chats* chats, Chat* chat, const IED::Workspace& ws, const Core::Array<ModelProfile*>& models, bool claude) {
+	static Core::Array<ContextPart> NextTurnParts(Chats* chats, Chat* chat, const IED::Workspace& ws, const Core::Array<ModelProfile*>& models, bool wholeTools) {
 		Core::Array<Core::String> contributed;
 		ToolRegistry* tools = TurnTools(chats, chat, ws, contributed);
 		Core::String system = TurnSystem(chats, chat, ws, tools, chat->Current() ? chat->Current()->m_UserText.View() : Core::StringView(""), models, contributed);
-		return ContextParts(chat, system.ByteLength(), ToolsSent(tools, chat, claude).ByteLength());
+		return ContextParts(chat, system.ByteLength(), ToolsSent(tools, chat, wholeTools).ByteLength());
 	}
 
 	Core::String ResplitContext(Chats* chats, Chat* chat, const IED::Workspace& ws) {
@@ -192,7 +192,9 @@ namespace Ai
 		Serialization::DomNode meter = Serialization::ReadJson(chat->m_Context.View(), *doc).root;
 		const int64 used = meter.Member("used").AsInt();
 		const bool claude = meter.Member("compacts").AsBool();
-		Core::Array<ContextPart> parts = ScaledParts(NextTurnParts(chats, chat, ws, models, claude), used);
+		ModelProfile* profile = FindModel(models, meter.Member("model").AsView());
+		const bool wholeTools = claude || chats->SendsWholeTools(profile);
+		Core::Array<ContextPart> parts = ScaledParts(NextTurnParts(chats, chat, ws, models, wholeTools), used);
 		return ContextJson(meter.Member("window").AsInt(), used, meter.Member("model").AsView(), claude, parts, meter.Member("source").AsView());
 	}
 
@@ -205,7 +207,7 @@ namespace Ai
 		Core::String model = chats->NextModel(chat, ws, group, roleEffort);
 		ModelProfile* profile = FindModel(models, model.View());
 		const bool claude = profile && profile->IsClaude();
-		Core::Array<ContextPart> parts = NextTurnParts(chats, chat, ws, models, claude);
+		Core::Array<ContextPart> parts = NextTurnParts(chats, chat, ws, models, chats->SendsWholeTools(profile));
 		int64 used = 0;
 		for (int64 i = chat->m_Turns.Count() - 1; i >= 0 && used == 0; --i) used = chat->m_Turns[i]->m_TokensIn;
 		if (used == 0)

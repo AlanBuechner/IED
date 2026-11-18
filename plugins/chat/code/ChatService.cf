@@ -234,6 +234,14 @@ namespace Ai
 		return found;
 	}
 
+	bool Chats::SendsWholeTools(const ModelProfile* profile) const {
+		if (!profile) return false;
+		if (profile->IsClaude()) return true;
+		bool llamaCpp = false;
+		m_LlamaCpp.TryGet(profile->m_Name, llamaCpp);
+		return llamaCpp;
+	}
+
 	static FS::Path WindowsFile(IED::PluginContext* context) { return FS::Path(context->StateFolder().View()) / "windows.json"; }
 
 	bool Chats::LearnWindow(Core::StringView model, int64 window) {

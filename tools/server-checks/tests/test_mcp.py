@@ -101,6 +101,7 @@ class McpCase(ChatCase):
 
 class McpChatTests(McpCase):
 	async def test_a_chat_lists_and_calls_a_servers_tools(self):
+		self.model.post("/_fake/config", {"props": False})   # an OpenAI-compatible server gets the stubs; llama.cpp every tool whole
 		await self.use_servers({"fake": stdio_server(self.log_path(), "--page-size", "4", permission="auto")})
 		chat_id, _ = await self.chat(permission="auto")
 		self.model.queue(call_step("mcp_fake_echo", {"text": "hi"}, "c1"), call_step("mcp_fake_add", {"a": 2, "b": 3}, "c2"),
