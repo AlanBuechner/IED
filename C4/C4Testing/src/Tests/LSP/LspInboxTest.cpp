@@ -325,7 +325,8 @@ namespace Testing
 		OpenAndEditHeld(server, scratch);
 		const size_t before = server.Server().AnalysesMade();
 		MessageInbox inbox;
-		std::vector<int64> outdated;
+		std::vector<int64> outdated;       // waiting for an analysis, with an edit behind them
+		std::vector<int64> outdatedTokens; // answered from the last analysis, edits or not
 		std::vector<int64> last;
 		{
 			Serving serving(server, inbox);
@@ -342,15 +343,22 @@ namespace Testing
 					inbox.Push(request);
 					last.push_back(IdOf(request));
 				}
-				if (edit < 19) outdated.insert(outdated.end(), last.begin(), last.end());
+				if (edit < 19)
+				{
+					outdated.insert(outdated.end(), last.begin(), last.begin() + 2);
+					outdatedTokens.push_back(last[2]);
+				}
 			}
 			// Each outdated request has an edit of its document behind it: answered without a wait, with the analysis held.
 			TEST_ASSERT(Within(kAtOnce, [&] {
-				for (int64 id : outdated)
-					if (server.Response(id).IsNull()) return false;
+				for (const std::vector<int64>* ids : { &outdated, &outdatedTokens })
+					for (int64 id : *ids)
+						if (server.Response(id).IsNull()) return false;
 				return true;
 			}));
 			for (int64 id : outdated) TEST_ASSERT_EQ(ErrorCodeOf(server.Response(id)), kContentModified);
+			// Tokens are not dropped for an edit: an error would clear the editor's colors until it asks again.
+			for (int64 id : outdatedTokens) TEST_ASSERT(server.Response(id).Member("result").Member("data").IsArray());
 			server.Server().HoldAnalysis(false);
 			for (int64 id : last) TEST_ASSERT(AnsweredWithin(server, id, kAnalyzed));
 			TEST_ASSERT(server.Response(last[0]).Member("result").IsObject());

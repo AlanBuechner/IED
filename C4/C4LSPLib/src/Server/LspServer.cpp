@@ -36,6 +36,14 @@ namespace C4LSP::Server
 			return code == kRequestCancelled ? "the request was cancelled" : "the document changed after the request";
 		}
 
+		// The requests that answer from the last analysis without waiting for one: an edit after them is no reason to drop
+		// the answer - the editor maps it over the edits since and asks again after each publish, and an error would clear
+		// the colors it shows (Monaco's semantic tokens) until then.
+		bool AnswersFromTheLastAnalysis(const std::string& method)
+		{
+			return method == "textDocument/semanticTokens/full" || method == "textDocument/foldingRange";
+		}
+
 		// The workspace symbols of `analysis`, with the files they were read from; a file's the copy `shared` has already.
 		std::shared_ptr<const SymbolIndex> IndexOf(CompilationSession& analysis, SharedFileSymbols& shared)
 		{
@@ -233,7 +241,7 @@ namespace C4LSP::Server
 	{
 		if (!m_Inbox) return 0;
 		if (m_Inbox->IsCancelled(m_RequestId)) return kRequestCancelled;
-		if (!m_RequestUri.empty() && m_Inbox->HasEditOf(m_RequestUri)) return kContentModified;
+		if (!m_RequestOutlivesEdits && !m_RequestUri.empty() && m_Inbox->HasEditOf(m_RequestUri)) return kContentModified;
 		return 0;
 	}
 
@@ -810,6 +818,7 @@ namespace C4LSP::Server
 		std::lock_guard<std::mutex> querying(m_QueryMutex);
 		m_RequestStart = arrived;
 		m_RequestId = id;
+		m_RequestOutlivesEdits = AnswersFromTheLastAnalysis(method);
 		// params must OWN its copy: Value::Member returns by value, so binding a const ref here would dangle.
 		Json::Value params = message.HasMember("params") ? message.Member("params") : Json::Value::Null();
 		// The request's document is where its positions (and its answer's without a URI) are; a UTF-16 client's columns

@@ -212,7 +212,9 @@ and the colors stayed half-done. Now (`Server/MessageInbox`, `LspServer::Serve`)
   analysis - a `$/cancelRequest` wakes it.
 - **A request with an edit of its document behind it answers `ContentModified` (-32801) at once**: its positions and
   its answer are for text that is gone, and the client asks again about the new text. An edit of another document
-  leaves it waiting.
+  leaves it waiting. Semantic tokens and folding ranges are the exception: they never wait (they answer from the last
+  analysis), the editor maps their answer over the edits since and asks again after each publish, and an error would
+  clear Monaco's semantic colors until then.
 - **A request's budget (25 s) counts from when it arrived**, not from when it is taken: one that waited behind others
   waits no longer for an analysis and answers from the one there is, inside IED's 30 s.
 - The same 20 s of typing: 5 analyses, every cancelled request answered within 0.6 s, the last ones 8.6 s after the

@@ -47,7 +47,8 @@ namespace C4LSP::Server
 
 		// Handles what `inbox` holds as it arrives, until exit or the inbox closes. Meanwhile a request waiting for an
 		// analysis sees what arrives after it: cancelled, it answers RequestCancelled; with an edit of its document after it,
-		// ContentModified - at once, not after its wait (docs/tools/03 "Requests while it analyzes").
+		// ContentModified - at once, not after its wait (docs/tools/03 "Requests while it analyzes"). Semantic tokens and
+		// folding, which never wait, answer from the last analysis whatever edits follow them.
 		void Serve(MessageInbox& inbox);
 
 		bool ShouldExit() const { return m_ShouldExit; }
@@ -92,7 +93,8 @@ namespace C4LSP::Server
 		// Wakes the requests waiting for an analysis: one was swapped in, or a message arrived that may interrupt them.
 		void WakeWaitingRequests();
 		// The error the request in hand answers instead of its result (0 while it stands): RequestCancelled once the client
-		// cancelled it, ContentModified once an edit of its document arrived after it. Always 0 without an inbox.
+		// cancelled it, ContentModified once an edit of its document arrived after it (but semantic tokens and folding,
+		// which answer from the last analysis at once). Always 0 without an inbox.
 		int InterruptionOfRequest() const;
 		// The program answering about `uri` (the session lock held): the one its document is analyzed in, else one whose
 		// analysis compiled the file, else the options' own.
@@ -229,6 +231,7 @@ namespace C4LSP::Server
 		Protocol::PositionEncoding m_Encoding = Protocol::PositionEncoding::Utf16; // negotiated in initialize
 		std::string m_RequestUri;                      // the document of the request being answered
 		Json::Value m_RequestId;                       // the request being answered
+		bool m_RequestOutlivesEdits = false;           // it answers from the last analysis: an edit after it does not drop it
 		MessageInbox* m_Inbox = nullptr;               // while Serve runs: what arrived and is not handled yet
 		bool m_Initialized = false;
 		bool m_ShutdownRequested = false;
