@@ -74,6 +74,8 @@ namespace Scripting
 		}
 		/// The LLVM type of `rec`'s function: its hidden parameters, then the declared ones as the ABI passes them.
 		llvm::FunctionType* FunctionTypeOf(const FunctionRecord& rec);
+		/// Where this module keeps the thunk of a func signature (FuncThunk): one per signature type, null until made.
+		llvm::Function*& FuncThunkSlot(const Type* signature) { return m_FuncThunks[signature]; }
 		/// The records whose functions were created since the last call: what emitted code referenced for
 		/// the first time (the driver lowers the template-made ones among them, D-16).
 		std::vector<const FunctionRecord*> TakeNewFunctions() { return std::move(m_NewFunctions); }
@@ -180,6 +182,7 @@ namespace Scripting
 		Abi m_Abi;
 		std::unordered_map<const Type*, llvm::Type*> m_TypeCache;
 		std::unordered_map<const FunctionRecord*, llvm::Function*> m_FuncCache;
+		std::unordered_map<const Type*, llvm::Function*> m_FuncThunks;
 		std::vector<const FunctionRecord*> m_NewFunctions; // created since the last TakeNewFunctions
 		std::unordered_map<const SymbolInfo*, llvm::GlobalVariable*> m_GlobalCache;
 		std::function<bool(const SymbolInfo&)> m_StartsOnFirstUse;

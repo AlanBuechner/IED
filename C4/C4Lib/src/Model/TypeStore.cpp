@@ -112,13 +112,14 @@ namespace Scripting
 	const Type* TypeStore::FunPtr(const Type* returnType, const Core::Vector<const Type*>& paramTypes)
 	{
 		if (!returnType) return nullptr;
-		return Interned<Type>(m_FunPtrCache, KeyOf(returnType->GetName(), paramTypes, false), [&] { return new FunPtrType(returnType, paramTypes); });
+		// By the return type itself, as a type is equal only to itself: its name alone is a template's for every instantiation (BUG-467).
+		return Interned<Type>(m_FunPtrCache, KeyOf(returnType, paramTypes, false), [&] { return new FunPtrType(returnType, paramTypes); });
 	}
 
 	const Type* TypeStore::Func(const Type* returnType, const Core::Vector<const Type*>& paramTypes)
 	{
 		if (!returnType) return nullptr;
-		return Interned<Type>(m_FuncCache, KeyOf(returnType->GetName(), paramTypes, false), [&] { return new FuncType(returnType, paramTypes); });
+		return Interned<Type>(m_FuncCache, KeyOf(returnType, paramTypes, false), [&] { return new FuncType(returnType, paramTypes); });
 	}
 
 	const FunctionType* TypeStore::Function(const Type* returnType, const Core::Vector<const Type*>& paramTypes, bool variadic)

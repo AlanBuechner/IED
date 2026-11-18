@@ -81,9 +81,11 @@ namespace Scripting
 
 	llvm::Function* FuncThunk(ModuleContext& mc, const SignatureType* signature)
 	{
-		const std::string name = ThunkName(signature);
-		if (llvm::Function* existing = mc.module().getFunction(name)) return existing;
-		llvm::Function* thunk = llvm::Function::Create(FuncEmitter::CodeType(mc, signature), llvm::Function::InternalLinkage, name, &mc.module());
+		// By the signature itself, not its name: every instantiation of a returned template names it alike (BUG-467), and
+		// LLVM gives a second internal function of a name a name of its own.
+		llvm::Function*& thunk = mc.FuncThunkSlot(signature);
+		if (thunk) return thunk;
+		thunk = llvm::Function::Create(FuncEmitter::CodeType(mc, signature), llvm::Function::InternalLinkage, ThunkName(signature), &mc.module());
 		BuildThunkBody(mc, signature, thunk);
 		return thunk;
 	}

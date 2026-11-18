@@ -1,0 +1,77 @@
+// BUG-467: a func or funcptr type was made once per its return type's name, and a func's thunk was found by the signature's
+// name, while every instantiation of a template has the template's name (and a type its own name in any namespace):
+// func<Box<int32*>()> was the func<Box<float>()> made first, a lambda returning Box<int32*> did not convert to it, and a
+// func<Box<int64>()> called the Box<float> thunk, which cut its value to 32 bits. Each instantiation, pointer elements too,
+// same-named types of two namespaces, func and funcptr alike.
+template<T> struct Box
+{
+public:
+	public T m_Value;
+}
+
+namespace Small
+{
+	struct Item
+	{
+	public:
+		public int8 m_Value;
+	}
+}
+
+namespace Large
+{
+	struct Item
+	{
+	public:
+		public int64 m_Value;
+	}
+}
+
+Box<float> MakeFloat() {
+	Box<float> box;
+	box.m_Value = 2.5f;
+	return box;
+}
+
+Box<int64> MakeWide() {
+	Box<int64> box;
+	box.m_Value = (int64)1 << 40;
+	return box;
+}
+
+Small::Item MakeSmall() {
+	Small::Item item;
+	item.m_Value = 9;
+	return item;
+}
+
+Large::Item MakeLarge() {
+	Large::Item item;
+	item.m_Value = (int64)3 << 40;
+	return item;
+}
+
+int32 main() {
+	int32 failures = 0;
+	int32 seven = 7;
+	int32* at = &seven;
+	func<Box<float>()> floats = []() -> Box<float> { return MakeFloat(); };
+	func<Box<int32*>()> pointers = [at]() -> Box<int32*> {
+		Box<int32*> box;
+		box.m_Value = at;
+		return box;
+	};
+	func<Box<int64>()> wide = []() -> Box<int64> { return MakeWide(); };
+	if (floats().m_Value != 2.5f) failures++;
+	if (*pointers().m_Value != 7) failures++;
+	if (wide().m_Value != (int64)1 << 40) failures++;
+	funcptr<Box<float>()> floatMaker = MakeFloat;
+	funcptr<Box<int64>()> wideMaker = MakeWide;
+	if (floatMaker().m_Value != 2.5f) failures++;
+	if (wideMaker().m_Value != (int64)1 << 40) failures++;
+	func<Small::Item()> small = MakeSmall;
+	func<Large::Item()> large = MakeLarge;
+	if (small().m_Value != 9) failures++;
+	if (large().m_Value != (int64)3 << 40) failures++;
+	return failures;
+}

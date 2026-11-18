@@ -155,8 +155,8 @@ namespace Scripting
 		std::map<std::pair<const Type*, uint32>, const Type*> m_SwizzleCache; // (element, laneCount) -> <N x elem>
 		std::map<const Type*, const Type*> m_InitListCache; // element type -> __init_list<T>
 		std::map<uint32, const Type*> m_BracedListCache;    // entry count -> {N entries}
-		std::unordered_map<SignatureKey<Core::String>, const Type*, KeyHash> m_FunPtrCache;
-		std::unordered_map<SignatureKey<Core::String>, const Type*, KeyHash> m_FuncCache;
+		std::unordered_map<SignatureKey<const Type*>, const Type*, KeyHash> m_FunPtrCache;
+		std::unordered_map<SignatureKey<const Type*>, const Type*, KeyHash> m_FuncCache;
 		std::unordered_map<SignatureKey<const Type*>, const FunctionType*, KeyHash> m_FunctionCache; // every function's signature
 	};
 
