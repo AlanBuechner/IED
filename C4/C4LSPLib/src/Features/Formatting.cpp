@@ -98,6 +98,14 @@ namespace C4LSP::Features
 
 		bool IsComment(TokenType t) { return t == TokenType::Comment || t == TokenType::MultiComment; }
 
+		// Whether a line ending in `t` has ended its statement or opened a block, a list item or an annotation: the next line
+		// starts afresh. Any other ending (an operator, `?`, a string literal, a name) is continued by the next line.
+		bool EndsStatement(TokenType t)
+		{
+			return t == TokenType::SemiColon || t == TokenType::OpenCurl || t == TokenType::CloseCurl || t == TokenType::Comma ||
+				t == TokenType::Colon || t == TokenType::CloseBracket || t == TokenType::Greater || t == TokenType::None;
+		}
+
 		struct Formatter
 		{
 		const std::string& text;
@@ -185,16 +193,19 @@ namespace C4LSP::Features
 			{
 				int open = 0;
 				int bonus = 0;
+				bool brace = false; // its innermost opener is a `{`: statements, not an argument list or an index
 			};
 
 			// Leading whitespace and trailing whitespace of every line. A brace-less control header (`if (x)`, `for (...)`,
 			// `else`) indents the next line once more - its bonus - and a `{` alone on the next line is the header's body, at
-			// the header's indentation.
+			// the header's indentation. A line that continues a statement among statements (`? a` / `: b`, a string literal
+			// after another) is indented once more than the statement; inside `(` or `[` the level already indents it.
 			void FixIndentationAndTrailing()
 			{
 				std::vector<Level> levels;
 				int pending = 0;        // the next line's bonus
 				bool afterHeader = false;
+				TokenType previousEnd = TokenType::None; // the last token of the code line before, None after a directive
 				size_t cursor = 0;      // tokens are in source order: each line's are found by walking on
 				for (uint32 li = 0; li < lineStarts.size(); ++li)
 				{
@@ -243,10 +254,18 @@ namespace C4LSP::Features
 					}
 
 					// Leading whitespace: only ever touched when it is pure whitespace, so a line
-					// whose content starts inside a multi-line comment (`... */ int x`) is left alone.
-					if (IsAllWhitespace(text.substr(ls, first.start - ls)))
+					// whose content starts inside a multi-line comment (`... */ int x`) is left alone; a directive keeps
+					// the indentation it was written with (`#if` at column 0 in a function body is the code base's way).
+					const bool directive = text[first.start] == '#' && !DirectiveOf(first).empty();
+					// `include "x.ch"` and `extern "c" include "x.h"` end without a semicolon: whole lines of their own.
+					const bool includes = first.type == TokenType::Extern ||
+						(first.type == TokenType::Identifier && std::string_view(text).substr(first.start, first.end - first.start) == "include");
+					const bool amongStatements = after.empty() || after.back().brace;
+					const bool continues = !directive && !includes && !afterHeader && amongStatements && !EndsStatement(previousEnd) &&
+						!IsCloser(first.type) && first.type != TokenType::OpenCurl;
+					if (!directive && IsAllWhitespace(text.substr(ls, first.start - ls)))
 					{
-						uint32 target = static_cast<uint32>(bonus);
+						uint32 target = static_cast<uint32>(bonus) + (continues ? 1u : 0u);
 						for (const Level& level : after)
 							target += 1 + static_cast<uint32>(level.bonus);
 						if (target > 0 && IsAccessLabel(firstIdx, lastIdx))
@@ -262,20 +281,30 @@ namespace C4LSP::Features
 						AddEdit(li, last.end, lineEnd, "");
 
 					int opened = 0;
+					std::vector<TokenType> openers; // this line's openers still open, innermost last
 					for (size_t i = firstIdx; i <= lastIdx; ++i)
 					{
 						int delta = Delta(tokens[i]);
 						if (delta > 0)
+						{
 							++opened;
+							openers.push_back(tokens[i].type);
+						}
 						else if (delta < 0 && opened > 0)
+						{
 							--opened;
+							openers.pop_back();
+						}
 						else if (delta < 0 && !levels.empty() && --levels.back().open == 0)
 							levels.pop_back();
 					}
+					// A continuation line's own opener indents what it opens from the continuation, not from the statement.
+					const int lineBonus = bonus + (continues ? 1 : 0);
 					if (opened > 0)
-						levels.push_back({ opened, bonus });
+						levels.push_back({ opened, lineBonus, openers.back() == TokenType::OpenCurl });
 					afterHeader = opened == 0 && EndsWithControlHeader(lastIdx);
 					pending = afterHeader ? bonus + 1 : 0;
+					previousEnd = directive || includes ? TokenType::None : tokens[lastIdx].type;
 				}
 			}
 
@@ -347,7 +376,7 @@ namespace C4LSP::Features
 						? std::optional<std::string>("")
 						: IsReturnTypeArrow(i) || IsReturnTypeArrow(i + 1) || bodyAfterHeader || comparedParen
 						? std::optional<std::string>(" ")
-						: DesiredGap(a.type, b.type, i > 0 ? tokens[i - 1].type : TokenType::None);
+						: DesiredGap(i);
 					if (desired && *desired != gap)
 						AddEdit(LineOf(a.end), a.end, b.start, *desired);
 				}
@@ -398,18 +427,39 @@ namespace C4LSP::Features
 				return false;
 			}
 
-			/// nullopt = no rule for this pair: keep the existing gap untouched.
-			std::optional<std::string> DesiredGap(TokenType aType, TokenType bType, TokenType prevBeforeA) const
+			// Whether token `at` ends an operand, so an operator after it is binary: a name, a literal, a `)` or `]`, or the `}` of a
+			// value braced after its type (`Color{ x } == c`, `Vector<T>{ 1 } != v`) - not a block's (`{ b(); } -x;`) (BUG-458).
+			bool EndsOperand(size_t at) const
 			{
+				if (IsOperandEnd(tokens[at].type))
+					return true;
+				if (tokens[at].type != TokenType::CloseCurl)
+					return false;
+				int depth = 0;
+				for (size_t j = at + 1; j-- > 0;)
+				{
+					if (tokens[j].type == TokenType::CloseCurl)
+						++depth;
+					else if (tokens[j].type == TokenType::OpenCurl && --depth == 0)
+						return j > 0 && (tokens[j - 1].type == TokenType::Identifier || tokens[j - 1].type == TokenType::Greater);
+				}
+				return false;
+			}
+
+			/// The gap between tokens `i` and `i + 1`; nullopt = no rule for this pair: keep the existing gap untouched.
+			std::optional<std::string> DesiredGap(size_t i) const
+			{
+				const TokenType aType = tokens[i].type;
+				const TokenType bType = tokens[i + 1].type;
 				switch (aType)
 				{
-			case TokenType::Dot:       case TokenType::DoubleColon:
-			case TokenType::Arrow:     return ""; // glue with nothing after '.', '::', '->'
-			case TokenType::Comma:     return " ";
-			// ';' ends a statement/initializer, so it glues to its left side (handled by the bType rule) but
-			// opens the next one on its right - VS house style `for (...; i < n; ...)` / `int a = 0; int b;`.
-			case TokenType::SemiColon: if (IsWordLike(bType)) return " "; // no rule after non-word tokens (e.g. an empty statement before ')')
-
+				case TokenType::Dot:       case TokenType::DoubleColon:
+				case TokenType::Arrow:     return ""; // glue with nothing after '.', '::', '->'
+				case TokenType::Comma:     return " ";
+				// ';' ends a statement/initializer, so it glues to its left side (handled by the bType rule) but
+				// opens the next one on its right - VS house style `for (...; i < n; ...)` / `int a = 0; int b;`.
+				case TokenType::SemiColon: if (IsWordLike(bType)) return " "; // no rule after non-word tokens (e.g. an empty statement before ')')
+					break;
 				default: break;
 				}
 				switch (bType)
@@ -421,12 +471,16 @@ namespace C4LSP::Features
 				default: break;
 				}
 
-			if (aType == TokenType::OpenParen || aType == TokenType::OpenBracket)
-				return ""; // `f(`, `[0]`, constructor calls and generic params (`Vector<int32>`) stay tight - including `{` right after them
+				if (aType == TokenType::OpenParen || aType == TokenType::OpenBracket)
+					return ""; // `f(`, `[0]`, constructor calls and generic params (`Vector<int32>`) stay tight - including `{` right after them
 				if (bType == TokenType::OpenParen && IsCallee(aType))
 					return ""; // tighten `f (` to `f(`; after operators and keywords the rules below decide
-			if (aType == TokenType::OpenCurl)
-				return bType == TokenType::CloseCurl ? "" : " "; // `{ statement` house style, but an EMPTY block stays glued: `{}` not `{ }`
+				// `{{` keeps its gaps as written, and so does the `{` glued after another: a template's `{{Module}}` in a file a tool
+				// fills in is no code, and nested braces written tight (`{{1, 2}}`) stay so, as `}}` always did (BUG-459).
+				if (aType == TokenType::OpenCurl && (bType == TokenType::OpenCurl || (i > 0 && tokens[i - 1].type == TokenType::OpenCurl && tokens[i - 1].end == tokens[i].start)))
+					return std::nullopt;
+				if (aType == TokenType::OpenCurl)
+					return bType == TokenType::CloseCurl ? "" : " "; // `{ statement` house style, but an EMPTY block stays glued: `{}` not `{ }`
 
 				if (bType == TokenType::OpenParen && IsControlKeyword(aType))
 					return " "; // `if (` / `while (` / `for (` / `switch (` keep a space before the paren
@@ -436,9 +490,9 @@ namespace C4LSP::Features
 
 				if (IsBinaryOp(aType))
 					// A binary op gets one space on each side; unary (prev ends no operand, e.g. '(', ',', '=', `return` or another operator) stays tight.
-					return IsOperandEnd(prevBeforeA) ? " " : "";
+					return i > 0 && EndsOperand(i - 1) ? " " : "";
 
-				if (IsBinaryOp(bType) && IsOperandEnd(aType))
+				if (IsBinaryOp(bType) && EndsOperand(i))
 					return " "; // one space before the binary op too: `x = 1`, `a + b` (unary ops after '('/','/'=' stay tight via the rule above)
 
 				if (aType == TokenType::Else && bType == TokenType::OpenCurl)

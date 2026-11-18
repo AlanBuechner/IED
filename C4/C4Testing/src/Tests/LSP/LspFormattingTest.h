@@ -50,7 +50,8 @@ namespace Testing
 		void TestSemicolonGluesLeftAndSpacesRight();
 
 		// An operator after `)` or `]` is binary (`f(a) && b`), and a `(` after an operator or a keyword groups
-		// rather than calls (`x = (a)`, `return (a)`, `catch (e)`): neither may be glued to its neighbor (BUG-411).
+		// rather than calls (`x = (a)`, `return (a)`, `catch (e)`): neither may be glued to its neighbor (BUG-411). So is
+		// one after the `}` of a value braced after its type (`Color{ x } == c`), not after a block's (BUG-458).
 		TEST_FUNC(Lsp.Features.Formatting)
 		void TestOperatorsAfterClosersAndParensAfterOperators();
 
@@ -107,6 +108,21 @@ namespace Testing
 		// `#error` and `#warning` print their message as written: its gaps are text, not code.
 		TEST_FUNC(Lsp.Features.Formatting)
 		void TestErrorAndWarningKeepTheirMessage();
+
+		// A directive keeps the indentation it was written with: `#if` at column 0 inside a function body (the code base's
+		// way) is not indented with the body, and an indented one is not pulled out.
+		TEST_FUNC(Lsp.Features.Formatting)
+		void TestDirectivesKeepTheirIndentation();
+
+		// A line that continues a statement among statements (`? a` then `: b`, string literals one after another) is
+		// indented once more than the statement; inside `(` the level indents it already.
+		TEST_FUNC(Lsp.Features.Formatting)
+		void TestContinuationLinesIndentOnceMore();
+
+		// `{{` and what follows it keep their gaps: a template's `{{Module}}` is not split into `{ { Module}}`, and nested
+		// braces written tight stay tight, as `}}` always did (BUG-459).
+		TEST_FUNC(Lsp.Features.Formatting)
+		void TestDoubledBracesKeepTheirGaps();
 
 	private:
 		// Apply a set of TextEdits (0-based line/char, LSP semantics) to `text` and return the result.

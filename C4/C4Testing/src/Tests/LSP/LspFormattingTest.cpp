@@ -222,10 +222,14 @@ namespace Testing
 		text += "\ttry { Go(); } catch(Error& e) { return (ok); }\n";
 		text += "\tint64 cast = (int64)-1;\n";                                 // a cast's '-' is unary
 		text += "\tint64 less = (a)-1 + (uint8) - 2;\n";                       // a parenthesized name's is binary; a cast is told by its type
+		text += "\tbool same = Color{ x } ==c && Vector<int32>{ 1 }!= v;\n";      // a value braced after its type ends an operand
+		text += "\tif (a) { b(); } -x;\n";                                       // a block's '}' does not: the '-' stays unary
 		text += "\treturn -x;\n}\n";
 		auto edits = Features::Formatting::Format(text, { 4, false });
 		std::string out = Apply(text, edits);
 
+		TEST_ASSERT(Contains(out, "bool same = Color{ x } == c && Vector<int32>{ 1 } != v;"));
+		TEST_ASSERT(Contains(out, "if (a) { b(); } -x;"));
 		TEST_ASSERT(Contains(out, "int64 cast = (int64)-1;"));
 		TEST_ASSERT(Contains(out, "int64 less = (a) - 1 + (uint8)-2;"));
 		TEST_ASSERT(Contains(out, "bool ok = Parse(uri, id) && id.View() == ws.Id();"));
@@ -479,10 +483,50 @@ namespace Testing
 		TEST_PASSED();
 	}
 
+	void LspFormattingTest::TestDirectivesKeepTheirIndentation()
+	{
+		std::string columnZero = "void F()\n{\n#if defined(A)\n\tG();\n#else\n\tH();\n#endif\n}\n";
+		TEST_ASSERT(Features::Formatting::Format(columnZero, { 4, false }).empty());
+		std::string indented = "void F()\n{\n\t#if defined(A)\n\tG();\n\t#endif\n}\n";
+		TEST_ASSERT(Features::Formatting::Format(indented, { 4, false }).empty());
+		std::string body = "void F()\n{\n#if defined(A)\nG();\n#endif\n}\n";
+		TEST_ASSERT(Apply(body, Features::Formatting::Format(body, { 4, false })) == "void F()\n{\n#if defined(A)\n\tG();\n#endif\n}\n"); // the code around them still is
+		TEST_PASSED();
+	}
+
+	void LspFormattingTest::TestContinuationLinesIndentOnceMore()
+	{
+		// A statement continued among statements: once more than the statement, however many lines it takes.
+		std::string ternary = "void F()\n{\n\tint32 x = a ? b\n\t: c;\n\tG();\n}\n";
+		TEST_ASSERT(Apply(ternary, Features::Formatting::Format(ternary, { 4, false })) == "void F()\n{\n\tint32 x = a ? b\n\t\t: c;\n\tG();\n}\n");
+		std::string literals = "const char* c_X = \"a\"\n\"b\"\n\"c\";\nint32 y;\n";
+		TEST_ASSERT(Apply(literals, Features::Formatting::Format(literals, { 4, false })) == "const char* c_X = \"a\"\n\t\"b\"\n\t\"c\";\nint32 y;\n");
+		// Inside `(` the level indents a continuation already; a list item, an annotation, a block and an include end
+		// their line.
+		std::string unchanged = "include \"a.ch\"\ninclude \"b.ch\"\n\n[test(\"x\")]\nvoid F()\n{\n\tif (a\n\t\t&& b)\n\t\tG(1,\n\t\t\t2);\n\tint32[2] v = {\n\t\t1,\n\t\t2\n\t};\n\tRun([]() {\n\t\tH();\n\t});\n}\n";
+		TEST_ASSERT(Features::Formatting::Format(unchanged, { 4, false }).empty());
+		std::string returned = "bool F()\n{\n\treturn a\n\t\t&& b;\n}\n";
+		TEST_ASSERT(Features::Formatting::Format(returned, { 4, false }).empty());
+		TEST_PASSED();
+	}
+
 	void LspFormattingTest::TestAccessLabelOutsideAnyBlockStaysAtColumnZero()
 	{
 		std::string text = "public:\nint32 x;\n";
 		TEST_ASSERT(Features::Formatting::Format(text, { 4, false }).empty());
+		TEST_PASSED();
+	}
+
+	void LspFormattingTest::TestDoubledBracesKeepTheirGaps()
+	{
+		// A template a tool fills in (Claymore's hub writes a package from it): its tokens come through whole.
+		std::string tokens = "namespace {{Module}}\n{\n\tconst char* c_Hello = \"{{module}}.hello\";\n}\n";
+		TEST_ASSERT(Features::Formatting::Format(tokens, { 4, false }).empty());
+		// Nested braces written tight stay tight, as `}}` always did; a `{` after anything else still gets its space.
+		std::string nested = "void F()\n{\n\tGrid g = Grid{{1, 2}, {3, 4}};\n\tColor c = Color{x};\n}\n";
+		std::string out = Apply(nested, Features::Formatting::Format(nested, { 4, false }));
+		TEST_ASSERT(Contains(out, "Grid{{1, 2}, { 3, 4}};"));
+		TEST_ASSERT(Contains(out, "Color{ x};"));
 		TEST_PASSED();
 	}
 } // namespace Testing
