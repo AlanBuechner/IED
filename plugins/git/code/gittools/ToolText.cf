@@ -261,4 +261,6 @@ namespace Git
 		}
 		return out.ToString();
 	}
+
+	int64 FileLines(int64 limit) { return limit < 1 || limit > c_ToolFileMostLines ? c_ToolFileMostLines : limit; }
 }

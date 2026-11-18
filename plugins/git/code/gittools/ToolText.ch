@@ -32,6 +32,9 @@ namespace Git
 	// A file's text as it was at a revision, lines numbered from `first`, at most `most` lines and kToolTextMostBytes,
 	// with how to read on.
 	Core::String FileText(Core::StringView text, int64 first, int64 most);
+	// The lines a file read shows for an asked `limit`: it, at most c_ToolFileMostLines; c_ToolFileMostLines when none
+	// (0) or not a count was asked.
+	int64 FileLines(int64 limit);
 	// What git's status letters say: "modified", "renamed", "both modified", ...
 	Core::StringView ChangeWord(Core::StringView status);
 }

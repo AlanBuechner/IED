@@ -132,5 +132,7 @@ class GitToolTests {
 		assert_true(text == "1\tone\n2\ttwo\n[lines 1-2 of 3; git_show with offset 3 reads on]\n", "numbered, a CR dropped, how to read on");
 		assert_true(Git::FileText(Core::StringView("one\ntwo\nthree\n"), 3, 400) == "3\tthree\n", "from a line");
 		assert_true(Git::FileText(Core::StringView(""), 1, 400) == "[the file is empty]\n", "empty");
+		assert_true(Git::FileLines(0) == Git::c_ToolFileMostLines && Git::FileLines(-3) == Git::c_ToolFileMostLines, "no limit: a page");
+		assert_true(Git::FileLines(6) == 6 && Git::FileLines(100000) == Git::c_ToolFileMostLines, "a limit, at most a page");
 	}
 }

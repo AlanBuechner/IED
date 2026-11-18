@@ -128,7 +128,8 @@ namespace Git
 		Core::String repoPath = RepoPaths(target, asked)[0];
 		GitRun run = git->RunOrThrow(target.m_Repo, GitArgs("show", ((Core::String(rev) + ":") + repoPath.View()).CStr()), c_GitReadTimeoutMs, IED::ErrorCode::NotFound);
 		if (run.m_Output.View().IndexOf((char)0, 0) >= 0) return (Core::String(asked[0]) + " is a binary file at ") + rev;
-		return FileText(run.m_Output.View(), IntArg(args, "offset", 1), c_ToolFileMostLines);
+		// A window of lines as fs_read takes one: `offset` (1-based) and `limit`.
+		return FileText(run.m_Output.View(), IntArg(args, "offset", 1), FileLines(IntArg(args, "limit", 0)));
 	}
 
 	Core::String ShowAnswer(GitPlugin* git, GitWorkspace* found, const Serialization::DomNode& args) {

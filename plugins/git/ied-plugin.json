@@ -76,7 +76,7 @@
 			},
 			{
 				"name": "git_show",
-				"description": "One commit: its hash, parents, author, committer, whole message, and its change against its first parent as a diff (only the `paths` given, if any). With `file`, that file's text as it was at the revision instead, lines numbered (`offset` reads on). `rev` is a hash, a branch, a tag or \"HEAD~2\"; HEAD when left out.",
+				"description": "One commit: its hash, parents, author, committer, whole message, and its change against its first parent as a diff (only the `paths` given, if any). With `file`, that file's text as it was at the revision instead, lines numbered: `offset` (the first line) and `limit` (how many, at most 400) read a window, as fs_read's do. `rev` is a hash, a branch, a tag or \"HEAD~2\"; HEAD when left out.",
 				"class": "read",
 				"group": "git",
 				"parallelSafe": true,
@@ -85,6 +85,7 @@
 					"paths": { "type": "array", "items": { "type": "string" } },
 					"file": { "type": "string" },
 					"offset": { "type": "integer", "minimum": 1 },
+					"limit": { "type": "integer", "minimum": 1 },
 					"repo": { "type": "string" } }, "additionalProperties": false },
 				"function": "Git::ShowTool"
 			},
