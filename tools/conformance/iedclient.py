@@ -71,10 +71,12 @@ class Client:
 		self.reader = None
 
 	@classmethod
-	async def connect(cls, url, checker, client_id=None, device_id=None, device_class="desktop", resume=None, proto=1, timeout=DEFAULT_TIMEOUT, headers=None):
+	async def connect(cls, url, checker, client_id=None, device_id=None, device_class="desktop", resume=None, proto=1, timeout=DEFAULT_TIMEOUT, headers=None, device_name=None):
 		sock = await ws.connect(url, headers=auth_headers() if headers is None else headers, timeout=timeout)
 		client = cls(sock, checker, client_id or new_id("c"), device_id or new_id("d"))
 		hello = {"t": "hello", "proto": proto, "clientId": client.client_id, "deviceId": client.device_id, "deviceClass": device_class}
+		if device_name is not None:
+			hello["deviceName"] = device_name
 		if resume is not None:
 			hello["resume"] = resume
 		await client.send(hello)

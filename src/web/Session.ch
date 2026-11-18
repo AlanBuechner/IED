@@ -44,6 +44,7 @@ namespace Ied
 		public Http::WebSocket* m_Socket;
 		public Core::String m_Peer;
 		public Core::String m_AuthDevice;   // the device session the socket was opened with (docs/11)
+		public Core::String m_AuthDeviceName; // the browser the socket came from, by its User-Agent: "Edge on Windows"
 		public bool m_Local;                // the socket came from a loopback address: a client on the server's machine
 		public Core::String m_ClientId;
 		public DeviceInfo m_Device;

@@ -78,5 +78,6 @@ import "./explorersearch.test.js";
 import "./definitionlinks.test.js";
 import "./grammars.test.js";
 import "./hoverpassthrough.test.js";
+import "./statusbar.test.js";
 
 run(document.getElementById("results"));

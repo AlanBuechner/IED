@@ -192,7 +192,7 @@ All clients see the same server state. Conflicts are resolved by explicit, visib
 | **Git operations** | One mutating git operation per repository at a time (server-side lock); others queue with a visible "waiting for <op>". |
 | **Sandbox desktop** | Input lease; taking control from another device asks for confirmation. |
 
-**Presence:** the status bar shows connected devices; editors show "being edited on <device>" when another device holds a document lease.
+**Presence:** the status bar shows connected devices; editors show "being edited on <device>" when another device holds a document lease. A device is a browser profile (its `deviceId`, kept in its local storage): a second browser on the same machine - another browser, a private window, an app's embedded browser such as an AI agent's browser pane - is a device of its own. The master's `server` topic lists each client (a tab or window) with its `deviceName`: the one its hello gives (IED's desktop app says `IED desktop app`), else the name its sign-in took from the browser that signed in (`Edge on Windows`, `Chrome on Windows`). The status bar's device item counts devices, and its tooltip names each, this device first ("- this device"), with its device classes and how many windows it has open.
 
 ## Audit
 

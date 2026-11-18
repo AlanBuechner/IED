@@ -51,12 +51,41 @@ namespace Ied
 		return "";
 	}
 
+	// The products of a browser's own User-Agent; any other names the app that embeds it.
+	static bool IsBrowserProduct(Core::StringView product) {
+		const char*[12] known = { "Mozilla", "AppleWebKit", "Chrome", "Safari", "Edg", "Version", "Mobile", "Electron", "HeadlessChrome", "OPR", "Gecko", "Firefox" };
+		for (int32 i = 0; i < 12; ++i)
+			if (product == known[i]) return true;
+		return false;
+	}
+
+	// An app that embeds Chromium names itself in the User-Agent ("... Claude/5.11 Chrome/156 ...", an Electron app's
+	// "... Slack/4.41 Chrome/130 Electron/33 ..."): the first product outside the comments that no browser sends.
+	static Core::StringView AppOf(Core::StringView agent) {
+		Core::StringView rest = agent;
+		int32 depth = 0;
+		while (!rest.IsEmpty()) {
+			Core::StringView part = NextPart(rest, ' ');
+			const bool comment = depth > 0 || part.StartsWith(Core::StringView("("));
+			for (int64 i = 0; i < part.ByteLength(); ++i) {
+				if (part.ByteAt(i) == '(') depth += 1;
+				else if (part.ByteAt(i) == ')' && depth > 0) depth -= 1;
+			}
+			const int64 slash = part.IndexOf('/', 0);
+			if (comment || slash <= 0) continue;
+			Core::StringView product = part.Substring(0, slash);
+			if (!IsBrowserProduct(product)) return product;
+		}
+		return Core::StringView("");
+	}
+
 	Core::String DeviceNameFrom(Core::StringView userAgent) {
 		Core::StringView browser = Core::StringView(BrowserOf(userAgent));
 		Core::StringView system = Core::StringView(SystemOf(userAgent));
 		if (browser.IsEmpty()) return Core::String("Unknown browser");
+		Core::StringView app = browser == "Chrome" || browser == "Edge" ? AppOf(userAgent) : Core::StringView("");
 		Core::StringBuilder name;
-		name.Append(browser);
+		name.Append(app.IsEmpty() ? browser : app);
 		if (!system.IsEmpty()) {
 			name.Append(" on ");
 			name.Append(system);

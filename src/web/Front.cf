@@ -148,7 +148,7 @@ namespace Ied
 		Core::StringView wsId;
 		Core::StringView rest;
 		// Whether the client is on the master's machine is the master's to say (`local=1`): this socket is the master's.
-		if (path == "/ws") Attach(request, response, SentDevice(request).View(), QueryValue(request.query.View(), Core::StringView("local")) == "1");
+		if (path == "/ws") Attach(request, response, SentDevice(request).View(), Core::StringView(""), QueryValue(request.query.View(), Core::StringView("local")) == "1");
 		else if (path == "/healthz") Health(response);
 		else if (path == "/api/upload") Upload(request, response);
 		else if (path.StartsWith(Core::StringView("/api/blob/"))) Blob(path.Substring(10, -1), request, response);
@@ -233,15 +233,20 @@ namespace Ied
 			Answer(response, 403, Core::StringView("that Origin is not allowed (see --allow-origin)"));
 			return;
 		}
-		Attach(request, response, device->m_Id.View(), request.peer.IsValid() && request.peer.IsLoopback());
+		// Named by the browser the socket comes from now (its sign-in's name may be older than a rule that names it better).
+		const Core::String* agent = request.headers.Find(Core::StringView("User-Agent"));
+		Core::String name = DeviceNameFrom(agent ? agent->View() : Core::StringView(""));
+		Attach(request, response, device->m_Id.View(), name.View(), request.peer.IsValid() && request.peer.IsLoopback());
 	}
 
-	void Front::Attach(const Http::Request& request, Http::Response& response, Core::StringView device, bool local) {
+	void Front::Attach(const Http::Request& request, Http::Response& response, Core::StringView device, Core::StringView deviceName, bool local) {
 		Server* shared = m_Server;
 		Core::String deviceId = Core::String(device);
-		Http::AcceptWebSocket(request, response, [shared, deviceId, local](Http::WebSocket& socket) {
+		Core::String name = Core::String(deviceName);
+		Http::AcceptWebSocket(request, response, [shared, deviceId, name, local](Http::WebSocket& socket) {
 			Session* session = new Session(shared, &socket, Core::StringView("client"));
 			session->m_AuthDevice = deviceId;
+			session->m_AuthDeviceName = name;
 			session->m_Local = local;
 			session->Run();
 		});

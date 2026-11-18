@@ -6,6 +6,36 @@ import { h, icon, replace } from "/ui-kit/dom.js";
 import { serverLook, serverTitle, showServerMenu } from "./servers.js";
 
 const CONNECTION_TEXT = { live: "Ready", connecting: "Connecting...", reconnecting: "Reconnecting...", closed: "Offline" };
+const UNNAMED_DEVICE = "Unnamed device";
+
+// The devices `clients` (the server topic's, one per tab or window) come from, this device first (docs/11 "Presence"):
+// [{deviceId, name, classes, windows, own}].
+export function connectedDevices(clients, ownDeviceId) {
+	const byId = new Map();
+	for (const client of clients) {
+		let device = byId.get(client.deviceId);
+		if (!device) {
+			device = { deviceId: client.deviceId, name: null, classes: [], windows: 0, own: client.deviceId === ownDeviceId };
+			byId.set(client.deviceId, device);
+		}
+		device.windows += 1;
+		if (!device.name && client.deviceName) device.name = client.deviceName;
+		if (client.deviceClass && !device.classes.includes(client.deviceClass)) device.classes.push(client.deviceClass);
+	}
+	const devices = [...byId.values()].map((device) => ({ ...device, name: device.name || UNNAMED_DEVICE }));
+	return devices.sort((a, b) => Number(b.own) - Number(a.own));
+}
+
+// The device item's tooltip: how many, then a line for each.
+export function devicesTitle(devices) {
+	const lines = [devices.length + (devices.length === 1 ? " device" : " devices") + " connected"];
+	for (const device of devices) {
+		const facts = [...device.classes];
+		if (device.windows > 1) facts.push(device.windows + " windows");
+		lines.push(device.name + (device.own ? " - this device" : "") + (facts.length ? " (" + facts.join(", ") + ")" : ""));
+	}
+	return lines.join("\n");
+}
 const CONFIG_TROUBLE = { unreachable: "cannot be reached", refused: "refuses IED's token", failed: "could not be mirrored" };
 const TRANSIENT_MS = 3000;
 
@@ -54,7 +84,8 @@ export class StatusBar {
 		const shell = this.shell;
 		const left = this.pluginItems("left");
 		const right = this.pluginItems("right");
-		const devices = new Set(shell.server.clients.map((c) => c.deviceId)).size;
+		const devices = connectedDevices(shell.server.clients, shell.identity ? shell.identity.deviceId : null);
+		const devicesText = devicesTitle(devices);
 		const unread = shell.server.notifications.length;
 		this.el.dataset.state = shell.context.get("statusState") || "idle";
 		replace(this.el,
@@ -65,7 +96,7 @@ export class StatusBar {
 			h("span.st.grow"),
 			...right,
 			this.configServerItem(),
-			h("span.st", { title: devices + " device(s) connected" }, icon("vm"), devices + (devices === 1 ? " device" : " devices")),
+			h("span.st.st-devices", { title: devicesText, "aria-label": devicesText.replace(/\n/g, "; ") }, icon("vm"), devices.length + (devices.length === 1 ? " device" : " devices")),
 			h("button.st.st-bell", { title: "Notifications", "aria-label": "Notifications (" + unread + ")", on: { click: (event) => shell.commands.run("shell.showNotifications", { at: event.currentTarget }) } }, icon(unread ? "bell-dot" : "bell"), unread ? String(unread) : ""));
 	}
 

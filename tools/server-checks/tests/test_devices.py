@@ -50,6 +50,25 @@ class DeviceTests(ServerTestCase):
 		self.assertEqual("not_found", missing.exception.code)
 		admin.abort()
 
+	async def test_connected_clients_carry_their_device_name(self):
+		# The status bar names each device (docs/11 "Presence"): the name a client gives (the desktop app's), else its
+		# browser's, by the socket's User-Agent - an app's embedded browser by the app.
+		chrome = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+		pane = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Claude/5.11492.5 Chrome/156.0.8078.75 Safari/537.36 MSIX"
+		cookie = self.server.sign_in()
+		browser = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": cookie, "User-Agent": chrome})
+		embedded = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": cookie, "User-Agent": pane})
+		app = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": cookie, "User-Agent": chrome}, device_name="IED desktop app")
+		await browser.sub(["server"])
+		clients = (await browser.next_frame("server", 10))["data"]["clients"]
+		names = {c["clientId"]: c.get("deviceName") for c in clients}
+		self.assertEqual("Chrome on Windows", names[browser.client_id])
+		self.assertEqual("Claude on Windows", names[embedded.client_id])
+		self.assertEqual("IED desktop app", names[app.client_id])
+		self.assertEqual([], browser.violations + embedded.violations + app.violations)
+		for client in (browser, embedded, app):
+			client.abort()
+
 	async def test_logout_clears_the_cookie_and_the_session(self):
 		cookie = self.server.sign_in()
 		reply = self.server.request("POST", "/api/auth/logout", headers={"Cookie": cookie})

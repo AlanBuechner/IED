@@ -304,7 +304,9 @@ namespace Ied
 		json.BeginObject();
 		json.Field("deviceId", m_Device.m_DeviceId.View());
 		json.Field("deviceClass", m_Device.m_DeviceClass.View());
-		if (!m_Device.m_DeviceName.IsEmpty()) json.Field("deviceName", m_Device.m_DeviceName.View());
+		// What the status bar calls it (docs/11 "Presence"): the name the client gave, else its sign-in's.
+		Core::StringView name = m_Device.m_DeviceName.IsEmpty() ? m_AuthDeviceName.View() : m_Device.m_DeviceName.View();
+		if (!name.IsEmpty()) json.Field("deviceName", name);
 		json.Field("clientId", m_ClientId.View());
 		json.EndObject();
 		return json.ToString();

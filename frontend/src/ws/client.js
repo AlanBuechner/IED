@@ -140,6 +140,7 @@ export class ProtocolClient {
 	sendHello(socket) {
 		if (socket !== this.socket) return;
 		const hello = { t: "hello", proto: PROTOCOL, clientId: this.identity.clientId, deviceId: this.identity.deviceId, deviceClass: this.identity.deviceClass };
+		if (this.identity.deviceName) hello.deviceName = this.identity.deviceName;
 		const cursors = this.resumableCursors();
 		if (this.epoch && Object.keys(cursors).length) hello.resume = { sessionEpoch: this.epoch, cursors };
 		this.send(hello);

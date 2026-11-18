@@ -70,5 +70,10 @@ class AuthGateTests {
 		assert_se("Chrome on Android", Ied::DeviceNameFrom(View("Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36")).CStr(), "Android before Linux");
 		assert_se("Firefox on Linux", Ied::DeviceNameFrom(View("Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0")).CStr(), "Firefox");
 		assert_se("Unknown browser", Ied::DeviceNameFrom(View("Python-urllib/3.14")).CStr(), "not a browser");
+		// An app's embedded browser is the app's: the Claude app's browser pane, an Electron app.
+		assert_se("Claude on Windows", Ied::DeviceNameFrom(View("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Claude/5.11492.5 Chrome/156.0.8078.75 Safari/537.36 MSIX")).CStr(), "an app's Chromium");
+		assert_se("Slack on macOS", Ied::DeviceNameFrom(View("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Slack/4.41.97 Chrome/130.0.6723.191 Electron/33.3.1 Safari/537.36")).CStr(), "an Electron app");
+		assert_se("Chrome on Windows", Ied::DeviceNameFrom(View("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36")).CStr(), "Chrome itself");
+		assert_se("Chrome on Android", Ied::DeviceNameFrom(View("Mozilla/5.0 (Linux; Android 15; Pixel 9/AP3A) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36")).CStr(), "a slash in a comment names no app");
 	}
 }

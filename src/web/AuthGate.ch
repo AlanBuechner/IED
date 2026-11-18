@@ -36,7 +36,8 @@ namespace Ied
 	Core::StringView CookieValue(Core::StringView header, Core::StringView name);
 	// The value of `name` in a query string ("t=abc&x=1"), not decoded; empty when absent.
 	Core::StringView QueryValue(Core::StringView query, Core::StringView name);
-	// "Edge on Windows", "Safari on iOS", ... from a User-Agent; "Unknown browser" when it names none.
+	// "Edge on Windows", "Safari on iOS", ... from a User-Agent; an app's embedded browser by the app ("Claude on
+	// Windows"); "Unknown browser" when it names none.
 	Core::String DeviceNameFrom(Core::StringView userAgent);
 	// A JSON body: status, Content-Type and the text.
 	void AnswerJson(Http::Response& response, int32 status, Core::StringView json);

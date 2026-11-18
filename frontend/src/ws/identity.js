@@ -28,7 +28,10 @@ function stored(storage, key, make) {
 	}
 }
 
-// Resolves to {clientId, deviceId, deviceClass}; keeps answering other tabs that ask about this tab's id.
+// What IED's desktop app calls itself to the server (docs/11 "Presence"); a browser is named by its sign-in instead.
+export const DESKTOP_APP_NAME = "IED desktop app";
+
+// Resolves to {clientId, deviceId, deviceClass, deviceName?}; keeps answering other tabs that ask about this tab's id.
 export async function resolveIdentity(win) {
 	const w = win || window;
 	const deviceId = stored(w.localStorage, DEVICE_KEY, () => "d-" + randomHex(16));
@@ -48,7 +51,9 @@ export async function resolveIdentity(win) {
 			if (event.data && event.data.ask === clientId) channel.postMessage({ taken: clientId });
 		};
 	}
-	return { clientId, deviceId, deviceClass: deviceClassOf(w.innerWidth) };
+	const identity = { clientId, deviceId, deviceClass: deviceClassOf(w.innerWidth) };
+	if (w.iedDesktop) identity.deviceName = DESKTOP_APP_NAME;
+	return identity;
 }
 
 function isTaken(channel, clientId) {
