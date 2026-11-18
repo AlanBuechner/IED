@@ -43,12 +43,12 @@ namespace Core
 		return strings;
 	}
 
-	Array<StringView> Split(StringView separator) extends StringView { return SplitViews(SplitParts(*this, separator)); }
-	Array<StringView> Split(const char* separator) extends StringView { return SplitViews(SplitParts(*this, StringView(separator))); }
-	Array<StringView> Split(char separator) extends StringView { return SplitViews(SplitParts(*this, separator)); }
-	Array<String> Split(StringView separator) extends String { return SplitStrings(SplitParts(this.View(), separator)); }
-	Array<String> Split(const char* separator) extends String { return SplitStrings(SplitParts(this.View(), StringView(separator))); }
-	Array<String> Split(char separator) extends String { return SplitStrings(SplitParts(this.View(), separator)); }
+	Array<StringView> Split(StringView separator) const extends StringView { return SplitViews(SplitParts(*this, separator)); }
+	Array<StringView> Split(const char* separator) const extends StringView { return SplitViews(SplitParts(*this, StringView(separator))); }
+	Array<StringView> Split(char separator) const extends StringView { return SplitViews(SplitParts(*this, separator)); }
+	Array<String> Split(StringView separator) const extends String { return SplitStrings(SplitParts(this.View(), separator)); }
+	Array<String> Split(const char* separator) const extends String { return SplitStrings(SplitParts(this.View(), StringView(separator))); }
+	Array<String> Split(char separator) const extends String { return SplitStrings(SplitParts(this.View(), separator)); }
 
 	int64 JoinedLength(int64 parts, int64 partBytes, StringView separator) {
 		return parts > 1 ? partBytes + separator.ByteLength() * (parts - 1) : partBytes;
@@ -90,10 +90,10 @@ namespace Core
 		return changed;
 	}
 
-	String ToLower() extends StringView { return WithAsciiCase(*this, false); }
-	String ToUpper() extends StringView { return WithAsciiCase(*this, true); }
-	String ToLower() extends String { return WithAsciiCase(this.View(), false); }
-	String ToUpper() extends String { return WithAsciiCase(this.View(), true); }
+	String ToLower() const extends StringView { return WithAsciiCase(*this, false); }
+	String ToUpper() const extends StringView { return WithAsciiCase(*this, true); }
+	String ToLower() const extends String { return WithAsciiCase(this.View(), false); }
+	String ToUpper() const extends String { return WithAsciiCase(this.View(), true); }
 
 	bool ParseDouble(StringView text, double& value) {
 		if (text.IsEmpty() || IsSpace(text.ByteAt(0))) return false;

@@ -394,6 +394,9 @@ p.SetXY(1.0f, 2.0f);                              // called like any member
 ```
 
 - Extensions work on objects and on primitive types.
+- An extension that only reads its receiver is `const` before `extends` (`float Length() const extends Point;`,
+  definition too): only a const extension can be called on a const object or through a const reference, as with
+  a type's own const methods.
 - They can be operators (`[operator("add")]`) and constructors (`[operator("create")] ... extends T`).
 - The target may be namespaced (`extends NS::Box`, covered end to end by
   `assets/TestCode/Types/NamespacedExtensionMethod.cf`), a concrete template instance

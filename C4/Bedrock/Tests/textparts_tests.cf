@@ -77,6 +77,16 @@ class TextCaseTests {
 		assert_true(accented.ToUpper().View() == Core::StringView("\xc3\x89T\xc3\xa9"), "bytes past ASCII are kept");
 		assert_eq(accented.CharCount(), accented.ToLower().CharCount(), "and so is the character count");
 	}
+
+	[test("const_receivers")]
+	public static void TestConstReceivers() {
+		const Core::StringView view = Core::StringView("TV_SHORT");
+		const Core::String text = Core::String("One_Shot");
+		assert_se("tv_short", view.ToLower().CStr(), "a const view lowers");
+		assert_se("ONE_SHOT", text.ToUpper().CStr(), "a const string uppers");
+		assert_eq((int64)2, view.Split('_').Count(), "a const view splits");
+		assert_se("Shot", text.Split("_")[1].CStr(), "a const string splits");
+	}
 }
 
 [test("text.parse_double")]

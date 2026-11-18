@@ -31,12 +31,12 @@ namespace Core
 		private bool done;
 	}
 
-	Array<StringView> Split(StringView separator) extends StringView;
-	Array<StringView> Split(const char* separator) extends StringView;
-	Array<StringView> Split(char separator) extends StringView;
-	Array<String> Split(StringView separator) extends String;
-	Array<String> Split(const char* separator) extends String;
-	Array<String> Split(char separator) extends String;
+	Array<StringView> Split(StringView separator) const extends StringView;
+	Array<StringView> Split(const char* separator) const extends StringView;
+	Array<StringView> Split(char separator) const extends StringView;
+	Array<String> Split(StringView separator) const extends String;
+	Array<String> Split(const char* separator) const extends String;
+	Array<String> Split(char separator) const extends String;
 
 	// The parts in order with `separator` between each two, Split's inverse: no parts give "", one part itself.
 	String Join(const Array<StringView>& parts, StringView separator);
@@ -45,10 +45,10 @@ namespace Core
 	String Join(const Array<String>& parts, const char* separator);
 
 	// ASCII letters changed; every other byte, UTF-8 sequences included, kept.
-	String ToLower() extends StringView;
-	String ToUpper() extends StringView;
-	String ToLower() extends String;
-	String ToUpper() extends String;
+	String ToLower() const extends StringView;
+	String ToUpper() const extends StringView;
+	String ToLower() const extends String;
+	String ToUpper() const extends String;
 
 	// The whole text as a double in strtod's syntax (digits, a fraction, an exponent, `inf`, `nan`, hexadecimal);
 	// false, with `value` as it was, for any other text, leading or trailing spaces included.
