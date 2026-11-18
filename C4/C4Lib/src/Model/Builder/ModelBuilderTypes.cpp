@@ -13,6 +13,7 @@
 #include "Parser/Nodes/Declarations/UnionDefinitionNode.h"
 #include "Parser/Nodes/Expressions/LiteralNode.h"
 #include "Model/ConstEvaluator.h"
+#include "Model/DeclaredAnnotations.h"
 #include "Model/OperatorAnnotations.h" // [group("name")] collection for reflection (plan 14)
 #include <functional>
 
@@ -66,6 +67,8 @@ namespace Scripting
 	void ModelBuilder::RegisterObject(Context& ctx, const ObjectDefinitionNode& obj)
 	{
 		const Core::String& name = obj.GetNameToken().GetText();
+		if ((obj.IsTemplated() || obj.IsSpecialization()) && DeclaresAnnotation(&obj))
+			ErrorAt(ctx, &obj, "[annotation] declares an annotation by a struct or class that is no template: '" + name + "' is one");
 		if (obj.IsSpecialization())
 		{
 			// `template<T> struct Box<T*> { ... }`: kept with the primary template's name; instantiation picks it.

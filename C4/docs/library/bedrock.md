@@ -1042,7 +1042,8 @@ violation, a stack overflow, a division by zero) is reported there too, from its
 system ends the program with the fault's code (Windows Error Reporting still sees it), and a C runtime function
 given an invalid argument is a fatal error instead of a fail-fast. A `-test` program reports faults the same way
 without a log (its harness calls `c4_report_faults`), so a case that faults is named by its `[TEST]` line and followed
-by the fault's report and stack.
+by the fault's report and stack. Any program does with `Platform::ReportFaults()`: on standard error alone, for a run
+whose console is read (headless, a script, CI) that names neither a log nor a reporter; a second call changes nothing.
 
 A windowed program shows a crash to whoever runs it with a crash reporter: `Platform::SetCrashReporter(program,
 arguments, error)` names a program (often the program itself, run with an argument that makes it a window showing the

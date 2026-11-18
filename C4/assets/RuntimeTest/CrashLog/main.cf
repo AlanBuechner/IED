@@ -66,7 +66,7 @@ static void ReportTo(Core::StringView out) {
 // The child: fails as `how` says, with `log` its crash log unless `how` is "unlogged"; "caught" prints what StackText
 // says in a handler and exits 0; "test-fault" faults in a test run, which names no log (BUG-437: a case that faulted said
 // nothing of where); "null-call" calls a null function pointer (BUG-465: Windows reported no stack); "reported-throw"
-// and "reported-fault" name no log but a reporter writing into `log`.
+// and "reported-fault" name no log but a reporter writing into `log`; "stderr-fault" names neither, after ReportFaults.
 static int32 Fail(Core::StringView how, Core::StringView log) {
 	if (how == "caught") {
 		try {
@@ -79,6 +79,11 @@ static int32 Fail(Core::StringView how, Core::StringView log) {
 	}
 	if (how == "test-fault") {
 		c4_test_configure(0, nullptr);
+		*Nowhere(how.ByteLength()) = 1;
+	}
+	if (how == "stderr-fault") {
+		Platform::ReportFaults();
+		Platform::ReportFaults();   // twice: the second changes nothing
 		*Nowhere(how.ByteLength()) = 1;
 	}
 	const bool reported = how == "reported-throw" || how == "reported-fault";
@@ -192,6 +197,7 @@ int32 main(int32 argc, char8** argv) {
 	ok = Reported("fault", kAccessViolation, kAccessViolationText, true) && ok;
 	ok = Reported("unlogged", 1, "an exception was thrown and not caught", false) && ok;
 	ok = Reported("test-fault", kAccessViolation, kAccessViolationText, false) && ok;
+	ok = Reported("stderr-fault", kAccessViolation, kAccessViolationText, false) && ok;
 	ok = Reported("null-call", kAccessViolation, kNullCallText, true) && ok;
 	ok = CallerNamed() && ok;
 	ok = ReporterShown("reported-throw", 1, "an exception was thrown and not caught") && ok;

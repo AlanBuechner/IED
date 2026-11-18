@@ -7,6 +7,9 @@
 
 namespace Scripting
 {
+	/// `[annotation] struct Requires {}` declares the annotation `[Requires]` (docs/language/12 section 4).
+	constexpr const char* kAnnotationDeclaration = "annotation";
+
 	/// Represents a single annotation (attribute) within a bracket group.
 	///
 	/// An annotation is a qualified name optionally followed by parenthesized arguments.
@@ -22,6 +25,8 @@ namespace Scripting
 
 		/// Full qualified name as a string (e.g. "NC::SomeAttr").
 		const Core::String& GetName() const { return m_Name; }
+		/// The name's last part, the one a declared annotation is named by (`SomeAttr` of `NC::SomeAttr`).
+		Core::String GetOwnName() const;
 
 		/// Number of identifier components in the qualified name.
 		uint32 GetNameTokenCount() const { return m_NameTokens.Count(); }
@@ -33,7 +38,7 @@ namespace Scripting
 		/// null: a name is a constant or a type, which the model decides. An argument that reads only as a type is this node.
 		const Ref<QualTypeNode>& GetArgumentType(uint32 index) const { return m_ArgumentTypes[index]; }
 
-		/// One of the compiler's own annotations (operator, test, test_setup, test_teardown, group, link, uuid, target):
+		/// One of the compiler's own annotations (operator, test, test_setup, test_teardown, group, link, uuid, target, annotation):
 		/// its arguments are string literals and reflection does not keep it (D-42).
 		bool IsCompilerAnnotation() const;
 		/// The compiler annotation this unknown name is a near miss of (`operater`), or null.

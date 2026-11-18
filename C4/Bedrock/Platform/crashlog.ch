@@ -4,7 +4,9 @@
 // after the time and the process id, and faults nothing handles (an access violation, a stack overflow) are reported
 // there too before the system ends the program. A windowed app names a crash reporter to show the report: a program
 // started with it as its standard input, which the crashed one waits for before it ends. StackText is the same stack
-// for a report of the program's own, such as an exception caught where a thread would have ended.
+// for a report of the program's own, such as an exception caught where a thread would have ended. A program that names
+// neither has a fault reported (and its stack) only after ReportFaults: a run whose console is read, headless or under test.
+//     Platform::ReportFaults();
 //     Platform::SetCrashLog(Core::StringView("C:/Users/me/AppData/Local/Game/logs/game.log"));
 //     Platform::SetCrashReporter(Platform::ExecutablePath().View(), arguments, error);   // arguments: "--crash-report"
 //     catch (...) { log.Write((Core::String("a job failed\n") + Platform::StackText()).View()); }
@@ -18,11 +20,16 @@ namespace Platform
 	const int64 kCrashReporterErrorBytes = 1024;
 
 	[link("c4_crash_log")] void c4_crash_log(const char* path) noexcept;
+	[link("c4_report_faults")] void c4_report_faults() noexcept;
 	[link("c4_crash_reporter")] int32 c4_crash_reporter(const char* program, const char** arguments, int32 count, char* error, int64 errorCapacity) noexcept;
 	[link("c4_stack_text")] int64 c4_stack_text(char* out, int64 capacity, int32 skip) noexcept;
 
 	// Where fatal reports are also appended (created when missing); empty for standard error only.
 	void SetCrashLog(Core::StringView path) { c4_crash_log(Core::String(path).CStr()); }
+
+	// Faults nothing handles (an access violation, a stack overflow) reported on standard error, with the thread and the
+	// stack, before the system ends the program - as a crash log or a crash reporter has them reported, without either.
+	void ReportFaults() { c4_report_faults(); }
 
 	// The program each fatal report starts once it is out, with `arguments` and the report's text ("C4: fatal: ...", the
 	// thread, the stack) as its standard input; the crashed process ends only after it does. Faults nothing handles are

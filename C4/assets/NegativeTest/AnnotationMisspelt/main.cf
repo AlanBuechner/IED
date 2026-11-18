@@ -1,0 +1,8 @@
+namespace Scene { namespace Annotations { [annotation] struct Requires {} } }
+
+struct CharacterMover { public float speed; }
+
+[Requiers(CharacterMover)]
+struct PlayerController { public float speed; }
+
+int32 main() { PlayerController p; return (int32)p.speed; }

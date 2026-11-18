@@ -40,6 +40,8 @@ namespace C4LSP::Features
 		/// The declaration whose own name is at `position` - `Push` of `void Ring::Push()` is the function, its `Ring`
 		/// the type - not its type, parameters or body (BUG-349). Null elsewhere.
 		static const Scripting::AstNode* DeclarationNamedAt(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position);
+		/// The struct declaring the annotation whose name is at `position` (`Requires` of `[Requires(Mesh)]`); null elsewhere.
+		static const Scripting::AstNode* AnnotationNamedAt(Server::CompilationSession& session, const Server::LocatedNode& located, const Protocol::Position& position);
 		/// The name of the lambda capture at `position` (`counter` of `[&counter]`); null off a capture.
 		static const Scripting::Token* CaptureNameAt(const Server::LocatedNode& located, const Protocol::Position& position);
 		/// The variable that capture names, resolved where the lambda is written (BUG-403); null off a capture.

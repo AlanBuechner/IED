@@ -1,5 +1,6 @@
 #include "AnnotationNode.h"
 #include "../Expressions/LiteralNode.h"
+#include "Parser/NearNames.h"
 #include "Parser/PrattParser.h"
 #include "Core/StringFormat.h"
 #include <algorithm>
@@ -20,22 +21,8 @@ namespace Scripting
 
 	namespace
 	{
-		const char* const kCompilerAnnotations[] = { "operator", "test", "test_setup", "test_teardown", "group", "link", "uuid", "target" };
-
-		// Levenshtein distance, case-sensitive: `Test` is one edit from `test`.
-		size_t EditDistance(const std::string& a, const std::string& b)
-		{
-			std::vector<size_t> previous(b.size() + 1), current(b.size() + 1);
-			for (size_t j = 0; j <= b.size(); ++j) previous[j] = j;
-			for (size_t i = 1; i <= a.size(); ++i)
-			{
-				current[0] = i;
-				for (size_t j = 1; j <= b.size(); ++j)
-					current[j] = std::min({ previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1) });
-				std::swap(previous, current);
-			}
-			return previous[b.size()];
-		}
+		const char* const kCompilerAnnotations[] = { "operator", "test", "test_setup", "test_teardown", "group", "link", "uuid", "target",
+			kAnnotationDeclaration };
 	}
 
 	bool AnnotationItem::IsCompilerAnnotation() const
@@ -51,12 +38,13 @@ namespace Scripting
 	{
 		if (IsCompilerAnnotation()) return nullptr;
 		for (const char* name : kCompilerAnnotations)
-		{
-			const std::string written = m_Name.c_str();
-			const size_t allowed = std::string(name).size() < 6 ? 1 : 2;
-			if (EditDistance(written, name) <= allowed) return name;
-		}
+			if (IsNearMiss(m_Name.c_str(), name)) return name;
 		return nullptr;
+	}
+
+	Core::String AnnotationItem::GetOwnName() const
+	{
+		return m_NameTokens.Empty() ? m_Name : m_NameTokens.Back().GetText();
 	}
 
 	// --- AnnotationNode ---
@@ -302,6 +290,12 @@ namespace Scripting
 
 	void AnnotationNode::CheckCompilerArguments(ParserState& state, const AnnotationItem& item)
 	{
+		if (item.GetName() == kAnnotationDeclaration && !item.GetArguments().Empty())
+		{
+			state.GetErrorTracker().AddError(item.GetArguments()[0]->startLocation,
+				"'annotation' takes no arguments: the struct or class it marks declares the annotation of its name", ErrorSeverity::Error);
+			return;
+		}
 		for (const auto& argument : item.GetArguments())
 		{
 			const auto* literal = dynamic_cast<const LiteralNode*>(argument.Get());

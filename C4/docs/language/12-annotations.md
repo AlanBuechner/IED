@@ -71,6 +71,7 @@ qualified_name: identifier ('::' identifier)*
 | `[group("name")]` | types, functions, variables | adds the entity to a named reflection group. See [runtime/02-reflection.md](../runtime/02-reflection.md) | **Implemented** |
 | `[link("symbol")]` | function and variable declarations (a variable without an initializer), function definitions | a declaration binds to the foreign symbol of that name; a function definition is emitted under it. See [13](13-interop.md) | **Implemented** |
 | `[target("avx2", ...)]` | functions and methods | builds the function for the program's processor with these features on as well (names a `-m` flag takes, [11 section 8](11-vectors-and-swizzling.md#8-the-simd-target)): its body uses them, and no caller built without them inlines it. Call it only where `Platform::HasProcessorFeature` says the processor has them | **Implemented** |
+| `[annotation]` | structs and classes (not templates) | declares the annotation of the type's name: `[annotation] struct Requires {}` declares `[Requires]` (section 4). Takes no arguments | **Implemented** |
 | `[uuid("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")]` | types | attaches a COM GUID, read by `__uuidof(T)`; CBind emits it from `__declspec(uuid(...))`. A type without one gets a calculated one (the name-based UUID of its qualified name, [14](14-builtins.md)), so `__uuidof` works for every type | **Implemented** |
 
 Details worth knowing:
@@ -113,14 +114,49 @@ A function declared and defined apart carries both lists, the declaration's firs
 A near miss of a compiler annotation is a warning (D-42): `[operater("+")]` says `unknown annotation
 'operater': did you mean 'operator'?`. It is still kept as a user annotation. A near miss is one edit from a
 short compiler annotation (`test`, `link`, `uuid`, `group`) or two from a longer one, so `[Test]` warns and
-`[Tag]` does not.
+`[Tag]` does not. A near miss of a *declared* annotation (section 4) is an error.
+
+---
+
+## 4. Declaring an annotation
+
+**Status:** **Implemented**
+
+A library declares the annotations it reads, so a misspelt one is a compile error rather than an annotation nothing
+reads: `[annotation]` on a struct or class declares the annotation of its name.
+
+```c4
+namespace Scene::Annotations
+{
+	// [Requires(Type, ...)]: the components a component's entity cannot be without.
+	[annotation] struct Requires {}
+}
+
+[Component, Requires(Render::MeshRenderer)]   // declared: fine
+struct MeshCollider { public bool convex; }
+
+[Component, Requiers(Physics::CharacterMover)] // error: unknown annotation 'Requiers': did you mean 'Requires',
+struct PlayerController { public float speed; } //        which Scene::Annotations::Requires declares?
+```
+
+- An annotation is declared by its **own name**, the last part of what is written: `[Requires]` and `[Scene::Requires]`
+  both name the one `Requires` declares, wherever it is declared and whether or not the file sees its namespace.
+- An annotation **no declaration names** is as free as ever (section 3) - unless its name is a near miss of a declared
+  one (one edit from a name shorter than 6 characters, two from a longer one, case counting), which is an error where it
+  is written, naming the one it misspells. A library meaning a name close to another library's declares its own.
+- `[annotation]` goes on a struct or class that is no template, and takes no arguments; anywhere else it is an error.
+  The type is an ordinary type (reflection registers it); its doc comment says what the annotation does.
+- The editor knows a declared annotation as code: hover on its name shows the declaration and its doc comment,
+  go-to-definition leads to it, and find-references on the declaring type finds its uses.
+- Every annotation of what reflection registers is checked (types, fields, enums, unions, globals, functions and
+  their parameters), as the program's model is built, so the editor shows the error too.
 
 Ideas from older design notes such as `[Derive(...)]`, `[CTGen]` (compile-time code
 generation) and `[Export]` were never confirmed as part of the language and are not planned.
 
 ---
 
-## 4. Why annotations instead of keywords
+## 5. Why annotations instead of keywords
 
 The C4 rule is "one concept": a constructor, a destructor and `operator+` are all just functions
 with an annotation, so they share one declaration form, one overload mechanism and one calling

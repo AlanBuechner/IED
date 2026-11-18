@@ -9,6 +9,8 @@
 #include "Parser/Nodes/Expressions/StaticAccessNode.h"
 #include "Parser/Nodes/Expressions/FunctionCallNode.h"
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
+#include "Parser/Nodes/Declarations/AnnotationNode.h"
+#include "Model/Types/ObjectType.h"
 #include "Server/WrittenChildren.h"
 #include "Features/TypeText.h"
 #include <algorithm>
@@ -120,6 +122,12 @@ namespace C4LSP::Features
 			const auto& sa = static_cast<const Scripting::StaticAccessNode&>(reference);
 			return { sa.GetMemberNameToken().GetStartLocation(), sa.GetMemberNameToken().GetEndLocation() };
 		}
+		case Scripting::NodeType::AnnotationItem: {
+			const auto& item = static_cast<const Scripting::AnnotationItem&>(reference);
+			if (item.GetNameTokens().Empty())
+				return { reference.startLocation, reference.endLocation };
+			return { item.GetNameTokens().Back().GetStartLocation(), item.GetNameTokens().Back().GetEndLocation() };
+		}
 		case Scripting::NodeType::NamespaceQualifiedName: {
 			const auto& name = static_cast<const Scripting::NamespaceQualifiedNameNode&>(reference);
 			return { name.GetLastIdentifierToken().GetStartLocation(), name.GetLastIdentifierToken().GetEndLocation() };
@@ -210,6 +218,14 @@ namespace C4LSP::Features
 			if (type.BaseName() && search.targets.count(DeclarationOfNamedType(search.resolver.ResolveQualType(type, path))) > 0)
 				search.sink(Occurrence{ &node, NameOf(node), true }, path);
 			return;
+		}
+		if (node.Type() == Scripting::NodeType::AnnotationItem && AnyTypeTarget(search.targets))
+		{
+			const auto& item = static_cast<const Scripting::AnnotationItem&>(node);
+			const Scripting::ObjectType* declaring = search.resolver.Annotations().Find(item.GetName().c_str());
+			if (declaring && search.targets.count(declaring->GetDeclNode()) > 0)
+				search.sink(Occurrence{ &node, NameOf(node), true }, path);
+			return;   // its arguments are walked as children
 		}
 		if (node.Type() == Scripting::NodeType::FunctionDefinition && AnyTypeTarget(search.targets))
 			VisitQualifiers(search, static_cast<const Scripting::FunctionDefinitionNode&>(node), path);

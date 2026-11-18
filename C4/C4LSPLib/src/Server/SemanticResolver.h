@@ -1,8 +1,10 @@
 #pragma once
 #include "Core/Core.h"
 #include "Compiler/CompilerInstance.h"
+#include "Model/DeclaredAnnotations.h"
 #include "Model/ProgramModel.h"
 #include "Model/SymbolTable.h"
+#include <memory>
 #include "Model/Types.h"
 #include "Parser/AstNode.h"
 #include <string>
@@ -35,7 +37,13 @@ namespace C4LSP::Server
 		explicit SemanticResolver(const Scripting::ProgramModel& model) : m_Model(model) {}
 
 		/// Clear resolution caches. Called after every Recompile() so stale node facts are dropped.
-		void Invalidate() { m_RefCache.clear(); m_TypeCache.clear(); m_RecordByDeclaration.clear(); m_RecordsIndexed = false; }
+		void Invalidate() { m_RefCache.clear(); m_TypeCache.clear(); m_RecordByDeclaration.clear(); m_RecordsIndexed = false; m_Annotations.reset(); }
+
+		/// The annotations the program declares ([annotation] struct Requires), made once a compile.
+		const Scripting::DeclaredAnnotations& Annotations() const;
+		/// The declaration of the annotation whose name is at `position` (`Requires` of `[Requires(Mesh)]`, the declaring
+		/// struct); null off an annotation's name, and for a name no [annotation] declares.
+		const Scripting::AstNode* AnnotationNamedAt(const Core::Vector<const Scripting::AstNode*>& path, uint32 line, uint32 column) const;
 
 		/// Resolve a reference node to its type + declaring declaration, given the enclosing AST path
 		/// (outermost first, innermost last) that contains it. The path supplies the function-local
@@ -96,5 +104,6 @@ namespace C4LSP::Server
 		mutable std::unordered_map<const Scripting::QualTypeNode*, const Scripting::Type*> m_TypeCache;
 		mutable std::unordered_map<const Scripting::AstNode*, const Scripting::FunctionRecord*> m_RecordByDeclaration;
 		mutable bool m_RecordsIndexed = false;
+		mutable std::unique_ptr<Scripting::DeclaredAnnotations> m_Annotations;
 	};
 } // namespace C4LSP::Server

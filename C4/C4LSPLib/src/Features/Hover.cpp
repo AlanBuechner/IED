@@ -99,8 +99,10 @@ namespace C4LSP::Features
 
 	std::string Hover::BuildHoverText(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position)
 	{
-		// What go-to-definition finds without a reference: a variable a lambda captures, a declaration's own name (a range-
-		// for variable's, the type `Ring` of `Ring::Push`).
+		// What go-to-definition finds without a reference: an annotation's declaration, a variable a lambda captures, a
+		// declaration's own name (a range-for variable's, the type `Ring` of `Ring::Push`).
+		if (const Scripting::AstNode* annotation = Definition::AnnotationNamedAt(session, located, position))
+			return DeclarationMarkdown(session, *annotation);
 		if (const Scripting::AstNode* captured = Definition::CapturedAt(session, located, position))
 			return DeclarationMarkdown(session, *captured);
 		if (const Scripting::AstNode* named = Definition::DeclarationNamedAt(session, sourceId, located, position))

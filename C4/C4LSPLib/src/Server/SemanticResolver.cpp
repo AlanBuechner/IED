@@ -2,6 +2,8 @@
 #include "Model/TypeHandle.h" // TypeHandle::UnwrapToValue (alias/reference -> value type)
 #include "Features/TypeText.h" // DeclarationOfNamedType
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
+#include "Parser/Nodes/Declarations/AnnotationNode.h"
+#include "Model/Types/ObjectType.h"
 #include "Model/Types/ClassHierarchy.h"
 #include "Parser/Nodes/Declarations/NamespaceNode.h"
 #include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
@@ -589,6 +591,33 @@ namespace C4LSP::Server
 
 		m_RefCache[&node] = res;
 		return res;
+	}
+
+	const Scripting::DeclaredAnnotations& SemanticResolver::Annotations() const
+	{
+		if (!m_Annotations) m_Annotations = std::make_unique<Scripting::DeclaredAnnotations>(m_Model);
+		return *m_Annotations;
+	}
+
+	const Scripting::AstNode* SemanticResolver::AnnotationNamedAt(const Core::Vector<const Scripting::AstNode*>& path, uint32 line, uint32 column) const
+	{
+		for (uint32 i = path.Count(); i-- > 0;)
+		{
+			if (path[i]->Type() != Scripting::NodeType::AnnotationItem) continue;
+			const auto& item = static_cast<const Scripting::AnnotationItem&>(*path[i]);
+			for (const Scripting::Token& token : item.GetNameTokens())
+			{
+				const Scripting::SourceLocation& start = token.GetStartLocation();
+				const Scripting::SourceLocation& end = token.GetEndLocation();
+				const bool after = line > start.line || (line == start.line && column >= start.column);
+				const bool before = line < end.line || (line == end.line && column <= end.column);
+				if (!after || !before) continue;
+				const Scripting::ObjectType* declaring = Annotations().Find(item.GetName().c_str());
+				return declaring ? declaring->GetDeclNode() : nullptr;
+			}
+			return nullptr; // in its arguments: what they name, not the annotation
+		}
+		return nullptr;
 	}
 
 	bool SemanticResolver::IsReference(const Scripting::AstNode& node, const Scripting::AstNode* parent)

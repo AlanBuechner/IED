@@ -40,5 +40,14 @@ namespace Testing
 
 		TEST_FUNC(Lsp.Features.AnnotationArguments)
 		void TestAnUnknownNameIsADiagnostic();
+
+		TEST_FUNC(Lsp.Features.AnnotationArguments)
+		void TestADeclaredAnnotationsNameLeadsToItsDeclaration();
+
+		TEST_FUNC(Lsp.Features.AnnotationArguments)
+		void TestADeclaredAnnotationsUsesAreItsReferences();
+
+		TEST_FUNC(Lsp.Features.AnnotationArguments)
+		void TestAMisspeltAnnotationIsADiagnostic();
 	};
 } // namespace Testing

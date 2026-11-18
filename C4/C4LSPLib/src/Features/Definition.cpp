@@ -76,6 +76,8 @@ namespace C4LSP::Features
 		if (!located.Found())
 			return {};
 
+		if (const Scripting::AstNode* annotation = AnnotationNamedAt(session, located, position))
+			return { LocationForDeclaration(session, *annotation) };
 		auto locations = ResolveReference(session, sourceId, located);
 		if (locations.Count() > 0)
 			return locations;
@@ -264,8 +266,15 @@ namespace C4LSP::Features
 
 	// A reference, else a variable a lambda captures, else a declaration's own name, else a type written there: what
 	// references, highlight and rename are about.
+	const Scripting::AstNode* Definition::AnnotationNamedAt(Server::CompilationSession& session, const Server::LocatedNode& located, const Protocol::Position& position)
+	{
+		return session.GetResolver().AnnotationNamedAt(located.path, position.line + 1, position.character + 1); // LSP is 0-based
+	}
+
 	const Scripting::AstNode* Definition::TargetAt(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position)
 	{
+		if (const Scripting::AstNode* target = AnnotationNamedAt(session, located, position))
+			return target;
 		if (const Scripting::AstNode* target = FindTargetDeclaration(session, sourceId, located))
 			return target;
 		if (const Scripting::AstNode* target = CapturedAt(session, located, position))
