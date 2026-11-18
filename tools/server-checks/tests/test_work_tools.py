@@ -93,10 +93,14 @@ class WorkToolTests(CodeToolCase):
 		self.assertIn("missing.md", results["r3"], results["r3"])
 
 	async def test_running_a_built_program(self):
+		# A sub-project's own build output, named from the folder it runs in (a game's Projects/<Name>/build/bin).
+		os.makedirs(os.path.join(self.repo, "sub", "bin"), exist_ok=True)
+		shutil.copy(os.path.join(self.repo, self.program()), os.path.join(self.repo, "sub", "bin", "copy.exe"))
 		results = await self.results(
 			("p1", "program_run", {"program": self.program(), "args": ["one", "two words"]}),
 			("p2", "program_run", {"program": self.program(), "repeat": 3}),
-			("p3", "program_run", {"program": "build/bin/no-such.exe"}), permission="auto")
+			("p3", "program_run", {"program": "build/bin/no-such.exe"}),
+			("p4", "program_run", {"program": "bin/copy.exe", "cwd": "sub", "args": ["one"]}), permission="auto")
 		self.assertIn("exit 0 after", results["p1"], results["p1"])
 		self.assertIn("CPU", results["p1"], "what it used, read once it ended")
 		self.assertIn("peak memory", results["p1"])
@@ -105,6 +109,7 @@ class WorkToolTests(CodeToolCase):
 		self.assertIn("--- stderr: nothing", results["p1"], "the streams apart")
 		self.assertIn("median", results["p2"], "repeated runs for timing")
 		self.assertIn("does not exist now", results["p3"], "a path that names no file: said plainly (a build may be replacing it)")
+		self.assertIn("exit 0 after", results["p4"], "a path from cwd when the workspace's root has none: " + results["p4"])
 
 	async def test_running_in_a_folder_that_is_not_there(self):
 		# Windows says only "the directory name is invalid": the tool names the folder and whose it is.

@@ -66,6 +66,8 @@ class WorkToolsTests {
 		assert_true(file.m_File == "src/a.cf" && file.m_Alone.IsEmpty() && file.m_Glob.IsEmpty(), "a file: that file alone, the glob left out");
 		Ai::SearchScope ignored = Ai::ScopeOfSearch(Core::StringView(".ied/local/check/full-test.log"), Core::StringView(""), true);
 		assert_se(".ied/local/check/full-test.log", ignored.m_File.CStr(), "an ignored file named alone is searched all the same");
+		Ai::SearchScope sourceBuild = Ai::ScopeOfSearch(Core::StringView("Plugins/WorldPartition/src/WorldPartition"), Core::StringView(""), false);
+		assert_true(sourceBuild.m_Alone.IsEmpty() && sourceBuild.m_Glob == "Plugins/WorldPartition/src/WorldPartition/**", "a source folder holding a Build folder is searched through the workspace's ignore rules, which re-include it");
 		Ai::SearchScope built = Ai::ScopeOfSearch(Core::StringView("build/int/Rhi/tests/results.json"), Core::StringView(""), true);
 		assert_true(built.m_File == "build/int/Rhi/tests/results.json" && built.m_Alone.IsEmpty(), "and one in a skipped folder");
 		Ai::SearchScope skipped = Ai::ScopeOfSearch(Core::StringView("build/int"), Core::StringView("**/*.json"), false);
@@ -91,10 +93,30 @@ class WorkToolsTests {
 		assert_true(!IED::SearchFileText(Core::StringView("a.txt"), Core::StringView("("), query, result, problem) && problem.View().Contains(Core::StringView("not a valid regex")), "a broken regex is refused");
 	}
 
+	[test("program_file")]
+	public static void TestProgramFile() {
+		Core::StringBuilder folder;
+		folder.Append("ied-program-");
+		folder.AppendInt(Platform::UnixTimeNs());
+		FS::Path root = FS::TempDirectory() / folder.View();
+		FS::MakeDirectories((root / "Game/build/bin").CStr());
+		FS::WriteFileAtomically((root / "Game/build/bin/Client.exe").CStr(), (const void*)"x", 1);
+		FS::MakeDirectories((root / "build/bin").CStr());
+		FS::WriteFileAtomically((root / "build/bin/Tool.exe").CStr(), (const void*)"x", 1);
+		Core::String client = Core::String((root / "Game/build/bin/Client.exe").View());
+		assert_se((root / "build/bin/Tool.exe").CStr(), Ai::ProgramFile(root.View(), Core::StringView(""), Core::StringView("build/bin/Tool.exe")).CStr(), "a path from the root");
+		assert_se(client.CStr(), Ai::ProgramFile(root.View(), Core::StringView("Game"), Core::StringView("build/bin/Client.exe")).CStr(), "else from cwd: a sub-project's own build output");
+		assert_se(client.CStr(), Ai::ProgramFile(root.View(), Core::StringView("Game/build/bin"), Core::StringView("Client.exe")).CStr(), "a bare name of a file in cwd, as cmd runs one");
+		assert_se("git", Ai::ProgramFile(root.View(), Core::StringView("Game/build/bin"), Core::StringView("git")).CStr(), "any other bare name is looked for on PATH");
+		assert_se("Client.exe", Ai::ProgramFile(root.View(), Core::StringView(""), Core::StringView("Client.exe")).CStr(), "a file elsewhere than cwd is not found by its name");
+	}
+
 	[test("search_problem")]
 	public static void TestSearchProblem() {
 		Core::String broken = Ai::SearchProblem(Core::StringView("the pattern is not a valid regex: a '(' that is never closed"), true);
 		assert_true(broken.View().StartsWith(Core::StringView("search_text: the pattern is not a valid regex")) && broken.View().Contains(Core::StringView("put a backslash before it")), "a broken regex says how to match ( as text");
 		assert_se("search_text: no folder x", Ai::SearchProblem(Core::StringView("no folder x"), true).CStr(), "another problem as it is");
+		assert_true(Ai::IsBrokenRegex(Core::StringView("the pattern is not a valid regex: a '(' that is never closed")) && !Ai::IsBrokenRegex(Core::StringView("no folder x")), "a broken regex, searched as text instead; another problem is an error");
+		assert_se("[the pattern is not a valid regex: a '(' that is never closed - so it was searched as text]\n", Ai::SearchedAsTextNote(Core::StringView("the pattern is not a valid regex: a '(' that is never closed")).CStr(), "the answer says why it was searched as text");
 	}
 }

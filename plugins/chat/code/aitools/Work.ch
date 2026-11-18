@@ -39,6 +39,14 @@ namespace Ai
 	SearchScope ScopeOfSearch(Core::StringView path, Core::StringView glob, bool isFile);
 	// search_text's error for a failed search; a broken regex says how to match its special characters as text.
 	Core::String SearchProblem(Core::StringView problem, bool regex);
+	// Whether a search failed only because its pattern is no valid regex: search_text then searches it as text.
+	bool IsBrokenRegex(Core::StringView problem);
+	// What search_text says above the matches of a broken regex searched as text: why it was not one.
+	Core::String SearchedAsTextNote(Core::StringView problem);
+	// The program program_run starts for `program`: a file of the workspace at `root` - a path from the root, else from `cwd` (a
+	// sub-project's own build output run in its folder), or a bare name of a file in `cwd`, as cmd runs one - else `program` as it
+	// is, a name looked for on PATH.
+	Core::String ProgramFile(Core::StringView root, Core::StringView cwd, Core::StringView program);
 	// The last `lines` lines of `text`, at most `bytes` of them.
 	Core::String TailOf(Core::StringView text, int64 lines, int64 bytes);
 	// What a command started for a tool call needs: its argv or shell text, the folder it runs in (workspace-relative)
