@@ -1,5 +1,6 @@
 // git: what the CLI prints in its machine formats read into values, and the patches that stage part of a file.
 
+include "repo/Discover.ch"
 include "repo/Parse.ch"
 include "repo/Patch.ch"
 include "repo/WorkingDiff.ch"
@@ -120,6 +121,34 @@ class GitPatchTests {
 		context.Push(0);
 		assert_true(Git::HunkPatch(Sample(), 0, context, false).IsEmpty(), "context alone changes nothing");
 		assert_true(Git::HunkPatch(Sample(), 5, Core::Array<int64>(), false).IsEmpty(), "no such hunk");
+	}
+}
+
+[test("server.git.discover")]
+class GitDiscoverTests {
+	[test("marker_holder")]
+	public static void TestMarkerHolder() {
+		Core::String holder;
+		assert_true(Git::GitMarkerHolder(View("nas-home/.git/HEAD"), holder) && holder == "nas-home", "a file in a folder's .git");
+		assert_true(Git::GitMarkerHolder(View("libs/inner/.git"), holder) && holder == "libs/inner", "the .git itself, deeper down");
+		assert_true(Git::GitMarkerHolder(View(".git/index"), holder) && holder.IsEmpty(), "the workspace's own .git");
+		assert_true(!Git::GitMarkerHolder(View("src/main.go"), holder), "no .git in the path");
+		assert_true(!Git::GitMarkerHolder(View("src/.gitignore"), holder), ".gitignore is no .git");
+		assert_true(!Git::GitMarkerHolder(View("node_modules/pkg/.git/HEAD"), holder), "a folder discovery skips");
+		assert_true(!Git::GitMarkerHolder(View("app/build/out/.git/HEAD"), holder), "a skipped folder anywhere above");
+	}
+
+	[test("a_deleted_folder_takes_its_repositories")]
+	public static void TestDeletionTakesRepo() {
+		assert_true(Git::DeletionTakesRepo(View("libs/inner/.git"), View("libs/inner")), "its .git");
+		assert_true(Git::DeletionTakesRepo(View("libs/inner"), View("libs/inner")), "its folder");
+		assert_true(Git::DeletionTakesRepo(View("libs"), View("libs/inner")), "a folder above it, deleted whole");
+		assert_true(Git::DeletionTakesRepo(View(".git"), View("")), "the workspace's own .git");
+		assert_true(!Git::DeletionTakesRepo(View("libs/inner/src/a.cf"), View("libs/inner")), "a file in it");
+		assert_true(!Git::DeletionTakesRepo(View("libs/other"), View("libs/inner")), "a folder beside it");
+		assert_true(!Git::DeletionTakesRepo(View("libs/inn"), View("libs/inner")), "a folder whose name begins its name");
+		assert_true(!Git::DeletionTakesRepo(View("src"), View("")), "a folder of the workspace's own repository");
+		assert_true(!Git::DeletionTakesRepo(View("src"), View("..")), "nor of one above the workspace");
 	}
 }
 

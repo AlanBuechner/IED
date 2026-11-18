@@ -361,3 +361,26 @@ class NestedRepoTests(ServerTestCase):
 
 	async def test_a_folder_inside_a_repository(self):
 		self.assertEqual([("..", "Outer")], await self.repos(os.path.join(self.outer, "src")))
+
+	async def test_a_repository_made_after_the_workspace_opened_is_found(self):
+		"""Discovery ran only when the workspace opened: a later git init was never listed."""
+		self.server = IedServer(extra=("--home", self.home, "--workspace", self.outer))
+		self.assertTrue(self.server.started, self.server.error)
+		client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		await client.request("ws.setTrust", {"wsId": "w1", "trusted": True})
+
+		async def listed_until(wanted):
+			listed = []
+			for _ in range(200):
+				listed = [(r["root"], r["name"]) for r in (await client.request("git.repos", {"wsId": "w1"}))["repos"]]
+				if wanted(listed):
+					break
+				await asyncio.sleep(0.05)
+			return listed
+
+		first = await listed_until(lambda repos: repos)
+		self.assertEqual([("", "Outer"), ("libs/inner", "inner")], first)
+		make_repo(os.path.join(self.outer, "tools", "late"))
+		later = await listed_until(lambda repos: ("tools/late", "late") in repos)
+		client.abort()
+		self.assertEqual([("", "Outer"), ("libs/inner", "inner"), ("tools/late", "late")], later)

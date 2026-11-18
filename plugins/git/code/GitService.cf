@@ -111,10 +111,41 @@ namespace Git
 		repo->m_ChangedNs = clock_now_ns();
 	}
 
+	// A .git no known repository has changed (one made since the workspace opened: git init, a clone), or a known
+	// repository went - its .git, its folder or a folder above it deleted: the repositories are found again. Discovery
+	// once ran only when the workspace opened or was trusted, so a repository made later was never listed; and one whose
+	// folder was deleted whole stayed listed, every git tool asking all of them failing in its missing folder.
+	bool GitPlugin::WantsDiscovery(GitWorkspace* git, const IED::FileChanges& changes) {
+		if (!git->m_Trusted || !git->m_Error.IsEmpty() || git->m_Discover) return false;
+		const int64 now = clock_now_ns();
+		for (const IED::FileChange& change : changes.m_Changes) {
+			if (change.m_Change == "deleted")
+				for (GitRepo* repo : git->m_Repos)
+					if (DeletionTakesRepo(change.m_Path.View(), repo->m_Relative.View())) return true;
+			Core::String holder;
+			if (!GitMarkerHolder(change.m_Path.View(), holder)) continue;
+			bool known = false;
+			for (GitRepo* repo : git->m_Repos)
+				if (repo->m_Relative == holder) known = true;
+			if (known) continue;
+			int64 lastNs = 0;
+			if (git->m_UnknownGitNs.TryGet(holder, lastNs) && now - lastNs < c_GitRediscoverNs) continue;
+			git->m_UnknownGitNs.Remove(holder);
+			git->m_UnknownGitNs.Insert(holder, now);
+			return true;
+		}
+		return false;
+	}
+
 	void GitPlugin::FilesChanged(const IED::FileChanges& changes) {
 		Threading::LockGuard guard(m_Lock);
 		GitWorkspace* git = Find(changes.m_WsId.View());
-		if (!git || git->m_Repos.IsEmpty()) return;
+		if (!git) return;
+		if (WantsDiscovery(git, changes)) {
+			git->m_Discover = true;
+			m_Wake.NotifyAll();
+		}
+		if (git->m_Repos.IsEmpty()) return;
 		for (GitRepo* repo : git->m_Repos) {
 			Core::String gitDir;
 			const bool gitDirInside = IED::RelativeTo(git->m_Root.View(), repo->m_CommonDir.View(), gitDir);

@@ -16,6 +16,8 @@ namespace Git
 {
 	const int64 c_GitQuietNs = 150000000;
 	const int64 c_GitStatusEveryNs = 1000000000;
+	// How often a .git that is no known repository's may make the repositories be found again.
+	const int64 c_GitRediscoverNs = 10000000000;
 	const int64 c_GitLogDefault = 200;
 	const int64 c_GitLogMost = 2000;
 	const int64 c_GitDiffMostBytes = 2097152;
@@ -31,6 +33,9 @@ namespace Git
 		public Core::Array<GitRepo*> m_Repos;
 		public bool m_Discover;          // waiting for the discovery thread
 		public Core::String m_Error;     // "untrusted", or why git cannot run
+		// When each .git no known repository has ("libs/x") last made a discovery: one that is not a repository, or lies
+		// deeper than git.scanDepth, would otherwise make every change in it a discovery.
+		public Core::HashMap<Core::String, int64> m_UnknownGitNs;
 
 		public Core::String Topic() const { return Core::String("gitrepos:") + m_WsId.View(); }
 		// {repos: [summary], error, discovering}
@@ -77,6 +82,7 @@ namespace Git
 		private void Trusted(GitWorkspace* git, bool trusted);
 		private void Forget(GitWorkspace* git);
 		private void Mark(GitRepo* repo, Core::StringView path, bool inGitDir);
+		private bool WantsDiscovery(GitWorkspace* git, const IED::FileChanges& changes);
 		private void Watch(GitRepo* repo);
 		private void Listed(GitWorkspace* git);
 		private void RefreshLoop();
