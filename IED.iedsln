@@ -68,6 +68,7 @@
 				"ied.profiler",
 				"ied.python",
 				"ied.rust",
+				"ied.sandbox",
 				"ied.scripts",
 				"ied.shaders",
 				"ied.sql",
