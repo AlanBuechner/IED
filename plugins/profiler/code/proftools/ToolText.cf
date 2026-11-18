@@ -146,6 +146,9 @@ namespace Profiler
 		}
 		FS::Path path = ws->File(IED::NormalizePath(named).View());
 		if (FS::FileExists(path.CStr())) return profiler->EntryForPath(ws, path.View())->m_Id;
+		// A path that names no file is most often a trace the program never wrote: IED_PROFILER=file: does nothing in a program without a profiler client.
+		if (named.EndsWith(Core::StringView(".iedtrace")))
+			throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no capture ") + named + ": no such file - a program writes one only when it is instrumented (it includes profile.ch or Itp.h and records zones) and ran with IED_PROFILER=file:<path>; profile_list names the captures there are").View());
 		throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no capture ") + named + " (profile_list names them)").View());
 	}
 
