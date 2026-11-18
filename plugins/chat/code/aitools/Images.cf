@@ -1,4 +1,5 @@
 include "Images.ch"
+include "Files.ch"
 
 namespace Ai
 {
@@ -12,10 +13,8 @@ namespace Ai
 
 	// The path relative to the workspace root; false with `why` when it is not inside it.
 	static bool InsideWorkspace(const IED::Workspace& ws, Core::StringView path, Core::String& relative, Core::String& why) {
-		Core::String named = Core::String(path);
-		Core::String kept;
-		if (IsAbsolute(path) && !ws.m_LocalState.IsEmpty() && IED::RelativeTo(ws.m_LocalState.View(), path, kept)) named = Core::String(".ied/local/") + kept.View();
-		else if (IsAbsolute(path) && !IED::RelativeTo(ws.m_Root.View(), path, named)) {
+		Core::String named = WorkspacePathOf(ws, path);
+		if (IsAbsolute(named.View())) {
 			why = Core::String("it is not inside the workspace");
 			return false;
 		}

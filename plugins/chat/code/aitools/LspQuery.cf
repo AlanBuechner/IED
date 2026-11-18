@@ -405,9 +405,10 @@ namespace Ai
 
 	Core::String CodeQuery::FileOf(Core::StringView given) const {
 		if (given.StartsWith(Core::StringView("file:"))) return Core::String(given);
-		Core::String relative;
-		if (IsAbsolute(given) && IED::RelativeTo(m_Ws.m_Root.View(), given, relative)) return IED::NormalizePath(relative.View());
-		if (IsAbsolute(given)) return IED::FileUriOfPath(given);
+		if (IsAbsolute(given)) {
+			Core::String inside = WorkspacePathOf(m_Ws, given);
+			return inside.View() != given ? IED::NormalizePath(inside.View()) : IED::FileUriOfPath(given);
+		}
 		return IED::NormalizePath(given);
 	}
 

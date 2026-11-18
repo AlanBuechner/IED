@@ -452,7 +452,7 @@ namespace Ai
 	static bool CopySource(const Chat* chat, const ToolInvocation& call, Core::String& text, Core::String& source, bool& numbered, Core::String& error) {
 		numbered = false;
 		if (call.m_Args.Member("path").IsValid()) {
-			source = IED::NormalizePath(call.m_Args.Member("path").AsView());
+			source = WorkspaceArgument(call, "path");
 			text = TextAsEdited(call.m_Ws, source.View());
 			return true;
 		}
@@ -615,7 +615,7 @@ namespace Ai
 		}
 		Core::String lines = LinesNote(RangeOf(call.m_Args));
 		if (call.m_Args.Member("path").IsValid()) {
-			Core::String path = IED::NormalizePath(call.m_Args.Member("path").AsView());
+			Core::String path = WorkspaceArgument(call, "path");
 			plan.m_Subject = (Core::String("fs.read(") + path.View()) + ")";
 			plan.m_Summary = ((Core::String("Copy ") + path.View()) + lines.View() + " to " + name);
 			return plan;

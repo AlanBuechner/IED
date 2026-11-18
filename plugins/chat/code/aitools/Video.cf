@@ -2,6 +2,7 @@ include "api/Plugin.ch"
 include "Video.ch"
 include "VideoFrames.ch"
 include "Images.ch"
+include "Files.ch"
 
 namespace Ai
 {
@@ -190,13 +191,13 @@ namespace Ai
 
 	static ToolPlan VideoPlan(const ToolInvocation& call) {
 		ToolPlan plan;
-		plan.m_Subject = (Core::String("fs.read(") + IED::NormalizePath(call.m_Args.Member("path").AsView()).View()) + ")";
+		plan.m_Subject = (Core::String("fs.read(") + WorkspaceArgument(call, "path").View()) + ")";
 		plan.m_Summary = Core::String("Watch ") + call.m_Args.Member("path").AsView();
 		return plan;
 	}
 
 	static ToolOutcome VideoRun(const ToolInvocation& call) {
-		Core::String path = IED::NormalizePath(call.m_Args.Member("path").AsView());
+		Core::String path = WorkspaceArgument(call, "path");
 		Core::String folder = IED::WorkspaceFile(call.m_Ws, path.View());
 		if (IsVideoFile(path.View()))
 			return ToolError(((Core::String("video_view: ") + path.View()) + " is a video file; video_view reads a recording as a folder of PNG frames (IED has no video decoder yet): "

@@ -253,7 +253,16 @@ namespace Ai
 		return IED::NormalizePath(kept.View());
 	}
 
-	static Core::String PathArgument(const ToolInvocation& call, const char* name) { return ToolPath(call.m_Args.Member(name).AsView()); }
+	Core::String WorkspacePathOf(const IED::Workspace& ws, Core::StringView path) {
+		Core::String relative;
+		if (!ws.m_LocalState.IsEmpty() && IED::RelativeTo(ws.m_LocalState.View(), path, relative)) return relative.IsEmpty() ? Core::String(".ied/local") : Core::String(".ied/local/") + relative.View();
+		if (IED::RelativeTo(ws.m_Root.View(), path, relative)) return relative;
+		return Core::String(path);
+	}
+
+	Core::String WorkspaceArgument(const ToolInvocation& call, const char* name) { return ToolPath(WorkspacePathOf(call.m_Ws, call.m_Args.Member(name).AsView()).View()); }
+
+	static Core::String PathArgument(const ToolInvocation& call, const char* name) { return WorkspaceArgument(call, name); }
 
 	// The file fs_read reads: a workspace path, or - by its absolute path, as the code tools show one - a file outside
 	// the workspace that a language server named (its file: URI).
@@ -443,6 +452,15 @@ namespace Ai
 		return formatted;
 	}
 
+	// .ied/local is the workspace's local state, kept outside its folder: a program run in the workspace finds the file
+	// only by where it really is.
+	static void AppendLocalStatePlace(const ToolInvocation& call, Core::StringView path, Core::StringBuilder& said) {
+		if (!path.StartsWith(Core::StringView(".ied/local/"))) return;
+		said.Append(" (on disk at ");
+		said.Append(IED::WorkspaceFile(call.m_Ws, path).View());
+		said.Append(", outside the workspace's folder: give shell_run and program_run that path)");
+	}
+
 	// Writes `text` over `before` and says so, with what follows a write (AfterWrite.ch): the file formatted when its
 	// language asks for it, and what its language server then says of it - information, never a failure.
 	static ToolOutcome Written(const ToolInvocation& call, Core::StringView path, Core::StringView before, Core::StringView text, const ToolPlan& plan) {
@@ -466,6 +484,7 @@ namespace Ai
 		said.Append(" -");
 		said.AppendInt(diff.m_Minus);
 		said.Append(" lines, saved");
+		AppendLocalStatePlace(call, path, said);
 		if (!formatNote.IsEmpty()) {
 			said.Append("\n");
 			said.Append(formatNote.View());
@@ -710,8 +729,8 @@ namespace Ai
 		read->m_Run = ReadRun;
 		read->m_FolderRoots = true;
 		registry.Add(read);
-		ToolSpec* write = Spec("fs_write", "Create a file, or replace a whole file's content. For a change to part of a file use fs_edit. Example: fs_write({\"path\": \"docs/notes.md\", \"content\": \"...\"})",
-			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\"}, \"content\": {\"type\": \"string\"}}, \"required\": [\"path\", \"content\"], \"additionalProperties\": false}",
+		ToolSpec* write = Spec("fs_write", "Create a file of the workspace, or replace a whole file's content. For a change to part of a file use fs_edit; a file outside the workspace is refused - write it with shell_run. Example: fs_write({\"path\": \"docs/notes.md\", \"content\": \"...\"})",
+			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"workspace-relative path (a full path inside the workspace or its .ied/local is taken as that)\"}, \"content\": {\"type\": \"string\"}}, \"required\": [\"path\", \"content\"], \"additionalProperties\": false}",
 			ToolClass::Write, false);
 		write->m_Plan = WritePlan;
 		write->m_Run = WriteRun;
@@ -722,8 +741,8 @@ namespace Ai
 		edit->m_Plan = EditPlan;
 		edit->m_Run = EditRun;
 		registry.Add(edit);
-		ToolSpec* list = Spec("fs_list", "List a folder's files and folders (folders end in /), skipping build output and .git. Example: fs_list({\"path\": \"src\", \"depth\": 2})",
-			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"workspace-relative folder; empty for the root; plugins:/ for the plugins' folders\"}, \"depth\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 6}}, \"required\": [\"path\"], \"additionalProperties\": false}",
+		ToolSpec* list = Spec("fs_list", "List a folder's files and folders (folders end in /), skipping build output and .git. A folder that is not there is an error naming the folders its nearest parent holds: to ask whether files are there, fs_glob them (none found is an answer, not an error). Example: fs_list({\"path\": \"src\", \"depth\": 2})",
+			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"workspace-relative folder (no ..); empty for the root; plugins:/ for the plugins' folders; a folder outside the workspace is listed with shell_run (dir)\"}, \"depth\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 6}}, \"required\": [\"path\"], \"additionalProperties\": false}",
 			ToolClass::Read, true);
 		list->m_Plan = ListPlan;
 		list->m_Run = ListRun;

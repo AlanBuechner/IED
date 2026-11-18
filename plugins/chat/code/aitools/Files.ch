@@ -22,6 +22,12 @@ namespace Ai
 	// A path a tool call names, workspace-relative: its "." parts dropped ("." is the root, as models often write it),
 	// then normalized as every workspace path is ("..", a drive letter: bad_request).
 	Core::String ToolPath(Core::StringView path);
+	// A full path inside the workspace as its workspace path: under its local state (kept outside its folder) as
+	// ".ied/local/...", under its root relative to it; any other path as given.
+	Core::String WorkspacePathOf(const IED::Workspace& ws, Core::StringView path);
+	// A call's path argument `name` as a workspace path: WorkspacePathOf, then ToolPath (bad_request when it is
+	// neither inside the workspace nor workspace-relative).
+	Core::String WorkspaceArgument(const ToolInvocation& call, const char* name);
 	// The glob of the workspace's files named like `path` ("src/a/Renderer.ch": "**/Renderer.ch"): where an fs_read
 	// that missed most likely meant.
 	Core::String SameNamedGlob(Core::StringView path);

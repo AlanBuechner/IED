@@ -3,6 +3,7 @@ include "Media.ch"
 include "Images.ch"
 include "ImageInfo.ch"
 include "Video.ch"
+include "Files.ch"
 
 namespace Ai
 {
@@ -25,14 +26,14 @@ namespace Ai
 
 	static ToolPlan ViewPlan(const ToolInvocation& call) {
 		ToolPlan plan;
-		plan.m_Subject = (Core::String("fs.read(") + IED::NormalizePath(call.m_Args.Member("path").AsView()).View()) + ")";
+		plan.m_Subject = (Core::String("fs.read(") + WorkspaceArgument(call, "path").View()) + ")";
 		plan.m_Summary = Core::String("View ") + call.m_Args.Member("path").AsView();
 		return plan;
 	}
 
 	static ToolOutcome ViewRun(const ToolInvocation& call) {
 		IED::ToolImage image;
-		image.m_Path = IED::NormalizePath(call.m_Args.Member("path").AsView());
+		image.m_Path = WorkspaceArgument(call, "path");
 		image.m_Mime = ImageMime(image.m_Path.View());
 		if (image.m_Mime.IsEmpty()) return ToolError(((Core::String("image_view: ") + image.m_Path.View()) + " is not a PNG, JPEG, WebP or GIF file").View());
 		Core::Array<IED::ToolImage> named;
@@ -55,13 +56,13 @@ namespace Ai
 
 	static ToolPlan InfoPlan(const ToolInvocation& call) {
 		ToolPlan plan;
-		plan.m_Subject = (Core::String("fs.read(") + IED::NormalizePath(call.m_Args.Member("path").AsView()).View()) + ")";
+		plan.m_Subject = (Core::String("fs.read(") + WorkspaceArgument(call, "path").View()) + ")";
 		plan.m_Summary = Core::String("Read the header of ") + call.m_Args.Member("path").AsView();
 		return plan;
 	}
 
 	static ToolOutcome InfoRun(const ToolInvocation& call) {
-		Core::String path = IED::NormalizePath(call.m_Args.Member("path").AsView());
+		Core::String path = WorkspaceArgument(call, "path");
 		FS::Path file = FS::Path(IED::WorkspaceFile(call.m_Ws, path.View()).View());
 		const int64 size = FS::FileSize(file.CStr());
 		if (size < 0) return ToolError(((Core::String("image_info: there is no file ") + path.View()) + "; use fs_glob to find files by name").View());

@@ -2,6 +2,7 @@ include "api/Plugin.ch"
 include "Run.ch"
 include "chats/Roots.ch"
 include "aitools/Clipboard.ch"
+include "aitools/Files.ch"
 include "prompts/Contributed.ch"
 include "chats/Replies.ch"
 
@@ -238,7 +239,7 @@ namespace Ai
 			if (!root.m_Note.IsEmpty() && !outcome.m_IsError) outcome.m_Content = (root.m_Note + "\n") + outcome.m_Content.View();
 			if (spec->m_ToolClass == ToolClass::Write && !outcome.m_IsError && root.m_RootAlias.IsEmpty() && !invocation.m_Args.Member("path").AsView().IsEmpty()) {
 				IED::HostLock guard(*m_Context);
-				TrackModified(IED::NormalizePath(invocation.m_Args.Member("path").AsView()).View(), outcome.m_Plus, outcome.m_Minus);
+				TrackModified(Ai::WorkspaceArgument(invocation, "path").View(), outcome.m_Plus, outcome.m_Minus);
 			}
 			return outcome;
 		}

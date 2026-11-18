@@ -584,3 +584,16 @@ class AfterAiWriteTests(CodeToolCase):
 		with open(os.path.join(self.repo, "a.fk"), encoding="utf-8") as f:
 			self.assertEqual("messy bad\n", f.read())
 		self.assertEqual([], self.received("textDocument/formatting"))
+
+	async def test_a_local_state_file_is_named_where_it_is_on_disk(self):
+		results = await self.results(("w1", "fs_write", {"path": ".ied/local/notes/run.py", "content": "print(1)\n"}), permission="auto")
+		said = results["w1"]
+		self.assertIn(".ied/local/notes/run.py: +1 -0 lines, saved (on disk at ", said, "a program run in the workspace would not find it by its workspace path")
+		on_disk = said.split("(on disk at ", 1)[1].split(", outside the workspace's folder", 1)[0]
+		with open(on_disk, encoding="utf-8") as f:
+			self.assertEqual("print(1)\n", f.read(), "the path it names is the file written")
+		again = await self.results(("r1", "fs_read", {"path": on_disk}), ("w2", "fs_write", {"path": on_disk, "content": "print(2)\n"}), permission="auto")
+		self.assertIn("print(1)", again["r1"], "fs_read takes the path fs_write named")
+		self.assertIn(".ied/local/notes/run.py: +1 -1 lines, saved", again["w2"], "and so does fs_write, as its workspace path")
+		with open(on_disk, encoding="utf-8") as f:
+			self.assertEqual("print(2)\n", f.read())
