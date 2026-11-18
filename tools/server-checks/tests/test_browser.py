@@ -198,6 +198,11 @@ class BrowserTests(ServerTestCase):
 		self.assertEqual((20, 200, 200, 60), (click["box"]["x"], click["box"]["y"], click["box"]["width"], click["box"]["height"]))
 		self.assertEqual({"text": 'Value: "Clicked AI"', "isError": False}, await self.call("browser.eval", page=page, js="document.title"))
 		self.assertTrue((await self.call("browser.eval", page=page, js="throw new Error('nope')"))["isError"])
+		awaited = await self.call("browser.eval", page=page, js="await new Promise(r => setTimeout(r, 50)); document.title")
+		self.assertEqual({"text": 'Value: "Clicked AI"', "isError": False}, awaited, "a top-level await works")
+		reloaded = await self.call("browser.eval", page=page, js="location.reload(); await new Promise(r => setTimeout(r, 3000)); 1")
+		self.assertTrue(reloaded["isError"] and "browser_navigate" in reloaded["text"], reloaded)
+		await self.titled(page, "Fixture")
 		shot = await self.call("browser.screenshot", page=page)
 		path = workspace_file(self.data, self.site, shot["image"])
 		self.assertTrue(shot["image"].startswith(".ied/local/browser/shots/" + page), shot)
@@ -247,6 +252,22 @@ class BrowserTests(ServerTestCase):
 		frame = await self.client.request("browser.frame", {"pageId": page, "after": 0}, timeout=LOAD_SECONDS)
 		self.assertGreater(frame["seq"], 0, "looking at it loads it again")
 		await self.titled(page, "Fixture")
+
+	async def test_a_page_kept_across_a_restart_answers_its_first_call(self):
+		"""The AI's first call on its page after a restart loads the page again and waits for it: a screenshot taken while
+		the new page was still navigating failed "Not attached to an active page" (2026-11-13)."""
+		opened = await self.call("browser.openPage", url=self.url)
+		page = re.search(r"(pg-[0-9a-f]+)", opened["text"]).group(1)
+		for _ in range(3):
+			self.client.abort()
+			self.server.stop(remove_data=False)
+			self.server = self.start_server()
+			await self.connect()
+			shot = await self.call("browser.screenshot", page=page)
+			with open(workspace_file(self.data, self.site, shot["image"]), "rb") as f:
+				self.assertEqual(b"\x89PNG", f.read(4))
+			self.assertEqual({"text": 'Value: "Fixture"', "isError": False}, await self.call("browser.eval", page=page, js="document.title"),
+				"it was loaded at its address before the call ran")
 
 	async def test_an_idle_page_leaves_the_browser_and_comes_back(self):
 		await self.client.request("settings.set", {"tier": "app", "key": "browser.unloadAfterSeconds", "value": 2})

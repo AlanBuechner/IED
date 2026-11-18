@@ -140,7 +140,7 @@
 			},
 			{
 				"name": "browser_eval",
-				"description": "Run JavaScript in a page and get its value as JSON (promises are awaited), or the exception it threw.",
+				"description": "Run JavaScript in a page and get its value as JSON, or the exception it threw. It runs as in DevTools' console: the last expression is the value, a top-level await works and a promise is awaited, for at most 10 s; a script with a top-level return runs as an async function's body instead, its return the value (to wait longer, call again). A script ends where the page navigates (location.reload(), a link): reload with browser_navigate, then evaluate.",
 				"class": "exec",
 				"group": "browser",
 				"inputSchema": { "type": "object", "properties": { "page": { "type": "string" }, "js": { "type": "string" } }, "required": ["page", "js"], "additionalProperties": false },

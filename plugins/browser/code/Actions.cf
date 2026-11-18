@@ -97,7 +97,7 @@ namespace Browser
 
 	static bool Quiet(Core::StringView role) {
 		return role == "none" || role == "generic" || role == "presentation" || role == "InlineTextBox" || role == "LineBreak" || role == "ignored" ||
-			role == "RootWebArea" || role == "WebArea" || role == "ListMarker";
+		role == "RootWebArea" || role == "WebArea" || role == "ListMarker";
 	}
 
 	static Core::String Property(const Serialization::DomNode& node, const char* name) {
@@ -462,9 +462,27 @@ namespace Browser
 		return done;
 	}
 
-	Core::String Evaluate(Browsers* browsers, Page* page, Core::StringView script, bool& failed) {
-		CdpReply reply = browsers->Call(page, Core::StringView("Runtime.evaluate"), (Core::String("{\"returnByValue\":true,\"awaitPromise\":true,\"userGesture\":true,\"timeout\":10000,\"expression\":") +
-			JsonText(script).View() + "}").View());
+	Core::String EvaluateOnce(Browsers* browsers, Page* page, Core::StringView script, bool& failed) {
+		CdpReply reply;
+		try {
+			// replMode: the code runs as in DevTools' console, so a top-level await works.
+			reply = browsers->Call(page, Core::StringView("Runtime.evaluate"), (Core::String("{\"returnByValue\":true,\"awaitPromise\":true,\"replMode\":true,\"userGesture\":true,\"timeout\":10000,\"expression\":") +
+				JsonText(script).View() + "}").View());
+		}
+		catch (IED::RpcError error) {
+			if (error.m_Message.View().Contains(Core::StringView("navigated or closed"))) {
+				failed = true;
+				return Core::String("the page navigated while the script ran (a reload, a link, a form), which ends the script: it cannot wait past "
+					"that. Load or reload the page with browser_navigate, then call browser_eval again.");
+			}
+			if (error.m_Message.View().Contains(Core::StringView("in time"))) {
+				failed = true;
+				return Core::String("the script ran past browser_eval's 10 s limit (an awaited promise or a loop that long), so its value is lost; "
+					"the page may still be running it. Split the work into calls of under 10 s: start the long part without awaiting it, "
+					"keep its result on window (window.__result = ...), and read that in a later call.");
+			}
+			throw error;
+		}
 		Serialization::DomNode exception = reply.m_Result.Member("exceptionDetails");
 		failed = exception.IsValid();
 		Core::String text;
@@ -480,6 +498,15 @@ namespace Browser
 		}
 		if (text.ByteLength() > c_EvalBytes) text = Core::String(text.View().Substring(0, IED::WholeCharacters(text.View().Substring(0, c_EvalBytes)))) + " [cut]";
 		return text;
+	}
+
+	// As the console runs it; a script with a top-level `return` (which the console refuses) runs again as an async
+	// function's body, so `return await r.json();` gives its value too. The console awaits a top-level `await`, not a
+	// promise left as the last value, so the call is awaited.
+	Core::String Evaluate(Browsers* browsers, Page* page, Core::StringView script, bool& failed) {
+		Core::String text = EvaluateOnce(browsers, page, script, failed);
+		if (!failed || !text.View().StartsWith(Core::StringView("SyntaxError: Illegal return statement"))) return text;
+		return EvaluateOnce(browsers, page, (Core::String("await (async () => {\n") + script + "\n})()").View(), failed);
 	}
 
 	Core::String Described(Browsers* browsers, Page* page) {

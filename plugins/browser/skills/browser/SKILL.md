@@ -33,7 +33,9 @@ your clicks and keystrokes is drawn on the page for them.
 6. `browser_screenshot {page, full_page?}` - for layout and visual checks; the PNG lands in
    `.ied/local/browser/shots/` (models that see images get it).
 7. `browser_eval {page, js}` - read state the page does not show (`document.title`, `localStorage`, a component's
-   data). It runs in the page with the page's rights; it needs approval in the default permission mode.
+   data). It runs in the page with the page's rights, as in DevTools' console (a top-level `await` works), for at
+   most 10 s - to watch something slower, call it again. A script ends where its page navigates (`location.reload()`,
+   a link): reload with `browser_navigate`, then evaluate. It needs approval in the default permission mode.
 
 A change to a web UI is done when the page loads without console errors, the snapshot shows what was asked for, and
 the interaction works when you drive it - not when the code compiles.
