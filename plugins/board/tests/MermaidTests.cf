@@ -49,6 +49,17 @@ class BoardMermaidTests
 		assert_true(!Boards::ParseMermaid(Core::StringView("flowchart TD\n a --> \n"), broken, problem) && problem.View().Contains(Core::StringView("line 2")), "a broken line is named");
 	}
 
+	[test("comments_keep_their_semicolons")]
+	public static void CommentSemicolons() {
+		Boards::MermaidChart chart;
+		Core::String problem;
+		const char* text = "flowchart TD\n  api[API]\n  %% desc api: routes requests; checks tokens\n  %% note by api: one; two\n";
+		assert_true(Boards::ParseMermaid(Core::StringView(text), chart, problem), problem.CStr());
+		Core::String* desc = chart.m_Descs.Find(Core::String("api"));
+		assert_true(desc != nullptr && *desc == "routes requests; checks tokens", "the desc whole");
+		assert_true(chart.m_NoteTexts.Count() == 1 && chart.m_NoteTexts[0] == "one; two", "the note whole");
+	}
+
 	[test("import_lays_out_then_export_reads_it_back")]
 	public static void RoundTrip() {
 		Boards::Board board;
@@ -65,6 +76,53 @@ class BoardMermaidTests
 		Core::String text = Boards::ExportMermaid(board, Boards::ExtractDiagram(board, Core::Array<Core::String>()), Core::HashMap<Core::String, Core::String>());
 		assert_true(text.View().Contains(Core::StringView("subgraph back [\"Backend\"]")), "the subgraph back");
 		assert_true(text.View().Contains(Core::StringView("db[(\"DB\")]")) && text.View().Contains(Core::StringView("web --> api")), "shapes and edges back");
+	}
+
+	[test("subgraphs_with_edges_across_them_become_separate_frames")]
+	public static void Subgraphs() {
+		Boards::Board board;
+		Boards::InitBoard(board, Core::StringView("Engine"));
+		Core::Array<Core::String> notes;
+		const char* text = "flowchart TD\n subgraph own [Ownership]\n  app[App] --> scene[Scene]\n  scene --> world[World]\n  scene --> jobs[Jobs]\n end\n subgraph frame [Frame]\n  f1(Begin) --> f2(Stream) --> f3(Gameplay) --> f4(Transforms) --> f5(Render)\n end\n subgraph store [Storage]\n  reg[(Registry)] --> alloc[Allocator]\n  reg --> masks[Masks]\n  reg --> pools[Pools]\n end\n subgraph cmds [Commands]\n  writer[Writer] --> ecb[(Buffer)] --> play(Playback)\n end\n world --> reg\n world --> ecb\n play --> reg\n f2 -.-> reg\n f3 -.-> writer\n";
+		Boards::ChangeResult result = BtImport(board, text, notes);
+		assert_true(result.m_Error.IsEmpty(), result.m_Error.CStr());
+		Core::Array<Core::String> keys = { Core::String("own"), Core::String("frame"), Core::String("store"), Core::String("cmds") };
+		Core::Array<Core::String> members = { Core::String("app,scene,world,jobs"), Core::String("f1,f2,f3,f4,f5"), Core::String("reg,alloc,masks,pools"), Core::String("writer,ecb,play") };
+		for (int32 i = 0; i < 4; ++i) {
+			Boards::Element* frame = BtKeyed(board, keys[i].CStr());
+			assert_true(frame != nullptr, "a frame per subgraph");
+			for (Boards::Element* element : board.m_Elements) {
+				if (!Boards::IsNode(element->m_Kind)) continue;
+				const bool member = ((Core::String(",") + members[i].View()) + ",").View().Contains((Core::String(",") + element->m_Key.View() + ",").View());
+				assert_true(frame->Frame().ContainsBox(element->Frame()) == member, ((keys[i] + " holds exactly its members: ") + element->m_Key.View()).CStr());
+			}
+			for (int32 j = i + 1; j < 4; ++j)
+				assert_true(!frame->Frame().Overlaps(BtKeyed(board, keys[j].CStr())->Frame()), (((keys[i] + " and ") + keys[j].View()) + " do not overlap").CStr());
+		}
+		assert_true(BtKeyed(board, "app")->m_Y < BtKeyed(board, "world")->m_Y && BtKeyed(board, "f1")->m_Y < BtKeyed(board, "f5")->m_Y, "each frame laid out top down");
+	}
+
+	[test("plan_text_takes_one_layers_diagram")]
+	public static void PlanLayer() {
+		Boards::Board board;
+		Boards::InitBoard(board, Core::StringView("Shop"));
+		Core::Array<Core::String> notes;
+		BtImport(board, "flowchart TD\n api[API] --> db[(DB)]\n", notes);
+		Core::String base = board.m_Layers[0].m_Name;
+		Boards::ChangeResult added = BtMermaidApply(board, Core::StringView("[{\"op\":\"add_layer\",\"name\":\"Pictures\"},{\"op\":\"add_layer\",\"name\":\"Empty\"},{\"op\":\"add\",\"type\":\"rect\",\"text\":\"cell\",\"x\":900,\"y\":0,\"w\":60,\"h\":40,\"layer\":\"Pictures\"}]"));
+		assert_true(added.m_Error.IsEmpty(), added.m_Error.CStr());
+		Core::HashMap<Core::String, Core::String> colors;
+		Core::String whole = Boards::ExpandPlanText(board, Core::StringView("{{board:mermaid}}"), colors);
+		assert_true(whole.View().Contains(Core::StringView("cell")) && whole.View().Contains(Core::StringView("api")), "the whole board's diagram");
+		Core::String own = Boards::ExpandPlanText(board, ((Core::String("{{board:mermaid:") + base.View()) + "}}").View(), colors);
+		assert_true(own.View().Contains(Core::StringView("api")) && !own.View().Contains(Core::StringView("cell")), "the first layer's alone");
+		Core::String pictures = Boards::ExpandPlanText(board, Core::StringView("a {{board:mermaid:Pictures}} b"), colors);
+		assert_true(pictures.View().Contains(Core::StringView("cell")) && !pictures.View().Contains(Core::StringView("api")), "the pictures layer's alone");
+		assert_true(pictures.View().StartsWith(Core::StringView("a ```mermaid")) && pictures.View().EndsWith(Core::StringView("``` b")), "the text around it kept");
+		Core::String empty = Boards::ExpandPlanText(board, Core::StringView("{{board:mermaid:Empty}}"), colors);
+		assert_true(!empty.View().Contains(Core::StringView("api")) && !empty.View().Contains(Core::StringView("cell")), "an empty layer is an empty diagram, not the whole board");
+		Core::String missing = Boards::ExpandPlanText(board, Core::StringView("{{board:outline:Nope}}"), colors);
+		assert_true(missing.View().Contains(Core::StringView("no layer \"Nope\"")), "a missing layer is said");
 	}
 
 	[test("an_edited_chart_keeps_positions")]

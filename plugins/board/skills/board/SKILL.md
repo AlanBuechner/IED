@@ -137,7 +137,9 @@ The plan is what an agent builds from. Write it with `board_plan` (`action: "wri
 `board_export` with `format: "markdown"`: one section per component (what it does, its interface, what it talks to and
 how), the flows, the data, open questions - and the Mermaid diagram. Give nodes and frames a `desc` with `board_edit` as you
 learn what they are for: descriptions flow into the export. Put `{{board:mermaid}}` where the diagram goes rather than
-pasting it: it is filled in from the board each time the plan is read, so it never drifts. Mark assumptions as
+pasting it: it is filled in from the board each time the plan is read, so it never drifts. Pictures drawn cell by cell (a
+memory layout, a table) are boxes too: put them on a layer of their own and write `{{board:mermaid:<diagram layer>}}`, so
+the plan's diagram holds the design and not every cell. Mark assumptions as
 assumptions. `board_read`'s checks list loose ends worth raising (a decision with one way out).
 
 ## Building

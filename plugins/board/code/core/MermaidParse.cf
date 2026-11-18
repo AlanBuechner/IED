@@ -331,12 +331,14 @@ namespace Boards
 			lineNumber += 1;
 			Core::StringView line = text.Substring(start, i - start);
 			start = i + 1;
+			// A comment is the whole line: a ';' in a desc or a note is its text, not a statement's end.
+			Core::StringView trimmed = line.Trimmed();
+			if (trimmed.StartsWith(Core::StringView("%%"))) {
+				Comment(chart, trimmed.Substring(2, trimmed.ByteLength() - 2).Trimmed());
+				continue;
+			}
 			for (Core::StringView statement : Statements(line)) {
 				Core::StringView s = statement.Trimmed();
-				if (s.StartsWith(Core::StringView("%%"))) {
-					Comment(chart, s.Substring(2, s.ByteLength() - 2).Trimmed());
-					continue;
-				}
 				if (s.IsEmpty() || s.StartsWith(Core::StringView("```"))) continue;
 				Core::StringView word = FirstWord(s);
 				if (!header && (word == "flowchart" || word == "graph")) {

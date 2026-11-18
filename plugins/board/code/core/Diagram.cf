@@ -234,41 +234,41 @@ namespace Boards
 		for (const Core::String& name : names) {
 			// Fill pass: a node tinted in its own outline's color gets one class, <name>_fill, for both.
 			for (int32 both = 0; both < (fill ? 2 : 1); ++both) {
-			bool any = false;
-			for (const DiagramNode& node : diagram.m_Nodes) {
-				const bool same = node.m_Element->m_Color == node.m_Element->m_Fill;
-				if (!fill && same) continue;
-				if ((fill ? node.m_Element->m_Fill : node.m_Element->m_Color) == name && (!fill || (both == 1) == same)) any = true;
-			}
-			if (!any) continue;
-			out.Append(Core::StringView("    classDef "));
-			if (fill && both == 0) out.Append(Core::StringView("fill_"));
-			out.Append(name.View());
-			if (fill && both == 1) out.Append(Core::StringView("_fill"));
-			out.Append(fill ? (both == 1 ? Core::StringView(" stroke:") : Core::StringView(" fill:")) : Core::StringView(" stroke:"));
-			out.Append(colors.Get(name).View());
-			if (fill && both == 1) {
-				out.Append(Core::StringView(",fill:"));
+				bool any = false;
+				for (const DiagramNode& node : diagram.m_Nodes) {
+					const bool same = node.m_Element->m_Color == node.m_Element->m_Fill;
+					if (!fill && same) continue;
+					if ((fill ? node.m_Element->m_Fill : node.m_Element->m_Color) == name && (!fill || (both == 1) == same)) any = true;
+				}
+				if (!any) continue;
+				out.Append(Core::StringView("    classDef "));
+				if (fill && both == 0) out.Append(Core::StringView("fill_"));
+				out.Append(name.View());
+				if (fill && both == 1) out.Append(Core::StringView("_fill"));
+				out.Append(fill ? (both == 1 ? Core::StringView(" stroke:") : Core::StringView(" fill:")) : Core::StringView(" stroke:"));
 				out.Append(colors.Get(name).View());
-			}
-			if (fill) out.Append(Core::StringView("40"));
-			out.AppendByte(10);
-			out.Append(Core::StringView("    class "));
-			bool first = true;
-			for (const DiagramNode& node : diagram.m_Nodes) {
-				const Core::String mine = fill ? node.m_Element->m_Fill : node.m_Element->m_Color;
-				if (mine != name) continue;
-				if (fill && (both == 1) != (node.m_Element->m_Color == node.m_Element->m_Fill)) continue;
-				if (!fill && node.m_Element->m_Color == node.m_Element->m_Fill) continue;
-				if (!first) out.AppendByte(',');
-				out.Append(node.m_Key.View());
-				first = false;
-			}
-			out.AppendByte(' ');
-			if (fill && both == 0) out.Append(Core::StringView("fill_"));
-			out.Append(name.View());
-			if (fill && both == 1) out.Append(Core::StringView("_fill"));
-			out.AppendByte(10);
+				if (fill && both == 1) {
+					out.Append(Core::StringView(",fill:"));
+					out.Append(colors.Get(name).View());
+				}
+				if (fill) out.Append(Core::StringView("40"));
+				out.AppendByte(10);
+				out.Append(Core::StringView("    class "));
+				bool first = true;
+				for (const DiagramNode& node : diagram.m_Nodes) {
+					const Core::String mine = fill ? node.m_Element->m_Fill : node.m_Element->m_Color;
+					if (mine != name) continue;
+					if (fill && (both == 1) != (node.m_Element->m_Color == node.m_Element->m_Fill)) continue;
+					if (!fill && node.m_Element->m_Color == node.m_Element->m_Fill) continue;
+					if (!first) out.AppendByte(',');
+					out.Append(node.m_Key.View());
+					first = false;
+				}
+				out.AppendByte(' ');
+				if (fill && both == 0) out.Append(Core::StringView("fill_"));
+				out.Append(name.View());
+				if (fill && both == 1) out.Append(Core::StringView("_fill"));
+				out.AppendByte(10);
 			}
 		}
 	}
@@ -487,6 +487,60 @@ namespace Boards
 			out.Append(Core::StringView("\n## Not yet in the diagram\n\n"));
 			out.AppendInt(diagram.m_Strokes.Count());
 			out.Append(Core::StringView(" freehand strokes are not part of the diagram (board_recognize turns them into shapes).\n"));
+		}
+		return out.ToString();
+	}
+
+	bool ExtractLayerDiagram(const Board& board, Core::StringView layer, Diagram& diagram) {
+		Core::String layerId;
+		for (const Layer& each : board.m_Layers)
+			if (each.m_Name == layer || each.m_Id == layer) layerId = each.m_Id;
+		if (layerId.IsEmpty()) return false;
+		Core::Array<Core::String> ids;
+		for (Element* element : board.m_Elements)
+			if (element->m_Layer == layerId) ids.Push(element->m_Id);
+		// No ids would mean the whole board to ExtractDiagram: an empty layer is an empty diagram.
+		diagram = ids.IsEmpty() ? Diagram() : ExtractDiagram(board, ids);
+		return true;
+	}
+
+	Core::String ExpandPlanText(const Board& board, Core::StringView text, const Core::HashMap<Core::String, Core::String>& colors) {
+		if (!text.Contains(Core::StringView("{{board:"))) return Core::String(text);
+		Core::StringBuilder out;
+		int64 at = 0;
+		while (at < text.ByteLength()) {
+			Core::StringView rest = text.Substring(at, text.ByteLength() - at);
+			const int64 open = rest.IndexOf(Core::StringView("{{board:"));
+			if (open < 0) {
+				out.Append(rest);
+				break;
+			}
+			out.Append(rest.Substring(0, open));
+			Core::StringView tail = rest.Substring(open, rest.ByteLength() - open);
+			const int64 close = tail.IndexOf(Core::StringView("}}"));
+			Core::StringView inner = close < 0 ? Core::StringView("") : tail.Substring(8, close - 8);
+			const int64 colon = inner.IndexOf(Core::StringView(":"));
+			Core::StringView what = colon < 0 ? inner : inner.Substring(0, colon);
+			Core::StringView layer = colon < 0 ? Core::StringView("") : inner.Substring(colon + 1, inner.ByteLength() - colon - 1).Trimmed();
+			if (close < 0 || (what != "mermaid" && what != "outline")) {
+				out.Append(Core::StringView("{{"));
+				at += open + 2;
+				continue;
+			}
+			at += open + close + 2;
+			Diagram diagram;
+			if (layer.IsEmpty()) diagram = ExtractDiagram(board, Core::Array<Core::String>());
+			else if (!ExtractLayerDiagram(board, layer, diagram)) {
+				out.Append(((Core::String("(the board has no layer \"") + layer) + "\")").View());
+				continue;
+			}
+			if (what == "outline") {
+				out.Append(ExportOutline(board, diagram, colors).View());
+				continue;
+			}
+			out.Append(Core::StringView("```mermaid\n"));
+			out.Append(ExportMermaid(board, diagram, colors).View());
+			out.Append(Core::StringView("```"));
 		}
 		return out.ToString();
 	}

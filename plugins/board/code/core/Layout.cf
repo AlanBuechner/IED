@@ -15,8 +15,16 @@ namespace Boards
 		public double m_Order;      // its place in its rank, for the barycenter sweeps
 		public Core::Array<int64> m_In;
 		public Core::Array<int64> m_Out;
-		public Core::String m_Cluster;   // the frame it is in, "" for none
-		public double m_LabelOut;        // the widest label on a connector it starts
+		public double m_LabelOut;   // the widest label on a connector it starts
+	}
+
+	// What a layout places as one box: a node, or a frame's members already laid out inside the frame's room.
+	class LayoutBlock
+	{
+		public Core::Array<int64> m_Leaves;    // the nodes it holds
+		public Core::Array<Point> m_Offsets;   // each one's top left from the block's
+		public double m_W;
+		public double m_H;
 	}
 
 	bool IsDirection(Core::StringView direction) {
@@ -27,7 +35,18 @@ namespace Boards
 		return direction == "LR" || direction == "RL";
 	}
 
-	static Core::Array<LayoutNode*> Nodes(const Board& board, const Core::Array<Core::String>& ids, bool horizontal, Core::HashMap<Core::String, int64>& index) {
+	// A node to place, standing at `box`.
+	static LayoutNode* PlacedNode(const Box& box, bool horizontal) {
+		LayoutNode* node = new LayoutNode();
+		node->m_Box = box;
+		node->m_MainSize = horizontal ? box.Width() : box.Height();
+		node->m_CrossSize = horizontal ? box.Height() : box.Width();
+		node->m_Cross = horizontal ? box.CenterY() : box.CenterX();
+		node->m_Main = horizontal ? box.CenterX() : box.CenterY();
+		return node;
+	}
+
+	static Core::Array<LayoutNode*> Nodes(const Board& board, const Core::Array<Core::String>& ids, Core::HashMap<Core::String, int64>& index) {
 		Core::Array<LayoutNode*> nodes;
 		for (const Core::String& id : ids) {
 			Element* element = board.Find(id.View());
@@ -35,10 +54,6 @@ namespace Boards
 			LayoutNode* node = new LayoutNode();
 			node->m_Id = id;
 			node->m_Box = element->Frame();
-			node->m_MainSize = horizontal ? node->m_Box.Width() : node->m_Box.Height();
-			node->m_CrossSize = horizontal ? node->m_Box.Height() : node->m_Box.Width();
-			node->m_Cross = horizontal ? node->m_Box.CenterY() : node->m_Box.CenterX();
-			node->m_Main = horizontal ? node->m_Box.CenterX() : node->m_Box.CenterY();
 			index.Insert(id, nodes.Count());
 			nodes.Push(node);
 		}
@@ -163,26 +178,9 @@ namespace Boards
 				for (int64 w : *neighbours) sum += nodes[w]->m_Order;
 				weight.Push(neighbours->IsEmpty() ? nodes[v]->m_Order : sum / (double)neighbours->Count());
 			}
-			// A frame's members sort by their frame's mean, so they stay side by side in the rank.
-			Core::Array<double> key;
-			for (int64 k = 0; k < rank.Count(); ++k) {
-				const Core::String& cluster = nodes[rank[k]]->m_Cluster;
-				if (cluster.IsEmpty()) {
-					key.Push(weight[k]);
-					continue;
-				}
-				double sum = 0.0;
-				int64 n = 0;
-				for (int64 j = 0; j < rank.Count(); ++j)
-					if (nodes[rank[j]]->m_Cluster == cluster) {
-						sum += weight[j];
-						n += 1;
-					}
-				key.Push(sum / (double)n);
-			}
 			Core::Array<int64> places;
 			for (int64 k = 0; k < rank.Count(); ++k) places.Push(k);
-			places.SortBy([&weight, &key](int64 a, int64 b) -> bool { return key[a] < key[b] || (key[a] == key[b] && (weight[a] < weight[b] || (weight[a] == weight[b] && a < b))); });
+			places.SortBy([&weight](int64 a, int64 b) -> bool { return weight[a] < weight[b] || (weight[a] == weight[b] && a < b); });
 			Core::Array<int64> sorted;
 			for (int64 k : places) sorted.Push(rank[k]);
 			ranks[r] = sorted;
@@ -241,60 +239,6 @@ namespace Boards
 		}
 	}
 
-	// Pushes nodes that are not a frame's members out of the span its members take in the ranks they are in.
-	static void ClearFrames(Core::Array<LayoutNode*>& nodes, Core::Array<Core::Array<int64>>& ranks, double gap) {
-		const double pad = 40.0;
-		Core::Array<Core::String> clusters;
-		for (LayoutNode* node : nodes)
-			if (!node->m_Cluster.IsEmpty() && !clusters.Contains(node->m_Cluster)) clusters.Push(node->m_Cluster);
-		for (int32 pass = 0; pass < 3; ++pass)
-			for (const Core::String& cluster : clusters) {
-				double lo = c_Far;
-				double hi = -c_Far;
-				int64 first = ranks.Count();
-				int64 last = -1;
-				for (int64 r = 0; r < ranks.Count(); ++r)
-					for (int64 v : ranks[r]) {
-						if (nodes[v]->m_Cluster != cluster) continue;
-						lo = Math::Min(lo, nodes[v]->m_Cross - nodes[v]->m_CrossSize * 0.5 - pad);
-						hi = Math::Max(hi, nodes[v]->m_Cross + nodes[v]->m_CrossSize * 0.5 + pad);
-						first = Math::Min(first, r);
-						last = Math::Max(last, r);
-					}
-				for (int64 r = first; r <= last; ++r) {
-					Core::Array<double> wanted;
-					bool moved = false;
-					for (int64 v : ranks[r]) {
-						LayoutNode* node = nodes[v];
-						double at = node->m_Cross;
-						const double half = node->m_CrossSize * 0.5;
-						if (node->m_Cluster != cluster && at + half > lo && at - half < hi) {
-							at = at < (lo + hi) * 0.5 ? lo - half - gap * 0.25 : hi + half + gap * 0.25;
-							moved = true;
-						}
-						wanted.Push(at);
-					}
-					if (!moved) continue;
-					// Keep the rank's order consistent with the new places, then space it.
-					Core::Array<int64> order;
-					for (int64 k = 0; k < ranks[r].Count(); ++k) order.Push(k);
-					order.SortBy([&wanted](int64 a, int64 b) -> bool { return wanted[a] < wanted[b]; });
-					Core::Array<int64> rank;
-					Core::Array<double> sortedWanted;
-					for (int64 k : order) {
-						rank.Push(ranks[r][k]);
-						sortedWanted.Push(wanted[k]);
-					}
-					ranks[r] = rank;
-					for (int64 k = 0; k < rank.Count(); ++k) nodes[rank[k]]->m_Cross = sortedWanted[k];
-					for (int64 k = 1; k < rank.Count(); ++k) {
-						const double least = nodes[rank[k - 1]]->m_Cross + (nodes[rank[k - 1]]->m_CrossSize + nodes[rank[k]]->m_CrossSize) * 0.5 + gap * 0.25;
-						if (nodes[rank[k]]->m_Cross < least) nodes[rank[k]]->m_Cross = least;
-					}
-				}
-			}
-	}
-
 	// Ranks one after another; across a horizontal layout the gap after a rank leaves room for its connectors' labels.
 	static void PlaceAlong(Core::Array<LayoutNode*>& nodes, Core::Array<Core::Array<int64>>& ranks, double gap, bool horizontal) {
 		double cursor = 0.0;
@@ -335,51 +279,152 @@ namespace Boards
 		}
 	}
 
-	Core::HashMap<Core::String, Point> LayeredLayout(const Board& board, const Core::Array<Core::String>& ids, Core::StringView direction, double gap, const Core::HashMap<Core::String, Core::String>& clusters) {
-		Core::HashMap<Core::String, Point> moves;
-		const bool horizontal = Horizontal(direction);
-		const bool reversed = direction == "BT" || direction == "RL";
-		Core::HashMap<Core::String, int64> index;
-		Core::Array<LayoutNode*> nodes = Nodes(board, ids, horizontal, index);
-		if (nodes.IsEmpty()) return moves;
-		Box before;
-		for (LayoutNode* node : nodes) {
-			before.AddBox(node->m_Box);
-			const Core::String* cluster = clusters.FindAs(node->m_Id.View());
-			if (cluster) node->m_Cluster = *cluster;
-		}
-		Edges(board, nodes, index);
+	// Places nodes in ranks by their connectors, or in a grid when none has one: each one's center as m_Cross and m_Main
+	// (across and along the ranks; in a grid, x and y). Whether it made a grid.
+	static bool Arrange(Core::Array<LayoutNode*>& nodes, double gap, bool horizontal) {
 		bool connected = false;
 		for (LayoutNode* node : nodes)
 			if (!node->m_Out.IsEmpty()) connected = true;
-		bool grid = false;
-		if (connected) {
-			BreakCycles(nodes);
-			Core::Array<Core::Array<int64>> ranks = Ranks(nodes, Rank(nodes));
-			for (Core::Array<int64>& rank : ranks) Number(nodes, rank);
-			for (int32 i = 0; i < 4; ++i) Sweep(nodes, ranks, i % 2 == 0);
-			PlaceAlong(nodes, ranks, gap, horizontal);
-			PlaceAcross(nodes, ranks, gap * 0.75);
-			ClearFrames(nodes, ranks, gap);
-		}
-		else {
+		if (!connected) {
 			Grid(nodes, gap * 0.75);
-			grid = true;
+			return true;
 		}
-		Box after;
-		for (LayoutNode* node : nodes) {
-			const double main = reversed ? -node->m_Main : node->m_Main;
-			const double x = grid ? node->m_Cross : (horizontal ? main : node->m_Cross);
-			const double y = grid ? node->m_Main : (horizontal ? node->m_Cross : main);
-			node->m_Box = BoxAt(x - node->m_Box.Width() * 0.5, y - node->m_Box.Height() * 0.5, node->m_Box.Width(), node->m_Box.Height());
-			after.AddBox(node->m_Box);
+		BreakCycles(nodes);
+		Core::Array<Core::Array<int64>> ranks = Ranks(nodes, Rank(nodes));
+		for (Core::Array<int64>& rank : ranks) Number(nodes, rank);
+		for (int32 i = 0; i < 4; ++i) Sweep(nodes, ranks, i % 2 == 0);
+		PlaceAlong(nodes, ranks, gap, horizontal);
+		PlaceAcross(nodes, ranks, gap * 0.75);
+		return false;
+	}
+
+	// The block below `container` ("" for the board) that holds a node of frame `cluster`: the frame just below the
+	// container on the way out, or "" when the node stands in the container itself.
+	static Core::String BlockOf(const LayoutClusters& clusters, const Core::String& cluster, const Core::String& container) {
+		Core::String at = cluster;
+		for (int32 depth = 0; depth < 32 && !at.IsEmpty() && at != container; ++depth) {
+			const Core::String* parent = clusters.m_Parent.FindAs(at.View());
+			Core::String up = parent ? *parent : Core::String();
+			if (up == container) return at;
+			at = up;
 		}
-		for (LayoutNode* node : nodes) {
-			Element* element = board.Find(node->m_Id.View());
+		return Core::String();
+	}
+
+	// The members of `container` sorted into its blocks: a frame just below it with every node inside, or a node alone.
+	static Core::Array<Core::Array<int64>> Blocks(const Core::Array<LayoutNode*>& leaves, const Core::Array<int64>& members, const Core::String& container, const LayoutClusters& clusters, Core::Array<Core::String>& frames) {
+		Core::Array<Core::Array<int64>> held;
+		for (int64 leaf : members) {
+			const Core::String* cluster = clusters.m_Of.FindAs(leaves[leaf]->m_Id.View());
+			Core::String frame = BlockOf(clusters, cluster ? *cluster : Core::String(), container);
+			int64 at = frame.IsEmpty() ? -1 : frames.IndexOf(frame);
+			if (at < 0) {
+				at = held.Count();
+				frames.Push(frame);
+				held.Push(Core::Array<int64>());
+			}
+			held[at].Push(leaf);
+		}
+		return held;
+	}
+
+	// Lays out `members` (indices into `leaves`) inside `container` ("" for the board): each frame just below it laid out
+	// on its own first, then placed as one block with room for its title and padding. Each member's top left from the
+	// arrangement's.
+	static LayoutBlock ArrangeIn(const Core::Array<LayoutNode*>& leaves, const Core::Array<int64>& members, const Core::String& container, const LayoutClusters& clusters, Core::StringView direction, double gap) {
+		const bool horizontal = Horizontal(direction);
+		const bool reversed = direction == "BT" || direction == "RL";
+		Core::Array<Core::String> frames;
+		Core::Array<Core::Array<int64>> held = Blocks(leaves, members, container, clusters, frames);
+		Core::HashMap<int64, int64> blockOf;
+		Core::Array<LayoutBlock> blocks;
+		Core::Array<LayoutNode*> nodes;
+		for (int64 b = 0; b < held.Count(); ++b) {
+			LayoutBlock block;
+			if (frames[b].IsEmpty()) {
+				block.m_Leaves.Push(held[b][0]);
+				block.m_Offsets.Push(Point());
+				block.m_W = leaves[held[b][0]]->m_Box.Width();
+				block.m_H = leaves[held[b][0]]->m_Box.Height();
+			}
+			else {
+				LayoutBlock inner = ArrangeIn(leaves, held[b], frames[b], clusters, direction, gap);
+				block.m_Leaves = inner.m_Leaves;
+				for (const Point& offset : inner.m_Offsets) {
+					Point at;
+					at.m_X = offset.m_X + c_FramePad;
+					at.m_Y = offset.m_Y + c_FrameTitle;
+					block.m_Offsets.Push(at);
+				}
+				block.m_W = inner.m_W + c_FramePad * 2.0;
+				block.m_H = inner.m_H + c_FrameTitle + c_FramePad;
+			}
+			// It starts where what it holds stands, so the order the layout begins from is the board's.
+			Box standing;
+			double labelOut = 0.0;
+			for (int64 leaf : held[b]) {
+				standing.AddBox(leaves[leaf]->m_Box);
+				labelOut = Math::Max(labelOut, leaves[leaf]->m_LabelOut);
+				blockOf.Insert(leaf, b);
+			}
+			LayoutNode* node = PlacedNode(BoxAt(standing.CenterX() - block.m_W * 0.5, standing.CenterY() - block.m_H * 0.5, block.m_W, block.m_H), horizontal);
+			node->m_LabelOut = labelOut;
+			nodes.Push(node);
+			blocks.Push(block);
+		}
+		for (int64 leaf : members)
+			for (int64 to : leaves[leaf]->m_Out) {
+				const int64* from = blockOf.FindAs(leaf);
+				const int64* into = blockOf.FindAs(to);
+				if (!into || *from == *into || nodes[*from]->m_Out.Contains(*into)) continue;
+				nodes[*from]->m_Out.Push(*into);
+				nodes[*into]->m_In.Push(*from);
+			}
+		const bool grid = Arrange(nodes, gap, horizontal);
+		Core::Array<Box> placed;
+		Box bounds;
+		for (int64 b = 0; b < nodes.Count(); ++b) {
+			const double main = reversed ? -nodes[b]->m_Main : nodes[b]->m_Main;
+			const double x = grid ? nodes[b]->m_Cross : (horizontal ? main : nodes[b]->m_Cross);
+			const double y = grid ? nodes[b]->m_Main : (horizontal ? nodes[b]->m_Cross : main);
+			Box box = BoxAt(x - blocks[b].m_W * 0.5, y - blocks[b].m_H * 0.5, blocks[b].m_W, blocks[b].m_H);
+			bounds.AddBox(box);
+			placed.Push(box);
+		}
+		LayoutBlock all;
+		for (int64 b = 0; b < blocks.Count(); ++b)
+			for (int64 k = 0; k < blocks[b].m_Leaves.Count(); ++k) {
+				Point at;
+				at.m_X = placed[b].m_X0 - bounds.m_X0 + blocks[b].m_Offsets[k].m_X;
+				at.m_Y = placed[b].m_Y0 - bounds.m_Y0 + blocks[b].m_Offsets[k].m_Y;
+				all.m_Leaves.Push(blocks[b].m_Leaves[k]);
+				all.m_Offsets.Push(at);
+			}
+		all.m_W = bounds.Width();
+		all.m_H = bounds.Height();
+		return all;
+	}
+
+	Core::HashMap<Core::String, Point> LayeredLayout(const Board& board, const Core::Array<Core::String>& ids, Core::StringView direction, double gap, const LayoutClusters& clusters) {
+		Core::HashMap<Core::String, Point> moves;
+		Core::HashMap<Core::String, int64> index;
+		Core::Array<LayoutNode*> leaves = Nodes(board, ids, index);
+		if (leaves.IsEmpty()) return moves;
+		Box before;
+		Core::Array<int64> all;
+		for (int64 i = 0; i < leaves.Count(); ++i) {
+			before.AddBox(leaves[i]->m_Box);
+			all.Push(i);
+		}
+		Edges(board, leaves, index);
+		LayoutBlock laid = ArrangeIn(leaves, all, Core::String(), clusters, direction, gap);
+		for (int64 k = 0; k < laid.m_Leaves.Count(); ++k) {
+			const Core::String& id = leaves[laid.m_Leaves[k]]->m_Id;
+			Element* element = board.Find(id.View());
 			Point move;
-			move.m_X = Tenth(node->m_Box.m_X0 - after.m_X0 + before.m_X0) - element->m_X;
-			move.m_Y = Tenth(node->m_Box.m_Y0 - after.m_Y0 + before.m_Y0) - element->m_Y;
-			moves.Insert(node->m_Id, move);
+			move.m_X = Tenth(laid.m_Offsets[k].m_X + before.m_X0) - element->m_X;
+			move.m_Y = Tenth(laid.m_Offsets[k].m_Y + before.m_Y0) - element->m_Y;
+			moves.Insert(id, move);
 		}
 		return moves;
 	}
@@ -443,7 +488,7 @@ namespace Boards
 		return moves;
 	}
 
-	Core::HashMap<Core::String, Point> StableLayout(const Board& board, const Core::Array<Core::String>& ids, const Core::Array<Core::String>& keep, Core::StringView direction, double gap, const Core::HashMap<Core::String, Core::String>& clusters) {
+	Core::HashMap<Core::String, Point> StableLayout(const Board& board, const Core::Array<Core::String>& ids, const Core::Array<Core::String>& keep, Core::StringView direction, double gap, const LayoutClusters& clusters) {
 		Core::Array<Core::String> all = keep;
 		for (const Core::String& id : ids)
 			if (!all.Contains(id)) all.Push(id);

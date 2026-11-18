@@ -1,0 +1,28 @@
+// The stroke font the server draws text with: punctuation outside ASCII drawn as its ASCII look-alike.
+
+include "Font.ch"
+
+static int64 BtStrokeCount(const char* text) {
+	Core::Array<Core::Array<double>> strokes;
+	Boards::LineStrokes(Core::StringView(text), 0.0, 0.0, 14.0, strokes);
+	return strokes.Count();
+}
+
+[test("board.font")]
+class BoardFontTests
+{
+	[test("punctuation_draws_as_its_ascii_look_alike")]
+	public static void StandIns() {
+		assert_true(Boards::TextWidth(Core::StringView("a…b"), 14.0) == Boards::TextWidth(Core::StringView("a...b"), 14.0), "an ellipsis is as wide as three dots");
+		assert_true(Boards::TextWidth(Core::StringView("2 × 16"), 14.0) == Boards::TextWidth(Core::StringView("2 x 16"), 14.0), "a times sign as an x");
+		assert_true(Boards::TextWidth(Core::StringView("a → b"), 14.0) == Boards::TextWidth(Core::StringView("a -> b"), 14.0), "an arrow as ->");
+		assert_true(BtStrokeCount("a—b") == BtStrokeCount("a-b"), "a dash drawn as a hyphen, not a question mark");
+		assert_true(BtStrokeCount("a…b") == BtStrokeCount("a...b"), "an ellipsis drawn as three dots");
+	}
+
+	[test("other_characters_draw_as_one_question_mark")]
+	public static void Unknown() {
+		assert_true(Boards::TextWidth(Core::StringView("a日b"), 14.0) == Boards::TextWidth(Core::StringView("a?b"), 14.0), "a character with no stand-in is one ?");
+		assert_true(BtStrokeCount("a日b") == BtStrokeCount("a?b"), "drawn as one ?");
+	}
+}

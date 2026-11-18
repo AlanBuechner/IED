@@ -2,9 +2,6 @@ include "OpContext.ch"
 
 namespace Boards
 {
-	const double c_FramePad = 24.0;
-	const double c_FrameTitle = 36.0;
-
 	bool ResolveId(OpContext& ctx, Core::StringView raw, Core::String& id) {
 		Core::StringView name = raw.StartsWith(Core::StringView("@")) ? raw.Substring(1, raw.ByteLength() - 1) : raw;
 		if (!raw.StartsWith(Core::StringView("@")) && ctx.m_Board->Find(raw)) {

@@ -36,6 +36,12 @@ namespace Boards
 	// The diagram of the elements among `ids` (empty: every element on a visible layer), keys made unique: an
 	// element's own key, else one from its text ("API Gateway" -> api_gateway), else its id.
 	Diagram ExtractDiagram(const Board& board, const Core::Array<Core::String>& ids);
+	// The diagram of one layer (by name or id) alone, visible or not; false when the board has no such layer.
+	bool ExtractLayerDiagram(const Board& board, Core::StringView layer, Diagram& diagram);
+	// A plan's text with its {{board:...}} parts filled in from the board as it is now: {{board:mermaid}} (a ```mermaid
+	// block of the diagram) and {{board:outline}} (the Markdown export), each also of one layer alone as
+	// {{board:mermaid:<layer>}}; a layer the board has not got is said in its place.
+	Core::String ExpandPlanText(const Board& board, Core::StringView text, const Core::HashMap<Core::String, Core::String>& colors);
 	// A Mermaid id from text: lower case letters, digits and '_', starting with a letter.
 	Core::String KeyFromText(Core::StringView text);
 	// A Mermaid flowchart of the diagram, in a stable order (nodes as they were made, edges by their ends): node colors as

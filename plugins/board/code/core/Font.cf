@@ -7,6 +7,35 @@ namespace Boards
 	const double c_UnitsPerSize = 30.0;
 	const double c_Baseline = 0.8;
 
+	// Characters the font has no glyph for, drawn as their ASCII look-alike.
+	const int32 c_StandIns = 18;
+	const char*[18] c_StandInFrom = { "…", "—", "–", "×", "←", "→", "↑", "↓", "·", "•", "‘", "’", "“", "”", "≤", "≥", "≠", " " };
+	const char*[18] c_StandInTo = { "...", "-", "-", "x", "<-", "->", "^", "v", ".", "*", "'", "'", "\"", "\"", "<=", ">=", "!=", " " };
+
+	// The text as the font draws it: printable ASCII as it is, common punctuation (an ellipsis, dashes, arrows, curly
+	// quotes) as its ASCII look-alike, any other character as one '?'.
+	static Core::String Drawable(Core::StringView line) {
+		Core::StringBuilder out;
+		int64 i = 0;
+		while (i < line.ByteLength()) {
+			const int32 c = line.ByteAt(i);
+			if (c < 128) {
+				out.AppendByte(c);
+				i += 1;
+				continue;
+			}
+			int64 length = c >= 240 ? 4 : (c >= 224 ? 3 : (c >= 192 ? 2 : 1));
+			if (i + length > line.ByteLength()) length = line.ByteLength() - i;
+			Core::StringView character = line.Substring(i, length);
+			Core::StringView standIn = Core::StringView("?");
+			for (int32 k = 0; k < c_StandIns; ++k)
+				if (character == Core::StringView(c_StandInFrom[k])) standIn = Core::StringView(c_StandInTo[k]);
+			out.Append(standIn);
+			i += length;
+		}
+		return out.ToString();
+	}
+
 	// The glyph of a byte: '?' for anything outside printable ASCII.
 	static Core::StringView GlyphOf(int32 c) {
 		if (c < 32 || c > 126) c = (int32)'?';
@@ -19,13 +48,9 @@ namespace Boards
 	}
 
 	double TextWidth(Core::StringView line, double size) {
+		Core::String drawn = Drawable(line);
 		double units = 0.0;
-		for (int64 i = 0; i < line.ByteLength(); ++i) {
-			const int32 c = line.ByteAt(i);
-			// A UTF-8 character draws as one '?': only its first byte advances.
-			if (c >= 128 && c < 192) continue;
-			units += Advance(c);
-		}
+		for (int64 i = 0; i < drawn.ByteLength(); ++i) units += Advance(drawn.View().ByteAt(i));
 		return units * size / c_UnitsPerSize;
 	}
 
@@ -83,9 +108,9 @@ namespace Boards
 		const double scale = size / c_UnitsPerSize;
 		const double baseline = y + size * c_Baseline;
 		double penX = x;
-		for (int64 i = 0; i < line.ByteLength(); ++i) {
-			const int32 c = line.ByteAt(i);
-			if (c >= 128 && c < 192) continue;
+		Core::String drawn = Drawable(line);
+		for (int64 i = 0; i < drawn.ByteLength(); ++i) {
+			const int32 c = drawn.View().ByteAt(i);
 			Core::StringView glyph = GlyphOf(c);
 			const int32 left = glyph.ByteAt(0) - (int32)'R';
 			Core::Array<double> stroke;

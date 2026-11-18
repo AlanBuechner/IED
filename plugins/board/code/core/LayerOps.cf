@@ -119,22 +119,23 @@ namespace Boards
 		return true;
 	}
 
-	// The frame each node is in (its innermost, on its layer), for a layout that keeps frames together.
-	static Core::HashMap<Core::String, Core::String> Clusters(const Board& board) {
-		Core::HashMap<Core::String, Core::String> clusterOf;
+	// The frame each node and each frame is in (its innermost, on its layer), for a layout that keeps frames together.
+	static LayoutClusters Clusters(const Board& board) {
+		LayoutClusters clusters;
 		Core::HashMap<Core::String, double> area;
 		for (Element* frame : board.m_Elements) {
 			if (frame->m_Kind != Kind::Frame) continue;
 			const double size = frame->m_W * frame->m_H;
 			for (Element* member : board.MembersOf(*frame)) {
-				if (!IsBoxed(member->m_Kind) || member->m_Kind == Kind::Frame) continue;
+				if (!IsBoxed(member->m_Kind)) continue;
 				const double* known = area.FindAs(member->m_Id.View());
 				if (known && *known <= size) continue;
 				area.Insert(member->m_Id, size);
-				clusterOf.Insert(member->m_Id, frame->m_Id);
+				if (member->m_Kind == Kind::Frame) clusters.m_Parent.Insert(member->m_Id, frame->m_Id);
+				else clusters.m_Of.Insert(member->m_Id, frame->m_Id);
 			}
 		}
-		return clusterOf;
+		return clusters;
 	}
 
 	// Notes and text near a node that moves move with it (an annotation stays by what it annotates).
@@ -174,7 +175,7 @@ namespace Boards
 		const double gap = op.Member("gap").IsValid() ? Math::Clamp(op.Member("gap").AsFloat(), 10.0, 1000.0) : c_LayoutGap;
 		Core::Array<Core::String> keep;
 		if (op.Member("keep").IsValid() && !ResolveIds(ctx, op, "keep", keep)) return false;
-		Core::HashMap<Core::String, Core::String> clusters = Clusters(*ctx.m_Board);
+		LayoutClusters clusters = Clusters(*ctx.m_Board);
 		Core::HashMap<Core::String, Point> moves = keep.IsEmpty() ? LayeredLayout(*ctx.m_Board, ids, direction, gap, clusters) : StableLayout(*ctx.m_Board, ids, keep, direction, gap, clusters);
 		const int64 laid = moves.Count();
 		Satellites(*ctx.m_Board, moves);

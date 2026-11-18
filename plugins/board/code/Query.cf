@@ -478,7 +478,10 @@ namespace Boards
 	static ToolAnswer ExportTool(BoardService* service, const IED::Workspace& ws, const Serialization::DomNode& args) {
 		OpenBoard* open = BoardArg(service, ws, args);
 		Threading::LockGuard held(open->m_Lock);
-		Diagram diagram = ExtractDiagram(*open->m_Board, Strings(args.Member("ids")));
+		Diagram diagram;
+		Core::StringView layer = args.Member("layer").AsView();
+		if (layer.IsEmpty()) diagram = ExtractDiagram(*open->m_Board, Strings(args.Member("ids")));
+		else if (!ExtractLayerDiagram(*open->m_Board, layer, diagram)) throw IED::RpcError(IED::ErrorCode::BadRequest, ((Core::String("no layer '") + layer) + "' on the board (board_read lists them)").View());
 		Core::StringView format = args.Member("format").AsView();
 		if (format == "markdown") return Text(ExportOutline(*open->m_Board, diagram, service->HueHex()));
 		if (!format.IsEmpty() && format != "mermaid") throw IED::RpcError(IED::ErrorCode::BadRequest, Core::StringView("'format' is mermaid or markdown"));
@@ -533,40 +536,6 @@ namespace Boards
 		Threading::LockGuard held(open->m_Lock);
 		text.Append(ChangeText(*open->m_Board, result).View());
 		return Text(text.ToString());
-	}
-
-	// A plan's text with {{board:mermaid}} (a ```mermaid block of the diagram) and {{board:outline}} (the Markdown
-	// export) filled in from the board as it is now, so that part of a plan never goes stale.
-	static Core::String Expanded(const Board& board, Core::StringView text, const Core::HashMap<Core::String, Core::String>& colors) {
-		if (!text.Contains(Core::StringView("{{board:"))) return Core::String(text);
-		Diagram diagram = ExtractDiagram(board, Core::Array<Core::String>());
-		Core::StringBuilder out;
-		int64 at = 0;
-		while (at < text.ByteLength()) {
-			Core::StringView rest = text.Substring(at, text.ByteLength() - at);
-			const int64 open = rest.IndexOf(Core::StringView("{{board:"));
-			if (open < 0) {
-				out.Append(rest);
-				break;
-			}
-			out.Append(rest.Substring(0, open));
-			Core::StringView tail = rest.Substring(open, rest.ByteLength() - open);
-			if (tail.StartsWith(Core::StringView("{{board:mermaid}}"))) {
-				out.Append(Core::StringView("```mermaid\n"));
-				out.Append(ExportMermaid(board, diagram, colors).View());
-				out.Append(Core::StringView("```"));
-				at += open + 17;
-			}
-			else if (tail.StartsWith(Core::StringView("{{board:outline}}"))) {
-				out.Append(ExportOutline(board, diagram, colors).View());
-				at += open + 17;
-			}
-			else {
-				out.Append(Core::StringView("{{"));
-				at += open + 2;
-			}
-		}
-		return out.ToString();
 	}
 
 	// The first ```mermaid block of Markdown, "" for none.
@@ -625,7 +594,7 @@ namespace Boards
 					text.Append(SameChart(now.View(), chart) ? Core::StringView("; its Mermaid is in step with the board's diagram") : Core::StringView("; the board's diagram has changed since its Mermaid was written: board_export shows it now, board_import draws the plan's"));
 				}
 				text.Append(Core::StringView(")\n"));
-				text.Append(Expanded(*open->m_Board, plan.m_Text.View(), service->HueHex()).View());
+				text.Append(ExpandPlanText(*open->m_Board, plan.m_Text.View(), service->HueHex()).View());
 				text.AppendByte(10);
 			}
 			if (text.IsEmpty()) text.Append(id.IsEmpty() ? Core::StringView("The board has no plans yet: write one with action write.\n") : Core::StringView("No such plan.\n"));

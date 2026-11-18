@@ -49,13 +49,15 @@ namespace Boards
 		return matched;
 	}
 
-	// Where new nodes go when some are matched: the chart laid out on its own, moved so its matched nodes sit where
-	// they stand on the board on average, each new one then pushed clear of what is already there.
-	static Core::HashMap<Core::String, Point> Placements(const Board& board, const MermaidChart& chart, const Core::HashMap<Core::String, Core::String>& matched) {
+	// The chart laid out on its own, each subgraph kept together as the frame it becomes: each node's box by key, the
+	// arrangement's top left (its frames' room included) at 0,0 when nothing is matched. Matched nodes start where they
+	// stand on the board, so the layout begins from the owner's order.
+	static Core::HashMap<Core::String, Box> ChartLayout(const Board& board, const MermaidChart& chart, const Core::HashMap<Core::String, Core::String>& matched) {
 		Board scratch;
 		InitBoard(scratch, Core::StringView(""));
 		Core::Array<Core::String> ids;
 		Core::HashMap<Core::String, Core::String> idOf;
+		LayoutClusters clusters;
 		for (const MermaidNode& node : chart.m_Nodes) {
 			Element* element = new Element();
 			element->m_Kind = node.m_Kind;
@@ -74,7 +76,10 @@ namespace Boards
 			scratch.Insert(element, -1);
 			ids.Push(element->m_Id);
 			idOf.Insert(node.m_Key, element->m_Id);
+			if (!node.m_Subgraph.IsEmpty()) clusters.m_Of.Insert(element->m_Id, node.m_Subgraph);
 		}
+		for (const MermaidSubgraph& subgraph : chart.m_Subgraphs)
+			if (!subgraph.m_Parent.IsEmpty()) clusters.m_Parent.Insert(subgraph.m_Key, subgraph.m_Parent);
 		for (const MermaidEdge& edge : chart.m_Edges) {
 			Element* connector = new Element();
 			connector->m_Kind = Kind::Connector;
@@ -82,20 +87,50 @@ namespace Boards
 			connector->m_Layer = scratch.m_Layers[0].m_Id;
 			connector->m_From = idOf.Get(edge.m_From);
 			connector->m_To = idOf.Get(edge.m_To);
+			connector->m_Text = edge.m_Label;
 			scratch.Insert(connector, -1);
 		}
-		Core::HashMap<Core::String, Point> moves = LayeredLayout(scratch, ids, chart.m_Direction.View(), c_LayoutGap, Core::HashMap<Core::String, Core::String>());
+		Core::HashMap<Core::String, Point> moves = LayeredLayout(scratch, ids, chart.m_Direction.View(), c_LayoutGap, clusters);
+		Core::HashMap<Core::String, Box> laid;
+		for (const MermaidNode& node : chart.m_Nodes) {
+			Element* element = scratch.Find(idOf.Get(node.m_Key).View());
+			const Point* move = moves.FindAs(element->m_Id.View());
+			laid.Insert(node.m_Key, BoxAt(element->m_X + (move ? move->m_X : 0.0), element->m_Y + (move ? move->m_Y : 0.0), element->m_W, element->m_H));
+		}
+		return laid;
+	}
+
+	// Where the nodes of a chart nothing on the board matches go: laid out, right of what stays on the board (as an
+	// element added without a place goes).
+	static Core::HashMap<Core::String, Point> FreshPlaces(const Board& board, const MermaidChart& chart, const Core::Array<Core::String>& doomed) {
+		Box content;
+		for (Element* element : board.m_Elements)
+			if (!doomed.Contains(element->m_Id)) content.AddBox(board.Bounds(*element));
+		const double x = content.IsEmpty() ? 0.0 : content.m_X1 + 120.0;
+		const double y = content.IsEmpty() ? 0.0 : content.m_Y0;
+		Core::HashMap<Core::String, Point> places;
+		for (const Core::KeyValue<Core::String, Box>& laid : ChartLayout(board, chart, Core::HashMap<Core::String, Core::String>())) {
+			Point place;
+			place.m_X = Tenth(x + laid.value.m_X0);
+			place.m_Y = Tenth(y + laid.value.m_Y0);
+			places.Insert(laid.key, place);
+		}
+		return places;
+	}
+
+	// Where new nodes go when some are matched: the chart laid out on its own, moved so its matched nodes sit where
+	// they stand on the board on average, each new one then pushed clear of what is already there.
+	static Core::HashMap<Core::String, Point> Placements(const Board& board, const MermaidChart& chart, const Core::HashMap<Core::String, Core::String>& matched) {
+		Core::HashMap<Core::String, Box> laid = ChartLayout(board, chart, matched);
 		double dx = 0.0;
 		double dy = 0.0;
 		int64 n = 0;
 		for (const MermaidNode& node : chart.m_Nodes) {
 			const Core::String* existing = matched.FindAs(node.m_Key.View());
 			if (!existing) continue;
-			Element* laid = scratch.Find(idOf.Get(node.m_Key).View());
-			const Point* move = moves.FindAs(laid->m_Id.View());
 			Element* on = board.Find(existing->View());
-			dx += on->m_X - (laid->m_X + (move ? move->m_X : 0.0));
-			dy += on->m_Y - (laid->m_Y + (move ? move->m_Y : 0.0));
+			dx += on->m_X - laid.Get(node.m_Key).m_X0;
+			dy += on->m_Y - laid.Get(node.m_Key).m_Y0;
 			n += 1;
 		}
 		dx = n > 0 ? dx / (double)n : 0.0;
@@ -105,9 +140,8 @@ namespace Boards
 		Core::Array<Box> taken;
 		for (const MermaidNode& node : chart.m_Nodes) {
 			if (matched.Contains(node.m_Key)) continue;
-			Element* laid = scratch.Find(idOf.Get(node.m_Key).View());
-			const Point* move = moves.FindAs(laid->m_Id.View());
-			Box box = BoxAt(Tenth(laid->m_X + (move ? move->m_X : 0.0) + dx), Tenth(laid->m_Y + (move ? move->m_Y : 0.0) + dy), laid->m_W, laid->m_H);
+			const Box own = laid.Get(node.m_Key);
+			Box box = BoxAt(Tenth(own.m_X0 + dx), Tenth(own.m_Y0 + dy), own.Width(), own.Height());
 			// A node joined to one the board has goes on that node's row (or column) beside it, not between rows.
 			Element* anchor = nullptr;
 			for (const MermaidEdge& edge : chart.m_Edges) {
@@ -120,8 +154,8 @@ namespace Boards
 				}
 			}
 			if (anchor) {
-				if (horizontal) box = BoxAt(box.m_X0, anchor->m_Y + anchor->m_H * 0.5 - laid->m_H * 0.5, laid->m_W, laid->m_H);
-				else box = BoxAt(anchor->m_X + anchor->m_W + 120.0, anchor->m_Y + anchor->m_H * 0.5 - laid->m_H * 0.5, laid->m_W, laid->m_H);
+				if (horizontal) box = BoxAt(box.m_X0, anchor->m_Y + anchor->m_H * 0.5 - own.Height() * 0.5, own.Width(), own.Height());
+				else box = BoxAt(anchor->m_X + anchor->m_W + 120.0, anchor->m_Y + anchor->m_H * 0.5 - own.Height() * 0.5, own.Width(), own.Height());
 			}
 			for (int32 tries = 0; tries < 40; ++tries) {
 				bool clash = !board.Near(box.Inflated(16.0)).IsEmpty();
@@ -227,8 +261,8 @@ namespace Boards
 		JsonOut json;
 		json.BeginArray();
 		Core::HashMap<Core::String, Core::String> matched;
+		Core::Array<Core::String> doomed;
 		if (replace) {
-			Core::Array<Core::String> doomed;
 			for (Element* element : board.m_Elements)
 				if ((IsNode(element->m_Kind) || element->m_Kind == Kind::Frame || element->m_Kind == Kind::Connector) && (layer.IsEmpty() || element->m_Layer == layer)) doomed.Push(element->m_Id);
 			if (!doomed.IsEmpty()) {
@@ -246,7 +280,7 @@ namespace Boards
 		else matched = Match(board, chart, diagram, notes);
 		Core::HashMap<Core::String, Point> places;
 		const bool laidOut = matched.IsEmpty();
-		if (!laidOut) places = Placements(board, chart, matched);
+		places = laidOut ? FreshPlaces(board, chart, doomed) : Placements(board, chart, matched);
 		int64 added = 0;
 		int64 updated = 0;
 		for (const MermaidNode& node : chart.m_Nodes) {
@@ -351,16 +385,7 @@ namespace Boards
 			json.EndObject();
 			notes.Push((Core::String("removed ") + Counted(dropped.Count(), "connector", "connectors").View()) + " between the chart's nodes that the chart no longer has");
 		}
-		if (laidOut && added > 0) {
-			json.BeginObject();
-			json.StrField("op", Core::StringView("layout"));
-			json.StrField("direction", chart.m_Direction.View());
-			json.Key(Core::StringView("ids"));
-			json.BeginArray();
-			for (const MermaidNode& node : chart.m_Nodes) json.Str(RefOf(node.m_Key.View()).View());
-			json.EndArray();
-			json.EndObject();
-		}
+		if (laidOut && added > 0) notes.Push((Core::String("laid out ") + chart.m_Direction.View()) + ", each subgraph a frame of its own beside the others");
 		Frames(json, board, chart, diagram, matched, layer, notes);
 		for (int64 i = 0; i < chart.m_NoteTexts.Count(); ++i) {
 			bool known = false;
