@@ -228,7 +228,10 @@ export class LanguageFeatures {
 				const lspContext = { triggerKind: context.triggerKind + 1 };
 				if (context.triggerCharacter) lspContext.triggerCharacter = context.triggerCharacter;
 				const list = C.completionListOf(this.monaco, await this.ask(model, "textDocument/completion", { position: C.toLspPosition(position), context: lspContext }, token), range);
-				for (const item of list.suggestions) item.model = model;
+				for (const item of list.suggestions) {
+					item.model = model;
+					if (item.lsp.command) item.command = this.completionCommand(model, item.lsp.command);
+				}
 				return list;
 			},
 			resolveCompletionItem: options.resolveProvider ? async (item, token) => {
@@ -239,6 +242,14 @@ export class LanguageFeatures {
 				return item;
 			} : undefined,
 		};
+	}
+
+	// What runs once a completion item is in: an editor command (`editor.action.triggerSuggest`, after a folder of a path)
+	// runs in the editor, any other command on the server, as a code action's does.
+	completionCommand(model, command) {
+		if (command.command.startsWith("editor.")) return { id: command.command, title: command.title, arguments: command.arguments };
+		const editor = this.editorOf(model);
+		return { id: EXECUTE, title: command.title, arguments: [editor ? editor.sync.docId : null, command] };
 	}
 
 	rename(options) {

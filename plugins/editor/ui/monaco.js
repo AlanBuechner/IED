@@ -64,12 +64,15 @@ export function controlKeywords(contributions) {
 }
 
 // Grammar (Monarch) tokens, then a rule per syntax kind for language servers' tokens (semanticcolors.js puts every
-// server's legend onto those kinds, per language).
+// server's legend onto those kinds, per language). An include's path (`keyword.directive.include.path`) is drawn as a
+// string but is not one to Monaco, which suggests nothing while typing in a string: a grammar names it so that typing a
+// path asks the language server for completions, as typing a name does.
 const TOKEN_RULES = [
 	["", "syntax-plain"], ["comment", "syntax-comment"], ["string", "syntax-string"], ["string.escape", "syntax-constant"],
 	["regexp", "syntax-string"], ["keyword", "syntax-keyword"], ["keyword.flow", "syntax-control"], ["number", "syntax-number"],
 	["type", "syntax-type"], ["type.identifier", "syntax-type"], ["identifier", "syntax-plain"], ["delimiter", "syntax-operator"],
 	["operator", "syntax-operator"], ["keyword.directive", "syntax-preprocessor"], ["keyword.directive.include.begin", "syntax-string"],
+	["keyword.directive.include.path", "syntax-string"],
 	["keyword.directive.include.end", "syntax-string"], ["annotation", "syntax-macro"], ["constant", "syntax-constant"],
 	["predefined", "syntax-function"], ["namespace", "syntax-namespace"], ["invalid", "syntax-invalid"], ["tag", "syntax-keyword"],
 	["attribute.name", "syntax-variable"], ["attribute.value", "syntax-string"], ["variable", "syntax-variable"], ["metatag", "syntax-macro"],

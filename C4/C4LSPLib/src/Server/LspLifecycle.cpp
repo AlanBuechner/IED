@@ -236,10 +236,12 @@ namespace C4LSP::Server
 
 	Json::Value LspServer::BuildTriggerCharacters() const
 	{
-		// The character that completes an accessor: `.`, and the `>` of `->` (Completion finds the `-` before it).
+		// The character that completes an accessor: `.`, and the `>` of `->` (Completion finds the `-` before it); the `"`
+		// that opens an include's path and the `/` after each of its folders (IncludeCompletion; anywhere else the server
+		// answers them with nothing).
 		Json::Value array = Json::Value::MakeArray();
-		array.Append(Json::Value::String(Core::String(".")));
-		array.Append(Json::Value::String(Core::String(">")));
+		for (const char* trigger : { ".", ">", "\"", "/" })
+			array.Append(Json::Value::String(Core::String(trigger)));
 		return array;
 	}
 } // namespace C4LSP::Server

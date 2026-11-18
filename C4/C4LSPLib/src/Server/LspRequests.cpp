@@ -7,6 +7,7 @@
 #include "Features/References.h"
 #include "Features/DocumentHighlight.h"
 #include "Features/Completion.h"
+#include "Features/IncludeCompletion.h"
 #include "Features/DocumentSymbols.h"
 #include "Features/SemanticTokens.h"
 #include "Features/SignatureHelp.h"
@@ -121,9 +122,33 @@ namespace C4LSP::Server
 
 	void LspServer::HandleCompletion(const Json::Value& id, const Json::Value& params)
 	{
-		auto position = ExtractPosition(params);
-		auto session = SnapshotForRequest(ExtractUri(params));
-		auto items = Features::Completion::At(*session, ExtractUri(params), position);
+		const std::string uri = ExtractUri(params);
+		const auto position = ExtractPosition(params);
+		std::optional<Features::IncludeCompletion::Site> include;
+		{
+			std::lock_guard<std::mutex> lock(m_DocMutex);
+			if (const std::string* text = m_Documents.GetText(uri))
+				include = Features::IncludeCompletion::Find(*text, position);
+		}
+		if (include)
+		{
+			// An include's path: the folders it searches are the program's, whatever the text says, so the last analysis
+			// answers without waiting for one of this text; a file no analysis has compiled yet waits for its first.
+			std::shared_ptr<CompilationSession> session = GetSnapshot(uri);
+			if (!session->FindSourceIdByUri(uri))
+				session = SnapshotForRequest(uri, Freshness::Document);
+			SendResponse(id, Protocol::LspJson::CompletionItems(Features::IncludeCompletion::Items(*session, uri, *include)));
+			return;
+		}
+		// `"` and `/` ask for an include's path; anywhere else they start a string, a division or a comment, never a name.
+		const std::string trigger = params.Member("context").Member("triggerCharacter").GetString();
+		if (trigger == "\"" || trigger == "/")
+		{
+			SendResponse(id, Json::Value::Null());
+			return;
+		}
+		auto session = SnapshotForRequest(uri);
+		auto items = Features::Completion::At(*session, uri, position);
 		SendResponse(id, Protocol::LspJson::CompletionItems(items));
 	}
 

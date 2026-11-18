@@ -137,6 +137,23 @@ namespace C4LSP::Protocol
 			obj.SetMember("kind", Json::Value::Int(item.kind));
 			if (!item.detail.empty())
 				obj.SetMember("detail", Json::Value::String(Core::String(item.detail)));
+			if (item.edit)
+			{
+				Json::Value edit = Json::Value::MakeObject();
+				edit.SetMember("range", RangeObject(*item.edit));
+				edit.SetMember("newText", Json::Value::String(Core::String(item.newText)));
+				obj.SetMember("textEdit", edit);
+			}
+			if (!item.sortText.empty())
+				obj.SetMember("sortText", Json::Value::String(Core::String(item.sortText)));
+			if (item.completeAgain)
+			{
+				// The command editors run to show completion again (VS Code's, which Monaco has too).
+				Json::Value command = Json::Value::MakeObject();
+				command.SetMember("title", Json::Value::String(Core::String("Suggest")));
+				command.SetMember("command", Json::Value::String(Core::String("editor.action.triggerSuggest")));
+				obj.SetMember("command", command);
+			}
 			array.Append(obj);
 		}
 		return array;

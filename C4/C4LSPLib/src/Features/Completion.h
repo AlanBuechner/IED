@@ -3,6 +3,7 @@
 #include "Protocol/LspTypes.h"
 #include "Server/NodeLocator.h"
 #include "Model/SymbolTable.h" // Scripting::SymbolKind for the global-symbol completion list
+#include <optional>
 
 namespace Scripting { class AstNode; class Type; }
 
@@ -17,6 +18,11 @@ namespace C4LSP::Features
 		std::string label;   // symbol name (also used as filterText)
 		int kind = 6;        // LSP CompletionItemKind
 		std::string detail;  // short type / signature shown beside the item
+		// An item that replaces a range of its own (the part of an include's path being typed): the range, and its text.
+		std::optional<Protocol::Range> edit;
+		std::string newText;
+		std::string sortText;       // where the client lists it; empty: by its label
+		bool completeAgain = false; // the client asks for completion again once it is in (a folder of an include's path)
 	};
 
 	class Completion

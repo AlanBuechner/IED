@@ -26,6 +26,8 @@
 	"tokenizer": {
 		"root": [
 			["^\\s*#\\s*[a-z]+", "keyword.directive"],
+			["^(\\s*)(include)(\\s*)(\")([^\"]*)(\"?)", ["", "keyword.directive", "", "keyword.directive.include.begin", "keyword.directive.include.path", "keyword.directive.include.end"]],
+			["^(\\s*)(extern)(\\s+)(\"c(?:\\+\\+)?\")(\\s+)(include)(\\s*)(\")([^\"]*)(\"?)", ["", "keyword", "", "string", "", "keyword.directive", "", "keyword.directive.include.begin", "keyword.directive.include.path", "keyword.directive.include.end"]],
 			["^\\s*include\\b", "keyword.directive"],
 			["^(\\s*)(\\[)(\\s*)([a-zA-Z_]\\w*)", ["", "@brackets", "", "annotation"]],
 			["[a-zA-Z_]\\w*", { "cases": { "@typeKeywords": "keyword.type", "@controlKeywords": "keyword.flow", "@keywords": "keyword", "@default": "identifier" } }],
