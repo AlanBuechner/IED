@@ -23,3 +23,5 @@ wchar_t* c4_process_win32_environment(const c4_process_options* start, bool* fai
 // inheritable.
 bool c4_process_win32_pipe(bool parentReads, HANDLE* parent, HANDLE* child);
 void c4_process_win32_close(HANDLE* handle);
+// An inheritable copy of `handle` for a child to take as a standard stream; null when there is none to copy.
+HANDLE c4_process_win32_inheritable_copy(HANDLE handle);

@@ -16,10 +16,16 @@
 // reported); and a fault's code is its signal. In a catch handler the stack of the throw is gone (the unwinder runs a
 // handler after unwinding to it), so the exception runtime records it at the throw (c4_eh_handling, ExceptionsPosix.c)
 // and c4_stack_text gives it with the thrown type, as Windows does.
+//
+// Once a report is out, the reporter a program named (c4_crash_reporter) is started with it as its standard input and
+// waited for, as on Windows. In a signal handler that takes the fork system call itself (glibc's fork runs handlers that
+// take locks), a pipe and execve, all async-signal-safe; the path and argv were made when the reporter was named.
 
 #include "PlatformRuntimeC.h"
 #include "ThreadRuntimeC.h"
 #include "ModulesLinux.h"
+#include "SystemErrorC.h"
+#include "Process/ProcessPosix.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -31,6 +37,7 @@
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <sys/uio.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <ucontext.h>
 #include <unistd.h>
@@ -45,6 +52,10 @@ enum { kPageFaultTrap = 14, kPageFaultWrite = 0x2, kPageFaultFetch = 0x10 };
 enum { kSecondsPerMinute = 60, kSecondsPerHour = 3600, kSecondsPerDay = 86400 };
 // Where /proc/self/maps writes a mapping's read and execute rights.
 enum { kReadRight = 0, kExecuteRight = 2 };
+// The exit code of a reporter's child that could not run the reporter (as a shell says a command was not found).
+enum { kReporterNotRun = 127 };
+
+extern char** environ;
 
 static const int kFaultSignals[] = { SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT };
 enum { kFaultSignalCount = sizeof(kFaultSignals) / sizeof(kFaultSignals[0]) };
@@ -367,6 +378,10 @@ static atomic_int g_handlersInstalled;
 static Report g_report;
 static Naming g_naming;
 static char g_text[kTextBytes];
+// The reporter (none while g_reporterArgv is null): its absolute path and its argv, the program as named first, each
+// malloc'd once (the argv with its strings), set under g_reportingThread.
+static char* g_reporterPath;
+static char** g_reporterArgv;
 
 static uint64_t CurrentThread(void) { return (uint64_t)syscall(SYS_gettid); }
 
@@ -481,12 +496,70 @@ static void WriteOut(const Writer* text)
 	close(file);
 }
 
-static void Deliver(const Report* report)
+// The report written out: its text.
+static Writer Deliver(const Report* report)
 {
 	Writer text = WriterOf(g_text, sizeof(g_text));
 	AppendHeader(&text, report);
 	AppendFrames(&text, &g_naming, report->frames, report->count);
 	WriteOut(&text);
+	return text;
+}
+
+// --- the reporter ------------------------------------------------------------------------------------------------
+
+// In the reporter's child, before anything else: the signals as a new program expects them (none blocked - a handler
+// blocks its own signal - and SIGPIPE as it was), the report's pipe as its input, then the reporter.
+__attribute__((noreturn)) static void ExecReporter(int input, const struct sigaction* pipeAction)
+{
+	sigset_t none;
+	sigemptyset(&none);
+	sigprocmask(SIG_SETMASK, &none, NULL);
+	sigaction(SIGPIPE, pipeAction, NULL);
+	if (dup2(input, STDIN_FILENO) == STDIN_FILENO) execve(g_reporterPath, g_reporterArgv, environ);
+	_exit(kReporterNotRun);
+}
+
+// The reporter shown `text`, and waited for until it ends; nothing when the program named none. A reporter that ends
+// before reading it all does not end this process with SIGPIPE.
+static void RunReporter(const Writer* text)
+{
+	int ends[2];
+	if (!g_reporterArgv || pipe2(ends, O_CLOEXEC) != 0) return;
+	struct sigaction ignore;
+	memset(&ignore, 0, sizeof(ignore));
+	ignore.sa_handler = SIG_IGN;
+	sigemptyset(&ignore.sa_mask);
+	struct sigaction pipeAction;
+	sigaction(SIGPIPE, &ignore, &pipeAction);
+	const pid_t child = (pid_t)syscall(SYS_fork);
+	if (child == 0) ExecReporter(ends[0], &pipeAction);
+	close(ends[0]);
+	if (child > 0) WriteAll(ends[1], text->bytes, text->length);
+	close(ends[1]);
+	if (child > 0)
+		while (waitpid(child, NULL, 0) < 0 && errno == EINTR) {}
+	sigaction(SIGPIPE, &pipeAction, NULL);
+}
+
+// The reporter's argv in one block: `program` as named, then `arguments`, then null. Null when out of memory.
+static char** CopyArguments(const char* program, const char* const* arguments, int32_t count)
+{
+	size_t bytes = strlen(program) + 1;
+	for (int32_t i = 0; i < count; ++i) bytes += strlen(arguments[i] ? arguments[i] : "") + 1;
+	char** argv = (char**)malloc(((size_t)count + 2) * sizeof(char*) + bytes);
+	if (!argv) return NULL;
+	char* at = (char*)(argv + count + 2);
+	for (int32_t i = -1; i < count; ++i)
+	{
+		const char* text = i < 0 ? program : arguments[i] ? arguments[i] : "";
+		const size_t length = strlen(text) + 1;
+		memcpy(at, text, length);
+		argv[i + 1] = at;
+		at += length;
+	}
+	argv[count + 1] = NULL;
+	return argv;
 }
 
 static void Describe(Report* report)
@@ -572,7 +645,8 @@ __attribute__((noinline)) void c4_fatal_report(const char* what)
 	Describe(&g_report);
 	Capture(&g_report, 1);
 	fflush(stderr);
-	Deliver(&g_report);
+	const Writer text = Deliver(&g_report);
+	RunReporter(&text);
 }
 
 __attribute__((noreturn)) void c4_fatal(const char* what)
@@ -681,7 +755,8 @@ static void OnFault(int signal, siginfo_t* info, void* context)
 	{
 		DescribeFault(&g_report, signal, info, (const ucontext_t*)context);
 		CaptureFault(&g_report, (const ucontext_t*)context);
-		Deliver(&g_report);
+		const Writer text = Deliver(&g_report);
+		RunReporter(&text);
 		Release();
 	}
 	HandOn(signal, info);
@@ -712,6 +787,31 @@ void c4_crash_log(const char* path)
 	g_logOffsetSeconds = c4_time_local_offset_seconds(c4_time_unix_ns());
 	Release();
 	if (g_log[0]) c4_report_faults();
+}
+
+int32_t c4_crash_reporter(const char* program, const char* const* arguments, int32_t count, char* error, int64_t errorCapacity)
+{
+	c4_copy_text("", error, errorCapacity);
+	char* path = NULL;
+	char** argv = NULL;
+	if (program && program[0])
+	{
+		if (!(path = c4_process_posix_program(program, error, errorCapacity))) return -1;
+		if (!(argv = CopyArguments(program, arguments, count < 0 ? 0 : count)))
+		{
+			free(path);
+			c4_copy_text("out of memory", error, errorCapacity);
+			return -1;
+		}
+	}
+	Acquire(CurrentThread());
+	free(g_reporterPath);
+	free(g_reporterArgv);
+	g_reporterPath = path;
+	g_reporterArgv = argv;
+	Release();
+	if (argv) c4_report_faults();
+	return 0;
 }
 
 // --- each thread's stack for faults ------------------------------------------------------------------------

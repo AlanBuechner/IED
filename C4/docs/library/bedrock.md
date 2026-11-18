@@ -1042,8 +1042,19 @@ violation, a stack overflow, a division by zero) is reported there too, from its
 system ends the program with the fault's code (Windows Error Reporting still sees it), and a C runtime function
 given an invalid argument is a fatal error instead of a fail-fast. A `-test` program reports faults the same way
 without a log (its harness calls `c4_report_faults`), so a case that faults is named by its `[TEST]` line and followed
-by the fault's report and stack. `assets/RuntimeTest/CrashLog` runs a child that fails each way and reads its stderr
-and log.
+by the fault's report and stack.
+
+A windowed program shows a crash to whoever runs it with a crash reporter: `Platform::SetCrashReporter(program,
+arguments, error)` names a program (often the program itself, run with an argument that makes it a window showing the
+report) that each report starts once it is out, with the arguments and the report's text as its standard input. The
+crashed process waits for it before it ends, so the reporter lives as long as the crash does - a job that ends with the
+process, such as the one IED runs a program in, does not take the window first. Like a crash log, a reporter makes
+faults nothing handles reported too. The reporter is started by a thread of its own and given up after 15 s (on
+Windows CreateProcess takes locks a thread the collector stopped may hold; on Linux the fork system call itself, a pipe
+and `execve`, which a signal handler may make); it inherits the standard input's pipe and this process's output and
+errors, nothing else. A program that is not there is an error at once (`false`, with `error` saying so); an empty
+program names none. `assets/RuntimeTest/CrashLog` runs a child that fails each way and reads its stderr, its log and
+what its reporter was given - and that the crashed process was still there while the reporter ran.
 
 `Platform::StackText()` is the same stack for a report of the program's own (`c4_stack_text`). In a catch handler it
 is the stack of the throw being handled - `thrown: class Ns::Error` and the frames from the `throw` outward, read from

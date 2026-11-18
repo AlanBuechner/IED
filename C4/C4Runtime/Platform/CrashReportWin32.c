@@ -10,9 +10,16 @@
 // loader's, the heap's). When the writer does not finish, the report goes out unnamed, the addresses alone.
 //
 // c4_stack_text names the same frames for a report of the program's own; in a catch handler, the stack of the throw.
+//
+// Once a report is out, the reporter a program named (c4_crash_reporter) is started with it as its standard input - a
+// pipe big enough to hold it all - and waited for: a window showing it lives as long as the crashed process does, so a
+// job that ends with the process (one IED runs it in) does not end the window first. It is started by a thread of its
+// own and given up after a while, as CreateProcess takes locks a stopped thread may hold.
 
 #include "PlatformRuntimeC.h"
 #include "ThreadRuntimeC.h"
+#include "SystemErrorC.h"
+#include "Process/ProcessWin32.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <dbghelp.h>
@@ -22,7 +29,10 @@
 #include <string.h>
 #include <wchar.h>
 
-enum { kFrames = 62, kLogUnits = 1024, kTextBytes = 32768, kNameBytes = 512, kWriterWaitMs = 15000 };
+enum { kFrames = 62, kLogUnits = 1024, kTextBytes = 32768, kNameBytes = 512, kWriterWaitMs = 15000, kReporterStartMs = 15000 };
+// Room for the reporter's attribute list, which names the handles it inherits (InitializeProcThreadAttributeList asks for
+// about 48 bytes for one attribute): static, as a fatal report allocates nothing it can avoid.
+enum { kAttributeListBytes = 256 };
 // UnDecorateSymbolName for a type's name: UNDNAME_32_BIT_DECODE | UNDNAME_TYPE_ONLY (not every SDK names the second).
 enum { kUndecorateTypeName = 0x0800 | 0x2000 };
 
@@ -68,6 +78,12 @@ static Text g_unnamed;
 static volatile DWORD g_fatalThread;
 static LPTOP_LEVEL_EXCEPTION_FILTER g_previous;
 static volatile LONG g_filterInstalled;
+// The reporter (none while its command line is null): its program and command line (malloc'd), set under g_reporting;
+// the process a report started.
+static wchar_t* g_reporterProgram;
+static wchar_t* g_reporterLine;
+static HANDLE g_reporterProcess;
+static uint64_t g_reporterAttributes[kAttributeListBytes / sizeof(uint64_t)];
 
 static void Append(Text* text, const char* format, ...)
 {
@@ -204,12 +220,84 @@ static void WriteUnnamed(const Report* report)
 	WriteOut(&g_unnamed);
 }
 
-static void Deliver(Report* report)
+// The report written out: its text, named, or unnamed when the writer did not finish.
+static const Text* Deliver(Report* report)
 {
 	HANDLE writer = CreateThread(NULL, 0, WriteNamed, report, 0, NULL);
 	const bool finished = writer && WaitForSingleObject(writer, kWriterWaitMs) == WAIT_OBJECT_0;
 	if (writer) CloseHandle(writer);
-	if (!finished) WriteUnnamed(report);
+	if (finished) return &g_named;
+	WriteUnnamed(report);
+	return &g_unnamed;
+}
+
+// --- the reporter ------------------------------------------------------------------------------------------------
+
+// The reporter with `input` as its standard input and this process's output and errors as its own (the handle list
+// keeps every other handle of this process from it); null when it could not start.
+static HANDLE SpawnReporter(HANDLE input)
+{
+	HANDLE output = c4_process_win32_inheritable_copy(GetStdHandle(STD_OUTPUT_HANDLE));
+	HANDLE errors = c4_process_win32_inheritable_copy(GetStdHandle(STD_ERROR_HANDLE));
+	HANDLE inherited[3] = { input, NULL, NULL };
+	DWORD count = 1;
+	if (output) inherited[count++] = output;
+	if (errors) inherited[count++] = errors;
+	LPPROC_THREAD_ATTRIBUTE_LIST attributes = (LPPROC_THREAD_ATTRIBUTE_LIST)(void*)g_reporterAttributes;
+	SIZE_T size = sizeof(g_reporterAttributes);
+	HANDLE process = NULL;
+	if (InitializeProcThreadAttributeList(attributes, 1, 0, &size))
+	{
+		STARTUPINFOEXW info;
+		memset(&info, 0, sizeof(info));
+		info.StartupInfo.cb = sizeof(info);
+		info.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+		info.StartupInfo.hStdInput = input;
+		info.StartupInfo.hStdOutput = output;
+		info.StartupInfo.hStdError = errors;
+		info.lpAttributeList = attributes;
+		// A process with no console window gives its reporter none either (a console program would open one).
+		const DWORD flags = EXTENDED_STARTUPINFO_PRESENT | (GetConsoleWindow() ? 0 : CREATE_NO_WINDOW);
+		PROCESS_INFORMATION started;
+		if (UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited, count * sizeof(HANDLE), NULL, NULL) &&
+			CreateProcessW(g_reporterProgram, g_reporterLine, NULL, NULL, TRUE, flags, NULL, NULL, &info.StartupInfo, &started))
+		{
+			CloseHandle(started.hThread);
+			process = started.hProcess;
+		}
+		DeleteProcThreadAttributeList(attributes);
+	}
+	c4_process_win32_close(&output);
+	c4_process_win32_close(&errors);
+	return process;
+}
+
+// Starts the reporter and hands it the report; the pipe holds the whole text, so the write never waits for the reporter.
+static DWORD WINAPI StartReporter(void* parameter)
+{
+	const Text* text = (const Text*)parameter;
+	SECURITY_ATTRIBUTES inheritable = { sizeof(inheritable), NULL, TRUE };
+	HANDLE input = NULL;
+	HANDLE feed = NULL;
+	if (!CreatePipe(&input, &feed, &inheritable, (DWORD)sizeof(text->bytes))) return 0;
+	g_reporterProcess = SpawnReporter(input);
+	CloseHandle(input);
+	DWORD written = 0;
+	if (g_reporterProcess) WriteFile(feed, text->bytes, (DWORD)text->length, &written, NULL);
+	CloseHandle(feed);
+	return 0;
+}
+
+// The reporter shown `text`, and waited for until it ends; nothing when the program named none.
+static void RunReporter(const Text* text)
+{
+	if (!g_reporterLine) return;
+	HANDLE starter = CreateThread(NULL, 0, StartReporter, (void*)text, 0, NULL);
+	const bool started = starter && WaitForSingleObject(starter, kReporterStartMs) == WAIT_OBJECT_0;
+	if (starter) CloseHandle(starter);
+	if (!started || !g_reporterProcess) return;
+	WaitForSingleObject(g_reporterProcess, INFINITE);
+	c4_process_win32_close(&g_reporterProcess);
 }
 
 static void Describe(Report* report, const char* what)
@@ -226,7 +314,9 @@ __attribute__((noinline)) static void Capture(Report* report, ULONG skip)
 	report->count = RtlCaptureStackBackTrace(skip + 1, kFrames, report->frames, NULL);
 }
 
-// A fault's stack, from the faulting instruction outward, as its context left it.
+// A fault's stack, from the faulting instruction outward, as its context left it. The faulting instruction is the first
+// frame even where no code is (a call through a null function pointer: BUG-465), and the leaf step finds its caller from
+// the return address the call left on top of the stack.
 static void Unwind(Report* report, const CONTEXT* fault)
 {
 	CONTEXT context = *fault;
@@ -234,7 +324,7 @@ static void Unwind(Report* report, const CONTEXT* fault)
 	ULONG_PTR high = 0;
 	GetCurrentThreadStackLimits(&low, &high);
 	report->count = 0;
-	while (report->count < kFrames && context.Rip)
+	while (report->count < kFrames && (report->count == 0 || context.Rip))
 	{
 		report->frames[report->count] = (void*)(uintptr_t)(report->count == 0 ? context.Rip + 1 : context.Rip);
 		report->count++;
@@ -319,7 +409,7 @@ __attribute__((noinline)) void c4_fatal_report(const char* what)
 	g_fatalThread = GetCurrentThreadId();
 	Describe(&g_report, what);
 	Capture(&g_report, 1);
-	Deliver(&g_report);
+	RunReporter(Deliver(&g_report));
 }
 
 __attribute__((noreturn)) void c4_fatal(const char* what)
@@ -365,7 +455,7 @@ static LONG WINAPI OnUnhandledFault(EXCEPTION_POINTERS* fault)
 	{
 		DescribeFault(&g_report, fault->ExceptionRecord);
 		Unwind(&g_report, fault->ContextRecord);
-		Deliver(&g_report);
+		RunReporter(Deliver(&g_report));
 		ReleaseSRWLockExclusive(&g_reporting);
 	}
 	return g_previous ? g_previous(fault) : EXCEPTION_CONTINUE_SEARCH;
@@ -395,4 +485,33 @@ void c4_crash_log(const char* path)
 	if (path && path[0] && MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, g_log, kLogUnits) <= 0) g_log[0] = 0;
 	ReleaseSRWLockExclusive(&g_reporting);
 	if (g_log[0]) c4_report_faults();
+}
+
+int32_t c4_crash_reporter(const char* program, const char* const* arguments, int32_t count, char* error, int64_t errorCapacity)
+{
+	c4_copy_text("", error, errorCapacity);
+	wchar_t* path = NULL;
+	wchar_t* line = NULL;
+	if (program && program[0])
+	{
+		if (!(path = c4_process_win32_program(program, error, errorCapacity))) return -1;
+		c4_process_options start;
+		memset(&start, 0, sizeof(start));
+		start.arguments = arguments;
+		start.argumentCount = count;
+		if (!(line = c4_process_win32_command_line(&start, path)))
+		{
+			free(path);
+			c4_copy_text("the crash reporter's arguments are not UTF-8", error, errorCapacity);
+			return -1;
+		}
+	}
+	AcquireSRWLockExclusive(&g_reporting);
+	free(g_reporterProgram);
+	free(g_reporterLine);
+	g_reporterProgram = path;
+	g_reporterLine = line;
+	ReleaseSRWLockExclusive(&g_reporting);
+	if (line) c4_report_faults();
+	return 0;
 }

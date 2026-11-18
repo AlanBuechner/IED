@@ -1,16 +1,18 @@
-// Crash reports (Platform::SetCrashLog, C4Runtime/Platform/CrashReportWin32.c): the program runs itself as a child
-// that fails - an exception nothing catches, an access violation - and reads what the child left on standard error
-// and in its crash log, and what Platform::StackText says in a catch handler. Exit 0 when each report is there, whole,
-// with its stack.
+// Crash reports (Platform::SetCrashLog, Platform::SetCrashReporter, C4Runtime/Platform/CrashReportWin32.c): the program
+// runs itself as a child that fails - an exception nothing catches, an access violation - and reads what the child left
+// on standard error, in its crash log and with its crash reporter (the program again, writing what it was given into a
+// file), and what Platform::StackText says in a catch handler. Exit 0 when each report is there, whole, with its stack.
 
 include "bedrock.ch"
 
 #if defined(PLATFORM_LINUX)
 const int64 kAccessViolation = 139;          // 128 + SIGSEGV: the report hands the signal on, which ends the process
 const char* kAccessViolationText = "an access violation (SIGSEGV) writing address 0x0";
+const char* kNullCallText = "an access violation (SIGSEGV) executing address 0x0";
 #else
 const int64 kAccessViolation = 3221225477;   // 0xC0000005, the exit code of a process a fault ended
 const char* kAccessViolationText = "an access violation (0xC0000005) writing address 0x0";
+const char* kNullCallText = "an access violation (0xC0000005) executing address 0x0";
 #endif
 
 struct Boom
@@ -25,12 +27,46 @@ static void Throw(int32 depth) {
 
 static int32* Nowhere(int64 n) { return n > 1000 ? new int32 : nullptr; }
 
+static void Somewhere() {}
+
+static funcptr<void()> NowhereToCall(int64 n) { return n > 1000 ? Somewhere : null; }
+
 // What a -test program's harness calls first (C4Runtime/TestRuntimeC.c).
 [link("c4_test_configure")] void c4_test_configure(int32 argc, char8** argv) noexcept;
 
+const int64 kReporterPauseNs = 500000000;
+
+const char* kStillWaiting = "the crashed process waited\n";
+
+// The crash reporter: the report it is given on standard input written into `out`, after a pause, and whether the crashed
+// process (`crashed`, its id) was still there after it - it ends only once its reporter has.
+static int32 Report(Core::StringView out, Core::StringView crashed) {
+	Core::StringBuilder report;
+	int64 id = 0;
+	if (!Platform::ReadAllInput(report) || !Core::ParseInt64(crashed, id)) return 1;
+	Threading::Thread::Sleep(kReporterPauseNs);
+	Process::Usage usage;
+	if (Process::GetUsage((uint32)id, usage)) report.Append(kStillWaiting);
+	FS::File file = FS::File(Core::String(out).CStr(), "wb");
+	return file.Write(report.CStr(), report.ByteLength()) == report.ByteLength() ? 0 : 1;
+}
+
+// The child as its own crash reporter, writing the report into `out`.
+static void ReportTo(Core::StringView out) {
+	Core::Array<Core::String> arguments;
+	arguments.Push(Core::String("reporter"));
+	arguments.Push(Core::String(out));
+	Core::StringBuilder id;
+	id.AppendInt((int64)Platform::ProcessId());
+	arguments.Push(id.ToString());
+	Core::String error;
+	if (!Platform::SetCrashReporter(Platform::ExecutablePath().View(), arguments, error)) printf("SetCrashReporter: %s\n", error.CStr());
+}
+
 // The child: fails as `how` says, with `log` its crash log unless `how` is "unlogged"; "caught" prints what StackText
 // says in a handler and exits 0; "test-fault" faults in a test run, which names no log (BUG-437: a case that faulted said
-// nothing of where).
+// nothing of where); "null-call" calls a null function pointer (BUG-465: Windows reported no stack); "reported-throw"
+// and "reported-fault" name no log but a reporter writing into `log`.
 static int32 Fail(Core::StringView how, Core::StringView log) {
 	if (how == "caught") {
 		try {
@@ -45,8 +81,11 @@ static int32 Fail(Core::StringView how, Core::StringView log) {
 		c4_test_configure(0, nullptr);
 		*Nowhere(how.ByteLength()) = 1;
 	}
-	if (how != "unlogged") Platform::SetCrashLog(log);
-	if (how == "fault") *Nowhere(how.ByteLength()) = 1;
+	const bool reported = how == "reported-throw" || how == "reported-fault";
+	if (reported) ReportTo(log);
+	else if (how != "unlogged") Platform::SetCrashLog(log);
+	if (how == "fault" || how == "reported-fault") *Nowhere(how.ByteLength()) = 1;
+	if (how == "null-call") NowhereToCall(how.ByteLength())();
 	Threading::Thread worker = Threading::Thread::Run([]() {
 		Threading::Thread::SetCurrentName("thrower");
 		Throw(3);
@@ -96,6 +135,40 @@ static bool Reported(const char* how, int64 exitCode, const char* what, bool log
 	return ok;
 }
 
+// A null function pointer's report goes on past the address no code is at, to the frame that called it: two frames at least.
+static bool CallerNamed() {
+	Core::String report = ReadLog(Platform::ExecutablePath().Parent() / "null-call.log");
+	const int64 first = report.View().IndexOf(Core::StringView("\n    at "));
+	if (first >= 0 && report.View().IndexOf(Core::StringView("\n    at "), first + 1) >= 0) return true;
+	printf("FAIL null-call: the report names no caller:\n%s\n", report.CStr());
+	return false;
+}
+
+// Runs the child failing as `how` with a crash reporter; true when it ended with `exitCode`, and its reporter had been
+// given the whole report - `what`, the thread and the stack - and waited for.
+static bool ReporterShown(const char* how, int64 exitCode, const char* what) {
+	FS::Path shown = Platform::ExecutablePath().Parent() / (Core::String(how) + ".shown").View();
+	FS::RemoveFile(shown.CStr());
+	Process::StartInfo info;
+	info.program = Core::String(Platform::ExecutablePath().View());
+	info.arguments.Push(Core::String(how));
+	info.arguments.Push(Core::String(shown.View()));
+	Process::Output child = Process::Run(info, 60000);
+	bool ok = true;
+	if (child.exitCode != exitCode) {
+		printf("FAIL %s: exit %lld, not %lld\n%s\n", how, child.exitCode, exitCode, child.output.CStr());
+		ok = false;
+	}
+	Core::String report = Core::String("C4: fatal: ") + what;
+	ok = Holds(child.errors.View(), report.View(), how, "stderr") && ok;
+	Core::String given = ReadLog(shown);
+	ok = Holds(given.View(), report.View(), how, "what the reporter was given") && ok;
+	ok = Holds(given.View(), Core::StringView("\n    thread "), how, "what the reporter was given") && ok;
+	ok = Holds(given.View(), Core::StringView("\n    at "), how, "what the reporter was given") && ok;
+	ok = Holds(given.View(), Core::StringView(kStillWaiting), how, "what the reporter was given") && ok;
+	return ok;
+}
+
 // StackText in a catch handler: the exception's type and the stack from its throw, the throwing frames included.
 static bool Caught() {
 	Process::StartInfo info;
@@ -111,6 +184,7 @@ static bool Caught() {
 }
 
 int32 main(int32 argc, char8** argv) {
+	if (argc == 4) return Report(Core::StringView((const char*)argv[2]), Core::StringView((const char*)argv[3]));
 	if (argc == 3) return Fail(Core::StringView((const char*)argv[1]), Core::StringView((const char*)argv[2]));
 	bool ok = Reported("throw", 1, "an exception was thrown and not caught", true);
 	Core::String thrown = ReadLog(Platform::ExecutablePath().Parent() / "throw.log");
@@ -118,6 +192,10 @@ int32 main(int32 argc, char8** argv) {
 	ok = Reported("fault", kAccessViolation, kAccessViolationText, true) && ok;
 	ok = Reported("unlogged", 1, "an exception was thrown and not caught", false) && ok;
 	ok = Reported("test-fault", kAccessViolation, kAccessViolationText, false) && ok;
+	ok = Reported("null-call", kAccessViolation, kNullCallText, true) && ok;
+	ok = CallerNamed() && ok;
+	ok = ReporterShown("reported-throw", 1, "an exception was thrown and not caught") && ok;
+	ok = ReporterShown("reported-fault", kAccessViolation, kAccessViolationText) && ok;
 	ok = Caught() && ok;
 	if (ok) printf("crash reports: ok\n");
 	return ok ? 0 : 1;

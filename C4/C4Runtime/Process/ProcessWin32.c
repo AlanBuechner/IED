@@ -57,15 +57,6 @@ static HANDLE OpenNul(bool forReading)
 	return nul == INVALID_HANDLE_VALUE ? NULL : nul;
 }
 
-// An inheritable copy of `handle`; null when there is none to copy.
-static HANDLE InheritableCopy(HANDLE handle)
-{
-	HANDLE copy = NULL;
-	if (!handle || handle == INVALID_HANDLE_VALUE) return NULL;
-	if (!DuplicateHandle(GetCurrentProcess(), handle, GetCurrentProcess(), &copy, 0, TRUE, DUPLICATE_SAME_ACCESS)) return NULL;
-	return copy;
-}
-
 static const DWORD kStandardHandles[3] = { STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE };
 
 // The child's end of each standard stream as its mode asks, and the parent's end of each pipe.
@@ -82,8 +73,8 @@ static bool PrepareStreams(const c4_process_options* start, c4_process* out, Lau
 		HANDLE* child = &launch->childEnds[stream];
 		if (modes[stream] == kProcessPipe && !c4_process_win32_pipe(stream != kProcessStdin, (HANDLE*)&out->pipes[stream], child)) return false;
 		if (modes[stream] == kProcessNull && !(*child = OpenNul(stream == kProcessStdin))) return false;
-		if (modes[stream] == kProcessInherit) *child = InheritableCopy(GetStdHandle(kStandardHandles[stream]));
-		if (modes[stream] == kProcessToOutput) *child = InheritableCopy(launch->childEnds[kProcessStdout]);
+		if (modes[stream] == kProcessInherit) *child = c4_process_win32_inheritable_copy(GetStdHandle(kStandardHandles[stream]));
+		if (modes[stream] == kProcessToOutput) *child = c4_process_win32_inheritable_copy(launch->childEnds[kProcessStdout]);
 	}
 	return true;
 }

@@ -129,7 +129,7 @@ void c4_library_close(void* library);
 // the module has none (a program built without -g, a script compiled in memory) or `file` is too small.
 int32_t c4_source_line_of(const void* code, char* file, int32_t capacity, int32_t* line);
 
-// --- crash reports (Platform/CrashReportWin32.c) ----------------------------------------------------------
+// --- crash reports (Platform/CrashReportWin32.c, Platform/CrashReportLinux.c) -------------------------------
 // Every fatal error of the runtime ends here: an exception nothing caught or one that left a noexcept function, the
 // collector's, an abstract method called. The report is "C4: fatal: <what>", the thread, and its stack a frame a line,
 // named from the modules' PDBs: on standard error, and appended to the crash log after the time and the process id.
@@ -144,6 +144,11 @@ void c4_crash_log(const char* path);
 // Faults nothing handles and invalid C runtime arguments are reported (on standard error, and in the crash log once one is
 // named) without naming a log: what a test run does, so a case that faults says where.
 void c4_report_faults(void);
+// The program each report starts once it is out - a window that shows it to whoever ran the crashed program - with
+// `count` UTF-8 `arguments` and the report's text as its standard input; the process ends only after the reporter does.
+// Like a crash log, it reports faults nothing handles too. A null or empty program starts none. 0, or -1 with `error`
+// (no such program).
+int32_t c4_crash_reporter(const char* program, const char* const* arguments, int32_t count, char* error, int64_t errorCapacity);
 // The calling thread's stack as a report writes it, a frame a line, the `skip` frames above the caller left out, into
 // `out` (terminated; what fits): its length. In a catch handler it runs on the stack of the throw, so the frames go on
 // from where the exception was thrown. It reads the PDBs the first time: for reports, not a hot path.

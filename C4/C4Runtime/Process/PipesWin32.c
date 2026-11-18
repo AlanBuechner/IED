@@ -19,6 +19,14 @@ void c4_process_win32_close(HANDLE* handle)
 	*handle = NULL;
 }
 
+HANDLE c4_process_win32_inheritable_copy(HANDLE handle)
+{
+	HANDLE copy = NULL;
+	if (!handle || handle == INVALID_HANDLE_VALUE) return NULL;
+	if (!DuplicateHandle(GetCurrentProcess(), handle, GetCurrentProcess(), &copy, 0, TRUE, DUPLICATE_SAME_ACCESS)) return NULL;
+	return copy;
+}
+
 // Named after this process and random bits, so no two are alike.
 bool c4_process_win32_pipe(bool parentReads, HANDLE* parent, HANDLE* child)
 {
