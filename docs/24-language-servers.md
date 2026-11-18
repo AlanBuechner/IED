@@ -160,3 +160,8 @@ request, waited for a whole analysis. Left: parsing 1.4 s (one file at a time, "
 - A project's server is not stopped when its project leaves the solution; it serves on until IED restarts or `lsp.restart`.
 - `settingsBindings` pushed with `didChangeConfiguration`; options files outside the workspace folder are read at start only (the watcher sees the workspace).
 - `tcp` transport.
+- `workspace/didChangeWatchedFiles` (and the watchers servers register with `client/registerCapability`): a file a
+  program rewrites on disk while no editor has it open is never announced, so a server that caches it keeps the old
+  text - gopls reports a `go.mod` that `go mod tidy` has rewritten as it was before ("... is not in your go.mod file",
+  "... should be direct") until it restarts (found 2026-11-13). C4LSP is not affected: it notices disk changes itself
+  (BUG-449).

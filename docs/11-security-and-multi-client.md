@@ -172,7 +172,7 @@ Declared in the manifest (`docs/02`), shown before enabling, enforced at the plu
 
 ## Secrets
 
-- Stored in Windows Credential Manager (DPAPI), under `IED/<name>`; settings hold references (`{"secret": "anthropic-key"}`) or env references (`{"env": "ANTHROPIC_API_KEY"}`). Not built yet (F-SET-30): what reads a reference today reads `{"env": ...}` from the IED server's environment, and a `{"secret": ...}` reference fails saying the store is missing (`configServer.token`, `docs/35`), never falling back to plain text.
+- Stored in Windows Credential Manager (DPAPI), under `IED/<name>`; settings hold references (`{"secret": "anthropic-key"}`) or env references (`{"env": "ANTHROPIC_API_KEY"}`). Not built yet (F-SET-30): settings take only `{"env"}` references (`mcp.servers` env and headers, `configServer.token`), read from the IED server's environment when it started; a `{"secret": ...}` reference fails saying the store is missing (`docs/35`), never falling back to plain text.
 - Never sent to clients (settings UI shows `******` + "replace"), never written to logs, trajectories, tool results or diagnostics bundles (a redaction filter over every outbound text sink matches known secret values).
 
 ## Multi-client concurrency rules

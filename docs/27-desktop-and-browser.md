@@ -82,7 +82,7 @@ The server starts Edge on first use: `msedge.exe --headless=new --remote-debuggi
 
 The code (`plugins/browser/code`, compiled into the server): `cdp` (the connection: ids, replies, events, one reader thread), `engine` (finding and starting the browser), `page` and `store` (a page's state and `pages.json`), `browser` and `events` (the service: contexts, loading, frames, what the browser tells), `actions` (input, snapshots, screenshots, acting, eval), `methods`, `bindings` and `tools`.
 
-Each workspace gets its own browser context (`Target.createBrowserContext`), so cookies and storage of one workspace's pages are invisible to another's.
+Each workspace gets its own browser context (`Target.createBrowserContext`), so cookies and storage of one workspace's pages are invisible to another's. Such a context lives in memory: a page kept across a restart comes back at its address, but its cookies, `localStorage` and sign-ins last only while the browser runs (seen 2026-11-13: a dashboard's saved view was gone after IED relaunched).
 
 ### Pages
 
