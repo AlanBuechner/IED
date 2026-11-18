@@ -184,12 +184,12 @@ namespace Browser
 		return page;
 	}
 
-	void Browsers::Load(Page* page) {
+	bool Browsers::Load(Page* page) {
 		Threading::LockGuard guard(m_Starting);
 		Core::String url;
 		{
 			IED::HostLock lock(*m_Context);
-			if (page->m_Live) return;
+			if (page->m_Live) return false;
 			url = page->m_Url;
 		}
 		EnsureEngine();
@@ -201,6 +201,7 @@ namespace Browser
 		CdpReply created = m_Engine.m_Cdp->Call(Core::StringView(""), Core::StringView("Target.createTarget"), params.View());
 		if (!created.m_Ok) throw Unavailable((Core::String("the browser made no page: ") + created.m_Error.View()).View());
 		Attach(page, created.m_Result.Member("targetId").AsView(), url.View());
+		return !url.IsEmpty() && url.View() != "about:blank";
 	}
 
 	// Under `starting`: the page on the target `targetId` - attached, its domains on, its title reported, its viewport

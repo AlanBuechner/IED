@@ -53,8 +53,9 @@ namespace Browser
 			Core::StringView chatId);
 		// The page, or RpcError not_found.
 		public Page* Find(Core::StringView pageId);
-		// Loads the page into the browser when it is not; throws RpcError unavailable when the browser cannot run.
-		public void Load(Page* page);
+		// Loads the page into the browser when it is not; throws RpcError unavailable when the browser cannot run. Whether
+		// it loaded it now and started a navigation to its address (a load event to await before acting on it).
+		public bool Load(Page* page);
 		// Whether a new document is loading (false for a navigation within the document, which fires no load event).
 		public bool Navigate(Page* page, Core::StringView url);
 		public void Back(Page* page, int32 step);

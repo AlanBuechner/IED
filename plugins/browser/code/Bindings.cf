@@ -17,13 +17,30 @@ namespace Browser
 		return json.ToString();
 	}
 
-	// The page `args.page` names, which must be the workspace's.
+	// After the load event, the moment until the page stops loading (its last frames and requests), at most a second.
+	static void Settle(Browsers* browsers, Page* page) {
+		for (int32 i = 0; i < 20; ++i) {
+			{
+				IED::HostLock lock(*browsers->m_Context);
+				if (!page->m_Loading) return;
+			}
+			Threading::Thread::Sleep(50000000);
+		}
+	}
+
+	// The page `args.page` names, which must be the workspace's. A page that was not in the browser (kept across a
+	// restart, or unloaded while idle) is loaded again and waited for, as browser_open waits: a call made while it still
+	// navigates finds no page to act on ("Not attached to an active page").
 	static Page* PageOf(Browsers* browsers, const Serialization::DomNode& args, const IED::Workspace& ws) {
 		Core::StringView pageId = args.Member("page").AsView();
 		if (pageId.IsEmpty()) throw IED::RpcError(IED::ErrorCode::BadRequest, "name the page: the id browser_open gave (pg-...)");
 		Page* page = browsers->Find(pageId);
 		if (page->m_WsId.View() != ws.m_Id.View()) throw IED::RpcError(IED::ErrorCode::NotFound, (Core::String("no page ") + pageId + " in this workspace").View());
-		browsers->Load(page);
+		const int64 loads = browsers->Loads(page);
+		if (browsers->Load(page)) {
+			browsers->AwaitLoad(page, loads, c_LoadWaitNs);
+			Settle(browsers, page);
+		}
 		return page;
 	}
 
@@ -45,17 +62,6 @@ namespace Browser
 		text.AppendInt(errors);
 		text.Append(" (browser_console shows them).");
 		return text.ToString();
-	}
-
-	// After the load event, the moment until the page stops loading (its last frames and requests), at most a second.
-	static void Settle(Browsers* browsers, Page* page) {
-		for (int32 i = 0; i < 20; ++i) {
-			{
-				IED::HostLock lock(*browsers->m_Context);
-				if (!page->m_Loading) return;
-			}
-			Threading::Thread::Sleep(50000000);
-		}
 	}
 
 	static int64 ConsoleMark(Browsers* browsers, Page* page) {
