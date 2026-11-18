@@ -1,5 +1,5 @@
 // Documents (docs/10 document editing): server-owned buffers, each a "doc:<docId>" topic. The first opener holds the
-// lease and only the holder edits; an edit made against an older version is rebased over the edits since, or refused
+// lease (and an opener takes the lease of a client that is gone) and only the holder edits; an edit made against an older version is rebased over the edits since, or refused
 // with conflict when it overlaps one. Server-side writers (a reload from disk, an AI tool) edit as the server, with
 // their own origin. Every method here runs with the server lock held.
 
@@ -68,8 +68,14 @@ namespace Ied
 		// Throws forbidden (reason read_only) for a document that is read-only.
 		public void RefuseReadOnly(const Document* doc) const;
 		public Core::Array<Core::String> OpenPaths(Workspace* ws) const;
+		// A client's session ended: each lease it held passes to another client following the document (the one that
+		// subscribed last), told by doc.lease. With none following it, the lease stays the client's for its own
+		// reconnect, and the next doc.open of another client takes it (a lease of a client no session has is free).
+		public void ClientGone(Core::StringView clientId);
 
 	private:
+		// Whether a session of `clientId` is connected.
+		private bool IsConnected(Core::StringView clientId) const;
 		private Document* Open(Workspace* ws, Core::StringView path);
 		// A file outside the workspace that one of its language servers named; throws forbidden for another.
 		private Document* OpenExternal(Workspace* ws, Core::StringView uri);

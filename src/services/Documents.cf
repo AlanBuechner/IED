@@ -273,6 +273,30 @@ namespace Ied
 		m_Server->m_Hub.Publish(doc->Topic().View(), "doc.lease", data.View());
 	}
 
+	bool Documents::IsConnected(Core::StringView clientId) const {
+		for (int64 i = 0; i < m_Server->m_Sessions.Count(); ++i) {
+			const Session* session = m_Server->m_Sessions[i];
+			if (!session->m_Closed && session->m_ClientId.View() == clientId) return true;
+		}
+		return false;
+	}
+
+	void Documents::ClientGone(Core::StringView clientId) {
+		if (clientId.IsEmpty() || IsConnected(clientId)) return;
+		for (Core::KeyValue<Core::String, Document*>& entry : m_ById) {
+			Document* doc = entry.value;
+			if (doc->m_Holder.View() != clientId || doc->IsReadOnly()) continue;
+			const Topic* topic = m_Server->m_Hub.Find(doc->Topic().View());
+			if (!topic) continue;
+			const Session* next = nullptr;
+			for (int64 i = 0; i < topic->m_Subscribers.Count(); ++i) {
+				const Session* session = topic->m_Subscribers[i];
+				if (session->m_Started && !session->m_Closed && session->m_ClientId.View() != clientId && !session->m_ClientId.IsEmpty()) next = session;
+			}
+			if (next) Grant(doc, next->m_ClientId.View());
+		}
+	}
+
 	Core::String Documents::OpenMethod(Call& call, const Params& params) {
 		Workspace* ws = m_Server->m_Workspaces->Get(params.Str("wsId").View());
 		const bool binary = params.Bool("binary", false);
@@ -283,7 +307,8 @@ namespace Ied
 			if (!binary && (known ? known->m_Binary : IsBinaryFile(ws->At(path.View())))) RefuseBinary(ws->At(path.View()));
 		}
 		Document* doc = params.Has("uri") ? OpenExternal(ws, params.Str("uri").View()) : Open(ws, path.View());
-		if (doc->m_Holder.IsEmpty() && !doc->IsReadOnly()) Grant(doc, call.ClientId());
+		const bool free = doc->m_Holder.IsEmpty() || !IsConnected(doc->m_Holder.View());
+		if (free && !doc->IsReadOnly() && !call.ClientId().IsEmpty()) Grant(doc, call.ClientId());
 		JsonWriter json;
 		json.BeginObject();
 		json.Field("docId", doc->m_DocId.View());

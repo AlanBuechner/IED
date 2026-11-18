@@ -1901,6 +1901,31 @@ def two_windows_share_a_document(run):
 
 
 @scenario(viewports=("desktop",))
+def a_closed_windows_lease_passes_on(run):
+	"""The owner, 2026-11-18: "Read-only: another window is editing this document" with no other window open - the
+	lease stayed with a window that had closed. Now the window left following the document takes it."""
+	first = run.open()
+	open_main_c(run, first)
+	take_over(first)
+	original = editor_text(first)
+	second = run.open(fresh=False)
+	open_main_c(run, second)
+	second.wait_for_selector(".ed-bar:has-text('another window is editing')")
+	second.wait_for_function("[...document.querySelectorAll('.st-part')].some((e) => e.textContent === 'Read-only')")
+	first.close()
+	second.wait_for_selector(".ed-bar", state="hidden", timeout=10000)
+	second.wait_for_function("![...document.querySelectorAll('.st-part')].some((e) => e.textContent === 'Read-only')", timeout=5000)
+	run.page = second
+	run.shot("lease-passed")
+	second.click(".monaco-editor .view-lines")
+	second.keyboard.press("Control+Home")
+	second.keyboard.type("Z")
+	second.wait_for_function("ied_shell.views.entries.get('doc:src/main.c').instance.model.getValue().startsWith('Z')", timeout=10000)
+	settled(second)
+	restore(run, second, original)
+
+
+@scenario(viewports=("desktop",))
 def server_edits_while_typing(run):
 	page = run.open()
 	open_main_c(run, page)

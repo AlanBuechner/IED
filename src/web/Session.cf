@@ -323,6 +323,7 @@ namespace Ied
 		if (!m_Started) return;
 		m_Server->RemoveSession(this);
 		m_Server->m_Presence->Disconnected(this);
+		m_Server->m_Documents->ClientGone(m_ClientId.View());
 	}
 
 	// --- The writer thread -------------------------------------------------------------------------------------------

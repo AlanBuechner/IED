@@ -3,6 +3,8 @@
 Positions are 0-based {line, col}; col counts UTF-16 code units.
 """
 
+import asyncio
+
 from harness import ProtocolTest
 from iedclient import RpcFailure, new_id
 
@@ -107,6 +109,48 @@ class DocumentTests(ProtocolTest):
 		with self.assertRaises(RpcFailure):
 			await owner.request("doc.edit", {"docId": doc["docId"], "baseVersion": doc["version"], "changes": [change(0, 0, 0, 0, "x")]})
 		await phone.request("doc.edit", {"docId": doc["docId"], "baseVersion": doc["version"], "changes": [change(0, 0, 0, 0, "x")]})
+
+	async def open_until_holder(self, client, scratch, holder):
+		"""doc.open until it answers `holder`: the server notices a closed socket a moment after it closed."""
+		for _ in range(50):
+			seen = await client.request("doc.open", {"wsId": scratch["wsId"], "path": scratch["path"]})
+			if seen["holder"] == holder:
+				return seen
+			await asyncio.sleep(0.05)
+		return seen
+
+	async def test_a_gone_holders_lease_passes_to_a_client_following_the_document(self):
+		# The owner, 2026-11-18: "Read-only: another window is editing this document" with no other window open - the
+		# lease stayed with a window that had closed.
+		owner, other = await self.client(), await self.client()
+		scratch, doc = await self.open_scratch(owner)
+		topic = "doc:" + doc["docId"]
+		await other.request("doc.open", {"wsId": scratch["wsId"], "path": scratch["path"]})
+		await other.sub([topic])
+		await other.next_frame(topic)
+		await owner.close()
+		event = (await other.wait_for(topic, lambda f: f.get("kind") == "doc.lease"))[-1]["data"]
+		self.assertEqual(other.client_id, event["holder"])
+		await other.request("doc.edit", {"docId": doc["docId"], "baseVersion": doc["version"], "changes": [change(0, 0, 0, 0, "x")]})
+
+	async def test_a_gone_holders_lease_is_taken_by_the_next_opener(self):
+		owner = await self.client()
+		scratch, doc = await self.open_scratch(owner)
+		await owner.close()
+		later = await self.client()
+		seen = await self.open_until_holder(later, scratch, later.client_id)
+		self.assertEqual(later.client_id, seen["holder"], "nobody followed the document: the lease waited for an opener")
+		await later.request("doc.edit", {"docId": doc["docId"], "baseVersion": doc["version"], "changes": [change(0, 0, 0, 0, "x")]})
+
+	async def test_a_holder_that_reconnects_keeps_its_lease(self):
+		owner = await self.client()
+		_, doc = await self.open_scratch(owner)
+		topic = "doc:" + doc["docId"]
+		await owner.sub([topic])
+		await owner.next_frame(topic)
+		owner.abort()
+		again = await self.reconnect(owner)
+		await again.request("doc.edit", {"docId": doc["docId"], "baseVersion": doc["version"], "changes": [change(0, 0, 0, 0, "x")]})
 
 	async def test_stale_edit_is_rebased_over_a_server_edit(self):
 		owner = await self.client()

@@ -145,9 +145,25 @@ class Documents:
 	async def m_doc_open(self, call, p):
 		uri = p.str("uri", None, required=False)
 		doc = self._open_external(p.str("wsId"), uri) if uri else self._open(p.str("wsId"), normalize(p.str("path")))
-		if doc.holder is None and not doc.external:
+		if (doc.holder is None or not self._connected(doc.holder)) and not doc.external and call.client_id:
 			self._grant(doc, call.client_id)
 		return {"docId": doc.doc_id, "path": doc.path, "version": doc.version, "holder": doc.holder, "readOnly": doc.external}
+
+	def _connected(self, client_id):
+		return any(not s.closed and s.client_id == client_id for s in self.server.sessions)
+
+	def client_gone(self, client_id):
+		"""A client's session ended: each lease it held passes to another client following the document (the one that
+		subscribed last); with none following, it stays the client's for its reconnect, and the next opener takes it."""
+		if not client_id or self._connected(client_id):
+			return
+		for doc in self.by_id.values():
+			if doc.holder != client_id or doc.external:
+				continue
+			topic = self.server.hub.get(doc.topic)
+			following = [s for s in (topic.subscribers if topic else ()) if not s.closed and s.client_id and s.client_id != client_id]
+			if following:
+				self._grant(doc, following[-1].client_id)
 
 	@staticmethod
 	def _refuse_external(doc):

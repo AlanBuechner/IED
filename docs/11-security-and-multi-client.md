@@ -181,7 +181,7 @@ All clients see the same server state. Conflicts are resolved by explicit, visib
 
 | Resource | Rule |
 |---|---|
-| **Document text** | One edit lease per document (first editor gets it). Others see a live read-only mirror with *Take over*. Lease auto-releases after 2 min idle. AI/server edits are merged by the server (`docs/10`). |
+| **Document text** | One edit lease per document (first editor gets it). Others see a live read-only mirror with *Take over*. When the holder's window closes (its socket ends, or is silent past the idle timeout) the lease passes to a window still following the document, else to the next one to open it (`docs/10`). AI/server edits are merged by the server (`docs/10`). |
 | **Chat input** | Sends are serialized per chat. A second send while a turn runs joins it at its next step or is queued for the next turn (the owner's choice per message), never a rejected error. |
 | **Approvals and questions** | First answer wins; other devices see the card resolve with "answered on <device>". |
 | **Debug controls** | Revision-checked: a "step" based on stale state is rejected (`conflict`) and the client refreshes. Two devices pressing Continue results in one continue. |

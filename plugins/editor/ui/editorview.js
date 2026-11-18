@@ -198,6 +198,7 @@ export class CodeEditor {
 	setReadOnly(readOnly) {
 		this.editor.updateOptions({ readOnly: readOnly || this.mixedEndings, readOnlyMessage: { value: this.readOnlyReason() } });
 		this.showBar();
+		this.changed();   // the status bar's "Read-only" follows the lease too
 	}
 
 	// The person typed: Monaco's changes refer to the text before them, as the protocol's do.

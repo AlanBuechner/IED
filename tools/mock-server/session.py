@@ -275,3 +275,4 @@ class Session:
 		if self in self.server.sessions:
 			self.server.sessions.discard(self)
 			self.server.presence.disconnected(self)
+			self.server.docs.client_gone(self.client_id)
