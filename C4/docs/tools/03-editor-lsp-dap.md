@@ -48,7 +48,7 @@ If a feature needs a fact the model does not expose, the fix is a new model quer
 ```text
 C4Protocol/src/Json/          JSON values, Content-Length framing, the stdio channel (shared with C4DAP)
 C4LSPLib/src/                 static library: everything the server does (C4Testing links it too)
-  Server/     LspServer, StdioTransport, CompilationSession, NodeLocator, SemanticResolver
+  Server/     LspServer, StdioTransport, MessageInbox, CompilationSession, NodeLocator, SemanticResolver
   Protocol/   LspJson, LspTypes, TextDocumentStore, TextDocumentSync
   Features/   one file per feature (below)
 C4LSP/src/main.cpp            the executable: the stdio loop
@@ -58,7 +58,7 @@ C4LSP/src/main.cpp            the executable: the stdio loop
 
 | Area | Methods |
 |---|---|
-| Lifecycle | `initialize` (answers `positionEncoding`: `utf-8` when the client offers it, else `utf-16`; request ids, numbers or strings, come back as sent), `initialized`, `shutdown`, `exit`, `workspace/didChangeConfiguration` |
+| Lifecycle | `initialize` (answers `positionEncoding`: `utf-8` when the client offers it, else `utf-16`; request ids, numbers or strings, come back as sent), `initialized`, `shutdown`, `exit`, `workspace/didChangeConfiguration`, `$/cancelRequest` (see "Requests while it analyzes") |
 | Sync | `didOpen`, `didChange` (the whole text, which the server asks for, or ranged changes applied in order, their columns in the agreed encoding's units), `didClose`, `publishDiagnostics` |
 | Navigation | `definition` (a function's body: its out-of-line definition when it has one; at a declaration's own name, a function's other declarations - its declaration in its type or header from its definition, its definition from a declaration - else the declaration itself, and the type qualifying an out-of-line definition, `FileWalk` of `FileWalk::Folder`, is that type), `declaration`, `typeDefinition` (the named type of a value: a variable's or a parameter's at its declaration or a use, through references, pointers and aliases), `implementation` (from a type, the types deriving from it; from a method, the methods of derived types that override it), `references` and `documentHighlight` (asked at a use, at a declaration's own name or at a type written in a declaration - `Push` of `void Ring::Push()` is the method, its `Ring` the type, `Ring` of `Ring* ring` the type; every file, the declarations first with `context.includeDeclaration`; a type's references include where it is written as a type, `Ring&` of a parameter, a field's type in another header, `new Ring(...)`, the `Ring::` of each out-of-line definition, and each base list naming it, `class Square : IShape`; a create operator's references are the constructions that call it, `new Ring(args)`, `Ring r(args)`, `Ring r;` and `Ring(args)`, by its count of arguments; a member reached with `->` through a pointer resolves like one reached with `.`; a name outside any function, a field's type in `namespace N { class C { ... } }`, resolves from its type's and namespace's scope); `rename` renames a type's qualifiers too but leaves a constructor's constructions, which spell the type's name; `prepareCallHierarchy`, `callHierarchy/incomingCalls` and `outgoingCalls` (the function named or called at a position; its callers, each with its calls; the functions its body calls; a function's declaration in its type and its out-of-line definition are one function; a construction is a call of the create operator it fits); `prepareTypeHierarchy`, `typeHierarchy/supertypes` and `subtypes` (direct bases and direct derived types) |
 | Information | `hover` (markdown `MarkupContent`: a `c4` block with the declaration as written - annotations, access, modifiers, return type, parameters with their defaults, trailing qualifiers - its name qualified with its owner, `public int64 Ai::ToolRegistry::Find(const Span& text, int64 start = 0) const`, then the comment above it, or after it on a field's line; a method's out-of-line definition hovers as its declaration in the type; a parameter or a local is labeled as one; a type written in a declaration shows that type; on a macro use, the `#define` and what the use expands to), `signatureHelp`, `completion` (triggered by `.` and the `>` of `->`; after an accessor only the base's members; in an include's path, the folders and headers it can name - triggered by its `"` and each `/`, see "Completing an include's path" below), `c4/expandMacro` (`TextDocumentPositionParams` -> `{name, expansion}`, null off a macro use; `experimental.expandMacro` in the capabilities, as rust-analyzer's `rust-analyzer/expandMacro`) |
@@ -161,9 +161,11 @@ a module's files are compiled only inside the programs that use it. One server s
   when they compile the document, else at the declaration - analyzed for the query when they were not (a request waits
   25 s at most in all, under IED's 30 s), and kept three minutes after; answers are merged, each place once. A
   parameter or a function's local asks no other program.
-- **Threads.** Analyses are made on the worker; a request reads them on the reading thread while the worker publishes
-  diagnostics from them, so the two take turns (the resolver's caches and the model's query-time instantiations are not
-  thread-safe): a request holds them but while it waits for the worker. A setting that changes what the diagnostics say
+- **Threads.** A reader takes each message off stdin as it arrives (`MessageInbox`, "Requests while it analyzes" below);
+  the messages are handled one at a time, in order, on the handling thread. Analyses are made on the worker; a request
+  reads them on the handling thread while the worker publishes diagnostics from them, so the two take turns (the
+  resolver's caches and the model's query-time instantiations are not thread-safe): a request holds them but while it
+  waits for the worker. A setting that changes what the diagnostics say
   (`tidy`) republishes them on the worker, after any older publish. `workspace/symbol` reads programs that hold every
   project, from their analyses or the symbols they left ("Workspace symbols" below).
 
@@ -194,6 +196,27 @@ analyzed every program (25 s, the request's whole budget). Now:
   header, `docs/language/13-interop.md` 2.1); and every unit's tree had its whole include closure spliced in (1.2 s, and
   every walk then skipped it): a unit's tree is now its own file's, and the semantic tokens take what the included
   headers declare (type names, fields) from the headers' units.
+
+### Requests while it analyzes
+
+An editor asks several things after each keystroke (semantic tokens, highlights, a hover, code actions) and cancels the
+ones the next keystroke makes moot. Until BUG-466 the server read the next message only once it had answered the last:
+a request waiting for an analysis held back the edits and the cancellations behind it, `$/cancelRequest` did nothing,
+and each edit then cost an analysis and each request - cancelled ones too - its wait. 20 s of typing in LS's client
+program (2483 files, 4.5 s an analysis) made 42 analyses, answered requests IED had cancelled 200 s later and left
+the last ones unanswered after 5 minutes; IED gave up on each at 30 s ("took longer than the language server's time")
+and the colors stayed half-done. Now (`Server/MessageInbox`, `LspServer::Serve`):
+
+- **Messages are read as they arrive**, by a thread of their own, and handled in order.
+- **A cancelled request answers `RequestCancelled` (-32800) at once**: when it is taken, or while it waits for an
+  analysis - a `$/cancelRequest` wakes it.
+- **A request with an edit of its document behind it answers `ContentModified` (-32801) at once**: its positions and
+  its answer are for text that is gone, and the client asks again about the new text. An edit of another document
+  leaves it waiting.
+- **A request's budget (25 s) counts from when it arrived**, not from when it is taken: one that waited behind others
+  waits no longer for an analysis and answers from the one there is, inside IED's 30 s.
+- The same 20 s of typing: 5 analyses, every cancelled request answered within 0.6 s, the last ones 8.6 s after the
+  last keystroke (the analysis then running and the one of the final text), semantic tokens within 0.2 s.
 
 ### Workspace symbols
 

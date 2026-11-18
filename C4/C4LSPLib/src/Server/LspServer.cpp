@@ -27,6 +27,14 @@ namespace C4LSP::Server
 		// How often the worker, while nothing changes, looks at the disk for files an analysis read that something besides
 		// the editor changed (git, a build, another tool), and for analyses it may let go.
 		constexpr auto kIdleLookEvery = std::chrono::seconds(2);
+		// JSON-RPC's errors for an answer not given: the client cancelled the request; the document changed after it.
+		constexpr int kRequestCancelled = -32800;
+		constexpr int kContentModified = -32801;
+
+		std::string InterruptionMessage(int code)
+		{
+			return code == kRequestCancelled ? "the request was cancelled" : "the document changed after the request";
+		}
 
 		// The workspace symbols of `analysis`, with the files they were read from; a file's the copy `shared` has already.
 		std::shared_ptr<const SymbolIndex> IndexOf(CompilationSession& analysis, SharedFileSymbols& shared)
@@ -168,13 +176,13 @@ namespace C4LSP::Server
 			std::lock_guard<std::mutex> lock(m_SessionMutex);
 			return IsCurrentLocked(uri, open, freshness);
 		};
-		if (!current())
+		if (!current() && InterruptionOfRequest() == 0)
 		{
 			const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(kRequestBudget - (std::chrono::steady_clock::now() - m_RequestStart));
 			QueryReleased waiting(m_QueryMutex);
 			std::unique_lock<std::mutex> lock(m_WorkMutex);
 			m_WorkCv.wait_for(lock, std::max(std::chrono::milliseconds(0), std::min<std::chrono::milliseconds>(kFreshWait, left)),
-				[&] { return (!m_Working && !m_Dirty) || current(); });
+				[&] { return (!m_Working && !m_Dirty) || current() || InterruptionOfRequest() != 0; });
 		}
 		return GetSnapshot(uri);
 	}
@@ -208,15 +216,25 @@ namespace C4LSP::Server
 	{
 		const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(kRequestBudget - (std::chrono::steady_clock::now() - m_RequestStart));
 		QueryReleased waiting(m_QueryMutex);
-		WaitForPendingWork(std::max(std::chrono::milliseconds(0), std::min(most, left)));
+		std::unique_lock<std::mutex> lock(m_WorkMutex);
+		m_WorkCv.wait_for(lock, std::max(std::chrono::milliseconds(0), std::min(most, left)),
+			[this] { return (!m_Working && !m_Dirty) || InterruptionOfRequest() != 0; });
 	}
 
-	void LspServer::NotifyAnalyzed()
+	void LspServer::WakeWaitingRequests()
 	{
 		{
 			std::lock_guard<std::mutex> lock(m_WorkMutex); // a request between its check and its wait sees the swap or the wake
 		}
 		m_WorkCv.notify_all();
+	}
+
+	int LspServer::InterruptionOfRequest() const
+	{
+		if (!m_Inbox) return 0;
+		if (m_Inbox->IsCancelled(m_RequestId)) return kRequestCancelled;
+		if (!m_RequestUri.empty() && m_Inbox->HasEditOf(m_RequestUri)) return kContentModified;
+		return 0;
 	}
 
 	int32 LspServer::ScopeOfUri(const std::string& uri) const
@@ -446,7 +464,7 @@ namespace C4LSP::Server
 			program.stale = false;
 			program.symbols = std::move(symbols);
 		}
-		NotifyAnalyzed();
+		WakeWaitingRequests();
 		return true;
 	}
 
@@ -757,29 +775,52 @@ namespace C4LSP::Server
 
 	// --- Messages ------------------------------------------------------------------------------------------------------
 
-	void LspServer::HandleMessage(const Json::Value& message)
+	void LspServer::HandleMessage(const Json::Value& message) { HandleMessage(message, std::chrono::steady_clock::now()); }
+
+	void LspServer::HandleMessage(const Json::Value& message, std::chrono::steady_clock::time_point arrived)
 	{
 		if (!message.HasMember("method"))
 			return; // a response to a server-initiated request; the server issues none
 		if (message.HasMember("id"))
-			HandleRequest(message);
+			HandleRequest(message, arrived);
 		else
 			HandleNotification(message);
 	}
 
-	void LspServer::HandleRequest(const Json::Value& message)
+	void LspServer::Serve(MessageInbox& inbox)
+	{
+		m_Inbox = &inbox;
+		inbox.OnArrival([this] { WakeWaitingRequests(); });
+		while (!ShouldExit())
+		{
+			std::optional<MessageInbox::Arrived> next = inbox.Next();
+			if (!next) break;
+			HandleMessage(next->message, next->at);
+		}
+		inbox.OnArrival({});
+		m_Inbox = nullptr;
+	}
+
+	void LspServer::HandleRequest(const Json::Value& message, std::chrono::steady_clock::time_point arrived)
 	{
 		const std::string method = message.Member("method").GetString();
 		const Json::Value id = message.Member("id");
 		// The features' resolver caches and the model's query-time instantiations are not thread-safe: a request holds the
 		// analyses (the worker publishes from them too) except while it waits for the worker (AwaitWork).
 		std::lock_guard<std::mutex> querying(m_QueryMutex);
-		m_RequestStart = std::chrono::steady_clock::now();
+		m_RequestStart = arrived;
+		m_RequestId = id;
 		// params must OWN its copy: Value::Member returns by value, so binding a const ref here would dangle.
 		Json::Value params = message.HasMember("params") ? message.Member("params") : Json::Value::Null();
 		// The request's document is where its positions (and its answer's without a URI) are; a UTF-16 client's columns
 		// become the compiler's UTF-8 ones here, and go back in SendResponse.
 		m_RequestUri = ExtractUri(params);
+		// One the client gave up on, or whose document changed after it, while it waited behind others: no work for it.
+		if (const int interrupted = InterruptionOfRequest())
+		{
+			SendError(id, interrupted, InterruptionMessage(interrupted));
+			return;
+		}
 		if (m_Encoding == Protocol::PositionEncoding::Utf16 && method != "initialize")
 			params = Codec().FromClient(params, m_RequestUri);
 
@@ -842,6 +883,12 @@ namespace C4LSP::Server
 		const std::string method = message.Member("method").GetString();
 		Json::Value params = message.HasMember("params") ? message.Member("params") : Json::Value::Null(); // owned copy (see HandleRequest)
 
+		if (method == "$/cancelRequest")
+		{
+			// It comes after its request, which is answered by now (with RequestCancelled if it was still being answered).
+			if (m_Inbox) m_Inbox->Forget(params.Member("id"));
+			return;
+		}
 		if (method == "initialized")
 			HandleInitialized();
 		else if (method == "exit")
@@ -902,6 +949,12 @@ namespace C4LSP::Server
 
 	void LspServer::SendResponse(const Json::Value& id, const Json::Value& result)
 	{
+		// Interrupted while it waited for an analysis: the answer, made from the analysis there was, is not the client's.
+		if (const int interrupted = InterruptionOfRequest())
+		{
+			SendError(id, interrupted, InterruptionMessage(interrupted));
+			return;
+		}
 		Json::Value message = Json::Value::MakeObject();
 		message.SetMember("jsonrpc", Json::Value::String(Core::String("2.0")));
 		message.SetMember("id", id);

@@ -82,15 +82,27 @@ namespace Testing::Lsp
 
 	Value ServerHarness::Request(const std::string& method, const Value& params)
 	{
-		const int64 id = m_NextId++;
-		Value message = Message(method, params);
-		message.SetMember("id", Value::Int(id));
+		const Value message = RequestMessage(method, params);
 		m_Server->HandleMessage(message);
+		return Response(message.Member("id").GetInt()).Member("result");
+	}
+
+	Value ServerHarness::RequestMessage(const std::string& method, const Value& params)
+	{
+		Value message = Message(method, params);
+		message.SetMember("id", Value::Int(m_NextId++));
+		return message;
+	}
+
+	Value ServerHarness::Response(int64 id)
+	{
 		for (const Value& answer : Messages())
 			if (answer.HasMember("id") && !answer.HasMember("method") && answer.Member("id").GetInt() == id)
-				return answer.Member("result");
+				return answer;
 		return Value::Null();
 	}
+
+	Value ServerHarness::NotificationMessage(const std::string& method, const Value& params) { return Message(method, params); }
 
 	std::string ServerHarness::MessagesFor(const std::string& uri)
 	{

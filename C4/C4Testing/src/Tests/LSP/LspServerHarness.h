@@ -26,6 +26,12 @@ namespace Testing::Lsp
 		void Notify(const std::string& method, const Json::Value& params);
 		// A request's result (null when it failed). Requests are answered on the calling thread.
 		Json::Value Request(const std::string& method, const Json::Value& params);
+		// A request of `method` with the next id, not handed to the server: for a test that delivers it itself (an inbox).
+		Json::Value RequestMessage(const std::string& method, const Json::Value& params);
+		// The server's response to the request `id`, its result or its error; null while it has not answered.
+		Json::Value Response(int64 id);
+		// A notification of `method`.
+		static Json::Value NotificationMessage(const std::string& method, const Json::Value& params);
 		// The last diagnostics published for `uri`, one message per line; empty when there were none.
 		std::string MessagesFor(const std::string& uri);
 		// {textDocument: {uri}, position: {line, character}} at the first `needle` of `text`.

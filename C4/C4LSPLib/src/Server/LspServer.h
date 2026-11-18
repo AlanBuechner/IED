@@ -1,5 +1,6 @@
 #pragma once
 #include "Server/CompilationSession.h"
+#include "Server/MessageInbox.h"
 #include "Server/Program.h"
 #include "Protocol/TextDocumentStore.h"
 #include "Protocol/PositionCodec.h"
@@ -39,8 +40,15 @@ namespace C4LSP::Server
 		explicit LspServer(OutputSink send);
 		~LspServer();
 
-		// Handle one already-parsed JSON-RPC document (request, notification, or response).
+		// Handle one already-parsed JSON-RPC document (request, notification, or response); a request's budget counts from
+		// `arrived`, when the transport read it (now, without one).
 		void HandleMessage(const Json::Value& message);
+		void HandleMessage(const Json::Value& message, std::chrono::steady_clock::time_point arrived);
+
+		// Handles what `inbox` holds as it arrives, until exit or the inbox closes. Meanwhile a request waiting for an
+		// analysis sees what arrives after it: cancelled, it answers RequestCancelled; with an edit of its document after it,
+		// ContentModified - at once, not after its wait (docs/tools/03 "Requests while it analyzes").
+		void Serve(MessageInbox& inbox);
 
 		bool ShouldExit() const { return m_ShouldExit; }
 		int ExitCode() const { return m_ShutdownRequested ? 0 : 1; }
@@ -78,11 +86,14 @@ namespace C4LSP::Server
 		// Of `open`, the documents `program` takes as the worker places them: those it holds, and for the options' own
 		// program those no program holds (the session lock held).
 		std::map<std::string, size_t> TakenByLocked(const Program& program, const std::map<std::string, size_t>& open) const;
-		// A request waits for the worker: at most `most`, and never past the request's budget; the analyses are the
-		// worker's meanwhile (the query lock released).
+		// A request waits for the worker: at most `most`, never past the request's budget, and not once it is interrupted;
+		// the analyses are the worker's meanwhile (the query lock released).
 		void AwaitWork(std::chrono::milliseconds most);
-		// Wakes the requests waiting for an analysis (after one is swapped in).
-		void NotifyAnalyzed();
+		// Wakes the requests waiting for an analysis: one was swapped in, or a message arrived that may interrupt them.
+		void WakeWaitingRequests();
+		// The error the request in hand answers instead of its result (0 while it stands): RequestCancelled once the client
+		// cancelled it, ContentModified once an edit of its document arrived after it. Always 0 without an inbox.
+		int InterruptionOfRequest() const;
 		// The program answering about `uri` (the session lock held): the one its document is analyzed in, else one whose
 		// analysis compiled the file, else the options' own.
 		std::shared_ptr<Program> ProgramOfLocked(const std::string& uri) const;
@@ -144,7 +155,7 @@ namespace C4LSP::Server
 		// left of one whose file changed, dropped.
 		void NoticeDiskChanges();
 
-		void HandleRequest(const Json::Value& message);
+		void HandleRequest(const Json::Value& message, std::chrono::steady_clock::time_point arrived);
 		void HandleNotification(const Json::Value& message);
 		void UnknownMethod(const Json::Value& id, const std::string& method);
 
@@ -217,6 +228,8 @@ namespace C4LSP::Server
 		std::vector<std::shared_ptr<const LoadedInterface>> m_ScriptHosts; // per scope, the interface its session took (the worker's)
 		Protocol::PositionEncoding m_Encoding = Protocol::PositionEncoding::Utf16; // negotiated in initialize
 		std::string m_RequestUri;                      // the document of the request being answered
+		Json::Value m_RequestId;                       // the request being answered
+		MessageInbox* m_Inbox = nullptr;               // while Serve runs: what arrived and is not handled yet
 		bool m_Initialized = false;
 		bool m_ShutdownRequested = false;
 		bool m_ShouldExit = false;
