@@ -47,7 +47,7 @@ namespace Ai
 		registry->Find(Core::StringView("finish"))->m_EndsTurn = true;
 		// Not m_EndsTurn: a chat that runs until stopped may suspend to wait for a helper or a background task, never to stop
 		// (docs/04 "Chats waiting on each other").
-		AddRunTool(*registry, "suspend", "End the turn to wait, with the tasks left as they are: the chat goes on by itself when a reply it required (chat_send or chat_create with require_reply), one of its background tasks, or the owner's message comes. Use it instead of chat_wait or background_wait when you cannot go on until then. A chat that owes a reply sends it first. Example: suspend({\"reason\": \"Waiting for the Port Ring.h chat's reply\"})",
+		AddRunTool(*registry, "suspend", "End the turn to wait, with the tasks left as they are: the chat goes on by itself when a reply it required (chat_send or chat_create with require_reply), one of its background tasks, or the owner's message comes. Use it instead of chat_wait or background_wait when you cannot go on until then. A chat that owes a reply sends it first: suspend is refused while it owes one, unless what it waits on (a reply it required, a background task) began after it was asked - waiting on another chat's message that was not required, it sends a progress reply first or waits with chat_wait. Example: suspend({\"reason\": \"Waiting for the Port Ring.h chat's reply\"})",
 			"{\"type\": \"object\", \"properties\": {\"reason\": {\"type\": \"string\", \"minLength\": 1}}, \"required\": [\"reason\"], \"additionalProperties\": false}",
 			false, true);
 		return registry;
