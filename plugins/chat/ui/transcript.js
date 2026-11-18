@@ -337,15 +337,19 @@ export class TranscriptView {
 			this.fill(this.segmentEls.get(segment.segId), segment);
 		};
 		const head = h("button.chat-tool-head", { "aria-expanded": open ? "true" : "false", on: { click: toggle } },
-			statusIcon(segment.state), h("span.tname", null, segment.tool), h("span.targs", null, argsLine(segment.tool, segment.argsText)),
+			statusIcon(segment.state), h("span.tname", null, segment.tool),
+			// a question's Markdown marks are noise on one line; opened, the card shows it rendered
+			h("span.targs", null, segment.tool === "ask_user" ? argsLine(segment.tool, segment.argsText).replace(/\*\*|__|`/g, "") : argsLine(segment.tool, segment.argsText)),
 			h("span.tstat", null,
 				segment.plus ? h("span.plus", null, "+" + segment.plus) : null, segment.minus ? h("span.minus", null, "-" + segment.minus) : null,
 				segment.source ? h("span.src", null, segment.source) : null,
 				segment.state === "running" && WAIT_TOOLS.has(segment.tool) ? h("span.chat-wait-hint", { title: "Send a message (Enter) and the AI stops waiting and reads it; what it waits on goes on" }, "a message stops the wait") : null,
 				segment.ms !== undefined && segment.state !== "running" && segment.state !== "streaming" ? h("span", null, duration(segment.ms)) : null,
 				icon(open ? "chevron-down" : "chevron-right")));
-		const out = open ? this.toolResult(segment, result) : null;
-		return h("div.chat-tool" + (segment.state === "error" ? ".failed" : ""), { dataset: { call: segment.callId, state: segment.state || "" } }, head, this.toolImages(result), out);
+		const answer = segment.tool === "ask_user" ? answerOf(segment) : "";
+		const out = !open ? null : segment.tool === "ask_user" ? this.askedResult(segment, answer) : this.toolResult(segment, result);
+		return h("div.chat-tool" + (segment.state === "error" ? ".failed" : ""), { dataset: { call: segment.callId, state: segment.state || "" } }, head,
+			answer ? h("div.chat-tool-answer", { title: "The answer the model got" }, icon("reply"), h("span", null, answer)) : null, this.toolImages(result), out);
 	}
 
 	// The images the result showed the model (docs/13 "Images in tool results"), from the workspace; open or closed. A
@@ -424,6 +428,8 @@ export class TranscriptView {
 			deny);
 	}
 
+	// The question waiting: its text as Markdown, each option a row as wide as the card whose text wraps (an option can
+	// be a sentence or two), and the field for an answer of the owner's own words.
 	questionCard(segment, question) {
 		const field = h("input.input-field", { placeholder: "Your answer", "aria-label": "Your answer" });
 		const send = (text) => text && this.actions.answer(question, text);
@@ -431,11 +437,22 @@ export class TranscriptView {
 			event.stopPropagation();
 			if (event.key === "Enter") send(field.value.trim());
 		});
+		const options = question.options || [];
 		return h("div.chat-question", { dataset: { call: segment.callId, question: question.questionId } },
 			h("div.chat-tool-head", null, icon("question", "c-info"), h("span.tname", null, "ask_user"), h("span.tstat", null, "waiting for your answer")),
-			h("div.chat-question-text", null, question.question),
-			question.options && question.options.length ? h("div.actions", null, ...question.options.map((option) => h("button.btn", { on: { click: () => send(option) } }, option))) : null,
+			h("div.chat-question-text.chat-text", null, ...this.markdown(question.question || "")),
+			options.length ? h("div.chat-question-options", null, ...options.map((option) => h("button.chat-question-option", { on: { click: () => send(option) } }, icon("chevron-right"), h("span", null, option)))) : null,
 			question.allowText ? h("div.chat-deny", null, field, h("button.btn.primary", { on: { click: () => send(field.value.trim()) } }, "Answer")) : null);
+	}
+
+	// An asked question, opened: the question in full and the options it offered, the one chosen ticked.
+	askedResult(segment, answer) {
+		const args = parsedArgs(segment.argsText);
+		const options = Array.isArray(args.options) ? args.options.map(String) : [];
+		return h("div.chat-asked", null,
+			h("div.chat-question-text.chat-text", null, ...this.markdown(String(args.question || ""))),
+			options.length ? h("div.chat-asked-options", null, ...options.map((option) => h("div.opt" + (option === answer ? ".chosen" : ""), null,
+				icon(option === answer ? "check" : "blank", option === answer ? "c-saved" : ""), h("span", null, option)))) : null);
 	}
 
 	finishCard(segment) {
@@ -490,6 +507,25 @@ function diffFileRow(row) {
 	const state = row.status === "renamed" ? "renamed from " + row.oldPath : row.status;
 	return h("div.dl.file", { title: row.path }, h("span.fpath", null, row.path), state ? h("span.fstate", null, state) : null,
 		h("span.fcount", null, row.plus ? h("span.plus", null, "+" + row.plus) : null, row.minus ? h("span.minus", null, "-" + row.minus) : null));
+}
+
+// A call's arguments as an object ({} when they do not parse to one).
+function parsedArgs(argsText) {
+	try {
+		const args = JSON.parse(argsText || "{}");
+		return args && typeof args === "object" ? args : {};
+	}
+	catch {
+		return {};
+	}
+}
+
+// What an ask_user call was answered: the answer as chat.answer gave it, then the result the call returned ("" while
+// it waits, or when the turn stopped before an answer).
+function answerOf(segment) {
+	if (segment.answer) return segment.answer;
+	const result = segment.result;
+	return segment.state === "ok" && result && !result.isError ? result.preview || "" : "";
 }
 
 // The file a call's arguments name ("" when none does).

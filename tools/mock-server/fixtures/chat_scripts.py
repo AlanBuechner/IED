@@ -62,6 +62,16 @@ ASK = [
 	("end", "finished", {}),
 ]
 
+# A question whose options are sentences: the card's rows wrap them ("choose").
+CHOOSE = [
+	("text", "The scene's systems come from the packages and scripts, with no per-scene choice and no saved settings.\n"),
+	("ask", {"question": "For the new **Scene Systems** panel (cards like components: `Add System` search, fields editable, Remove/Reset, undoable, saved in the scene file), which model do you want?",
+		"options": ["A (recommended): per scene, like components. The scene file lists its systems and their settings; Add System offers every system the packages and scripts register; Remove takes one out of this scene only.",
+			"B: package systems stay in every scene (only their settings are editable); Add/Remove only for systems a package or script marks optional."], "allowText": True}),
+	("text", "Going with that.\n"),
+	("end", "finished", {}),
+]
+
 ERROR = [
 	("text", "Let me start by reading the renderer so I can"),
 	("pause", 0.5),
@@ -154,8 +164,8 @@ THINK = [
 	("end", "finished", {}),
 ]
 
-SCRIPTS = {"default": DEFAULT, "approval": APPROVAL, "ask": ASK, "error": ERROR, "long": LONG, "snap": SNAP, "prefill": PREFILL, "estimate": ESTIMATE, "rich": RICH, "think": THINK}
-KEYWORDS = [("think hard", "think"), ("overview", "rich"), ("screen", "snap"), ("big prompt", "prefill"), ("slow server", "estimate"), ("approv", "approval"), ("clamp", "approval"), ("run ", "approval"), ("test", "approval"), ("ask me", "ask"), ("decide", "ask"),
+SCRIPTS = {"default": DEFAULT, "approval": APPROVAL, "ask": ASK, "choose": CHOOSE, "error": ERROR, "long": LONG, "snap": SNAP, "prefill": PREFILL, "estimate": ESTIMATE, "rich": RICH, "think": THINK}
+KEYWORDS = [("think hard", "think"), ("overview", "rich"), ("screen", "snap"), ("big prompt", "prefill"), ("slow server", "estimate"), ("approv", "approval"), ("clamp", "approval"), ("run ", "approval"), ("test", "approval"), ("ask me", "ask"), ("decide", "ask"), ("choose", "choose"),
 	("long", "long"), ("essay", "long"), ("error", "error"), ("fail", "error")]
 
 SEED_TURNS = [

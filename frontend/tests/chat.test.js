@@ -62,6 +62,7 @@ test("chat: tool calls, approvals and the question", () => {
 	assertEqual([question.question, question.segment.segId], [true, "s7"]);
 	const answered = model.event("question.resolved", { questionId: "q9", answer: "A" });
 	assertEqual([answered.segment.segId, model.question], ["s7", null]);
+	assertEqual(answered.segment.answer, "A", "the card shows the answer before the call's result comes back");
 });
 
 test("chat: tasks, queue, files and context", () => {

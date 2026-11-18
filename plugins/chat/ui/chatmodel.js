@@ -274,7 +274,10 @@ export class ChatModel {
 			case "question.resolved": {
 				const asked = this.question;
 				this.question = null;
-				return Object.assign({ question: true }, asked ? this.tool(asked.callId) || {} : {});
+				const found = asked ? this.tool(asked.callId) : null;
+				// the card shows the answer at once, before the call's result comes back with it
+				if (found && data.answer) found.segment.answer = data.answer;
+				return Object.assign({ question: true }, found || {});
 			}
 			case "tasks.changed":
 				this.tasks = data.items || [];

@@ -174,6 +174,29 @@ button.chat-tool-head:hover { background: var(--veil); }
 .chat-deny .input-field { flex: 1; }
 .chat-question { border-left: 2px solid var(--accent-info); }
 .chat-question .chat-deny { padding-top: var(--space-4); border-top: var(--border-width) solid var(--border-0); }
+/* The question's text is Markdown (transcript.js questionCard), at the card's size. */
+.chat-question-text.chat-text { font-size: var(--font-size-sm); line-height: 1.5; }
+.chat-question-text.chat-text > :first-child { margin-top: 0; }
+.chat-question-text.chat-text > :last-child { margin-bottom: 0; }
+/* Each option a row as wide as the card, its text wrapping: an option can be a sentence or two. */
+.chat-question-options { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-4) var(--space-5); border-top: var(--border-width) solid var(--border-0); }
+.chat-question-option { display: flex; align-items: flex-start; gap: var(--space-3); width: 100%; min-height: var(--input-h); padding: 3px var(--space-4); border: var(--border-width) solid var(--border-1); border-radius: var(--radius-2); background: var(--bg-3); color: var(--text-0); font: inherit; line-height: 16px; text-align: left; white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
+.chat-question-option:hover { background: var(--bg-4); }
+.chat-question-option:focus-visible { outline: var(--border-width) solid var(--focus); outline-offset: -1px; }
+.chat-question-option .ci { width: 14px; height: 14px; flex: none; margin-top: 1px; color: var(--text-2); }
+.chat-question-option > span { min-width: 0; }
+/* An answered question: the answer under the call's head, whether the card is open or not; opened, the question in
+   full with the options it offered, the one chosen ticked. */
+.chat-tool-answer { display: flex; align-items: flex-start; gap: var(--space-3); padding: 0 var(--space-5) var(--space-3) 30px; color: var(--text-0); line-height: 17px; overflow-wrap: anywhere; }
+.chat-tool-answer .ci { width: 14px; height: 14px; flex: none; margin-top: 1px; color: var(--text-2); }
+.chat-tool-answer > span { min-width: 0; white-space: pre-wrap; }
+.chat-asked { border-top: var(--border-width) solid var(--border-0); padding: var(--space-3) var(--space-5) var(--space-3) 30px; }
+.chat-asked .chat-question-text { padding: 0; border-top: 0; }
+.chat-asked-options { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-3); color: var(--text-1); }
+.chat-asked-options .opt { display: flex; align-items: flex-start; gap: var(--space-3); line-height: 17px; overflow-wrap: anywhere; }
+.chat-asked-options .opt.chosen { color: var(--text-0); }
+.chat-asked-options .ci { width: 14px; height: 14px; flex: none; margin-top: 1px; }
+.chat-asked-options .opt > span { min-width: 0; }
 .chat-finish { border-left: 2px solid var(--accent-saved); }
 .chat-finish-body { padding: 0 var(--space-5) var(--space-3) 30px; }
 .chat-finish-verify { color: var(--text-1); margin-top: var(--space-2); }
