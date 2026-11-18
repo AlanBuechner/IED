@@ -187,8 +187,12 @@ def describe(repo, commit, pattern):
 	if text:
 		tag, distance, _ = text.strip().rsplit("-", 2)
 		return tag, int(distance)
-	count = run(["rev-list", "--count", commit], cwd=repo)
-	return None, int(count.strip())
+	return None, history_length(repo, commit)
+
+
+def history_length(repo, commit):
+	"""How many commits the commit's history holds, itself included."""
+	return int(run(["rev-list", "--count", commit], cwd=repo).strip())
 
 
 def is_ancestor(repo, older, newer):

@@ -8,8 +8,13 @@
 namespace Scripting
 {
 
-	// How much of a folder RegisterFolder takes: everything under it, or only the files directly in it.
-	enum class FolderScan { Recursive, TopOnly };
+	// How much of a folder RegisterFolder takes: everything under it; everything but its own tests/ folder (a project's source
+	// folder in a build without -test: its tests are the test harness's alone, docs/language/15-projects.md rule 7); or only
+	// the files directly in it.
+	enum class FolderScan { Recursive, WithoutTests, TopOnly };
+
+	// The folder of a source folder that holds its project's tests.
+	constexpr const char* kTestsFolder = "tests";
 
 	struct SourceInfo
 	{

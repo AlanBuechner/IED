@@ -76,7 +76,7 @@ namespace Scripting
 			};
 			for (const Core::String& object : objects) add(object.c_str());
 			for (const Core::String& library : libraries)
-				if (system == TargetSystem::Linux) add(library.c_str());
+				if (system == TargetSystem::Linux) add(LinuxLinkerArgument(library.c_str()));
 				else for (const std::string& argument : LinkerArguments(library.c_str())) add(argument);
 			if (WriteFileBytes(path, text)) return true;
 			std::cerr << "error: cannot write the link's inputs to " << path << std::endl;
@@ -284,6 +284,14 @@ namespace Scripting
 		}
 		if (argument.rfind("-L", 0) == 0) return { "-libpath:" + argument.substr(2) };
 		return { argument };
+	}
+
+	std::string LinuxLinkerArgument(const std::string& argument)
+	{
+		if (argument.rfind("-l", 0) != 0) return argument;
+		const std::string name = argument.substr(2);
+		const bool file = name.find('/') != std::string::npos || name.find('\\') != std::string::npos;
+		return file ? name : argument;
 	}
 
 	bool CompileForeignSource(const Core::String& srcPath, const Core::String& objPath,

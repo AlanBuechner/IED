@@ -304,15 +304,17 @@ namespace
 			return true;
 		}
 
-		// Every project's source folders and files (docs/language/15-projects.md).
+		// Every project's source folders and files (docs/language/15-projects.md); a source folder's tests/ only in a -test
+		// build (rule 7), so what a project's tests use is never part of its programs.
 		uint32 RegisterProjectSources()
 		{
 			uint32 total = 0;
+			const Scripting::FolderScan scan = m_Options.runTests ? Scripting::FolderScan::Recursive : Scripting::FolderScan::WithoutTests;
 			const Scripting::ProjectSet& projects = m_Compiler.GetSourceManager().Projects();
 			for (uint32 p = 0; p < projects.Count(); ++p)
 				for (const fs::path& source : projects.At(p).sources)
 				{
-					if (Scripting::IsFolder(Scripting::PathText(source))) total += m_Compiler.RegisterFolder(source);
+					if (Scripting::IsFolder(Scripting::PathText(source))) total += m_Compiler.RegisterFolder(source, scan);
 					else if (m_Compiler.RegisterFile(source)) ++total;
 					else std::cerr << "warning: project '" << projects.At(p).name << "' names '" << source.generic_string() << "', which does not exist\n";
 				}

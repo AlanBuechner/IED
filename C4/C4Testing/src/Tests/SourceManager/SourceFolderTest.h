@@ -19,5 +19,7 @@ namespace Testing
 		void ADeepFolderRegistersAndReads();
 		TEST_FUNC(SourceManager.Folders)
 		void AForeignIncludeIsNoLibraryFile();
+		TEST_FUNC(SourceManager.Folders)
+		void AProgramLeavesOutItsSourceFoldersTests();
 	};
 } // namespace Testing

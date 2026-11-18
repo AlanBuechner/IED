@@ -31,6 +31,7 @@ class PackageInfo:
 	dependencies: tuple  # manifest.PackageRequirement
 	projects: tuple      # ProjectInfo
 	version: str = None  # what its [package] says
+	dev_dependencies: tuple = ()   # what its projects' tests use: fetched with it, so a harness holding it compiles
 
 
 @dataclass
@@ -88,7 +89,8 @@ def build(manifest_texts, label):
 			parsed[folder] = _parse(data, folder, path, label)
 	for folder, spec in parsed.items():
 		if spec.package is not None:
-			index.packages[folder] = PackageInfo(folder, spec.package.description, spec.package.dependencies, (), spec.package.version)
+			index.packages[folder] = PackageInfo(folder, spec.package.description, spec.package.dependencies, (), spec.package.version,
+				spec.package.dev_dependencies)
 	owned = {path: [] for path in index.packages}
 	for folder, spec in sorted(parsed.items()):
 		if spec.project is None:
@@ -98,7 +100,8 @@ def build(manifest_texts, label):
 			owned[owner].append(ProjectInfo(spec.project.name, folder, spec.project.depends))
 	for path, projects in owned.items():
 		package = index.packages[path]
-		index.packages[path] = PackageInfo(package.path, package.description, package.dependencies, tuple(projects), package.version)
+		index.packages[path] = PackageInfo(package.path, package.description, package.dependencies, tuple(projects), package.version,
+			package.dev_dependencies)
 	return index
 
 

@@ -51,6 +51,15 @@ class CopySpec:
 
 
 @dataclass(frozen=True)
+class ScriptHostSpec:
+	"""[project.script-host]: a C4 program whose plugins are scripts compiled against its interface (--script-host).
+	The language server analyzes each folder `folders` matches as one script against the program's .c4i, allowed
+	to include the program's headers under `allow`, as the program itself compiles them."""
+	folders: tuple = ()             # globs relative to the project ("plugins/*/src"): each folder matched is one script
+	allow: tuple = ()               # the program's header folders a script may include ("Sdk/")
+
+
+@dataclass(frozen=True)
 class ConfigOverride:
 	defines: dict = field(default_factory=dict)
 	compiler_args: tuple = ()
@@ -81,12 +90,15 @@ class ProjectSpec:
 	config_overrides: dict = field(default_factory=dict)
 	system_overrides: dict = field(default_factory=dict)   # [project.system.<name>]: added when building for that system
 	scripts: tuple = ()
+	script_host: object = None      # ScriptHostSpec, for a program whose plugins are C4 scripts
 	language: str = ""              # the project's language: "c4" by default for executable and module; another one
 	                                # builds through its driver (languages.py), a custom project's is for IDEs only
 	driver_options: dict = field(default_factory=dict)   # [project.driver]: what the language's driver reads
 	package: object = None          # packages.Origin of a project a package brings (None: the workspace's own)
 	dependencies: tuple = ()        # [dependencies]: the packages it uses (PackageRequirements); their projects join
 	                                # its depends
+	dev_dependencies: tuple = ()    # [dev-dependencies]: the packages only its tests use; their projects join dev_depends
+	dev_depends: tuple = ()         # the projects a test harness holding it adds (packages.link fills it)
 
 	@property
 	def is_c4(self):
@@ -164,6 +176,7 @@ class PackageSpec:
 	file: str
 	description: str = ""
 	dependencies: tuple = ()        # [dependencies] (and [package.dependencies]): the packages it uses
+	dev_dependencies: tuple = ()    # [dev-dependencies]: the packages only its projects' tests use
 	version: str = None             # its version, which `nuke package release` writes and tags
 
 
@@ -286,6 +299,7 @@ def parse(data, path):
 	languages = _languages(root.table("languages"))
 	package_table = root.table("package")
 	dependencies_table = root.table("dependencies")
+	dev_table = root.table("dev-dependencies")
 	for gone in ("sources", "packages"):
 		if root.table(gone) is not None:
 			raise NukeError(f"{path}: [{gone}] is gone: each project lists the packages it uses in its own [dependencies], "
@@ -295,23 +309,40 @@ def parse(data, path):
 		raise NukeError(f"{path}: needs a [workspace], [project] or [package] table")
 	if workspace_table is None and (configurations or commands or any(languages)):
 		raise NukeError(f"{path}: [configurations], [commands] and [languages] belong to the workspace file")
-	if dependencies_table is not None and project_table is None and package_table is None:
-		raise NukeError(f"{path}: [dependencies] belong to a project or a package (a [project] or [package] table)")
+	for name, table in (("dependencies", dependencies_table), ("dev-dependencies", dev_table)):
+		if table is not None and project_table is None and package_table is None:
+			raise NukeError(f"{path}: [{name}] belong to a project or a package (a [project] or [package] table)")
 	dependencies = _dependencies(dependencies_table, path) if dependencies_table is not None else ()
+	dev_dependencies = _dev_dependencies(dev_table, path, dependencies) if dev_table is not None else ()
 	workspace = _workspace(workspace_table, configurations, commands, languages, folder, path) if workspace_table else None
-	project = _project(project_table, folder, path, dependencies) if project_table else None
-	package = _package(package_table, folder, path, dependencies) if package_table else None
+	project = _project(project_table, folder, path, dependencies, dev_dependencies) if project_table else None
+	package = _package(package_table, folder, path, dependencies, dev_dependencies) if package_table else None
 	return ManifestFile(path, workspace, project, package)
 
 
-def _dependencies(t, path):
+def _dev_dependencies(t, path, dependencies):
+	"""[dev-dependencies]: as [dependencies], for the packages only the project's tests use (a platform backend its tests
+	run on, a test kit): a test harness holding the project adds them, a program never does. A NuGet package's files are
+	reached by ${nuget:...} from [dependencies] only, and a package in both tables is one of its dependencies."""
+	found = _dependencies(t, path, "dev-dependencies")
+	for requirement in found:
+		if requirement.nuget is not None:
+			raise NukeError(f"{path}: dev-dependencies.{requirement.name}: a NuGet package belongs in [dependencies] (its files are "
+				f"reached by ${{nuget:...}} there)")
+		if any(d.name.lower() == requirement.name.lower() for d in dependencies):
+			raise NukeError(f"{path}: {requirement.name} is in [dependencies] and [dev-dependencies]: a dependency is the tests' "
+				f"too, so name it once, in [dependencies]")
+	return found
+
+
+def _dependencies(t, path, table_name="dependencies"):
 	"""[dependencies]: name -> { source = "<repository URL>/<package folder>", version | branch | rev, writable } for a
 	package from git, { source = "<folder from the workspace's root>" } for a project of the same package, or
 	{ nuget = "<package id>", version = "<exact version>" } for a NuGet package."""
 	found = []
 	for key, value in t.data.items():
 		t.read.add(key)
-		where = f"dependencies.{key}"
+		where = f"{table_name}.{key}"
 		if not isinstance(value, dict):
 			raise NukeError(f"{path}: {where} must be a table: {{ source = \"https://host/owner/repo.git/Folder\", version = \"^1.0\" }}, "
 				f"{{ source = \"Folder\" }} (from the workspace's root) for a project of the same package, or "
@@ -385,7 +416,7 @@ def split_source(source):
 	return None, text
 
 
-def _package(t, folder, path, dependencies=()):
+def _package(t, folder, path, dependencies=(), dev_dependencies=()):
 	t.where = "package"
 	if t.table("dependencies") is not None:
 		raise NukeError(f"{path}: [package.dependencies] is now [dependencies], each entry with its repository's URL: "
@@ -398,6 +429,7 @@ def _package(t, folder, path, dependencies=()):
 		file=path,
 		description=t.string("description", ""),
 		dependencies=tuple(dependencies),
+		dev_dependencies=tuple(dev_dependencies),
 		version=version,
 	)
 	t.done()
@@ -501,7 +533,7 @@ def _command(name, t, path):
 	return spec
 
 
-def _project(t, folder, path, dependencies=()):
+def _project(t, folder, path, dependencies=(), dev_dependencies=()):
 	t.where = "project"
 	name = t.string("name") or os.path.basename(folder)
 	if not PROJECT_NAME.match(name):
@@ -539,8 +571,10 @@ def _project(t, folder, path, dependencies=()):
 		config_overrides=dict(_override(name, o) for name, o in t.subtables("config")),
 		system_overrides=dict(_system_override(name, o, path) for name, o in t.subtables("system")),
 		scripts=t.strings("scripts"),
+		script_host=_script_host(t.table("script-host")),
 		driver_options=driver,
 		dependencies=tuple(dependencies),
+		dev_dependencies=tuple(dev_dependencies),
 	)
 	t.done()
 	if kind != "custom" and spec.output:
@@ -553,6 +587,16 @@ def _project(t, folder, path, dependencies=()):
 		raise NukeError(f"{path}: a module is C4 source; a library in {spec.language} is kind = \"library\"")
 	if kind == "library" and spec.language in ("", "c4"):
 		raise NukeError(f"{path}: kind = \"library\" is for another language (language = \"rust\", ...); a C4 library is a module")
+	return spec
+
+
+def _script_host(t):
+	if t is None:
+		return None
+	spec = ScriptHostSpec(folders=t.strings("folders"), allow=t.strings("allow"))
+	t.done()
+	if not spec.folders:
+		raise NukeError(f"{t.file}: {t.where}.folders must name the plugins' source folders (\"plugins/*/src\")")
 	return spec
 
 

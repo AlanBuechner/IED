@@ -123,7 +123,16 @@ namespace Scripting
 		if (scan == FolderScan::TopOnly)
 			for (fs::directory_iterator it(walked, options, error), end; !error && it != end; it.increment(error)) take(*it);
 		else
-			for (fs::recursive_directory_iterator it(walked, options, error), end; !error && it != end; it.increment(error)) take(*it);
+			for (fs::recursive_directory_iterator it(walked, options, error), end; !error && it != end; it.increment(error))
+			{
+				std::error_code kindError;
+				if (scan == FolderScan::WithoutTests && it.depth() == 0 && it->is_directory(kindError) && it->path().filename() == kTestsFolder)
+				{
+					it.disable_recursion_pending();
+					continue;
+				}
+				take(*it);
+			}
 
 		// The files are read on several threads, then registered in the order the walk found them.
 		std::vector<Ref<Source>> read(found.size());

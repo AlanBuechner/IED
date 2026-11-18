@@ -28,6 +28,11 @@ namespace Ied
 	// The not_found error for a file no language server serves, saying how to read it instead (a shader, a config file).
 	Core::String NoServerMessage(Core::StringView path);
 
+	// What a server's initializationOptionsFiles (their JSON, an object of program name to options) give under its
+	// profile's pluginCodeOption `key` - a script host's plugin folders, C4LSP's `scripts` - one program a line: a server
+	// reads them when it starts, so a change is a restart, not a didChangeConfiguration. "" for no key or none given.
+	Core::String ScriptScopesOf(Core::StringView files, Core::StringView key);
+
 	// The oldest of `language`'s transient files past `most`, taken off its open documents and its published paths.
 	Core::Array<EvictedFile> EvictTransients(LanguageServer* language, int64 most);
 

@@ -26,6 +26,29 @@ def variables(ctx):
 	return {"llvm": llvm, "clang": f"{llvm}/bin/{toolchains.clang_name()}"}
 
 
+def native_library(ctx):
+	"""What a C4 program depending on this project takes from it, when it is a static or prebuilt library: the include
+	folders of it and of the static libraries it reaches (for `extern "c" include`), and the files to link - its own
+	library, theirs, and every link of theirs and its own, less what its "!NAME" links leave out."""
+	if not model.is_static_library(ctx):
+		return None
+	try:
+		target = model.target(ctx)
+		libraries = [model.target(dependency) for dependency in model.libraries(ctx)]
+		toolchain = toolchains.resolve(settings.read_settings(ctx.settings), ctx.workspace_dir, ctx.expand, ctx.nuke_home, ctx.system)
+		owners = [target] + libraries
+		files = [owner.output for owner in owners if owner.output]
+		for owner in owners:
+			files += model.resolve_links(owner.links, owner.dir, toolchain.library_dirs)
+	except ValueError as error:
+		ctx.problem(f"{ctx.project.file}: {error}")
+	left_out = model.excluded_links(target.links)
+	return {
+		"includes": list(_unique(tuple(folder for owner in owners for folder in owner.includes))),
+		"links": [path for path in _unique(tuple(files)) if os.path.basename(path).lower() not in left_out],
+	}
+
+
 def _executable(ctx, name):
 	return name if ctx.system == "linux" else f"{name}.exe"
 

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from .. import fsutil, process
 from ..errors import StepFailed
 from ..variables import expand, expand_argv
-from . import description
+from . import description, native
 
 ARGS_STAMP = "compile.args"
 DEPENDENCY_STAMP = "deps.d"
@@ -43,8 +43,10 @@ def plan(session, project, test=False):
 	configuration = session.configuration
 	int_dir = session.int_dir(project) + ("/tests" if test else "")
 	output = session.test_output(project) if test else session.output(project)
-	modules = description.modules_for(session.workspace, project, configuration, lambda module, text: expand(text, session.variables(module)),
-		session.system)
+	natives = {module.name: native.libraries(session, module, test) for module in session.c4_modules(project, test)}
+	modules = description.modules_for(session.workspace, project, configuration, lambda module, text: expand(text, session.variables(module)), test,
+		session.system, lambda module: tuple(folder for library in natives[module.name] for folder in library.includes))
+	native_links = _unique(link for libraries in natives.values() for library in libraries for link in library.links)
 	description_path = fsutil.join(int_dir, DESCRIPTION_FILE)
 	argv = toolchain.compiler_command() + ["--projects", description_path, f"-O{configuration.optimize}"]
 	if session.system == "linux":
@@ -59,22 +61,22 @@ def plan(session, project, test=False):
 		argv += ["-test", "-test-json", results]
 	for name, value in configuration.defines.items():
 		argv += ["-D", f"{name}={value}"]
-	for link in collect_links(session, project):
+	for link in _unique(collect_links(session, project, test) + list(native_links)):
 		argv += ["-l", link]
 	if project.subsystem != "console" and not test:
 		argv += ["--subsystem", project.subsystem]
 	argv += expand_argv(compiler_args(project, configuration, session.system), session.variables(project))
 	argv += ["--int-dir", int_dir, "-o", output]
-	tracked = description.tracked_files(modules) + _toolchain_files(toolchain)
+	tracked = description.tracked_files(modules) + list(native_links) + _toolchain_files(toolchain)
 	return CompileJob(label=f"{project.name}{' tests' if test else ''}", argv=tuple(argv), output=output, int_dir=int_dir,
 		description_path=description_path, description_text=description.render(project.name, modules),
 		tracked=tuple(tracked), modules=tuple(modules), test_results=results, cwd=project.dir)
 
 
-def collect_links(session, project):
+def collect_links(session, project, test=False):
 	"""Every module's links, each expanded with that module's variables (a path in its own ${int})."""
 	links = []
-	for module in session.c4_modules(project):
+	for module in session.c4_modules(project, test):
 		override = module.config_overrides.get(session.configuration.name)
 		system = module.system_overrides.get(session.system)
 		own = module.links + (override.links if override else ()) + (system.links if system else ())
@@ -82,6 +84,14 @@ def collect_links(session, project):
 			if link not in links:
 				links.append(link)
 	return links
+
+
+def _unique(items):
+	result = []
+	for item in items:
+		if item not in result:
+			result.append(item)
+	return result
 
 
 def compiler_args(project, configuration, system="windows"):

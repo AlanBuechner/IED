@@ -186,15 +186,20 @@ def excluded(relative, patterns):
 	return any(fnmatch.fnmatch(relative, p) or fnmatch.fnmatch(relative.rsplit("/", 1)[-1], p) for p in patterns)
 
 
-def copy_tree_if_newer(source, dest, exclude=()):
-	"""Copy every file of `source` into `dest` when newer, but those `exclude` leaves out. Returns the number of files
-	copied."""
-	copied = 0
+def tree_copies(source, dest, exclude=()):
+	"""(file of `source`, where it is copied in `dest`) for every file but those `exclude` leaves out."""
+	pairs = []
 	for path in files_under(source):
 		relative = os.path.relpath(path, source)
 		if not excluded(relative, exclude):
-			copied += copy_if_newer(path, join(dest, relative))
-	return copied
+			pairs.append((path, join(dest, relative)))
+	return pairs
+
+
+def copy_tree_if_newer(source, dest, exclude=()):
+	"""Copy every file of `source` into `dest` when newer, but those `exclude` leaves out. Returns the number of files
+	copied."""
+	return sum(copy_if_newer(path, target) for path, target in tree_copies(source, dest, exclude))
 
 
 def mirror_tree(source, dest):

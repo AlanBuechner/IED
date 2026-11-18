@@ -16,6 +16,7 @@ class Command:
 	policy = CLOSURE
 	takes_args = False         # the rest of the command line belongs to this command (nuke toolchain install ...)
 	needs_workspace = True
+	loads_workspace = True     # the command line loads the workspace, syncing its packages, before main; False: main reads it itself
 	project_override = None    # a workspace command may fix its projects (CommandSpec.projects)
 
 	def work(self, session, project):

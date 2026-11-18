@@ -1,6 +1,7 @@
 """The build description C4.exe reads with --projects (C4/docs/language/15-projects.md): the root program and
 every C4 module it depends on, each with its sources, include folders, defines and dependencies. A module's sources and
-include folders expand its ${variables}, as every manifest string does (${toolchain.dir}/C4Api: a toolchain's headers)."""
+include folders expand its ${variables}, as every manifest string does (${toolchain.dir}/C4Api: a toolchain's headers).
+A module's include folders also hold those of the native libraries it depends on (native.py), for its extern headers."""
 
 import os
 from dataclasses import dataclass
@@ -21,7 +22,11 @@ def _unexpanded(project, text):
 	return text
 
 
-def module_for(workspace, project, configuration, expand=_unexpanded, system="windows"):
+def _no_native_includes(project):
+	return ()
+
+
+def module_for(workspace, project, configuration, expand=_unexpanded, test=False, system="windows", native_includes=_no_native_includes):
 	override = project.config_overrides.get(configuration.name)
 	for_system = project.system_overrides.get(system)
 	defines = dict(project.defines)
@@ -34,19 +39,21 @@ def module_for(workspace, project, configuration, expand=_unexpanded, system="wi
 	# The project's folder as a string literal, '/' separators: a module finds its own files (a package's shaders) in a
 	# checkout or an install, where __FILE__ is only relative to its source folder.
 	defines["PROJECT_DIR"] = '"' + fsutil.norm(project.dir) + '"'
-	depends = tuple(d.name for d in (workspace.find_project(n) for n in project.depends) if d.is_c4)
+	depends = tuple(d.name for d in (workspace.find_project(n) for n in graph.edges(project, test)) if d.is_c4)
 	return Module(
 		name=project.name,
 		sources=tuple(_absolute(project.dir, expand(project, s)) for s in project.sources),
-		includes=tuple(_absolute(project.dir, expand(project, i)) for i in project.includes),
+		includes=tuple(_absolute(project.dir, expand(project, i)) for i in project.includes) + tuple(native_includes(project)),
 		depends=depends,
 		defines=defines,
 	)
 
 
-def modules_for(workspace, root, configuration, expand=_unexpanded, system="windows"):
-	"""`expand(project, text)`: `text` with that project's ${variables}; `system` picks [project.system.<name>]'s."""
-	return [module_for(workspace, p, configuration, expand, system) for p in graph.c4_modules(workspace, root)]
+def modules_for(workspace, root, configuration, expand=_unexpanded, test=False, system="windows", native_includes=_no_native_includes):
+	"""`expand(project, text)`: `text` with that project's ${variables}. `test`: a test harness's, each project also
+	depending on its dev_depends. `system` picks [project.system.<name>]'s. `native_includes(project)`: the header
+	folders of the native libraries that project depends on."""
+	return [module_for(workspace, p, configuration, expand, test, system, native_includes) for p in graph.c4_modules(workspace, root, test)]
 
 
 def _absolute(base, path):

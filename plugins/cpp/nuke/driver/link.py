@@ -22,7 +22,7 @@ def linux_link_command(toolchain, configuration, target, objects, libraries):
 	what links it by path then needs it by that name, not by the path it was built at."""
 	if target.kind == "static":
 		return [toolchain.archiver, "rcs", target.output] + list(objects)
-	command = [toolchain.clang, "--driver-mode=g++", "--target=" + toolchain.target, "-fuse-ld=lld", "-Wl,-rpath,$ORIGIN"]
+	command = [toolchain.clang, "--driver-mode=g++", "--target=" + toolchain.target] + toolchain.sysroot_args() + ["-fuse-ld=lld", "-Wl,-rpath,$ORIGIN"]
 	if target.kind != "executable":
 		command += ["-shared", "-fPIC", "-Wl,-soname," + os.path.basename(target.output)]
 	if configuration.debug_info:

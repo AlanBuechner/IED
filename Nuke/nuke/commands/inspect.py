@@ -47,6 +47,7 @@ def _summary(session, project, default):
 		"dir": project.dir,
 		"manifest": project.file,
 		"depends": list(project.depends),
+		"dev_depends": list(project.dev_depends),
 		"sources": [os.path.normpath(os.path.join(project.dir, source)).replace("\\", "/") for source in project.sources],
 		"tests": session.has_tests(project),
 		"default": default is not None and default.name == project.name,

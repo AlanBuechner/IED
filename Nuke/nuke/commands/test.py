@@ -38,7 +38,7 @@ class Test(base.Command):
 		finally:
 			if session.workspace.spec.ide and project.kind == "module":
 				ide_bridge.write(session.workspace, project.name, job, session.toolchain(), c4compile.compiler_args(project, session.configuration))
-		copy_files(session, project)    # beside the harness, as beside a program: DLLs, shaders, content its tests load
+		copy_files(session, project, test=True)    # beside the harness, as beside a program: DLLs, shaders, content its tests load
 		cases = session.test_filter or project.test_filter
 		argv = [job.output] + (["--filter", cases] if cases else []) + session.args
 		session.log.header(f"tests: {project.name}")

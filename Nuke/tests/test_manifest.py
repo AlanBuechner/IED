@@ -35,6 +35,26 @@ class ProjectManifestTests(unittest.TestCase):
 		self.assertTrue(project.steps[0].applies_to("dist"))
 		self.assertFalse(project.steps[0].applies_to("Debug"))
 
+	def test_dev_dependencies_are_the_tests_packages(self):
+		parsed = parse({"package": {"version": "1.0.0"}, "project": {"kind": "module"},
+			"dependencies": {"Rhi": {"source": "https://host/o/r.git/Rhi", "version": "^1.0"}},
+			"dev-dependencies": {"Dx12": {"source": "https://host/o/r.git/Rhi/Dx12", "version": "^1.0"}}}, "C:/ws/Engine/nuke.toml")
+		self.assertEqual(["Rhi"], [d.name for d in parsed.project.dependencies])
+		self.assertEqual(["Dx12"], [d.name for d in parsed.project.dev_dependencies])
+		self.assertEqual(["Dx12"], [d.name for d in parsed.package.dev_dependencies], "fetched with the package")
+		self.assertEqual("Rhi/Dx12", parsed.project.dev_dependencies[0].path)
+
+	def test_dev_dependencies_refuse_what_belongs_in_dependencies(self):
+		both = {"project": {}, "dependencies": {"Rhi": {"source": "Rhi"}}, "dev-dependencies": {"rhi": {"source": "Rhi"}}}
+		with self.assertRaisesRegex(NukeError, r"in \[dependencies\] and \[dev-dependencies\]"):
+			parse(both)
+		with self.assertRaisesRegex(NukeError, r"dev-dependencies\.Dxc: a NuGet package belongs in \[dependencies\]"):
+			parse({"project": {}, "dev-dependencies": {"Dxc": {"nuget": "Microsoft.Direct3D.DXC", "version": "1.0.0"}}})
+		with self.assertRaisesRegex(NukeError, r"\[dev-dependencies\] belong to a project or a package"):
+			parse({"workspace": {}, "dev-dependencies": {"Rhi": {"source": "Rhi"}}})
+		with self.assertRaisesRegex(NukeError, r"dev-dependencies\.Rhi needs its source"):
+			parse({"project": {}, "dev-dependencies": {"Rhi": {}}})
+
 	def test_system_tables_and_copies_for_a_system(self):
 		project = parse({"project": {
 			"system": {"windows": {"links": ["ws2_32"], "compiler-args": ["--script-host"]}, "linux": {"defines": {"POSIX": "1"}}},

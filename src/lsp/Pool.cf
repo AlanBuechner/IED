@@ -609,11 +609,36 @@ namespace Ied
 		language->Relaunch();
 	}
 
+	Core::String ScriptScopesOf(Core::StringView files, Core::StringView key) {
+		if (key.IsEmpty()) return Core::String();
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(files, *doc);
+		if (!read.Ok() || read.root.Kind() != Serialization::DomKind::Object) return Core::String();
+		const Core::String member = Core::String(key);
+		Core::StringBuilder scopes;
+		for (int64 i = 0; i < read.root.Count(); i++) {
+			Serialization::DomNode given = read.root.ValueAt(i).Member(member.CStr());
+			if (!given.IsValid()) continue;
+			scopes.Append(read.root.KeyAt(i));
+			scopes.Append("=");
+			scopes.Append(NodeJson(given).View());
+			scopes.Append("\n");
+		}
+		return scopes.ToString();
+	}
+
 	void LspPool::SendOptionsFilesIfChanged(LanguageServer* language) {
 		if (language->m_Profile->m_OptionsFilesKey.IsEmpty()) return;
 		Core::String files = OptionsFilesJson(language);
 		if (files.View() == language->m_OptionsFilesSent.View()) return;
+		const Core::StringView scopesKey = language->m_Profile->m_PluginCodeOption.View();
+		const bool scopesChanged = ScriptScopesOf(files.View(), scopesKey).View() != ScriptScopesOf(language->m_OptionsFilesSent.View(), scopesKey).View();
 		language->m_OptionsFilesSent = files;
+		if (scopesChanged) {
+			Log(language, Core::StringView("a program's script folders changed in its options files: starting it again with them"));
+			language->Relaunch();
+			return;
+		}
 		JsonWriter json;
 		json.BeginObject();
 		json.Key(Core::StringView("settings"));

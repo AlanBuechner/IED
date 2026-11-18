@@ -119,8 +119,10 @@ C4.exe does not run the executable; you (or Nuke) run it and read the exit code.
 A project carries its tests in an in-source `src/tests/` folder. A project with at least one `.cf` or
 `.ch` under `src/tests/` (or `tests = true` in its `nuke.toml`) is test-bearing:
 
-- `nuke build` / `nuke run` never pass `-test`: the files under `src/tests/` are part of the program and
-  its `[test]` functions are inert code, so the program runs its own `main`.
+- `nuke build` / `nuke run` never pass `-test`: the files under `src/tests/` are left out of the program
+  (a project's own source folders' `tests/`, [15-projects.md](../language/15-projects.md) rule 7), so neither its
+  tests nor what only they use - a test kit, a backend they run on (Nuke's `[dev-dependencies]`) - are part of it,
+  and the program runs its own `main`. A `[test]` function elsewhere in its sources is inert code.
 - `nuke test [config] [--filter GLOB]` compiles each test-bearing project separately with
   `-test -test-json <int>/tests/results.json` into `build/bin/<Config>-windows-x64/<Project>/<Project>-tests.exe`
   (intermediates in `<int>/tests/`), runs it from the

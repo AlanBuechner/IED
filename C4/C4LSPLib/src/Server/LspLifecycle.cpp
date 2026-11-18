@@ -78,8 +78,9 @@ namespace C4LSP::Server
 		// docs/language/15-projects.md - and target), then each of `programs` (docs/tools/03 "One server for every program").
 		SetPrograms(ReadProgramOptions("", options), options.Member("programs"));
 		if (options.IsObject()) {
-			// Folders of scripts and the host interface each compiles against (docs/tools/03 section 1).
-			m_Scripts = ReadScriptScopes(options.Member("scripts"));
+			// Folders of scripts and the host interface each compiles against (docs/tools/03 section 1): the client's, and
+			// each program's own. Read once: a program's scopes that a later build adds count from the next start.
+			m_Scripts = ReadAllScriptScopes(options);
 			// C4 Tidy on/off: the plugin's "feature-tidy" setting is forwarded here by the client at startup.
 			// A missing key keeps the server-side default (off); a non-bool value is ignored so a bad
 			// client option never breaks initialization.

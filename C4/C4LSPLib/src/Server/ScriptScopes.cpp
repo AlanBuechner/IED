@@ -79,6 +79,23 @@ namespace C4LSP::Server
 		return scopes;
 	}
 
+	std::vector<ScriptScope> ReadAllScriptScopes(const Json::Value& options)
+	{
+		std::vector<ScriptScope> scopes = ReadScriptScopes(options.Member("scripts"));
+		const Json::Value programs = options.Member("programs");
+		if (!programs.IsObject()) return scopes;
+		const auto listed = [&scopes](const std::string& folder) {
+			for (const ScriptScope& scope : scopes)
+				for (const std::string& known : scope.folders)
+					if (ComparablePath(known) == ComparablePath(folder)) return true;
+			return false;
+		};
+		for (const auto& [name, program] : programs.Raw().GetAsDescriptionMap())
+			for (ScriptScope& scope : ReadScriptScopes(Json::Value(program).Member("scripts")))
+				if (std::none_of(scope.folders.begin(), scope.folders.end(), listed)) scopes.push_back(std::move(scope));
+		return scopes;
+	}
+
 	int32 ScopeOf(const std::vector<ScriptScope>& scopes, const std::string& path)
 	{
 		const std::string file = ComparablePath(path);

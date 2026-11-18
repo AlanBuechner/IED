@@ -32,6 +32,10 @@ namespace C4LSP::Server
 	// left out. Defines are NAME or NAME=VALUE, as after -D.
 	std::vector<ScriptScope> ReadScriptScopes(const Json::Value& scripts);
 
+	// Every scope the initialization options give: their own `scripts` (the client's plugins), then each program's in
+	// `programs` (a script host's plugin folders, which Nuke writes into its options), a folder listed twice once.
+	std::vector<ScriptScope> ReadAllScriptScopes(const Json::Value& options);
+
 	// A path as scopes compare paths: `/`-separated, no trailing `/`, lower case (Windows paths ignore case).
 	std::string ComparablePath(std::string path);
 

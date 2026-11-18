@@ -198,13 +198,14 @@ def _main(argv, log, store, cwd):
 	takes_args_names = {name for name, c in builtins.items() if c.takes_args}
 	workspace_dir = find_workspace_option(split_program_args(argv)[0], takes_args_names)
 	first_word = next((t for t in argv if not t.startswith("-")), None)
-	tolerate = first_word in builtins and not builtins[first_word].needs_workspace
+	first = builtins.get(first_word) if first_word else None
+	tolerate = first is not None and not first.needs_workspace
 	start = os.path.abspath(os.path.join(cwd, workspace_dir)) if workspace_dir else cwd
 	if workspace_dir and not os.path.isfile(os.path.join(start, "nuke.toml")):
 		raise NukeError(f"no nuke.toml in {start}")
 	if "--json" in split_program_args(argv)[0]:
 		log.json_mode()           # what loading the workspace says (installing packages) stays out of the JSON
-	workspace = load_workspace_for(start, log, tolerate)
+	workspace = load_workspace_for(start, log, tolerate) if first is None or first.loads_workspace else None
 	table = command_table(workspace)
 	inv = parse(argv, make_classifier(table, workspace), lambda word: table[word].takes_args)
 	log.verbose = inv.verbose

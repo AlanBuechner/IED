@@ -10,12 +10,13 @@ import subprocess
 import threading
 import unittest
 import zipfile
+from unittest import mock
 
 from support import read, write_files, WorkspaceTest
 
 from nuke import manifest
 from nuke.errors import NukeError
-from nuke.packages import checkouts, semver, store, writable
+from nuke.packages import checkouts, git as nuke_git, index, semver, store, writable
 
 GIT_IDENTITY = {"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com", "GIT_COMMITTER_NAME": "Test",
 	"GIT_COMMITTER_EMAIL": "test@example.com"}
@@ -280,6 +281,19 @@ class LocalDependencyTests(PackageTest):
 		projects = self.projects()
 		self.assertIn("KitCore", projects["Kit"]["depends"], "from its repository's root, wherever it is installed")
 		self.assertIn("Kit@1.0.0", projects["KitCore"]["dir"].replace("\\", "/"))
+
+	def test_a_fetched_package_brings_what_its_tests_use_for_the_harnesses_alone(self):
+		self.engine.commit({
+			"nuke.toml": "[workspace]\nname = \"Engine\"\n",
+			"Kit/nuke.toml": "[package]\nversion = \"1.0.0\"\n[project]\nname = \"Kit\"\nkind = \"module\"\n[dev-dependencies]\n"
+				f"Probe = {needs(self.engine.url, 'Probe', '^1.0')}\n",
+			"Probe/nuke.toml": "[package]\nversion = \"1.0.0\"\n[project]\nname = \"Probe\"\nkind = \"module\"\n",
+		}, tags=["Kit/v1.0.0", "Probe/v1.0.0"])
+		self.workspace({"Kit": "\"engine@^1.0\""}, depends=())
+		projects = self.projects()
+		self.assertIn("Probe", projects, "fetched with it: a harness holding Kit compiles Kit's tests, which use it")
+		self.assertEqual(["Probe"], projects["Kit"]["dev_depends"])
+		self.assertNotIn("Probe", projects["Kit"]["depends"], "a program holding Kit holds no Probe")
 
 	def test_a_local_dependency_stays_inside_its_package(self):
 		self.files({
@@ -973,6 +987,59 @@ class DevelopTests(PackageTest):
 		release.join()
 		self.assertEqual(code, 0, out)
 		self.assertTrue(os.path.isdir(self.path("packages", "engine", "Windowing@0.2.0")), "it waited for the file to close")
+
+	def test_the_lock_reads_a_develop_checkout_once(self):
+		self.windowing()
+		self.workspace({"Renderer": "\"engine@^1.0\""}, depends=("Renderer",))
+		code, out = self.nuke("package", "develop", "engine")
+		self.assertEqual(code, 0, out)
+		self.projects()
+		self.assertGreater(len(self.lock()), 1, "several of the checkout's packages are locked")
+		checkout = os.path.normcase(os.path.normpath(self.path("packages", "engine")))
+
+		def of_checkout(mocked):
+			return sum(1 for call in mocked.call_args_list if os.path.normcase(os.path.normpath(call.args[0])) == checkout)
+		with mock.patch.object(index, "in_folder", wraps=index.in_folder) as walked, mock.patch.object(nuke_git, "head", wraps=nuke_git.head) as heads:
+			projects = self.projects()
+		self.assertIn("Renderer", projects)
+		self.assertEqual(1, of_checkout(walked), "the lock is checked with one walk of the checkout, however many of its packages it holds")
+		self.assertEqual(1, of_checkout(heads), "and one look at its HEAD")
+
+	def test_a_resolution_asks_git_little_for_unreleased_packages(self):
+		names = ("Alpha", "Beta", "Gamma")
+		files = {"nuke.toml": "[workspace]\nname = \"Engine\"\n"}
+		for name in names:
+			# Each states a version: a versioned package of its own, none released yet.
+			files[f"{name}/nuke.toml"] = module(name, package=name.lower()).replace("[package]\n", "[package]\nversion = \"0.0.1\"\n")
+			files[f"{name}/src/{name}/{name.lower()}.ch"] = ""
+		self.engine.commit(files)
+		self.workspace({name: "\"engine@*\"" for name in names}, depends=names)
+		code, out = self.nuke("package", "develop", "engine")
+		self.assertEqual(code, 0, out)
+		checkout = self.path("packages", "engine")
+		write_files(checkout, {"Alpha/src/Alpha/alpha.ch": "// edited\n"})
+		git("commit", "--quiet", "-am", "edit", cwd=checkout)
+		with mock.patch.object(nuke_git, "run", wraps=nuke_git.run) as ran:
+			self.projects()
+		asked = [call.args[0] for call in ran.call_args_list]
+		self.assertFalse([a for a in asked if a[0] == "describe"], "no tag can match: nothing to describe")
+		self.assertEqual(1, len([a for a in asked if a[:2] == ["rev-list", "--count"]]), asked)
+		head = git("rev-parse", "HEAD", cwd=checkout)
+		locked = self.lock()
+		for name in names:
+			self.assertEqual((locked[("engine", name)]["commit"], locked[("engine", name)]["version"]), (head, f"0.0.1+2.{head[:8]}"),
+				"each is its pseudo-version at HEAD, as its manifest states it")
+
+	def test_developing_an_existing_clone_asks_no_remote(self):
+		self.windowing()
+		self.workspace({"Windowing": "\"engine@^0.2\""})
+		clone = os.path.join(self.tmp, "engine-clone")
+		git("clone", "--quiet", self.engine.url, clone)
+		with mock.patch.object(nuke_git, "remote_refs", wraps=nuke_git.remote_refs) as asked:
+			code, out = self.nuke("package", "develop", "engine", "--at", clone)
+		self.assertEqual(code, 0, out)
+		self.assertEqual(0, asked.call_count, "a new workspace's manifests are not resolved from the remote before the checkout takes over")
+		self.assertTrue(self.projects()["Windowing"]["dir"].replace("\\", "/").startswith(clone.replace("\\", "/")))
 
 	def test_drivers_see_the_develop_checkouts(self):
 		self.windowing()

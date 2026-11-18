@@ -152,7 +152,8 @@ test-filter = "anime.*"            # the cases `nuke test` runs without a --filt
 working-dir = "."                  # where `nuke run` and the tests start, relative to the project
 scripts = ["nuke_ext.py"]          # extensions whose steps default to this project
 
-[[project.copy]]                   # copied into the program's bin folder after each build (when newer)
+[[project.copy]]                   # copied into the program's bin folder after each build (when newer); a file an earlier
+                                   # build copied and this one does not (source removed, renamed, excluded) is removed again
 from = "assets"                    # file or folder, relative to the project
 to = "assets"                      # relative to the bin folder (default: the source's name)
 exclude = ["nuke.toml"]            # of a folder: paths in it or names (globs) left out - and removed from a mirror
@@ -167,6 +168,10 @@ compiler-args = []
 links = ["ws2_32"]
 compiler-args = ["--script-host"]
 
+[project.script-host]              # a program whose plugins are C4 scripts: the editor analyzes each folder `folders`
+folders = ["plugins/*/src"]        # matches (globs, relative to the project) as one script against the program's .c4i,
+allow = ["Sdk/", "Web/"]           # including only the program headers under `allow` - written into its IDE options
+
 [[project.steps]]                  # section 4
 phase = "pre-build"
 run = ["${python}", "tools/cook.py"]
@@ -174,6 +179,17 @@ run = ["${python}", "tools/cook.py"]
 [project.driver]                   # a project in another language: what its driver reads (section 9b)
 package = "./cmd/server"
 ```
+
+**Copies are pruned (C4 programs and their tests).** Several modules may copy into one folder (every package's `Shaders` into
+`<bin>/Shaders`), so a folder is not mirrored from one source. Each program instead remembers what its last copy wrote:
+`build/int/<config>/<Project>/copies.json`, a list of paths from the bin folder (in the int folder, so it is not shipped and
+`nuke clean` removes it with the bin folder). After a copy, a file in that list which this copy does not write is removed
+(and a folder that leaves empty): its source was deleted or renamed, an `exclude` now leaves it out, its `[[project.copy]]`
+entry is gone, or its source folder vanished (the missing source is still warned about). A file Nuke did not copy - the
+program, a file dropped in, what the program writes at run time - is never touched. The first build with no `copies.json`
+(a bin folder from before pruning, or one whose int folder was deleted) removes nothing, as what is there cannot be told
+from what Nuke put there: delete the stale files (or the bin folder) once; from the next build on they are tracked.
+`nuke build` and `nuke test` of one project share the bin folder and the manifest.
 
 | Kind | Builds | Runs |
 |---|---|---|
@@ -458,12 +474,23 @@ llvm = "vendor/llvm"               # the LLVM release (default: the folder above
                                    # of Nuke's home, the IED checkout, which setup.bat installs)
 system-includes = ["${cpp.llvm}/include"]   # system include folders of every C++ compile
 standard = "c++20"                 # -std= of .cpp files; c-standard = "c11" for .c files
+linux-sysroot = "c4"               # Linux builds compile and link against it instead of the system: "c4" for the one
+                                   # the C4 toolchain links Linux programs with (its sysroots/linux-x64, else the IED
+                                   # checkout's vendor/sysroots/linux-x64), or a folder
 ```
 
 - **Includes and links travel through static libraries.** A project compiles with its own include folders and those
   of every C++ static library it reaches through static libraries; a program or DLL links its objects with those
   libraries, their `links` and its own (less what its `"!NAME"` entries leave out). A static library holds its own
   objects only. A program or DLL in `depends` only orders the build: a tool it runs, a program shipped beside it.
+  `system-includes` stay the project's own: a library's private third-party headers go there.
+- **C4 programs link C++ static libraries.** A C4 project (a program or a module) with a C++ static or prebuilt library
+  in `depends` gets that library's include folders and those of the static libraries it reaches as its module's
+  `includes`, so `extern "c" include "Api.h"` finds the header, and the program links the library's file, theirs and all
+  their `links` - no `lib(...)` or `include_dir(...)` in the extern block. A rebuilt library relinks the program. The
+  driver's `native_library(ctx)` gives this (any language's driver may: `nuke/c4/native.py`). For Linux the C4
+  compiler links against its Linux sysroot (glibc 2.31, GCC 10's libstdc++), so a C++ library it links is built with
+  `linux-sysroot = "c4"`: compiled against the system's newer headers it would need symbols that libstdc++ lacks.
 - **Compiles.** A source compiles when it has no object or dependency file yet, its arguments changed, clang is newer,
   or a file it read changed or went (clang's dependency files). An object is stamped with the time its compile began,
   so a file edited during the build compiles again the next time. `-j N` (`NUKE_JOBS`) compiles N at once, by default
@@ -480,7 +507,7 @@ string literal, `/` separators) and the configuration's
 - **Links** run when the output is missing, an object or library is newer, or the arguments changed, through a
   response file (a deep folder's objects outgrow a command line). A running program or DLL is moved aside first
   (`<file>.<ms>.old`), as Nuke does for C4 programs.
-- **Copies.** A program or DLL gets its `[[project.copy]]` entries and those of the libraries it links: a file when it
+- **Copies** (C++ driver). A program or DLL gets its `[[project.copy]]` entries and those of the libraries it links: a file when it
   changed, a folder mirrored (but what its `exclude` leaves out, which the mirror removes). A program whose project has
   an `assets/` folder gets `<bin>/assets` linked to it.
 - **Reflection** (`reflection = true`): the project depends on the package's `Reflection`, `HeaderTool` and `CodeGen`
@@ -630,6 +657,20 @@ Agility   = { source = "https://github.com/me/Agility.git/SDK", version = "^1.6"
 - **Dependencies are written, never inferred**: each package's `[dependencies]` are followed from its manifest at the
   version chosen; a package's project that depends on another package's project without naming that package is an
   error that says what to write.
+- **`[dev-dependencies]`** are the packages only a project's tests use - a platform backend its tests run on, a test
+  kit - written as `[dependencies]` are (no NuGet package, and none in both tables). They are the project's
+  `dev_depends` (`nuke list --json`): a **test harness** holding the project adds them - its own and every other
+  test-bearing project's that holds it, since the compiler compiles the tests of every project a harness holds
+  (C4 `docs/language/15-projects.md` rule 7) - and their copies go beside it; **a program never does**, and a build
+  without `-test` leaves each source folder's `tests/` out, so a project's own code cannot name them. They are fetched
+  and locked with the package (a workspace using it may run a harness that holds it). A cycle through them is an
+  error (`dependency cycle in a test harness`). Claymore's engine names no platform backend and runs its tests on
+  Win32 and D3D12 this way:
+
+  ```toml
+  [dev-dependencies]
+  WindowingWin32 = { source = "https://github.com/AlanBuechner/Claymore.git/Packages/Windowing/Win32", version = "^0.0.1" }
+  ```
 - **Resolution** takes the highest version every requirement accepts, keeps a locked version while it still does, and
   when requirements on a package exclude each other tries older versions of the packages that made them before it
   stops with every requirement and who made it.

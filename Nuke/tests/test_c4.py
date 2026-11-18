@@ -161,6 +161,27 @@ class C4BuildTests(WorkspaceTest):
 		self.assertEqual(options["target"], ["-march=x86-64-v3"])
 		self.assertIn(self.path("Engine", "third").replace("\\", "/"), options["includePaths"])
 
+	def test_a_script_host_gives_the_editor_its_plugin_folders(self):
+		"""[project.script-host]: each plugin folder its globs match is a script scope in the program's IDE options, compiled
+		alone against the program's interface beside its executable."""
+		self.files({"Game/nuke.toml": "[project]\ndepends = [\"Engine\", \"Tools\"]\ncompiler-args = [\"--script-host\"]\n"
+			"[project.script-host]\nfolders = [\"plugins/*/src\"]\nallow = [\"Sdk/\", \"Web/\"]\n",
+			"Game/plugins/tv/src/Tv.cf": "\n", "Game/plugins/manga/src/Manga.cf": "\n", "Game/plugins/notes.txt": "\n"})
+		code, out = self.nuke("build")
+		self.assertEqual(code, 0, out)
+		options = json.loads(read(self.path(".ied", "local", "lsp-options", "Game.json")))
+		scopes = options["scripts"]
+		self.assertEqual([s["folders"] for s in scopes], [[self.path("Game", "plugins", "manga", "src").replace("\\", "/")],
+			[self.path("Game", "plugins", "tv", "src").replace("\\", "/")]], "one scope a plugin, in name order")
+		self.assertEqual(scopes[0]["interface"].replace("\\", "/"), self.bin("Game", "Game.c4i").replace("\\", "/"))
+		self.assertEqual(scopes[0]["allow"], ["Sdk/", "Web/"])
+
+	def test_a_script_host_needs_its_folders(self):
+		self.files({"Game/nuke.toml": "[project]\ndepends = [\"Engine\", \"Tools\"]\n[project.script-host]\nallow = [\"Sdk/\"]\n"})
+		code, out = self.nuke("build")
+		self.assertNotEqual(code, 0, out)
+		self.assertIn("script-host.folders", out)
+
 	def test_the_options_of_a_project_gone_are_removed(self):
 		self.nuke("build")
 		stale = self.path(".ied", "local", "lsp-options", "OldTool.json")
@@ -303,6 +324,60 @@ class C4TestHarnessTests(WorkspaceTest):
 		copied = self.path("build", "bin", "Development-windows-x64", "Engine", "shaders", "a.hlsl")
 		self.assertTrue(os.path.isfile(copied), "the module's copies beside Engine-tests.exe")
 
+	def dev_dependencies(self):
+		"""Engine's tests run on a backend (Dx12, with a DLL it copies) that the engine itself never names; Game holds Engine."""
+		self.files({"nuke.toml": "[workspace]\ntoolchain = \"1.0.0\"\ndefault-project = \"Game\"\n",
+			"Rhi/nuke.toml": "[project]\nkind = \"module\"\n", "Rhi/src/rhi.ch": "",
+			"Dx12/nuke.toml": "[project]\nkind = \"module\"\ndepends = [\"Rhi\"]\n[[project.copy]]\nfrom = \"dxc.dll\"\n",
+			"Dx12/dxc.dll": "", "Dx12/src/dx12.ch": "",
+			"Engine/nuke.toml": "[project]\nkind = \"module\"\n[dependencies]\nRhi = { source = \"Rhi\" }\n"
+				"[dev-dependencies]\nDx12 = { source = \"Dx12\" }\n",
+			"Engine/src/engine.ch": "", "Engine/src/tests/engine_tests.cf": "",
+			"Game/nuke.toml": "[project]\n[dependencies]\nEngine = { source = \"Engine\" }\n",
+			"Game/src/main.cf": "", "Game/src/tests/game_tests.cf": ""})
+		from nuke import workspace as workspaces, configs
+		from nuke.session import Session
+		from nuke.log import Log
+		ws = workspaces.load_workspace(self.root)
+		return ws, Session(ws, configs.BUILT_IN[1], "x64", "windows", Log(), self.store)
+
+	def test_dev_dependencies_join_the_test_harnesses_and_no_program(self):
+		from nuke.c4 import compile as c4compile
+		ws, session = self.dev_dependencies()
+		self.assertEqual(("Dx12",), ws.project("Engine").dev_depends)
+		self.assertNotIn("Dx12", ws.project("Engine").depends)
+
+		def engine_in(job):
+			return next(m for m in job.modules if m.name == "Engine")
+
+		program = c4compile.plan(session, ws.project("Game"))
+		self.assertNotIn("Dx12", [m.name for m in program.modules], "a program never holds the tests' packages")
+		self.assertEqual(("Rhi",), engine_in(program).depends, "so the engine's own code cannot name them")
+		for root in ("Engine", "Game"):
+			with self.subTest(harness=root):
+				harness = c4compile.plan(session, ws.project(root), test=True)
+				self.assertIn("Dx12", [m.name for m in harness.modules])
+				self.assertEqual(("Rhi", "Dx12"), engine_in(harness).depends,
+					"the compiler compiles the tests of every project a harness holds: the engine's use its backend in Game's too")
+
+	def test_a_test_harness_gets_its_dev_dependencies_copies(self):
+		self.dev_dependencies()
+		try:
+			self.nuke("test", "Engine")
+		except OSError:
+			pass        # the stub compiler's harness is no program; the copies come before it runs
+		self.assertTrue(os.path.isfile(self.path("build", "bin", "Development-windows-x64", "Engine", "dxc.dll")))
+		self.nuke("build", "Game")
+		self.assertFalse(os.path.isfile(self.path("build", "bin", "Development-windows-x64", "Game", "dxc.dll")))
+
+	def test_a_dev_dependency_that_holds_the_project_is_a_cycle(self):
+		self.files({"nuke.toml": "[workspace]\ntoolchain = \"1.0.0\"\n",
+			"Engine/nuke.toml": "[project]\nkind = \"module\"\n[dev-dependencies]\nKit = { source = \"Kit\" }\n",
+			"Kit/nuke.toml": "[project]\nkind = \"module\"\n[dependencies]\nEngine = { source = \"Engine\" }\n"})
+		code, out = self.nuke("list")
+		self.assertEqual(code, 1)
+		self.assertIn("dependency cycle in a test harness, through [dev-dependencies]", out)
+
 	def test_naming_a_project_without_tests_is_an_error(self):
 		self.files({"nuke.toml": "[workspace]\ntoolchain = \"1.0.0\"\n", "Game/nuke.toml": "[project]\n", "Game/src/main.cf": ""})
 		code, out = self.nuke("test", "Game")
@@ -311,6 +386,64 @@ class C4TestHarnessTests(WorkspaceTest):
 		code, out = self.nuke("test")
 		self.assertEqual(code, 0, out)
 		self.assertIn("no project has tests", out)
+
+
+class NativeLibraryTests(WorkspaceTest):
+	"""A C4 program depending on a project in another language takes what that language's driver says the library gives
+	(native_library(ctx)): its header folders join the module's includes, its files the program's links."""
+
+	DRIVER = ("def build(ctx):\n\treturn []\ndef program(ctx):\n\treturn None\ndef test(ctx):\n\treturn 0\n"
+		"def native_library(ctx):\n\tif ctx.project.kind != \"library\":\n\t\treturn None\n"
+		"\treturn {\"includes\": [ctx.project.dir + \"/include\"], \"links\": [ctx.bin_dir + \"/\" + ctx.project.name + \".lib\", \"ws2_32.lib\"]}\n")
+
+	def setUp(self):
+		super().setUp()
+		from nuke import languages
+		languages._drivers.clear()   # each test writes its own driver at the same path
+		self.files({
+			"nuke.toml": "[workspace]\ntoolchain = \"1.0.0\"\ndefault-project = \"Game\"\n",
+			".ied/plugins/native/nuke/nuke-language.toml": "[language]\nid = \"native\"\nmodule = \"d.py\"\n",
+			".ied/plugins/native/nuke/d.py": self.DRIVER,
+			"Game/nuke.toml": "[project]\ndepends = [\"Engine\", \"Net\", \"Tool\"]\nlinks = [\"user32\"]\n",
+			"Game/src/main.cf": "int32 main() { return 0; }\n",
+			"Engine/nuke.toml": "[project]\nkind = \"module\"\ndepends = [\"Audio\"]\n",
+			"Engine/src/engine.ch": "",
+			"Net/nuke.toml": "[project]\nkind = \"library\"\nlanguage = \"native\"\n",
+			"Net/include/Net.h": "",
+			"Audio/nuke.toml": "[project]\nkind = \"library\"\nlanguage = \"native\"\n",
+			"Audio/include/Audio.h": "",
+			"Tool/nuke.toml": "[project]\nkind = \"executable\"\nlanguage = \"native\"\n",
+		})
+
+	def plan(self):
+		from nuke import workspace as workspaces, configs
+		from nuke.session import Session
+		from nuke.c4 import compile as c4compile
+		from nuke.log import Log
+		ws = workspaces.load_workspace(self.root)
+		return c4compile.plan(Session(ws, configs.BUILT_IN[1], "x64", "windows", Log(), self.store), ws.project("Game"))
+
+	def norm(self, *parts):
+		return self.path(*parts).replace("\\", "/")
+
+	def test_each_module_gets_its_libraries_headers_and_the_program_their_files(self):
+		job = self.plan()
+		modules = {module.name: module for module in job.modules}
+		self.assertEqual((self.norm("Net", "include"),), modules["Game"].includes, "Game's own library; Tool, a program, gives nothing")
+		self.assertEqual((self.norm("Audio", "include"),), modules["Engine"].includes, "the module that depends on it has its headers")
+		links = [job.argv[i + 1] for i, a in enumerate(job.argv) if a == "-l"]
+		net = self.norm("build", "bin", "Development-windows-x64", "Net", "Net.lib")
+		audio = self.norm("build", "bin", "Development-windows-x64", "Audio", "Audio.lib")
+		self.assertEqual(["user32", net, "ws2_32.lib", audio], links, "the manifest's links, then every library's, each once")
+		self.assertIn(net, job.tracked, "a library built again compiles the program again")
+		self.assertIn(self.norm("Net", "include", "Net.h"), job.tracked)
+
+	def test_a_driver_answer_of_another_shape_is_named(self):
+		from nuke.errors import NukeError
+		self.files({".ied/plugins/native/nuke/d.py": self.DRIVER.replace('{"includes"', '{"headers"')})
+		with self.assertRaises(NukeError) as wrong:
+			self.plan()
+		self.assertIn("native_library gave", str(wrong.exception))
 
 
 if __name__ == "__main__":

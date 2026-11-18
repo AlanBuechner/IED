@@ -1,6 +1,8 @@
 """One source during one resolution: its versions (from its tags), its mirror, and what its commits hold. A source being
-developed reads everything from its checkout instead: its tags, its HEAD, and the packages in its working tree."""
+developed reads everything from its checkout instead: its tags, its HEAD, and the packages in its working tree. Each
+question goes to git once: a resolution asks the same of every package of a repository, round after round."""
 
+import fnmatch
 import re
 
 from ..errors import NukeError
@@ -23,6 +25,10 @@ class Repository:
 		self._lines = None
 		self._indexes = {}
 		self._versions = {}
+		self._head = None
+		self._described = {}      # (commit, tag pattern) -> (tag, distance)
+		self._lengths = {}        # commit -> commits in its history
+		self._unchanged = {}      # (line, older, newer) -> bool
 
 	@property
 	def develop(self):
@@ -133,7 +139,9 @@ class Repository:
 			git.fetch_commit(self.cache.mirror(self.url), self.url, commit)
 
 	def head(self):
-		return git.head(self.checkout)
+		if self._head is None:
+			self._head = git.head(self.checkout)
+		return self._head
 
 	def index(self, commit):
 		"""What the commit holds (a develop checkout: its working tree, whatever the commit)."""
@@ -148,8 +156,29 @@ class Repository:
 
 	def release_before(self, line, commit):
 		"""The latest release of `line` in the commit's history (a Version), or None."""
-		tag, _ = git.describe(self.repo_dir(), commit, self.tag_pattern(line))
+		tag, _ = self._describe(commit, self.tag_pattern(line))
 		return semver.parse_version(tag.rpartition("/")[2]) if tag else None
+
+	def _describe(self, commit, pattern):
+		"""git.describe of the commit: a pattern no tag of the repository matches finds none, so only the history's
+		length is asked (once a commit) - in a repository whose packages are unreleased, one git call for all of them."""
+		key = (commit, pattern)
+		if key not in self._described:
+			if self._tags_are_local() and not any(fnmatch.fnmatchcase(tag, pattern) for tag in self._tag_names()):
+				if commit not in self._lengths:
+					self._lengths[commit] = git.history_length(self.repo_dir(), commit)
+				self._described[key] = (None, self._lengths[commit])
+			else:
+				self._described[key] = git.describe(self.repo_dir(), commit, pattern)
+		return self._described[key]
+
+	def _tags_are_local(self):
+		"""Whether refs() came from the repository git describe reads (the checkout, or the mirror), not the remote."""
+		self.refs()
+		return not self._remote
+
+	def _tag_names(self):
+		return [ref[len("refs/tags/"):] for ref in self.refs() if ref.startswith("refs/tags/")]
 
 	def version_of(self, line, commit):
 		"""The release a commit is (the highest of its tags), else its pseudo-version after the last release."""
@@ -160,7 +189,7 @@ class Repository:
 				self._versions[key] = exact[0]
 			else:
 				self.ensure(commit)
-				tag, distance = git.describe(self.repo_dir(), commit, self.tag_pattern(line))
+				tag, distance = self._describe(commit, self.tag_pattern(line))
 				release = semver.parse_version(tag.rpartition("/")[2]) if tag else None
 				self._versions[key] = semver.pseudo_version(release, distance, commit)
 		return self._versions[key]
@@ -174,7 +203,11 @@ class Repository:
 
 	def unchanged(self, line, older, newer):
 		"""Whether the versioned package's folder is the same at both commits."""
-		return git.run(["diff", "--quiet", older, newer, "--"] + self.pathspec(line), cwd=self.repo_dir(), check=False) is not None
+		key = (line, older, newer)
+		if key not in self._unchanged:
+			self._unchanged[key] = git.run(["diff", "--quiet", older, newer, "--"] + self.pathspec(line), cwd=self.repo_dir(),
+				check=False) is not None
+		return self._unchanged[key]
 
 	def pathspec(self, line):
 		"""The versioned package's files for git: its folder without the packages inside it versioned on their own."""

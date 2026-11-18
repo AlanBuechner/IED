@@ -109,6 +109,19 @@ class LspTests {
 		assert_true(!Ied::ParseIedUri(Core::StringView("ied:///x"), wsId, relative) && !Ied::ParseIedUri(Core::StringView("file:///x"), wsId, relative), "no workspace, another scheme");
 	}
 
+	[test("script_scopes")]
+	public static void TestScriptScopes() {
+		const Core::StringView key = Core::StringView("scripts");
+		const Core::String none = Ied::ScriptScopesOf(Core::StringView("{\"Game\": {\"includePaths\": [\"a\"]}}"), key);
+		assert_se("", none.CStr(), "a program without scripts");
+		const Core::String host = Ied::ScriptScopesOf(Core::StringView("{\"Game\": {\"includePaths\": [\"b\"]}, \"Host\": {\"scripts\": [{\"folders\": [\"p/tv/src\"]}]}}"), key);
+		assert_se("Host=[{\"folders\":[\"p/tv/src\"]}]\n", host.CStr(), "a script host's, by program");
+		const Core::String moved = Ied::ScriptScopesOf(Core::StringView("{\"Game\": {\"includePaths\": [\"c\"]}, \"Host\": {\"scripts\": [{\"folders\": [\"p/tv/src\"]}]}}"), key);
+		assert_true(moved == host, "other options changing leave them as they were: no restart");
+		assert_se("", Ied::ScriptScopesOf(Core::StringView("{\"Host\": {\"scripts\": []}}"), Core::StringView("")).CStr(), "a profile without the option");
+		assert_se("", Ied::ScriptScopesOf(Core::StringView("not json"), key).CStr(), "what does not read");
+	}
+
 	[test("profiles")]
 	public static void TestProfiles() {
 		Serialization::DomDoc* doc = new Serialization::DomDoc();

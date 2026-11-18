@@ -86,6 +86,10 @@ namespace Scripting
 	/// `-L<dir>` a search folder, `-Wl,a,b` its arguments; an object, a library or a resource file goes as it is.
 	std::vector<std::string> LinkerArguments(const std::string& argument);
 
+	/// The same for clang's driver linking for Linux: `-l<name>` searches for lib<name>, but `-l` of a library's file (a
+	/// path, as Nuke gives a C++ dependency's `.a`) is that file, which ld would look up as a name and not find.
+	std::string LinuxLinkerArgument(const std::string& argument);
+
 	// Compile a foreign C/C++ source file to an object file for `system` using the bundled clang (for Linux against the
 	// Linux sysroot, position independent).
 	// language is "c" or "c++"; defines/includeDirs are passed as -D / -I flags, targetFlags (D-62) and compileFlags (the

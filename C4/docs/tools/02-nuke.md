@@ -77,7 +77,7 @@ folder as a string literal, so a module finds its own files) and `depends`. So
 - The program's `compiler-args` (and those of its `[project.config.<Config>]` override) go on the command line.
   The processor goes here: `compiler-args = ["-march=x86-64-v3"]`, which the editor bridge passes on as `target`.
 - The compiler's intermediates (the object cache `<name>.objects/`, a script host's inline bodies in `<name>.inline/`, foreign objects in `<name>.interop/`) go to `<int>`, the executable and its `.pdb` to `<bin>`; then the
-  `[[project.copy]]` entries of the program and its modules are copied into `<bin>`.
+  `[[project.copy]]` entries of the program and its modules are copied into `<bin>`. A file that an earlier build copied and this one no longer copies (its source deleted, renamed or excluded, its copy entry gone) is removed again; Nuke remembers what it copied in `<int>/copies.json` and removes nothing else. The first build without that file removes nothing.
 - A dependency cycle is an error that prints the chain.
 
 ### When a program is rebuilt
@@ -101,8 +101,9 @@ compile: a failed compile is never taken for an up-to-date one, and `nuke run` n
 A C4 project is test-bearing when one of its source folders has a `tests/` folder with `.cf` or `.ch` files
 (`src/tests/` by default), or its manifest sets `tests = true` (`tests = false` turns the detection off).
 
-- `nuke build` and `nuke run` never pass `-test`. `src/tests/` is under `src/`, so its files are part of the
-  program, where the `[test]` functions are inert code; an executable still needs its `main`.
+- `nuke build` and `nuke run` never pass `-test`, and the compiler leaves `src/tests/` out of the program (a source
+  folder's own `tests/`); an executable still needs its `main`. A project's `[dev-dependencies]` - what only its tests
+  use - join the harness of every test-bearing project that holds it, never a program (Nuke/README.md).
 - `nuke test` compiles each test-bearing project on its own with `-test -test-json <int>/tests/results.json`
   into `<bin>/<Project>-tests.exe` (intermediates in `<int>/tests/`, same rebuild rules), runs it from the project
   folder (with `--filter GLOB` when given: a glob, or a case's or group's name), runs every harness even after one

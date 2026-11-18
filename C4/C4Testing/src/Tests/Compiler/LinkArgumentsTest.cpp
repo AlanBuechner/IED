@@ -33,4 +33,15 @@ namespace Testing
 		TEST_ASSERT(LinkerArguments("C:/int/app.objects/a-b.obj") == Arguments{ "C:/int/app.objects/a-b.obj" });
 		TEST_PASSED();
 	}
+
+	void LinkArgumentsTest::LinuxLibraryFilesGoAsFiles()
+	{
+		TEST_ASSERT_EQ(LinuxLinkerArgument("-lm"), std::string("-lm"));
+		TEST_ASSERT_EQ(LinuxLinkerArgument("-lssl"), std::string("-lssl"));
+		TEST_ASSERT_EQ(LinuxLinkerArgument("-l/work/build/bin/Torrent/Torrent.a"), std::string("/work/build/bin/Torrent/Torrent.a"));
+		TEST_ASSERT_EQ(LinuxLinkerArgument("-lC:\\libs\\foreign.a"), std::string("C:\\libs\\foreign.a"));
+		TEST_ASSERT_EQ(LinuxLinkerArgument("-L/opt/lib"), std::string("-L/opt/lib"));
+		TEST_ASSERT_EQ(LinuxLinkerArgument("/int/a.o"), std::string("/int/a.o"));
+		TEST_PASSED();
+	}
 } // namespace Testing

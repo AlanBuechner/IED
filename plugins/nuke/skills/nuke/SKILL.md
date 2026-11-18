@@ -43,6 +43,11 @@ The workspace root has `nuke.toml` with `[workspace]` (name, `toolchain`, `defau
 `defines`, `links`, `compiler-args`, `[[project.copy]]`, `[project.config.<Config>]` overrides and
 `[[project.steps]]`. Unknown keys are errors - read the message, it names the file and key.
 
+`[[project.copy]]` (`from`, `to`, `exclude`) copies files into the program's bin folder after each build and test; the copies
+are pruned: what an earlier build copied and this one no longer does (a source deleted, renamed or excluded) is removed again.
+The record is `<int>/copies.json`; files Nuke did not copy are never removed, and the first build without a record removes
+nothing - delete stale files from before once by hand.
+
 A module's sources compile into every program that depends on it; each project keeps its own defines.
 Tests are `[test]` functions under `src/tests/`; `nuke test` compiles them into `<Project>-tests.exe`.
 

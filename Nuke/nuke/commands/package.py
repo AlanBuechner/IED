@@ -52,6 +52,7 @@ class Package(base.Command):
 	usage = USAGE
 	takes_args = True
 	needs_workspace = False
+	loads_workspace = False     # each action reads the manifests and syncs as it needs (_Context): a sync before it would resolve twice
 	policy = base.NONE
 
 	def main(self, cli, args):

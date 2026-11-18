@@ -94,6 +94,24 @@ namespace Testing
 		TEST_PASSED();
 	}
 
+	// A build without -test leaves out a source folder's tests/ (docs/language/15-projects.md rule 7): what the tests use (a
+	// backend they run on) is never part of the program. Only the folder's own tests/: one deeper is the program's.
+	void SourceFolderTest::AProgramLeavesOutItsSourceFoldersTests()
+	{
+		Folder folder("tests");
+		folder.Write("Engine/engine.cf", "int32 engine = 1;\n");
+		folder.Write("Engine/tests/deep/kit.ch", "int32 kit = 2;\n");
+		folder.Write("tests/engine_tests.cf", "int32 tested = 3;\n");
+		folder.Write("tests/kit.ch", "int32 kit = 4;\n");
+		SourceManager program;
+		TEST_ASSERT_EQ(program.RegisterFolder(folder.root, FolderScan::WithoutTests), 2u);
+		TEST_ASSERT(program.FindByAbsPath(folder.Utf8("tests/kit.ch")) == 0);
+		TEST_ASSERT(program.FindByAbsPath(folder.Utf8("Engine/tests/deep/kit.ch")) != 0);
+		SourceManager harness;
+		TEST_ASSERT_EQ(harness.RegisterFolder(folder.root, FolderScan::Recursive), 4u);
+		TEST_PASSED();
+	}
+
 	void SourceFolderTest::ADeepFolderRegistersAndReads()
 	{
 		Folder folder("deep");

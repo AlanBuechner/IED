@@ -196,7 +196,8 @@ class Resolver:
 				f"(its packages there: {', '.join(sorted(p for p in found.packages if p)) or 'none'})")
 		label = f"{repo.name}:{path or '(repository)'} {choice.version}"
 		elsewhere = set()
-		for dependency in info.dependencies:
+		# What its tests use comes too: the compiler compiles the tests of every project a test harness holds.
+		for dependency in info.dependencies + info.dev_dependencies:
 			if dependency.local is not None:
 				continue        # a project of this package: it comes with it
 			if dependency.nuget is not None:

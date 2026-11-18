@@ -100,7 +100,9 @@ ENGINE_EDITOR = "1"
 7. **Tests.** A `-test` build runs the root project's `[test]` functions and fixtures. Those of the projects it depends on
    are compiled with it but do not run: each project's own `-test` build runs them (Nuke builds one harness per
    test-bearing project), so a program's harness does not run again what its modules' harnesses ran. A root with no
-   tests of its own runs its `main`.
+   tests of its own runs its `main`. A build without `-test` leaves out each source folder's own `tests/` folder: a
+   project's tests, and what they use (a test kit, a platform backend they run on - Nuke's `[dev-dependencies]`), are
+   never part of its programs; non-test code may not include a file there.
 
 ## 15.4 How the compiler does it
 
@@ -108,7 +110,7 @@ ENGINE_EDITOR = "1"
 |---|---|
 | `Compiler/ProjectFile` | reads the description (the TOML subset), with line-numbered errors |
 | `Compiler/Projects` | checks it (unique names, known dependencies, no cycle, no folder in two projects, every project used by the root); answers which project owns a file and which projects one may use |
-| `SourceManager` | each source records its project (`SetProjects`); `ResolveInclude` follows rule 3 from the including file and reports the ambiguity and boundary errors; there is no basename fallback |
+| `SourceManager` | each source records its project (`SetProjects`); `ResolveInclude` follows rule 3 from the including file and reports the ambiguity and boundary errors; there is no basename fallback; `RegisterFolder(folder, FolderScan::WithoutTests)` leaves out the folder's own `tests/`, which the driver passes for a project's source folders without `-test` (rule 7) |
 | `Compiler/SourceMacros`, `MacroPass::RunFiles` | each file starts with its project's macros; an include carries the included file's `exported` table |
 | `ProgramModel::OutOfProjectReach` | declaration-level lookups (`TypeResolver::ResolveTypeInContext`) reject a name from a project out of reach |
 | `Script/ScriptReach` | a script compile parses only the host files its project reaches (and those adding to their templates): by rule 4 the rest could not change what its code means (docs/runtime/04 section 4, step 3) |
@@ -120,7 +122,8 @@ ENGINE_EDITOR = "1"
 - C4Testing `Compiler.Projects`: reading the description, its errors, the checks (a cycle, a folder in two
   projects, an unused project), who may use whom.
 - C4Testing `SourceManager.Projects`: owners, the resolution order, the ambiguity and boundary errors, each file's
-  defines, what an include carries.
+  defines, what an include carries. `SourceManager.Folders` `AProgramLeavesOutItsSourceFoldersTests`: a source
+  folder's own `tests/` left out without `-test`, a deeper one kept.
 - C4Testing `Lsp.Server`: the editor gets the projects' defines and the boundary error.
 - ToolsTest `ProjectTests` (a game's harness runs the game's tests and not the engine's, the engine's runs its own
   with its setup, a root without tests runs its `main`).

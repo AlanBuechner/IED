@@ -4,9 +4,10 @@ from .errors import NukeError
 
 
 def validate(workspace):
-	"""Every `depends` entry names a project, C4 programs fold only modules, and there are no cycles."""
+	"""Every `depends` and `dev_depends` entry names a project, C4 programs fold only modules, and there are no cycles -
+	in a test harness neither, which adds every project's dev_depends."""
 	for project in workspace.projects.values():
-		for name in project.depends:
+		for name in edges(project, test=True):
 			dependency = workspace.find_project(name)
 			if dependency is None:
 				workspace.project(name)  # raises with a suggestion
@@ -18,9 +19,17 @@ def validate(workspace):
 	cycle = find_cycle(workspace)
 	if cycle:
 		raise NukeError("dependency cycle: " + " -> ".join(cycle))
+	cycle = find_cycle(workspace, test=True)
+	if cycle:
+		raise NukeError("dependency cycle in a test harness, through [dev-dependencies]: " + " -> ".join(cycle))
 
 
-def find_cycle(workspace):
+def edges(project, test=False):
+	"""What `project` depends on: in a test harness its dev_depends too."""
+	return tuple(project.depends) + tuple(project.dev_depends) if test else tuple(project.depends)
+
+
+def find_cycle(workspace, test=False):
 	WHITE, GRAY, BLACK = 0, 1, 2
 	colour = {name: WHITE for name in workspace.projects}
 	stack = []
@@ -28,7 +37,7 @@ def find_cycle(workspace):
 	def visit(name):
 		colour[name] = GRAY
 		stack.append(name)
-		for dependency in workspace.projects[name].depends:
+		for dependency in edges(workspace.projects[name], test):
 			dep = workspace.find_project(dependency).name
 			if colour[dep] == GRAY:
 				return stack[stack.index(dep):] + [dep]
@@ -65,11 +74,12 @@ def build_order(workspace, roots):
 	return order
 
 
-def c4_modules(workspace, root):
-	"""`root` and every C4 project its `depends` reach, nearest first (the compiler's build description order)."""
+def c4_modules(workspace, root, test=False):
+	"""`root` and every C4 project its `depends` reach, nearest first (the compiler's build description order). A test
+	harness (`test`) follows each project's dev_depends too: the compiler compiles the tests of every project it holds."""
 	order = [root]
 	for project in order:
-		for name in project.depends:
+		for name in edges(project, test):
 			dependency = workspace.find_project(name)
 			if dependency.is_c4 and dependency not in order:
 				order.append(dependency)

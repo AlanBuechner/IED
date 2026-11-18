@@ -73,6 +73,46 @@ class LlvmFolderTests(unittest.TestCase):
 		self.assertEqual(self.toolchain.checkout_llvm("C:/IED").replace("\\", "/"), "C:/IED/vendor/llvm", "Nuke's home's")
 
 
+class LinuxSysrootTests(unittest.TestCase):
+	"""[languages.cpp] linux-sysroot: a folder, or "c4" for the one the C4 toolchain links Linux programs with (its
+	sysroots/linux-x64, else the IED checkout's vendor/sysroots/linux-x64), and the clang arguments it gives."""
+
+	def setUp(self):
+		self.toolchain = module("toolchain")
+		self.settings = module("settings")
+		self.root = os.path.join(REPOSITORY, "build", "nuke-tests", "linux-sysroot")
+		shutil.rmtree(self.root, ignore_errors=True)
+		for folder in ("c4/sysroots/linux-x64", "bare-c4", "home/vendor/sysroots/linux-x64", "own"):
+			os.makedirs(os.path.join(self.root, folder))
+
+	def tearDown(self):
+		shutil.rmtree(self.root, ignore_errors=True)
+
+	def resolve(self, value, c4):
+		expand = lambda text: text.replace("${toolchain.dir}", os.path.join(self.root, c4))
+		return self.toolchain.linux_sysroot(value, expand, self.root, os.path.join(self.root, "home"))
+
+	def test_c4_names_the_toolchains_then_the_checkouts(self):
+		self.assertEqual(self.resolve("c4", "c4"), os.path.normpath(os.path.join(self.root, "c4", "sysroots", "linux-x64")))
+		self.assertEqual(self.resolve("c4", "bare-c4"), os.path.normpath(os.path.join(self.root, "home", "vendor", "sysroots", "linux-x64")),
+			"a development install has none: the checkout's")
+		self.assertEqual(self.resolve("own", "c4").replace("\\", "/"), os.path.join(self.root, "own").replace("\\", "/"), "a folder of the workspace")
+		self.assertIsNone(self.resolve(None, "c4"), "none: the system's")
+		with self.assertRaises(ValueError) as missing:
+			self.resolve("nowhere", "c4")
+		self.assertIn("names no folder", str(missing.exception))
+
+	def test_the_setting_is_checked_and_reaches_clang(self):
+		self.assertEqual(self.settings.read_settings({"linux-sysroot": "c4"}).linux_sysroot, "c4")
+		with self.assertRaises(ValueError):
+			self.settings.read_settings({"linux-sysroot": ""})
+		linux = self.toolchain.Toolchain("/llvm", "/llvm/bin/clang", (), (), "", None, "/sysroot", linux=True)
+		self.assertEqual(linux.sysroot_args(), ["--sysroot=/sysroot"])
+		windows = self.toolchain.Toolchain("C:/llvm", "C:/llvm/bin/clang.exe", (), (), "14.4", None, "C:/kit")
+		self.assertEqual(windows.sysroot_args(), ["-Xmicrosoft-windows-sys-root", "C:/kit"], "Windows' kit as before")
+		self.assertEqual(self.toolchain.Toolchain("/llvm", "/llvm/bin/clang", (), (), "", None, None, linux=True).sysroot_args(), [])
+
+
 class KitTests(unittest.TestCase):
 	"""The MSVC runtime and Windows SDK: setup.bat's kit (Visual Studio's layout) when the checkout has one."""
 
@@ -279,6 +319,37 @@ class LibraryTests(CppTest):
 		app = read(self.int("App", "linker.args"))
 		self.assertNotIn("Mid.lib", app, "a program in depends only orders the build")
 		self.assertNotIn(self.path("Mid", "src").replace("\\", "/"), read(self.int("App", "Main.args")))
+
+
+class NativeLibraryTests(CppTest):
+	"""What a C4 program depending on a C++ project takes from it (native_library): a static library's include folders and
+	those of the static libraries it reaches, its own library file, theirs and all their links; nothing of a program."""
+
+	def native_library(self, name):
+		from nuke import workspace as workspaces, configs
+		from nuke.session import Session
+		from nuke.log import Log
+		ws = workspaces.load_workspace(self.root)
+		session = Session(ws, configs.BUILT_IN[1], "x64", "windows", Log(), self.store)
+		project = ws.project(name)
+		return session.driver(project).native_library(session.driver_context(project))
+
+	def test_a_static_library_gives_its_headers_and_files_with_those_it_reaches(self):
+		self.workspace({
+			"Base": ("kind = \"library\"\nlinks = [\"shlwapi.lib\"]\nincludes = [\"public\"]\n", {"public/Base.h": "", "src/Base.cpp": ""}),
+			"Api": ("kind = \"library\"\ndepends = [\"Base\"]\nincludes = [\"include\"]\nlinks = [\"ws2_32.lib\", \"!shlwapi.lib\"]\n"
+				"[project.driver]\nsystem-includes = [\"private\"]\n", {"include/Api.h": "", "private/p.h": "", "src/Api.cpp": ""}),
+			"Tool": ("depends = [\"Api\"]\n", {"src/Main.cpp": ""}),
+		})
+		given = self.native_library("Api")
+		norm = lambda *parts: self.path(*parts).replace("\\", "/")
+		self.assertEqual([norm("Api", "src"), norm("Api", "include"), norm("Base", "src"), norm("Base", "public")], given["includes"],
+			"its own folders, then those of the libraries it reaches; never its system includes")
+		links = [link.replace("\\", "/") for link in given["links"]]
+		self.assertEqual([norm("build", "bin", CONFIG, "Api", "Api.lib"), norm("build", "bin", CONFIG, "Base", "Base.lib")], links[:2])
+		self.assertTrue(any(link.lower().endswith("/ws2_32.lib") for link in links), "its links, found in the Windows SDK")
+		self.assertFalse(any(link.lower().endswith("/shlwapi.lib") for link in links), "less what its !NAME leaves out")
+		self.assertIsNone(self.native_library("Tool"), "a program gives a C4 program nothing")
 
 
 class PrebuiltTests(CppTest):

@@ -18,5 +18,8 @@ namespace Testing
 		void SearchFoldersAndLinkerArgumentsAreLld();
 		TEST_FUNC(Compiler.Link)
 		void FilesGoAsTheyAre();
+		// For Linux `-l<path>` (a C++ dependency's .a) is the file; `-l<name>` stays a name ld searches for.
+		TEST_FUNC(Compiler.Link)
+		void LinuxLibraryFilesGoAsFiles();
 	};
 } // namespace Testing

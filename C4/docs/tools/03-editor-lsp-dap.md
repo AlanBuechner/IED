@@ -119,7 +119,11 @@ drawn as a string), so typing in it asks for completion as typing a name does.
   folders, the allow-list and the defines, and is not part of the program. Its diagnostics are the script compile's
   front end and body checks, the rules for scripts included (no `extern` import, no header off the allow-list, no
   body for a host function); an interface that does not read is an error on each of its documents. A host header a
-  script includes lives in the interface, so navigation stops at the script's own files.
+  script includes lives in the interface, so navigation stops at the script's own files. A program in `programs` may
+  carry `scripts` of its own - a script host's plugin folders, which Nuke writes from `[project.script-host]` - read
+  with the client's at `initialize` (a folder both name once). The server reads scopes only then: when a build changes
+  a program's `scripts`, IED starts the server again (its profile's `pluginCodeOption` names the key) rather than
+  sending `didChangeConfiguration`.
 - File and folder names may use any script: the compiler keeps paths as UTF-8.
 - An editor document maps to its source by absolute path (case-insensitive on Windows), and a source's URI is its
   file, so navigation works in every project, `-I` folder and Bedrock alike.

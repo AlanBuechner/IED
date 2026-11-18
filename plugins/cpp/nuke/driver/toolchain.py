@@ -4,7 +4,8 @@ own headers, and the MSVC runtime and Windows SDK it targets (setup.bat's kit in
 
 For Linux (`--system linux`, C4 D-86) Nuke runs on Linux (tools/linux/builder): the LLVM is the one whose clang the
 workspace's llvm folder holds for Linux, else $LLVM_HOME's, else the clang on PATH's, and clang's driver finds the
-system's headers and libraries itself."""
+system's headers and libraries itself - or a sysroot's ([languages.cpp] linux-sysroot), which a C++ library a C4 program
+links must share with the C4 compiler's link (its glibc and libstdc++)."""
 
 import functools
 import os
@@ -27,7 +28,7 @@ class Toolchain:
 	library_dirs: tuple    # where a library given by name is looked for
 	ms_version: str
 	settings: Settings
-	sysroot: str = None     # the MSVC and SDK kit's folder when the build uses setup.bat's, for clang's driver
+	sysroot: str = None     # Windows: the MSVC and SDK kit's folder when the build uses setup.bat's; Linux: linux-sysroot
 	linux: bool = False     # building for Linux, on Linux
 
 	@property
@@ -40,8 +41,11 @@ class Toolchain:
 		return f"{self.llvm}/bin/llvm-ar"
 
 	def sysroot_args(self):
-		"""clang driver arguments that take the MSVC and SDK headers and libraries from the kit, not a Visual Studio."""
-		return ["-Xmicrosoft-windows-sys-root", self.sysroot] if self.sysroot else []
+		"""clang driver arguments that take the headers and libraries from the sysroot: for Windows the MSVC and SDK kit
+		instead of a Visual Studio, for Linux the sysroot instead of the system's."""
+		if not self.sysroot:
+			return []
+		return ["--sysroot=" + self.sysroot] if self.linux else ["-Xmicrosoft-windows-sys-root", self.sysroot]
 
 
 def checkout_llvm(nuke_home):
@@ -91,14 +95,37 @@ def clang_resource_includes(llvm):
 	return (f"{newest}/include",) if newest else ()
 
 
+C4_SYSROOT = "c4"
+LINUX_SYSROOT = "sysroots/linux-x64"   # in a C4 toolchain; a development checkout keeps it in vendor/
+
+
+def linux_sysroot(value, expand, workspace_dir, nuke_home):
+	"""The folder [languages.cpp] linux-sysroot names: "c4" is the one the C4 toolchain links Linux programs with (its
+	sysroots/linux-x64, else the IED checkout's vendor/sysroots/linux-x64, as C4's Toolchain finds it); None for none."""
+	if value is None:
+		return None
+	if value == C4_SYSROOT:
+		candidates = [os.path.join(expand("${toolchain.dir}"), LINUX_SYSROOT), os.path.join(nuke_home, "vendor", LINUX_SYSROOT)]
+		found = next((folder for folder in candidates if os.path.isdir(folder)), None)
+		if found is None:
+			raise ValueError(f"languages.cpp.linux-sysroot = \"c4\": the C4 toolchain has no Linux sysroot ({' or '.join(candidates)}; "
+				"tools/setup/linux_sysroot.py in the IED checkout makes it)")
+		return os.path.normpath(found)
+	folder = _absolute(expand(value), workspace_dir)
+	if not os.path.isdir(folder):
+		raise ValueError(f"languages.cpp.linux-sysroot names no folder: {folder}")
+	return folder
+
+
 @functools.lru_cache(maxsize=None)
-def _resolve_linux(llvm, workspace_system_includes, settings):
+def _resolve_linux(llvm, workspace_system_includes, settings, sysroot):
 	clang = os.path.join(llvm, "bin", "clang")
 	if not os.path.isfile(clang):
 		raise ValueError(f"no clang at {clang}")
-	# A library given by name is looked for in the LLVM release, then where Debian keeps the system's.
-	libraries = (f"{llvm}/lib", "/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu")
-	return Toolchain(llvm, clang, workspace_system_includes, libraries, "", settings, None, linux=True)
+	# A library given by name is looked for in the LLVM release, then where Debian keeps the system's (or the sysroot's).
+	base = sysroot or ""
+	libraries = (f"{llvm}/lib", f"{base}/usr/lib/x86_64-linux-gnu", f"{base}/lib/x86_64-linux-gnu")
+	return Toolchain(llvm, clang, workspace_system_includes, libraries, "", settings, sysroot, linux=True)
 
 
 @functools.lru_cache(maxsize=None)
@@ -119,7 +146,7 @@ def resolve(settings, workspace_dir, expand, nuke_home, system_name="windows"):
 	llvm = llvm_folder(settings, workspace_dir, checkout_llvm(nuke_home))
 	system = tuple(_absolute(expand(folder), workspace_dir) for folder in settings.system_includes)
 	if system_name == "linux":
-		return _resolve_linux(llvm, system, settings)
+		return _resolve_linux(llvm, system, settings, linux_sysroot(settings.linux_sysroot, expand, workspace_dir, nuke_home))
 	return _resolve(llvm, system, settings, checkout_kit(nuke_home))
 
 

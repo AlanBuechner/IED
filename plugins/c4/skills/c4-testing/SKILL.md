@@ -37,7 +37,7 @@ Each returns an int32 status you normally ignore; the harness counts failures it
 
 ## How Nuke runs them
 Tests live in an **in-source** `tests/` folder inside one of a project's source folders (`src/tests/` with the default `sources = ["src"]`; no separate test projects). A project with at least one `.cf`/`.ch` under such a `tests/` folder is "test-bearing":
-- `nuke build` / `nuke run` (never `-test`), or a compile without `-test`: the `[test]` functions are inert code; the project builds as usual.
+- `nuke build` / `nuke run` (never `-test`), or a compile without `-test`: a project's source folders' own `tests/` are left out of the program, so what only the tests use (a test kit, the backend they run on: the project's `[dev-dependencies]`) is never part of it; a `[test]` function elsewhere is inert code.
 - `nuke test [config] [--filter "math.*"]`: Nuke compiles each test-bearing project separately with `-test -test-json` into `build/bin/<Config>-windows-x64/<Project>/<Project>-tests.exe`, runs every harness (even after one fails) and exits 1 if any failed. The filter is a glob over whole case names, or without `*`/`?` a case's or group's name (`--filter math.vector` runs `math.vector.*`); a filter that matches no case is said so.
 - Each harness runs its **own project's** tests and fixtures: a module it depends on is compiled into it, but that module's tests run in the module's own harness (with a build description, `-test` runs the root project's tests; `C4/docs/language/15-projects.md` rule 7). So `nuke test App` runs App's cases, not its modules' again; `nuke test Engine` runs Engine's.
 

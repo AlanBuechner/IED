@@ -13,6 +13,8 @@ class Settings:
 	system_includes: tuple = ()      # system include folders every C++ compile gets
 	standard: str = "c++20"          # -std= of .cpp files
 	c_standard: str = "c11"          # -std= of .c files
+	linux_sysroot: str = None        # Linux builds compile and link against it, not the system: "c4" for the one the
+	                                 # workspace's C4 toolchain links with, so a library a C4 program links matches it
 
 
 @dataclass(frozen=True)
@@ -47,12 +49,16 @@ def _no_others(table, known, where):
 
 def read_settings(table):
 	where = "languages.cpp"
-	_no_others(table, ("llvm", "system-includes", "standard", "c-standard"), where)
+	_no_others(table, ("llvm", "system-includes", "standard", "c-standard", "linux-sysroot"), where)
 	llvm = table.get("llvm")
 	if llvm is not None and not isinstance(llvm, str):
 		raise ValueError(f"{where}.llvm must be a folder")
+	sysroot = table.get("linux-sysroot")
+	if sysroot is not None and (not isinstance(sysroot, str) or not sysroot):
+		raise ValueError(f"{where}.linux-sysroot must be a folder, or \"c4\" for the C4 toolchain's")
 	return Settings(llvm=llvm, system_includes=_strings(table, "system-includes", where),
-		standard=_string(table, "standard", where, "c++20"), c_standard=_string(table, "c-standard", where, "c11"))
+		standard=_string(table, "standard", where, "c++20"), c_standard=_string(table, "c-standard", where, "c11"),
+		linux_sysroot=sysroot)
 
 
 def read_options(spec):

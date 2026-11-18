@@ -46,7 +46,7 @@ class Origin:
 
 def active(spec, projects=None):
 	"""Whether the workspace uses packages at all: anything else costs no file access."""
-	return any(p.dependencies for p in (projects or {}).values()) or lockfile.exists(spec)
+	return any(p.dependencies or p.dev_dependencies for p in (projects or {}).values()) or lockfile.exists(spec)
 
 
 def sync(spec, projects, options):
@@ -111,13 +111,13 @@ def workspace_roots(spec, projects=None):
 	roots, declared = [], set()
 	for project in sorted((p for p in (projects or {}).values() if p.package is None), key=lambda p: p.name.lower()):
 		declared.add(os.path.relpath(project.dir, spec.dir).replace("\\", "/"))
-		for requirement in project.dependencies:
+		for requirement in project.dependencies + project.dev_dependencies:
 			if requirement.url is not None and local.path_of(requirement.url, requirement.path) is None:
 				roots.append(Root(requirement.url, requirement, f"project {project.name}", project.file, project.name))
 	for folder, package in sorted(local.by_path.items()):
 		if (folder or ".") in declared:
 			continue
-		for requirement in package.dependencies:
+		for requirement in package.dependencies + package.dev_dependencies:
 			if requirement.url is not None and local.path_of(requirement.url, requirement.path) is None:
 				roots.append(Root(requirement.url, requirement, f"the workspace's package {folder or '(root)'}"))
 	return roots
@@ -130,7 +130,7 @@ def check_local(spec, projects):
 	for project in projects.values():
 		if project.package is not None:
 			continue
-		for requirement in project.dependencies:
+		for requirement in project.dependencies + project.dev_dependencies:
 			if requirement.local is None:
 				continue
 			target = local_target(spec, projects, project, requirement)
@@ -206,8 +206,9 @@ def local_packages(spec):
 
 def link(spec, projects):
 	"""Each project - the workspace's and the packages' - depends also on the projects of the packages its
-	[dependencies] name, so `depends` lists only what is not a package."""
-	if not any(p.dependencies for p in projects.values()):
+	[dependencies] name, so `depends` lists only what is not a package; the projects of its [dev-dependencies] are its
+	`dev_depends`, which only a test harness adds."""
+	if not any(p.dependencies or p.dev_dependencies for p in projects.values()):
 		return projects
 	local = local_packages(spec)
 	provided = defaultdict(list)        # (url key, package path) or ("", workspace-relative path) -> project names
@@ -218,19 +219,29 @@ def link(spec, projects):
 		provided[("", path)] += [p.name for p in info.projects if p.name in projects]
 	linked = {}
 	for name, project in projects.items():
-		names = []
-		for requirement in project.dependencies:
-			if requirement.nuget is not None:
-				continue        # files, not projects (nuget.py)
-			if requirement.local is not None:
-				target = local_target(spec, projects, project, requirement)
-				names += [target.name] if target is not None else []
-			else:
-				names += _provided(spec, local, provided, project, requirement)
+		names = _projects_of(spec, local, provided, projects, project, project.dependencies)
 		known = {d.lower() for d in project.depends} | {project.name.lower()}
-		extra = [n for n in dict.fromkeys(names) if n.lower() not in known]
-		linked[name] = replace(project, depends=tuple(project.depends) + tuple(extra)) if extra else project
+		extra = [n for n in names if n.lower() not in known]
+		known |= {n.lower() for n in extra}
+		dev = [n for n in _projects_of(spec, local, provided, projects, project, project.dev_dependencies) if n.lower() not in known]
+		if extra or dev:
+			project = replace(project, depends=tuple(project.depends) + tuple(extra), dev_depends=tuple(dev))
+		linked[name] = project
 	return linked
+
+
+def _projects_of(spec, local, provided, projects, project, requirements):
+	"""The names of the projects `requirements` bring, once each, in order."""
+	names = []
+	for requirement in requirements:
+		if requirement.nuget is not None:
+			continue        # files, not projects (nuget.py)
+		if requirement.local is not None:
+			target = local_target(spec, projects, project, requirement)
+			names += [target.name] if target is not None else []
+		else:
+			names += _provided(spec, local, provided, project, requirement)
+	return list(dict.fromkeys(names))
 
 
 def _provided(spec, local, provided, project, requirement):
@@ -251,16 +262,17 @@ def _from_lock(state, lock, checkouts, local, wanted):
 	"""The packages' projects from the lock and what is installed, or None when anything is missing or a project depends
 	on a project nothing installed has (then the lock is resolved again)."""
 	developed = {url_key(url): folder for url, folder in checkouts.items()}
+	checked = {}        # url key -> a develop checkout's index while the lock follows it: one walk and one git call a checkout
 	joined = []
 	for entry in lock.packages:
-		checkout = developed.get(url_key(entry.url))
+		key = url_key(entry.url)
+		checkout = developed.get(key)
 		if checkout is not None:
-			developed_at = state.develop.get(url_key(entry.url), {})
-			if not os.path.isdir(checkout) or git.head(checkout) != developed_at.get("head"):
+			if key not in checked:
+				checked[key] = _followed_checkout(state, key, checkout, entry.source)
+			base, found = checkout, checked[key]
+			if found is None:
 				return None
-			base, found = checkout, index.in_folder(checkout, entry.source)
-			if found.digest != developed_at.get("manifests"):
-				return None         # a manifest of the checkout changed, committed or not: what its packages need may have
 		else:
 			relative = install.export_name(entry.source, entry.line, entry.version)
 			base = fsutil.join(state.root, install.content_name(entry.source, entry.line, entry.version, entry.url))
@@ -275,6 +287,16 @@ def _from_lock(state, lock, checkouts, local, wanted):
 	names = {p.name.lower() for p in joined} | local
 	needed = set(n.lower() for n in wanted) | {n.lower() for p in joined for n in p.depends}
 	return joined if needed <= names else None
+
+
+def _followed_checkout(state, key, checkout, label):
+	"""The index of a develop checkout while the lock follows it - its HEAD and its manifests as they were when it was
+	locked - else None: a commit, or a manifest changed (committed or not), may change what its packages need."""
+	developed_at = state.develop.get(key, {})
+	if not os.path.isdir(checkout) or git.head(checkout) != developed_at.get("head"):
+		return None
+	found = index.in_folder(checkout, label)
+	return found if found.digest == developed_at.get("manifests") else None
 
 
 def _load_projects(entry, info, base, develop):

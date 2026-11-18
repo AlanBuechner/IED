@@ -788,7 +788,9 @@ int32 main() {
 		const std::string rootUri = C4LSP::Protocol::DocumentUri::ToUri(root.string());
 		const std::string docUri = C4LSP::Protocol::DocumentUri::ToUri((root / "plugin" / "main.cf").string());
 
-		auto diagnosticsFor = [this, &root, &rootUri, &docUri](const std::string& interfacePath, const std::string& script) {
+		// The scope comes in the options' own `scripts` (a client's plugins) or in a program's (a script host's plugin
+		// folders, as Nuke writes them into the program's options file): both analyze alike.
+		auto diagnosticsFor = [this, &root, &rootUri, &docUri](const std::string& interfacePath, const std::string& script, bool inProgram = false) {
 			Reset(rootUri);
 			Value init = Value::MakeObject();
 			init.SetMember("rootUri", Value::String(Core::String(rootUri)));
@@ -800,7 +802,15 @@ int32 main() {
 			Value scripts = Value::MakeArray();
 			scripts.Append(scope);
 			Value options = Value::MakeObject();
-			options.SetMember("scripts", scripts);
+			if (inProgram)
+			{
+				Value host = Value::MakeObject();
+				host.SetMember("scripts", scripts);
+				Value programs = Value::MakeObject();
+				programs.SetMember("Host", host);
+				options.SetMember("programs", programs);
+			}
+			else options.SetMember("scripts", scripts);
 			init.SetMember("initializationOptions", options);
 			FeedRequest("initialize", 1, init);
 			FeedNotification("initialized", Value::Null());
@@ -825,6 +835,8 @@ int32 main() {
 		TEST_ASSERT(Contains(diagnosticsFor(interfacePath, "include \"api.ch\"\nnamespace Api\n{\n\tint32 Twice(int32 v) { return v; }\n}\n"),
 			"a script cannot define"));
 		TEST_ASSERT(Contains(diagnosticsFor((root / "missing.c4i").string(), "int32 Five() { return 5; }\n"), "does not read"));
+		TEST_ASSERT_EQ(diagnosticsFor(interfacePath, "include \"api.ch\"\nint32 Four() { return Api::Twice(2); }\n", true), std::string());
+		TEST_ASSERT(Contains(diagnosticsFor(interfacePath, "include \"api.ch\"\nint32 Bad() { return Api::Thrice(2); }\n", true), "Thrice"));
 
 		fs::remove_all(root);
 		TEST_PASSED();

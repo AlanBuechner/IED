@@ -96,8 +96,8 @@ class Session:
 	def test_output(self, project):
 		return fsutil.join(self.bin_dir(project), self.executable(f"{project.name}-tests"))
 
-	def c4_modules(self, project):
-		return graph.c4_modules(self.workspace, project)
+	def c4_modules(self, project, test=False):
+		return graph.c4_modules(self.workspace, project, test)
 
 	def has_tests(self, project):
 		"""C4 projects: `tests = true`, or "auto" and a tests/ folder with .cf/.ch files under a source folder.

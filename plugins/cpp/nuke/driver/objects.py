@@ -122,7 +122,7 @@ def make_job(toolchain, configuration, target, source, includes, system_includes
 	name = os.path.join(target.int_dir, object_name(source)).replace("\\", "/")
 	obj, dep = name + object_extension(toolchain), name + ".d"
 	if toolchain.linux:
-		command = [toolchain.clang, "-c"]
+		command = [toolchain.clang, "-c"] + toolchain.sysroot_args()
 		command += linux_compile_args(toolchain, configuration, source, includes, system_includes, target.defines, target.compiler_args)
 		command += [source, "-o", obj, "-MD", "-MF", dep, "-MT", dep]
 	else:
