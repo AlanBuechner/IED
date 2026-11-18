@@ -651,7 +651,9 @@ namespace Ai
 			m_Chats->QueueChanged(m_Chat);
 		}
 		if (m_Pausing) UiNote(Core::StringView("paused"), ((Core::String("Paused (") + m_Stop.View()) + "): " + m_PauseWhy.View() + ". Send a message to continue.").View());
-		CloseOpenCalls(m_Turn, Core::StringView("The call did not run: the turn ended first."));
+		const Core::StringView notRun = Core::StringView("The call did not run: the turn ended first.");
+		CloseOpenCalls(m_Turn, notRun);
+		InterruptUnrunCalls(notRun);
 		m_Turn->m_Stop = m_Stop;
 		m_Turn->m_EndedMs = RunNowMs();
 		m_Chat->m_Run = nullptr;

@@ -940,6 +940,17 @@ class ChatTests(ChatCase):
 		await self.use_model({}, script="loop-same-call")
 		self.assertEqual("loop_detected", (await self.turn(chat_id))["stop"])
 
+	# A small model looping on its tool format sent one reply of six calls with {} (owner, 2026-11-13: "the tool calls
+	# dont finish even when i stop the chat"): the calls after the pause never ran, and their cards must not spin on.
+	async def test_calls_a_paused_turn_never_ran_end_interrupted(self):
+		chat_id, topic = await self.chat(mode="agent")
+		await self.use_model({}, script="many-empty-calls")
+		self.assertEqual("loop_detected", (await self.turn(chat_id))["stop"])
+		states = [s["state"] for s in self.segments(await self.last_turn(chat_id), "tool")]
+		self.assertEqual(["error"] * 3 + ["interrupted"] * 3, states)
+		live = [f["data"]["state"] for f in self.frames if f.get("kind") == "tool.state"]
+		self.assertEqual(3, live.count("interrupted"), "an open view is told, not only the history")
+
 	async def test_steps_are_not_capped_unless_ai_max_steps_says_so(self):
 		chat_id, topic = await self.chat(mode="agent")
 		await self.use_model({}, script="budget-runaway")
@@ -1121,6 +1132,23 @@ class ChatTests(ChatCase):
 		end = (await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=20))[-1]["data"]
 		self.assertEqual("user_cancelled", end["stop"])
 		self.assertEqual("idle", (await self.summary(chat_id))["state"])
+
+	async def test_stop_while_calls_stream_ends_their_cards(self):
+		chat_id, topic = await self.chat()
+		await self.use_model({}, script="slow-tool-calls")
+		await self.client.request("chat.send", {"chatId": chat_id, "text": "read it many times"})
+		calls = []
+
+		def second_call(frame):
+			if frame.get("kind") == "segment.start" and frame["data"].get("type") == "tool":
+				calls.append(frame)
+			return len(calls) >= 2
+		await self.client.wait_for(topic, second_call, timeout=20)
+		await self.client.request("chat.stop", {"chatId": chat_id})
+		frames = await self.client.wait_for(topic, lambda f: f.get("kind") == "turn.end", timeout=20)
+		self.assertEqual("user_cancelled", frames[-1]["data"]["stop"])
+		states = [s["state"] for s in self.segments(await self.last_turn(chat_id), "tool")]
+		self.assertTrue(len(states) >= 2 and all(state == "interrupted" for state in states), states)
 
 	async def test_queued_messages_run_next_and_sent_ones_join_the_running_turn(self):
 		chat_id, topic = await self.chat()

@@ -406,6 +406,19 @@ namespace Ai
 		json.EndObject();
 	}
 
+	bool IsSettledCall(Core::StringView state) { return state == "ok" || state == "error" || state == "denied" || state == "interrupted"; }
+
+	// An ended turn saved before its end settled every call (the server before 2026-11-13 left the calls a stop or a
+	// pause cut off "streaming"): those calls never ran, and read as the end now leaves them.
+	static void SettleUnrunCalls(const Core::Array<Segment*>& segments) {
+		for (Segment* segment : segments) {
+			if (segment->m_Type != "tool" || IsSettledCall(segment->m_State.View())) continue;
+			segment->m_State = Core::String("interrupted");
+			if (segment->m_Preview.IsEmpty()) segment->m_Preview = Core::String("The call did not run: the turn ended first.");
+			segment->m_IsError = true;
+		}
+	}
+
 	void Turn::Read(const Serialization::DomNode& node) {
 		m_TurnId = Core::String(node.Member("turnId").AsView());
 		m_UserText = Core::String(node.Member("user").Member("text").AsView());
@@ -428,6 +441,7 @@ namespace Ai
 			m_Segments.Push(segment);
 		}
 		m_Stop = Core::String(node.Member("stop").AsView());
+		if (!m_Stop.IsEmpty()) SettleUnrunCalls(m_Segments);
 		Serialization::DomNode done = node.Member("recoveries");
 		for (int64 i = 0; i < done.Count(); ++i) m_Recoveries.Push(Core::String(done.At(i).AsView()));
 		m_TokensIn = node.Member("tokensIn").AsInt();

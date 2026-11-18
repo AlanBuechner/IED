@@ -1,0 +1,86 @@
+{
+	"description": "One reply of six fs_read calls with empty arguments {} (missing the required path), as a small model looping on its tool format sends them; every request the same.",
+	"stopClass": "loop_detected",
+	"harness": "The third identical failure pauses with loop_detected; the three calls that never ran end interrupted, not streaming (no card spins after the turn).",
+	"responses": [
+		{
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {}
+					}
+				},
+				{
+					"finish": "tool_calls"
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "tool_calls",
+				"toolCalls": [
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					}
+				]
+			}
+		}
+	]
+}

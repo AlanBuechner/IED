@@ -127,6 +127,7 @@ namespace Ai
 		private void LoadTool(const ToolSpec* spec);
 		private void ToolState(Segment* segment, const char* state);
 		private void Resolve(Segment* segment, const ToolOutcome& outcome, int64 ms);
+		private void InterruptUnrunCalls(Core::StringView note);
 		private void TrackLoop(ToolCallDraft* call, const ToolOutcome& outcome);
 		private void TrackModified(Core::StringView path, int64 plus, int64 minus);
 

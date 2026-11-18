@@ -531,6 +531,28 @@ namespace Ai
 		m_Chats->Publish(m_Chat, "tool.state", data.View());
 	}
 
+	// The calls of a turn that ends before they ran - stopped while the reply streamed, or an earlier call ended the turn -
+	// end interrupted with `note`, as a restart leaves them: a card still "streaming" spins for ever. The lock is held.
+	void TurnRun::InterruptUnrunCalls(Core::StringView note) {
+		for (Segment* segment : m_Turn->m_Segments) {
+			if (segment->m_Type != "tool" || IsSettledCall(segment->m_State.View())) continue;
+			segment->m_State = Core::String("interrupted");
+			segment->m_Preview = Core::String(note);
+			segment->m_IsError = true;
+			IED::JsonWriter data;
+			data.BeginObject();
+			data.Field("callId", segment->m_CallId.View());
+			data.Field("state", segment->m_State.View());
+			data.Key(Core::StringView("result"));
+			data.BeginObject();
+			data.Field("preview", segment->m_Preview.View());
+			data.BoolField("isError", true);
+			data.EndObject();
+			data.EndObject();
+			m_Chats->Publish(m_Chat, "tool.state", data.View());
+		}
+	}
+
 	void TurnRun::TrackLoop(ToolCallDraft* call, const ToolOutcome& outcome) {
 		Core::String key = ((call->m_Name + "\n") + call->m_Arguments.View() + "\n") + outcome.m_Content.View();
 		if (outcome.m_IsError && key == m_LastCallKey) m_SameErrors += 1;

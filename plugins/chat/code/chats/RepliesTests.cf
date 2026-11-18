@@ -127,4 +127,25 @@ class RepliesTests {
 		assert_true(back.m_Reply == "required" && back.m_FromChatId == "c1", kept.ToString().CStr());
 		assert_true(Core::StringView(Ai::ChatStateName(Ai::ChatState::Suspended)) == "suspended", "the state's name");
 	}
+
+	// Turns an older server saved with calls a stop cut off still "streaming" read as interrupted; a running turn's
+	// calls are left for the restart's own handling.
+	[test("an_ended_turns_unrun_calls_read_as_interrupted")]
+	public static void TestUnrunCalls() {
+		const char* ended = "{\"turnId\":\"u1\",\"stop\":\"user_cancelled\",\"segments\":["
+		"{\"segId\":\"s1\",\"type\":\"tool\",\"tool\":\"fs_read\",\"callId\":\"k1\",\"state\":\"ok\",\"preview\":\"done\"},"
+		"{\"segId\":\"s2\",\"type\":\"tool\",\"tool\":\"fs_read\",\"callId\":\"k2\",\"state\":\"streaming\"}]}";
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Ai::Turn turn;
+		turn.Read(Serialization::ReadJson(Core::StringView(ended), *doc).root);
+		assert_se("ok", turn.m_Segments[0]->m_State.CStr(), "a call that ran keeps its state");
+		assert_se("interrupted", turn.m_Segments[1]->m_State.CStr(), "a call the stop cut off");
+		assert_true(turn.m_Segments[1]->m_IsError && !turn.m_Segments[1]->m_Preview.IsEmpty(), "it says why");
+		const char* running = "{\"turnId\":\"u2\",\"segments\":[{\"segId\":\"s1\",\"type\":\"tool\",\"callId\":\"k1\",\"state\":\"streaming\"}]}";
+		Serialization::DomDoc* runningDoc = new Serialization::DomDoc();
+		Ai::Turn live;
+		live.Read(Serialization::ReadJson(Core::StringView(running), *runningDoc).root);
+		assert_se("streaming", live.m_Segments[0]->m_State.CStr(), "a turn still running is left as it is");
+		assert_true(Ai::IsSettledCall(Core::StringView("denied")) && !Ai::IsSettledCall(Core::StringView("awaiting_approval")), "settled states");
+	}
 }

@@ -120,9 +120,11 @@ An `error` or `cut` as the very first step happens before any header. When the s
 | `context_overflow` | `context-overflow-openai` | 2 | HTTP 400 `context_length_exceeded`, the limit only in the message text |
 | `context_overflow` | `context-overflow-in-stream` | 1 | HTTP 200, then an in-stream error object |
 | `loop_detected` | `loop-same-call` | 1 | the same `read_file` on a missing file, every request |
+| `loop_detected` | `many-empty-calls` | 1 | one reply of six `fs_read({})` calls, every request: the calls after the pause end interrupted |
 | `no_progress` | `no-progress` | 1 | text without a tool call or finish, every request |
 | `budget` | `budget-runaway` | 1 | a different `read_file` every request (`src/file_{request}.c`) |
 | `user_cancelled` | `long-stream` | 1 | ~1800 chunks 50 ms apart, to press Stop on |
+| `user_cancelled` | `slow-tool-calls` | 1 | twenty `fs_read` calls over ~16 s, to press Stop on while calls stream |
 | `none` (baseline) | `ok-text`, `ok-tool-call`, `ok-reasoning-then-answer` | 1 each | normal answers |
 | `none` (must not stop) | `slow-prefill-keepalive` | 1 | 90 s prefill with a keepalive comment every 10 s |
 | `none` (must not stop) | `malformed-chunk` | 1 | one bad `data:` line mid-stream; skip it and go on |

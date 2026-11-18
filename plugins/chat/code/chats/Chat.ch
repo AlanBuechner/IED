@@ -58,7 +58,7 @@ namespace Ai
 		public Core::String m_Tool;
 		public Core::String m_CallId;
 		public Core::String m_ArgsText;
-		public Core::String m_State;         // running, awaiting_approval, ok, error, denied, interrupted
+		public Core::String m_State;         // streaming, running, awaiting_approval, awaiting_answer, ok, error, denied, interrupted
 		public Core::String m_Preview;       // the result as the card shows it
 		public bool m_IsError;
 		public int64 m_Ms;
@@ -80,6 +80,9 @@ namespace Ai
 		public void WriteFields(IED::JsonWriter& json) const;
 		public void Read(const Serialization::DomNode& node);
 	}
+
+	// Whether a tool card's state is a final one (ok, error, denied, interrupted); any other is still under way.
+	bool IsSettledCall(Core::StringView state);
 
 	// `images` as the chat keeps them and the card gets them: [{mime, path}].
 	void WriteToolImages(IED::JsonWriter& json, const Core::Array<IED::ToolImage>& images);

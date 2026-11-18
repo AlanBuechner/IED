@@ -1,0 +1,267 @@
+{
+	"description": "Twenty fs_read calls streamed slowly (about 16 s for the reply), to press Stop on while calls arrive.",
+	"stopClass": "user_cancelled",
+	"harness": "Stop cancels the request; every call card that streamed ends interrupted, none left streaming.",
+	"responses": [
+		{
+			"chunkDelayMs": 400,
+			"steps": [
+				{
+					"role": "assistant"
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {
+							"path": "src/main.c"
+						}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {
+							"path": "src/main.c"
+						}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {
+							"path": "src/main.c"
+						}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {
+							"path": "src/main.c"
+						}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {
+							"path": "src/main.c"
+						}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {
+							"path": "src/main.c"
+						}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {
+							"path": "src/main.c"
+						}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {
+							"path": "src/main.c"
+						}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {
+							"path": "src/main.c"
+						}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {
+							"path": "src/main.c"
+						}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {
+							"path": "src/main.c"
+						}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {
+							"path": "src/main.c"
+						}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {
+							"path": "src/main.c"
+						}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {
+							"path": "src/main.c"
+						}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {
+							"path": "src/main.c"
+						}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {
+							"path": "src/main.c"
+						}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {
+							"path": "src/main.c"
+						}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {
+							"path": "src/main.c"
+						}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {
+							"path": "src/main.c"
+						}
+					}
+				},
+				{
+					"toolCall": {
+						"name": "fs_read",
+						"arguments": {
+							"path": "src/main.c"
+						}
+					}
+				},
+				{
+					"finish": "tool_calls"
+				},
+				{
+					"done": true
+				}
+			],
+			"wire": {
+				"transport": "done",
+				"finishReason": "tool_calls",
+				"toolCalls": [
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					},
+					{
+						"name": "fs_read",
+						"argumentsValid": true
+					}
+				]
+			}
+		}
+	]
+}
