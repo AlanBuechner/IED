@@ -16,7 +16,21 @@ namespace Ai
 
 	bool HoldsMembers(int64 kind) { return kind == 2 || kind == 3 || kind == 4 || kind == 5 || kind == 10 || kind == 11 || kind == 23; }
 
-	static Core::String Normalized(Core::StringView name) {
+	// gopls names a method by its receiver: "(*Ring).Push" and "(Ring[T]).Push" are Ring.Push.
+	static Core::String WithoutGoReceiver(Core::StringView name) {
+		if (!name.StartsWith(Core::StringView("("))) return Core::String(name);
+		const int64 close = name.IndexOf(Core::StringView(")."));
+		if (close < 0) return Core::String(name);
+		Core::StringView type = name.Substring(1, close - 1);
+		if (type.StartsWith(Core::StringView("*"))) type = type.Substring(1, type.ByteLength() - 1);
+		const int64 parameters = type.IndexOf(Core::StringView("["));
+		if (parameters >= 0) type = type.Substring(0, parameters);
+		return (Core::String(type) + ".") + name.Substring(close + 2, name.ByteLength() - close - 2);
+	}
+
+	static Core::String Normalized(Core::StringView given) {
+		Core::String plain = WithoutGoReceiver(given);
+		Core::StringView name = plain.View();
 		Core::StringBuilder out;
 		for (int64 i = 0; i < name.ByteLength(); ++i) {
 			if (name.ByteAt(i) == '.') out.Append("::");
@@ -674,6 +688,74 @@ namespace Ai
 
 	CodeTarget TargetOf(CodeQuery& query, const Serialization::DomNode& args) { return TargetsOf(query, args, 1); }
 
+	static const int64 c_BaseTypesDepthMost = 5;
+
+	// "Ai::Ring" of "Ai::Ring::Push".
+	static Core::String QualifierOf(const Core::Array<Core::String>& parts) {
+		Core::StringBuilder qualifier;
+		for (int64 i = 0; i + 1 < parts.Count(); ++i) {
+			if (i > 0) qualifier.Append("::");
+			qualifier.Append(parts[i].View());
+		}
+		return qualifier.ToString();
+	}
+
+	// The type hierarchy's items of the types `qualifier` names, for typeHierarchy/supertypes.
+	static Core::Array<Serialization::DomNode> TypeItems(CodeQuery& query, Core::StringView qualifier) {
+		Core::Array<Serialization::DomNode> items;
+		for (CodeSymbol* type : query.Find(qualifier, Core::StringView())) {
+			Core::StringView path = type->m_Selection.m_Path.View();
+			if (!HoldsMembers(type->m_Kind) || !query.Offers(path, "typeHierarchyProvider")) continue;
+			Serialization::DomNode found = query.Request(path, Core::StringView("textDocument/prepareTypeHierarchy"), PositionParams(type->m_Selection, Core::StringView("")).View(), true);
+			for (int64 i = 0; i < found.Count(); ++i) items.Push(found.At(i));
+		}
+		return items;
+	}
+
+	// `Type::Member` that Type inherits - in C++ and C4 the derived type's name reaches it: what its base types name so, the
+	// nearest first (typeHierarchy/supertypes); empty when none does or the server has no type hierarchy.
+	static Core::Array<CodeSymbol*> InheritedNamed(CodeQuery& query, Core::StringView name) {
+		Core::Array<CodeSymbol*> found;
+		Core::Array<Core::String> parts = NameParts(name);
+		if (parts.Count() < 2) return found;
+		Core::StringView member = parts[parts.Count() - 1].View();
+		Core::Array<Serialization::DomNode> waiting = TypeItems(query, QualifierOf(parts).View());
+		Core::Array<Core::String> visited;
+		for (int64 depth = 0; depth < c_BaseTypesDepthMost && !waiting.IsEmpty(); ++depth) {
+			Core::Array<Serialization::DomNode> next;
+			for (const Serialization::DomNode& item : waiting) {
+				Core::String itemPath = query.PathOf(item.Member("uri").AsView());
+				Serialization::DomNode supers = query.Request(itemPath.View(), Core::StringView("typeHierarchy/supertypes"), (Core::String("{\"item\": ") + IED::NodeJson(item).View() + "}").View(), false);
+				for (int64 i = 0; i < supers.Count(); ++i) {
+					Serialization::DomNode base = supers.At(i);
+					Core::String basePath = query.PathOf(base.Member("uri").AsView());
+					CodeSymbol* type = query.Enclosing(basePath.View(), base.Member("selectionRange").Member("start").Member("line").AsInt());
+					Core::String qualified = type != null ? type->Qualified() : Core::String(base.Member("name").AsView());
+					if (visited.Contains(qualified)) continue;
+					visited.Push(qualified);
+					next.Push(base);
+					found = OwnFirst(WithoutMembersOfFound(query.Find((qualified + "::" + member).View(), Core::StringView())));
+					if (!found.IsEmpty()) return found;
+				}
+			}
+			waiting = next;
+		}
+		return found;
+	}
+
+	// Where position requests about `name` find it: `at`, unless its line does not write the name - a C header's declaration the
+	// C4 server places on the line that includes the header (`extern "c++" include`), where a hover says nothing - then where a
+	// file writes it (the header's own line, from the C++ server).
+	static CodeSpan WrittenPlace(CodeQuery& query, Core::StringView name, const CodeSpan& at) {
+		Core::Array<Core::String> parts = NameParts(name);
+		if (parts.IsEmpty()) return at;
+		Core::StringView last = parts[parts.Count() - 1].View();
+		if (query.Line(at.m_Path.View(), at.m_StartLine).Contains(last)) return at;
+		for (CodeSymbol* symbol : query.Search(last))
+			if (symbol->m_Name.View() == last && query.Line(symbol->m_Selection.m_Path.View(), symbol->m_Selection.m_StartLine).Contains(last)) return symbol->m_Selection;
+		return at;
+	}
+
 	static int64 DistinctNames(const Core::Array<CodeSymbol*>& symbols) {
 		Core::Array<Core::String> names;
 		for (CodeSymbol* symbol : symbols) {
@@ -699,6 +781,7 @@ namespace Ai
 				if (!target.m_Symbols.IsEmpty()) break;
 			}
 		}
+		if (target.m_Symbols.IsEmpty()) target.m_Symbols = InheritedNamed(query, name);
 		if (target.m_Symbols.IsEmpty()) {
 			// Without a path the workspace's own code is searched (and the chat's roots after it, TurnRun::RunInRoots): a package's
 			// file needs its path.
@@ -709,7 +792,7 @@ namespace Ai
 		Core::String first = target.m_Symbols[0]->Qualified();
 		int64 names = DistinctNames(target.m_Symbols);
 		if (names > 1 && names <= mostNames) {
-			target.m_At = target.m_Symbols[0]->m_Selection;
+			target.m_At = WrittenPlace(query, name, target.m_Symbols[0]->m_Selection);
 			target.m_Label = Core::String(name);
 			return target;
 		}
@@ -727,7 +810,7 @@ namespace Ai
 			}
 			throw IED::RpcError(IED::ErrorCode::BadRequest, listed.View());
 		}
-		target.m_At = target.m_Symbols[0]->m_Selection;
+		target.m_At = WrittenPlace(query, name, target.m_Symbols[0]->m_Selection);
 		target.m_Label = first;
 		return target;
 	}

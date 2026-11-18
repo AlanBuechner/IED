@@ -24,6 +24,14 @@ class CodeToolsTests {
 		symbol.m_Name = Core::String("Ring::Push");
 		symbol.m_Container = Core::String("game");
 		assert_true(symbol.Qualified().View() == "game::Ring::Push", "an out-of-line definition's name under its namespace");
+		parts = Ai::NameParts(Text("(*Supervisor).Run"));
+		assert_true(parts.Count() == 2 && parts[0].View() == "Supervisor" && parts[1].View() == "Run", "a Go method is its receiver's type and its name");
+		assert_true(Ai::QualifiedMatches(Text("(*Ring[T]).Push"), Text("Ring.Push")), "a pointer receiver with type parameters");
+		assert_true(Ai::QualifiedMatches(Text("(Config).Service"), Text("Config::Service")), "a value receiver");
+		assert_true(!Ai::QualifiedMatches(Text("(*BigRing).Push"), Text("Ring::Push")), "not part of a receiver's name");
+		Ai::CodeSymbol method;
+		method.m_Name = Core::String("(*Supervisor).Run");
+		assert_true(method.Qualified().View() == "Supervisor::Run", "a Go method of a file's outline, qualified by its type");
 		assert_true(Core::StringView(Ai::SymbolKindName(6)) == "method" && Core::StringView(Ai::SymbolKindName(99)) == "symbol", "kinds");
 		assert_true(Ai::HoldsMembers(5) && Ai::HoldsMembers(10) && !Ai::HoldsMembers(12), "classes and enums hold members, functions do not");
 		Core::Array<Core::String> words = Ai::NameWords(Text("LanguageServerPool"));

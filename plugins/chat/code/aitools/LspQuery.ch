@@ -139,7 +139,8 @@ namespace Ai
 	}
 
 	// The target of a call's `symbol`, `path`, `line` and `column`; one symbol's when `symbol` names several of one
-	// qualified name (its declaration and definition, overloads), else it fails listing them.
+	// qualified name (its declaration and definition, overloads), else it fails listing them. `Type::Member` that Type
+	// inherits is its base type's (HeadlessBackend::Emit is WindowBackend::Emit), as the language reads it.
 	CodeTarget TargetOf(CodeQuery& query, const Serialization::DomNode& args);
 	// As TargetOf, but a plain name that symbols of up to `mostNames` qualified names have keeps them all, its label the name asked:
 	// code_read_symbol shows each rather than ask which (GatherCandidates of two packages).
