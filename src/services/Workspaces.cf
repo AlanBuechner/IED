@@ -232,12 +232,44 @@ namespace Ied
 		// folder on request.
 		FS::Path solution = folder ? SolutionIn(target) : FS::Path();
 		if (!solution.IsEmpty()) return OpenOrFind(solution, relative);
+		relative = folder ? Core::String() : Core::String(target.FileName());
+		return OpenNew(target, folder);
+	}
+
+	Workspace* Workspaces::OpenNew(const FS::Path& target, bool folder) {
 		if (folder) MakeOwnFolder(m_Server, target);
 		Workspace* opened = Open(folder ? target : target.Parent(), Core::StringView(folder ? "folder" : "file"));
-		relative = folder ? Core::String() : Core::String(target.FileName());
 		Serve(opened, target);
 		m_Server->m_Hub.Publish(Core::StringView("server"), "workspace.opened", opened->SummaryJson().View());
 		return opened;
+	}
+
+	Workspace* Workspaces::OpenNamed(const FS::Path& in) {
+		Core::String none;
+		if (IsSolutionFile(in.View())) return OpenOrFind(in, none);
+		if (!FS::IsDirectory(in.CStr())) throw RpcError(ErrorCode::BadRequest, (Core::String("a file opens in a solution or a folder, not in ") + in.View()).View());
+		FS::Path solution = SolutionIn(in);
+		if (!solution.IsEmpty()) return OpenOrFind(solution, none);
+		Workspace* rooted = RootedAt(in);
+		return rooted ? rooted : OpenNew(in, true);
+	}
+
+	// A file's path in `ws` as its solution names it, trusted or not: in the folder, or under a linked project.
+	static bool NamedIn(const Workspace* ws, const FS::Path& target, Core::String& relative) {
+		if (RelativeTo(ws->m_Root.View(), target.View(), relative)) return true;
+		return ws->m_Solution && ws->m_Solution->LinkedPath(target, relative);
+	}
+
+	Workspace* Workspaces::OpenIn(const FS::Path& in, const FS::Path& target, Core::String& relative) {
+		Workspace* ws = OpenNamed(in);
+		Remember(ws);
+		if (NamedIn(ws, target, relative)) return ws;
+		if (ws->m_Solution) {
+			// Written again since it opened (nuke init --ied), it may link projects the master's model does not have yet.
+			ws->m_Solution = ReadSolution(ws->m_Solution->m_File, m_Server->m_Schemas);
+			if (NamedIn(ws, target, relative)) return ws;
+		}
+		throw RpcError(ErrorCode::NotFound, (((Core::String("") + target.View()) + " is neither in ") + ws->m_Root.View() + " nor in a project its solution links to").View());
 	}
 
 	// The master: the workspace's server started, its --workspace what the owner opened.
@@ -668,6 +700,8 @@ namespace Ied
 
 	Core::String Workspaces::Read(Workspace* ws, Core::StringView path) {
 		FS::Path file = ws->At(path);
+		if (!ws->m_Trusted && ws->m_Solution && !ws->m_Solution->LinkedFile(path).IsEmpty())
+			throw RpcError(ErrorCode::Untrusted, (Core::String(path) + " is a file of a project the solution links to, outside its folder, which only a trusted workspace reaches: trust it (File > Trust Workspace)").View());
 		if (!FS::FileExists(file.CStr())) throw Missing("file", path);
 		FS::File opened = FS::File(file.CStr(), "rb");
 		Core::String text = opened.ReadText();

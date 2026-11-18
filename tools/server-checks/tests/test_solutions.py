@@ -284,6 +284,61 @@ class SolutionTests(ServerTestCase):
 		listed = {w["wsId"]: w for w in (await self.client.request("ws.list"))["workspaces"]}
 		self.assertEqual(("solution", "Valley"), (listed[script["wsId"]]["kind"], listed[script["wsId"]]["name"]))
 
+	async def test_open_in_a_named_workspace(self):
+		"""docs/10 control `open` with `in`: a file opens in the workspace `in` names, not the solution nearest above it - a
+		package's file, in a checkout whose own solution is above it, opens in the game's solution that links it, at its
+		linked path, whether or not that workspace is trusted, and reading it there says it must be; `in` a folder opens its
+		one solution; a file the workspace holds neither in its folder nor in a linked project is refused."""
+		checkout = os.path.join(self.root, "Checkout")
+		write(os.path.join(checkout, "Checkout.iedsln"), {"version": 1, "name": "Checkout", "projects": []})
+		package = os.path.join(checkout, "Plugins", "Wind")
+		write(os.path.join(package, "src", "Wind.cf"), "struct Wind {}\n")
+		game = os.path.join(self.root, "Valley")
+		write(os.path.join(game, "Valley.iedsln"), {"version": 1, "name": "Valley", "projects": [{"file": "build/ied/*.iedproj", "optional": True}]})
+		write(os.path.join(game, "Game", "Hover.cf"), "\n")
+		stray = os.path.join(self.root, "Stray", "s.cf")
+		write(stray, "\n")
+		wind = os.path.join(package, "src", "Wind.cf")
+		pipe = ControlPipe(self.server.control)
+		try:
+			nearest = pipe.call("open", {"path": wind})["result"]
+			unlinked = pipe.call("open", {"path": wind, "in": game})
+			# The game's solution written again with the package linked (nuke init --ied) after it opened.
+			write(os.path.join(game, "build", "ied", "Wind.iedproj"), project("Wind", package.replace("\\", "/"), kind="library"))
+			linked = pipe.call("open", {"path": wind, "line": 2, "in": game})["result"]
+			own = pipe.call("open", {"path": os.path.join(game, "Game", "Hover.cf"), "in": os.path.join(game, "Valley.iedsln")})["result"]
+			strayed = pipe.call("open", {"path": stray, "in": game})
+			nowhere = pipe.call("open", {"path": stray, "in": os.path.join(self.root, "Nowhere")})
+			not_a_workspace = pipe.call("open", {"path": stray, "in": os.path.join(game, "Game", "Hover.cf")})
+		finally:
+			pipe.close()
+		self.assertEqual("Plugins/Wind/src/Wind.cf", nearest["path"], "without `in`, the solution nearest above it: the checkout's")
+		self.assertEqual(-32000, unlinked["error"]["code"], "not yet a file of the game's solution")
+		self.assertIn("nor in a project its solution links to", unlinked["error"]["message"])
+		self.assertNotEqual(nearest["wsId"], linked["wsId"], "the game's solution, not the checkout's")
+		self.assertEqual("@Wind/src/Wind.cf", linked["path"], "its linked path, the solution read again")
+		self.assertTrue(linked["url"].endswith("/@Wind/src/Wind.cf:2"), linked["url"])
+		self.assertEqual((linked["wsId"], "Game/Hover.cf"), (own["wsId"], own["path"]), "the solution file names the same workspace")
+		self.assertEqual(-32000, strayed["error"]["code"], "a file the workspace does not hold")
+		self.assertIn("no such solution or folder", nowhere["error"]["message"])
+		self.assertEqual(-32602, not_a_workspace["error"]["code"], "a file is no workspace to open another in")
+		listed = {w["wsId"]: w for w in (await self.client.request("ws.list"))["workspaces"]}
+		self.assertEqual(("solution", "Valley", False), (listed[linked["wsId"]]["kind"], listed[linked["wsId"]]["name"], listed[linked["wsId"]]["trusted"]))
+		topic = "ws:" + linked["wsId"]
+
+		def links_wind(frame):
+			solution = frame["data"].get("solution") if frame["t"] == "snap" or (frame["t"] == "evt" and frame["kind"] == "solution.changed") else None
+			return bool(solution) and "Wind" in [p["name"] for p in solution["projects"]]
+
+		await self.client.sub([topic])
+		await self.client.wait_for(topic, links_wind, 15)
+		with self.assertRaises(Exception) as refused:
+			await self.client.request("fs.read", {"wsId": linked["wsId"], "path": "@Wind/src/Wind.cf"})
+		self.assertIn("trust it", str(refused.exception), "an untrusted workspace says why it reaches no linked file")
+		await self.client.request("ws.setTrust", {"wsId": linked["wsId"], "trusted": True})
+		read = await self.client.request("fs.read", {"wsId": linked["wsId"], "path": "@Wind/src/Wind.cf"})
+		self.assertIn("struct Wind", read["text"], "trusted, it reads the package's file")
+
 	async def test_open_with_reveal_goes_to_a_window_that_shows_the_workspace(self):
 		"""docs/10 control `open` with reveal: a client that has the workspace open is told to show the file
 		(workspace.reveal), the first to claim it does, and no second window is needed; with no such client, revealed is

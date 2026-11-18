@@ -1,5 +1,6 @@
 // The command line of `ied` (features F-SRV-7), read into a Command.
 //     ied [<path>[:<line>[:<col>]]]     open a folder or file (default: the current folder)
+//     ied --in <workspace> <path>...    open it in that solution (its file, or a folder holding one) or folder
 //     ied status | url | stop
 //     ied --control <name> ...          another server's control pipe (tests)
 //     ied --no-browser ...              print the URL instead of opening it
@@ -17,6 +18,7 @@ namespace Cli
 		public Core::String m_Path;      // open: as written, without its line and column
 		public int64 m_Line;             // 0: none
 		public int64 m_Col;
+		public Core::String m_In;        // open: the workspace to open it in; empty: the one it belongs to
 		public Core::String m_Control;   // empty: this user's server
 		public bool m_NoBrowser;
 		public bool m_Browser;           // the default browser even when the desktop app is beside ied

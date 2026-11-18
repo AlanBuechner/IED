@@ -41,6 +41,19 @@ class DesktopTests {
 		assert_se("C:\\ied-test\\desktop", Desktop::DataFolder(moved).CStr(), "the data folder it was given");
 	}
 
+	[test("open_in")]
+	public static void TestOpenIn() {
+		bool ok = false;
+		Core::String error;
+		Desktop::Options in = Parsed("C:\\engine\\Wind.cf:7", "--in", "C:\\games\\Valley", ok, error);
+		assert_true(ok && in.m_In.View() == "C:\\games\\Valley", "the workspace to open the path in");
+		Launch::OpenRequest request = Desktop::OpenRequestOf(in);
+		assert_true(request.m_Path.View() == "C:\\engine\\Wind.cf" && request.m_Line == 7 && request.m_In.View() == "C:\\games\\Valley" && !request.m_Reveal, "what the window asks `open` for");
+		assert_true(Desktop::OpenRequestOf(Parsed("C:\\a.cf", nullptr, nullptr, ok, error)).m_In.IsEmpty(), "none: the workspace it belongs to");
+		Parsed("--in", "C:\\games\\Valley", nullptr, ok, error);
+		assert_true(!ok && error.View().Contains(Core::StringView("needs a path")), "a workspace with nothing to open in it");
+	}
+
 	[test("start_menu")]
 	public static void TestStartMenu() {
 		bool ok = false;

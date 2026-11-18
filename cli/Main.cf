@@ -45,6 +45,10 @@ static bool OpenInDesktop(const Cli::Command& command) {
 	Process::StartInfo info;
 	info.program = Core::String(desktop.View());
 	info.arguments.Push(DesktopLocation(command));
+	if (!command.m_In.IsEmpty()) {
+		info.arguments.Push(Core::String("--in"));
+		info.arguments.Push(Core::String(FS::AbsolutePath(command.m_In.CStr()).View()));
+	}
 	if (!command.m_Control.IsEmpty()) {
 		info.arguments.Push(Core::String("--control"));
 		info.arguments.Push(command.m_Control);
@@ -60,9 +64,13 @@ static bool OpenInDesktop(const Cli::Command& command) {
 static int32 Run(const Cli::Command& command, Net::LocalStream& stream) {
 	if (command.m_Verb == Cli::Verb::Open) {
 		// A window that shows the workspace already shows the file and comes to the front: no second window on it.
-		const bool reveal = !command.m_NoBrowser;
-		if (reveal) AllowSetForegroundWindow(c_AnyProcess);
-		Launch::Reply reply = Launch::Ask(stream, Core::StringView("open"), Launch::OpenParams(command.m_Path.View(), command.m_Line, command.m_Col, reveal).View());
+		Launch::OpenRequest request = Launch::OpenOf(command.m_Path.View());
+		request.m_Line = command.m_Line;
+		request.m_Col = command.m_Col;
+		request.m_In = command.m_In;
+		request.m_Reveal = !command.m_NoBrowser;
+		if (request.m_Reveal) AllowSetForegroundWindow(c_AnyProcess);
+		Launch::Reply reply = Launch::Ask(stream, Core::StringView("open"), Launch::OpenParams(request).View());
 		if (!reply.m_Ok) return Fail(reply.m_Error.View());
 		if (Launch::ResultFlag(reply, "revealed")) return 0;
 		if (!command.m_NoBrowser && !command.m_Browser && OpenInDesktop(command)) return 0;

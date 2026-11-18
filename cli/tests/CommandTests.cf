@@ -2,14 +2,18 @@
 
 include "Command.ch"
 
-static Cli::Command Parsed(const char* first, const char* second, bool& ok) {
-	Core::Array<Core::String> arguments;
-	if (first) arguments.Push(Core::String(first));
-	if (second) arguments.Push(Core::String(second));
+static Cli::Command ParsedAll(const Core::Array<Core::String>& arguments, bool& ok) {
 	Cli::Command command;
 	Core::String error;
 	ok = Cli::ParseCommand(arguments, command, error);
 	return command;
+}
+
+static Cli::Command Parsed(const char* first, const char* second, bool& ok) {
+	Core::Array<Core::String> arguments;
+	if (first) arguments.Push(Core::String(first));
+	if (second) arguments.Push(Core::String(second));
+	return ParsedAll(arguments, ok);
 }
 
 [test("cli.command")]
@@ -30,5 +34,26 @@ class CommandTests {
 		assert_true(!ok, "an unknown option");
 		Parsed("a", "b", ok);
 		assert_true(!ok, "two paths");
+	}
+
+	[test("open_in")]
+	public static void TestOpenIn() {
+		bool ok = false;
+		Core::Array<Core::String> arguments;
+		arguments.Push(Core::String("--in"));
+		arguments.Push(Core::String("C:/games/Valley"));
+		arguments.Push(Core::String("C:/engine/Plugins/Wind/src/Wind.cf:12"));
+		Cli::Command open = ParsedAll(arguments, ok);
+		assert_true(ok && open.m_Verb == Cli::Verb::Open && open.m_In.View() == "C:/games/Valley", "the workspace to open it in");
+		assert_true(open.m_Path.View() == "C:/engine/Plugins/Wind/src/Wind.cf" && open.m_Line == 12, "and the location");
+		assert_true(Parsed("a.cf", nullptr, ok).m_In.IsEmpty() && ok, "none: the workspace it belongs to");
+		Core::Array<Core::String> status;
+		status.Push(Core::String("--in"));
+		status.Push(Core::String("C:/games/Valley"));
+		status.Push(Core::String("status"));
+		ParsedAll(status, ok);
+		assert_true(!ok, "only a path opens in a workspace");
+		Parsed("--in", nullptr, ok);
+		assert_true(!ok, "--in without its workspace");
 	}
 }

@@ -1,5 +1,6 @@
 // The command line of ied-desktop (docs/27):
 //     ied-desktop [<path>[:<line>[:<col>]]]     a window on that folder or file (default: IED's home)
+//     --in <workspace>                          open the path in that solution (its file, or a folder holding one) or folder
 //     --control <name>                          another server's control pipe (tests)
 //     --data <dir>                              the app's state and WebView2 profile elsewhere (tests)
 //     --debug-port <n>                          the WebView2's DevTools protocol on loopback port n (tests)
@@ -14,6 +15,7 @@ namespace Desktop
 		public Core::String m_Path;      // empty: IED's home
 		public int64 m_Line;             // 0: none
 		public int64 m_Col;
+		public Core::String m_In;        // the workspace to open the path in; empty: the one it belongs to
 		public Core::String m_Control;   // empty: this user's server
 		public Core::String m_DataDir;   // empty: <LOCALAPPDATA>\IED\desktop
 		public int32 m_DebugPort;        // 0: none
@@ -25,6 +27,8 @@ namespace Desktop
 
 	// `options` from the arguments after the program's name; false with `error` saying what is wrong.
 	bool ParseOptions(const Core::Array<Core::String>& arguments, Options& options, Core::String& error);
+	// What the control pipe's `open` is asked for the path the options name.
+	Launch::OpenRequest OpenRequestOf(const Options& options);
 	const char* Usage();
 	// Where the app keeps its window placement and WebView2 profile.
 	FS::Path DataFolder(const Options& options);

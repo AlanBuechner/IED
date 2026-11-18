@@ -39,11 +39,25 @@ class LauncherTests {
 
 	[test("open_params")]
 	public static void TestOpenParams() {
-		Core::String plain = Launch::OpenParams(Core::StringView("C:/src/a.cf"), 4, 2);
+		Launch::OpenRequest request = Launch::OpenOf(Core::StringView("C:/src/a.cf"));
+		assert_true(request.m_Line == 0 && request.m_Col == 0 && request.m_In.IsEmpty() && !request.m_Reveal, "at its start, where it belongs");
+		request.m_Line = 4;
+		request.m_Col = 2;
+		Core::String plain = Launch::OpenParams(request);
 		assert_true(plain.View().Contains(Core::StringView("\"line\":4,\"col\":2}")), plain.CStr());
-		assert_true(!plain.View().Contains(Core::StringView("reveal")), "nothing to reveal unless asked");
-		Core::String revealed = Launch::OpenParams(Core::StringView("C:/src/a.cf"), 4, 0, true);
+		assert_true(!plain.View().Contains(Core::StringView("reveal")) && !plain.View().Contains(Core::StringView("\"in\"")), "nothing to reveal and no workspace named unless asked");
+		request.m_Col = 0;
+		request.m_Reveal = true;
+		Core::String revealed = Launch::OpenParams(request);
 		assert_true(revealed.View().EndsWith(Core::StringView(",\"reveal\":true}")), revealed.CStr());
+		request.m_In = Core::String("Valley");
+		Core::StringBuilder absolute;
+		absolute.Append(",\"in\":");
+		Serialization::WriteJsonString(FS::AbsolutePath("Valley").View(), &absolute);
+		absolute.Append(",\"reveal\":true}");
+		Core::String in = Launch::OpenParams(request);
+		assert_true(in.View().EndsWith(absolute.ToString().View()), in.CStr());
+		assert_true(!in.View().Contains(Core::StringView("\"in\":\"Valley\"")), "the workspace made absolute, as the path is");
 	}
 
 	[test("external_urls")]

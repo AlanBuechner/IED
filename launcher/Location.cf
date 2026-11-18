@@ -31,16 +31,25 @@ namespace Launch
 		path = Core::String(rest);
 	}
 
-	Core::String OpenParams(Core::StringView path, int64 line, int64 col, bool reveal) {
-		Core::String text = Core::String(path);
+	OpenRequest OpenOf(Core::StringView path) {
+		OpenRequest request;
+		request.m_Path = Core::String(path);
+		return request;
+	}
+
+	Core::String OpenParams(const OpenRequest& request) {
 		Core::StringBuilder params;
 		params.Append("{\"path\":");
-		Serialization::WriteJsonString(FS::AbsolutePath(text.CStr()).View(), &params);
+		Serialization::WriteJsonString(FS::AbsolutePath(request.m_Path.CStr()).View(), &params);
 		params.Append(",\"line\":");
-		params.AppendInt(line);
+		params.AppendInt(request.m_Line);
 		params.Append(",\"col\":");
-		params.AppendInt(col);
-		if (reveal) params.Append(",\"reveal\":true");
+		params.AppendInt(request.m_Col);
+		if (!request.m_In.IsEmpty()) {
+			params.Append(",\"in\":");
+			Serialization::WriteJsonString(FS::AbsolutePath(request.m_In.CStr()).View(), &params);
+		}
+		if (request.m_Reveal) params.Append(",\"reveal\":true");
 		params.AppendByte('}');
 		return params.ToString();
 	}

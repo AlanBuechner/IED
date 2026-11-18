@@ -49,7 +49,7 @@ namespace Desktop
 		Net::LocalStream stream = EnsureServer(error);
 		if (!stream.IsOpen()) return 1;
 		Launch::Reply reply = m_Options.m_Path.IsEmpty() ? Launch::Ask(stream, Core::StringView("url"), Core::StringView(""))
-			: Launch::Ask(stream, Core::StringView("open"), Launch::OpenParams(m_Options.m_Path.View(), m_Options.m_Line, m_Options.m_Col).View());
+			: Launch::Ask(stream, Core::StringView("open"), Launch::OpenParams(OpenRequestOf(m_Options)).View());
 		return reply.m_Ok && Launch::OpenExternal(Launch::ResultField(reply, "url").View()) ? 0 : 1;
 	}
 
@@ -59,7 +59,7 @@ namespace Desktop
 			[self](void* error, void* created) -> int32 {
 				self->EnvironmentReady(Hresult(error), created);
 				return c_Ok;
-			});
+		});
 		Core::Array<char16> profile = Wide((m_Data / "webview").View());
 		const int32 started = CreateCoreWebView2EnvironmentWithOptions(null, profile.Data(), null,
 			(ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler*)(void*)done);
@@ -130,16 +130,16 @@ namespace Desktop
 		if (window != null) Resolve(window, Core::StringView("url"), Core::StringView(""), Arrival::StartPage);
 	}
 
-	void App::OpenLocation(Core::StringView path, int64 line, int64 col) {
+	void App::OpenLocation(const Launch::OpenRequest& request) {
 		Window* window = NewWindow();
-		if (window != null) Resolve(window, Core::StringView("open"), Launch::OpenParams(path, line, col).View(), Arrival::First);
+		if (window != null) Resolve(window, Core::StringView("open"), Launch::OpenParams(request).View(), Arrival::First);
 	}
 
 	void App::OpenFolder(Window* window) {
 		Core::String folder;
 		Core::String error;
 		if (PickFolder(window->m_Hwnd, folder, error))
-			Resolve(window, Core::StringView("open"), Launch::OpenParams(folder.View(), 0, 0).View(), Arrival::Folder);
+			Resolve(window, Core::StringView("open"), Launch::OpenParams(Launch::OpenOf(folder.View())).View(), Arrival::Folder);
 		else if (!error.IsEmpty()) window->Alert((Core::String("IED could not open a folder: ") + error.View()).View());
 	}
 
@@ -252,7 +252,7 @@ namespace Desktop
 			Core::String error;
 			Net::LocalStream stream = self->EnsureServer(error);
 			if (stream.IsOpen()) {
-				Launch::Reply reply = Launch::Ask(stream, Core::StringView("open"), Launch::OpenParams(path.View(), 0, 0).View());
+				Launch::Reply reply = Launch::Ask(stream, Core::StringView("open"), Launch::OpenParams(Launch::OpenOf(path.View())).View());
 				if (reply.m_Ok) {
 					Launch::OpenExternal(Launch::ResultField(reply, "url").View());
 					return;
@@ -346,7 +346,7 @@ namespace Desktop
 			if (window == null) continue;
 			window->m_DockQuery = entry.m_DockQuery;
 			if (entry.m_Root.IsEmpty()) Resolve(window, Core::StringView("url"), Core::StringView(""), Arrival::StartPage);
-			else Resolve(window, Core::StringView("open"), Launch::OpenParams(entry.m_Root.View(), 0, 0).View(), Arrival::First);
+			else Resolve(window, Core::StringView("open"), Launch::OpenParams(Launch::OpenOf(entry.m_Root.View())).View(), Arrival::First);
 		}
 	}
 
@@ -381,7 +381,7 @@ namespace Desktop
 		Core::String root = RootOf(status.View(), WorkspaceOf(window->CurrentUrl().View()).View());
 		window->m_DockQuery = DockQueryOf(window->CurrentUrl().View());
 		if (root.IsEmpty()) Resolve(window, Core::StringView("url"), Core::StringView(""), arrival);
-		else Resolve(window, Core::StringView("open"), Launch::OpenParams(root.View(), 0, 0).View(), Arrival::Reopened);
+		else Resolve(window, Core::StringView("open"), Launch::OpenParams(Launch::OpenOf(root.View())).View(), Arrival::Reopened);
 	}
 
 	void App::ServerFailed(Core::StringView why) {
@@ -444,7 +444,7 @@ namespace Desktop
 		CreateEnvironment();
 		if (!relaunched.IsEmpty()) OpenRelaunched(relaunched);
 		else if (m_Options.m_Path.IsEmpty()) OpenHome();
-		else OpenLocation(m_Options.m_Path.View(), m_Options.m_Line, m_Options.m_Col);
+		else OpenLocation(OpenRequestOf(m_Options));
 		if (m_Windows.IsEmpty()) return 1;
 		tagMSG message;
 		while (GetMessageW(&message, null, 0, 0) > 0) {

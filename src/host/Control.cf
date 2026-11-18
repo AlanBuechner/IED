@@ -280,11 +280,16 @@ namespace Ied
 		if (path.IsEmpty()) throw RpcError(ErrorCode::BadRequest, "open needs a path");
 		FS::Path target = FS::CanonicalPath(path.CStr());
 		if (target.IsEmpty()) throw RpcError(ErrorCode::NotFound, (Core::String("no such file or folder: ") + path.View()).View());
+		// `in`: the workspace to open it in, rather than the one it belongs to (a linked project's file in the solution that links it).
+		Core::String in = Core::String(params.Member("in").AsView());
+		FS::Path workspace = in.IsEmpty() ? FS::Path() : FS::CanonicalPath(in.CStr());
+		if (!in.IsEmpty() && workspace.IsEmpty()) throw RpcError(ErrorCode::NotFound, (Core::String("no such solution or folder: ") + in.View()).View());
 		Core::String wsId;
 		Core::String relative;
 		{
 			Threading::LockGuard guard(m_Server->m_Lock);
-			wsId = m_Server->m_Workspaces->OpenFor(target, relative)->m_WsId;
+			Workspace* ws = workspace.IsEmpty() ? m_Server->m_Workspaces->OpenFor(target, relative) : m_Server->m_Workspaces->OpenIn(workspace, target, relative);
+			wsId = ws->m_WsId;
 		}
 		const bool revealed = params.Member("reveal").AsBool() && RevealIn(wsId.View(), relative.IsEmpty() ? FS::Path() : target, params.Member("line").AsInt(), params.Member("col").AsInt());
 		JsonWriter json;

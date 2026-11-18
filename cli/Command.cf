@@ -5,7 +5,8 @@ namespace Cli
 	const char* Usage() {
 		return "usage: ied [<path>[:<line>[:<col>]]]   open a folder or file in IED (default: this folder)\n"
 			"       ied status | url | stop\n"
-			"options: --control <name> (another server's pipe), --no-browser (print the URL),\n"
+			"options: --in <workspace> (open it in this solution or folder, not the one it belongs to),\n"
+			"         --control <name> (another server's pipe), --no-browser (print the URL),\n"
 			"         --browser (the default browser, not the desktop app)\n";
 	}
 
@@ -27,6 +28,7 @@ namespace Cli
 			if (argument == "--no-browser") command.m_NoBrowser = true;
 			else if (argument == "--browser") command.m_Browser = true;
 			else if (argument == "--control" && i + 1 < arguments.Count()) command.m_Control = arguments[++i];
+			else if (argument == "--in" && i + 1 < arguments.Count()) command.m_In = arguments[++i];
 			else if (argument.StartsWith(Core::StringView("--")) && argument != "--help") {
 				error = Core::String("unknown option ") + argument;
 				return false;
@@ -43,6 +45,10 @@ namespace Cli
 			}
 		}
 		if (command.m_Verb == Verb::Open && command.m_Path.IsEmpty()) command.m_Path = Core::String(".");
+		if (command.m_Verb != Verb::Open && !command.m_In.IsEmpty()) {
+			error = Core::String("--in is for opening a path");
+			return false;
+		}
 		return true;
 	}
 }

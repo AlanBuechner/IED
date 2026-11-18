@@ -83,6 +83,12 @@ namespace Ied
 		// folder as its one solution file or else as itself, another file in its folder; `relative` is the path inside
 		// it. It goes first in the recent projects (host/recent).
 		public Workspace* OpenFor(const FS::Path& target, Core::String& relative);
+		// The master: the workspace `in` (a canonical path) names - a solution file, a folder's one solution, else the folder
+		// itself, never a workspace above it that holds it - opened when it is not, and `relative` the path of `target` (a
+		// canonical file or folder) in it: in its folder, or under a project its solution links to (named so whether or not
+		// the workspace is trusted: reaching the file is the workspace's to allow). It goes first in the recent projects.
+		// Throws bad_request when `in` is neither a solution nor a folder, not_found when the workspace holds no `target`.
+		public Workspace* OpenIn(const FS::Path& in, const FS::Path& target, Core::String& relative);
 		// A .iedsln (a canonical path) as a solution workspace rooted at its folder.
 		public Workspace* OpenSolution(const FS::Path& file);
 		// The master, once its plugins and so its settings are loaded (before it listens): the workspaces open when it last
@@ -125,6 +131,10 @@ namespace Ied
 
 	private:
 		private Workspace* OpenOrFind(const FS::Path& target, Core::String& relative);
+		// The workspace a solution file or a folder is, as OpenIn names it.
+		private Workspace* OpenNamed(const FS::Path& in);
+		// `target` - a folder, or a file whose folder opens for it - as a new workspace of its own.
+		private Workspace* OpenNew(const FS::Path& target, bool folder);
 		private void Remember(Workspace* ws);
 		private void Reopen();
 		private void KeepOpen();

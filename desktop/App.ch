@@ -27,7 +27,7 @@ namespace Desktop
 		public int32 Run();
 
 		public void OpenHome();
-		public void OpenLocation(Core::StringView path, int64 line, int64 col);
+		public void OpenLocation(const Launch::OpenRequest& request);
 		// A window straight on a URL of the server (the profile is signed in already). A docked window opens where it last
 		// closed, or with `atCursor` (a sidebar tab let go outside every window, docs/15 "Windows") at the pointer.
 		public void OpenUrl(Core::StringView url, bool atCursor);

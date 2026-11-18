@@ -558,7 +558,7 @@ class AfterAiWriteTests(CodeToolCase):
 			("w2", "fs_write", {"path": "q.qt", "content": "messy bad\n"}),
 			("w3", "fs_write", {"path": "s.fk", "content": "silent bad\n"}),
 			permission="auto")
-		self.assertIn("a.fk: +3 -0 lines, saved\nFormatted by Fake: it changed 1 of the lines you wrote", results["w1"])
+		self.assertIn("a.fk: +3 -0 lines, saved\nFormatted by Fake: it changed 1 line of the file (it formats the whole file, not only what you wrote)", results["w1"])
 		self.assertIn("Language server (Fake): 1 error, 1 warning in this file - what the code says now, not a failure of this call", results["w1"])
 		self.assertIn("  line 1:8: error: bad word\n  line 2:2: warning: dull word", results["w1"], "after formatting, in the file's own columns")
 		self.assertIn("Other files it finds problems in: b.fk (1 error).", results["w1"], "a multi-file edit's other files")

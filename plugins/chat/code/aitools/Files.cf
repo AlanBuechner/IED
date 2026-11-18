@@ -430,8 +430,10 @@ namespace Ai
 		said.Append("Formatted by ");
 		said.Append(after.m_Label.View());
 		said.Append(": it changed ");
-		said.AppendInt(change.m_Plus > change.m_Minus ? change.m_Plus : change.m_Minus);
-		said.Append(" of the lines you wrote, so read them again before an fs_edit near them.");
+		const int64 changed = change.m_Plus > change.m_Minus ? change.m_Plus : change.m_Minus;
+		said.AppendInt(changed);
+		said.Append(changed == 1 ? " line" : " lines");
+		said.Append(" of the file (it formats the whole file, not only what you wrote), so read them again before an fs_edit near them.");
 		// A few changed lines are shown, so the next fs_edit can copy them as they are now without reading the file.
 		if (change.m_Plus + change.m_Minus <= c_FormatChangesShown) {
 			said.Append(" What it changed (- yours, + now):\n");
