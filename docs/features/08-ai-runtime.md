@@ -32,11 +32,11 @@ Owner: `plugins/chat/code` (the chat plugin's server code, a built-in on the plu
 
 | ID | Feature | Pri | Stories |
 |---|---|---|---|
-| F-AIR-20 | Privacy classes on models; chat-level `private` flag (local + lan only) | P0 | US-MDL-5 |
-| F-AIR-21 | Solution policy `aiEgress.models: any | local-only | lan-only` in `.ied/` (committed: a repo can declare itself private) | P0 | US-MDL-5 |
+| F-AIR-20 | Privacy classes on models; chat-level `private` flag (local + lan only). Built 2026-11-19 as the chat's `privacy.noCloudModels`, one of three settings each its own (`docs/04` "Three settings, each its own") | P0 | US-MDL-5 |
+| F-AIR-21 | Solution policy `aiEgress.models: any | local-only | lan-only` in `.ied/` (committed: a repo can declare itself private). Built 2026-11-19 as the Solution tier's `ai.privacy.noCloudModels` (with `ai.privacy.hiddenChats` and `ai.privacy.noWeb`); no lan-only | P0 | US-MDL-5 |
 | F-AIR-22 | Taint tracking: path rules (`.ied/privacy.json` globs, e.g. `secrets/**`, `**/.env`, `personal/**`) mark content sensitive; once a chat's context contains sensitive content, the chat becomes local-only (sticky, visible lock reason); clearing requires forking without the content | P1 | US-MDL-5 |
 | F-AIR-23 | Optional content detectors (API-key patterns, private keys) that taint and warn; never block silently | P2 | US-MDL-5 |
-| F-AIR-24 | Privacy also gates tools: in a private chat, web tools follow the egress policy (tor by default if configured) and MCP servers flagged `cloud` are hidden | P1 | US-MDL-5, US-WEB-2 |
+| F-AIR-24 | Privacy also gates tools: in a private chat, web tools follow the egress policy (tor by default if configured) and MCP servers flagged `cloud` are hidden. Built 2026-11-19 as its own setting, no web (`docs/04` "Three settings, each its own"): no tool of class `net` or marked `web` - web search, web fetch, the browser, a `cloud` MCP server - and no section marked `web`; web search goes through Tor whatever the chat | P1 | US-MDL-5, US-WEB-2 |
 
 ## Agent loop and reliability (design: `docs/12`)
 
@@ -84,7 +84,7 @@ Owner: `plugins/chat/code` (the chat plugin's server code, a built-in on the plu
 | ID | Feature | Pri | Stories |
 |---|---|---|---|
 | F-AIR-70 | MCP client: stdio and streamable HTTP transports; tools, resources (as @-mentionable context), prompts (as slash commands). Built 2026-10-26 as the `ied.mcp` plugin (`docs/04` "MCP") but for prompts and https | P1 | US-TOOL-6 |
-| F-AIR-71 | MCP server config at app / solution / project tier (project-defined servers need trust); per-server enable, env, privacy class, egress policy. Built (`mcp.servers`; every server needs a trusted workspace) but for the egress policy, which waits for the egress proxy, and the privacy class's effect, which waits for private chats | P1 | US-TOOL-6 |
+| F-AIR-71 | MCP server config at app / solution / project tier (project-defined servers need trust); per-server enable, env, privacy class, egress policy. Built (`mcp.servers`; every server needs a trusted workspace) but for the egress policy, which waits for the egress proxy; a `cloud` server's tools are left out of a chat with no web (2026-11-19, `docs/04` "Three settings, each its own") | P1 | US-TOOL-6 |
 | F-AIR-72 | MCP server supervision: start on demand, restart on crash with backoff, logs to an output source, health in settings. Built (`docs/04` "MCP" Lifetime, Failures show) | P1 | US-OPS-1 |
 | F-AIR-73 | IED as an MCP server (stdio shim + HTTP): exposes a curated set of IED tools (LSP navigation, build/test, editor open, diagnostics) to external agents; per-client allowlist | P1 | US-TOOL-9 |
 | F-AIR-74 | Remote MCP OAuth flows | P2 | - |

@@ -9,6 +9,7 @@ include "chats/Pages.ch"
 include "chats/Replies.ch"
 include "chats/Drafts.ch"
 include "chats/DefaultChain.ch"
+include "chats/Privacy.ch"
 
 namespace Ai
 {
@@ -158,8 +159,9 @@ namespace Ai
 	static Core::Array<ModelProfile*> CandidatesOf(IED::PluginContext* context, const Chat* chat, const IED::Workspace& ws, RoleModel& role) {
 		Core::Array<Core::String> problems;
 		Core::Array<ModelProfile*> models = ReadModels(context->Setting(Core::StringView("ai.models"), WsId(ws)).View(), problems);
-		return TurnCandidates(models, DefaultGroupsJson(context, WsId(ws)).View(), GroupOf(context, chat, ws).View(), chat->m_Agent.View(),
-			Core::StringView(ChatModeName(chat->m_Mode)), ChosenModelOf(context, WsId(ws), chat).View(), role);
+		// Its privacy's too (Privacy.ch): a chat with no cloud models is never shown one it would not run on.
+		return AllowedModels(TurnCandidates(models, DefaultGroupsJson(context, WsId(ws)).View(), GroupOf(context, chat, ws).View(), chat->m_Agent.View(),
+			Core::StringView(ChatModeName(chat->m_Mode)), ChosenModelOf(context, WsId(ws), chat).View(), role), PrivacyOf(context, chat));
 	}
 
 	Core::String Chats::NextModel(const Chat* chat, const IED::Workspace& ws, Core::String& group, Core::String& roleEffort) const {
@@ -189,7 +191,8 @@ namespace Ai
 		if (unmetered || unsplit) Loaded(chat);
 		if (unmetered) chat->m_Context = MeterFromTurns(this, chat, ws);
 		else if (unsplit) chat->m_Context = ResplitContext(this, chat, ws);
-		if (!chat->m_Run && !chat->m_ClaudeAsked && !chat->m_ClaudeSession.IsEmpty() && ContextSource(chat->m_Context.View()) != "claude") CountClaude(chat, ws);
+		// A chat with no cloud models asks Claude nothing, not even to count what it holds (Privacy.ch).
+		if (!chat->m_Run && !chat->m_ClaudeAsked && !chat->m_ClaudeSession.IsEmpty() && ContextSource(chat->m_Context.View()) != "claude" && !PrivacyOf(m_Context, chat).m_NoCloudModels) CountClaude(chat, ws);
 		Core::String model = NextModel(chat, ws, group, roleEffort);
 		return chat->SnapshotJson(model.View(), group.View(), roleEffort.View(), LastPage(LocalStateOf(ws), chat));
 	}
@@ -530,6 +533,17 @@ namespace Ai
 		if (params.Has("section")) chat->m_Section = params.Str("section");
 		if (params.Has("meta")) chat->m_Meta = ReadMeta(params.Field("meta"));
 		if (params.Has("endless")) chat->m_Endless = params.Bool("endless", false);
+		// Its own privacy, replaced whole (docs/04 "Three settings, each its own"); its solution's is the settings'.
+		if (params.Has("privacy")) {
+			Serialization::DomNode privacy = params.Field("privacy");
+			if (privacy.Kind() != Serialization::DomKind::Object) throw IED::RpcError(IED::ErrorCode::BadRequest, "privacy must be an object: {noCloudModels?, hidden?, noWeb?}");
+			for (int64 i = 0; i < privacy.Count(); ++i) {
+				Core::StringView key = privacy.KeyAt(i);
+				if (key != "noCloudModels" && key != "hidden" && key != "noWeb") throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("privacy has no setting ") + key + "; it has noCloudModels, hidden and noWeb").View());
+				if (privacy.ValueAt(i).Kind() != Serialization::DomKind::Bool) throw IED::RpcError(IED::ErrorCode::BadRequest, (Core::String("privacy.") + key + " must be true or false").View());
+			}
+			chat->m_Privacy = ReadPrivacy(privacy);
+		}
 		if (params.Has("effort")) {
 			Core::String effort = params.Str("effort");
 			if (!effort.IsEmpty() && !IsEffort(effort.View())) throw IED::RpcError(IED::ErrorCode::BadRequest, "effort must be low, medium, high, xhigh, max or empty (its role's)");

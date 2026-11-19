@@ -59,6 +59,11 @@ namespace Ai
 		public void StartTurn(Chat* chat, const OwnerMessage& message, int64 hops, const char* resumed = "", const char* origin = "");
 		// The workspace's chats.
 		public Core::Array<Chat*> InWorkspace(Core::StringView wsId) const;
+		// The workspace's chats `self`'s AI sees (Privacy.ch): those its privacy and its solution's leave visible to it.
+		public Core::Array<Chat*> SeenBy(const Chat* self) const;
+		// The rules refusing `self`'s file tools the folders of the chats it does not see (Privacy.ch): its workspace's
+		// hidden chats - every one when its solution hides them - archived and deleted ones too, but those linked to it.
+		public Core::Array<Core::String> HiddenFolderRules(const Chat* self) const;
 		// A new chat in `ws`, published on its chats: topic.
 		public Chat* Create(const IED::Workspace& ws, Core::StringView title, ChatMode mode, Core::StringView group);
 		// chat_title: the chat named `title` by its own AI (docs/04 "Chat names"); false when it keeps a name someone else

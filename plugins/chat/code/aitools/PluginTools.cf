@@ -158,6 +158,7 @@ namespace Ai
 		spec->m_Description = Core::String(node.Member("description").AsView());
 		spec->m_Parameters = IED::NodeJson(node.Member("inputSchema"));
 		spec->m_ToolClass = ClassOf(node.Member("class").AsView());
+		spec->m_Web = node.Member("class").AsView() == "net" || node.Member("web").AsBool();
 		spec->m_ParallelSafe = spec->m_ToolClass == ToolClass::Read && node.Member("parallelSafe").AsBool();
 		spec->m_InPlan = spec->m_ToolClass == ToolClass::Read;
 		spec->m_Deferred = !node.Member("preload").AsBool();

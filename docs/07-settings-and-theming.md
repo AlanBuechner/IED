@@ -61,6 +61,10 @@ which only the workspace's tiers know, keep the every-tier default).
   a model a machine does not have falls back to the default chain), sub-agents (`ai.agents`, merged by name) -; what an AI
   edit does (`ai.edits.*`); which language servers run (`*.languageServer`) and clangd's arguments; git's pull mode and
   how deep repositories are looked for; the profiler's target frame rate.
+- **Solution only** (2026-11-19) - what a repository declares about itself: its privacy (`ai.privacy.noCloudModels`,
+  `ai.privacy.hiddenChats`, `ai.privacy.noWeb`, `docs/04` "Three settings, each its own"), a floor every chat of it
+  keeps and can only add to. Not the User tier: tiers replace, so a solution's `false` would undo a User `true` - a
+  repository widening the owner's privacy, which this section's rule above forbids.
 - **Project too** - only what IED reads per project (the project owning a file or a task): `mcp.servers`. A setting
   read per workspace would ignore a project's value, so it does not offer the tier.
 
@@ -70,6 +74,7 @@ which only the workspace's tiers know, keep the every-tier default).
 | `configServer.url`, `configServer.token`, `configServer.certificate` (`docs/35`) | User, never Shared |
 | `ai.models`, `ai.permissions`, `ai.maxSteps`, `ai.resumeInterrupted`, `ai.tools.loadAll`, `ai.chats.keepDeletedDays`, `ai.chats.offloadAfterMinutes`, `ai.chats.notify`, `ai.chats.panelRows`, `ai.claude.*` | User |
 | `ai.defaultModel`, `ai.fallbackModel`, `ai.agents`, `ai.chats.model`, `ai.chats.effort`, `ai.edits.*` | User, Solution |
+| `ai.privacy.noCloudModels`, `ai.privacy.hiddenChats`, `ai.privacy.noWeb` | Solution |
 | `board.snap` / `board.ai.model`, `board.ai.effort` | User / User, Solution |
 | `browser.*`, `developer.enabled`, `editor.*`, `gpu.*`, `terminal.*`, `tor.*`, `webfetch.*`, `websearch.*` | User |
 | `c4.toolchain`, `cpp.clangd.path`, `cpp.lldb.path`, `git.path`, `go.path`, `go.gopls.path`, `go.delve.path`, `rust.analyzer.path`, `rust.cargo.path`, `nuke.command`, `nuke.packages.fetchMinutes` | User |

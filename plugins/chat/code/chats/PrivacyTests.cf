@@ -1,0 +1,131 @@
+// A chat's privacy (docs/04 "Three settings, each its own"): the models a chat with no cloud models runs on, which chats
+// another sees, the folders its file tools are refused, what a started chat takes, the JSON form, and the tools a chat
+// with no web is not offered.
+
+include "Privacy.ch"
+include "Permissions.ch"
+include "aitools/Tool.ch"
+include "aitools/CodeTools.ch"
+
+static Core::StringView PrivacyText(const char* text) { return Core::StringView(text); }
+
+static Ai::Chat* PrivacyChat(const char* chatId) {
+	Ai::Chat* chat = new Ai::Chat();
+	chat->m_ChatId = Core::String(chatId);
+	chat->m_WsId = Core::String("ws");
+	return chat;
+}
+
+static Serialization::DomNode PrivacyJson(const char* text) {
+	Serialization::DomDoc* doc = new Serialization::DomDoc();
+	return Serialization::ReadJson(Core::StringView(text), *doc).root;
+}
+
+const char* c_PrivacyModels = "{\"claude-opus\": {\"provider\": \"claude-code\", \"model\": \"opus\"}, \"router\": {\"endpoint\": \"http://models.example.com/v1\", \"privacy\": \"cloud\"},"
+	"\"qwen\": {\"endpoint\": \"http://127.0.0.1:8080/v1\"}, \"spark\": {\"endpoint\": \"http://spark.lan:8080/v1\", \"privacy\": \"lan\"}}";
+
+[test("server.ai.privacy")]
+class PrivacyTests {
+	[test("no_cloud_models_leaves_local_and_lan_in_order")]
+	public static void TestModels() {
+		Core::Array<Core::String> problems;
+		Core::Array<Ai::ModelProfile*> models = Ai::ReadModels(PrivacyText(c_PrivacyModels), problems);
+		assert_eq((int64)4, models.Count(), "four profiles");
+		Ai::ChatPrivacy open;
+		assert_eq((int64)4, Ai::AllowedModels(models, open).Count(), "an open chat runs on any");
+		Ai::ChatPrivacy closed;
+		closed.m_NoCloudModels = true;
+		Core::Array<Ai::ModelProfile*> allowed = Ai::AllowedModels(models, closed);
+		assert_eq((int64)2, allowed.Count(), "Claude and the cloud endpoint are left out");
+		assert_se("qwen", allowed[0]->m_Name.CStr(), "local first, as the chain had it");
+		assert_se("spark", allowed[1]->m_Name.CStr(), "a LAN model is no cloud model");
+		assert_true(Ai::ModelRefusal(models, PrivacyText("qwen"), closed).IsEmpty(), "a local model is no refusal");
+		assert_true(Ai::ModelRefusal(models, PrivacyText("claude-opus"), open).IsEmpty(), "an open chat refuses none");
+		Core::String refusal = Ai::ModelRefusal(models, PrivacyText("claude-opus"), closed);
+		assert_true(refusal.View().Contains(PrivacyText("claude-opus is a cloud model")) && refusal.View().Contains(PrivacyText("qwen, spark")), refusal.CStr());
+		Core::String note = Ai::NoAllowedModelNote(Ai::AllowedModels(models, open));
+		assert_true(note.View().Contains(PrivacyText("(claude-opus, router, qwen, spark)")) && note.View().Contains(PrivacyText("Add a local model")), note.CStr());
+	}
+
+	[test("a_hidden_chat_is_seen_by_itself_and_its_linked_chats_only")]
+	public static void TestSees() {
+		Ai::Chat* lead = PrivacyChat("c1");
+		Ai::Chat* other = PrivacyChat("c2");
+		Ai::Chat* hidden = PrivacyChat("c3");
+		hidden->m_Privacy.m_Hidden = true;
+		assert_true(Ai::SeesChat(lead, other, false), "a chat not hidden is seen");
+		assert_true(!Ai::SeesChat(lead, hidden, true), "a hidden one is not");
+		assert_true(Ai::SeesChat(hidden, hidden, true), "a chat sees itself");
+		assert_true(Ai::SeesChat(hidden, lead, false), "a hidden chat sees the chats that are not");
+		hidden->m_StartedBy = Core::String("c1");
+		assert_true(Ai::SeesChat(lead, hidden, true) && !Ai::SeesChat(other, hidden, true), "the chat that started it sees it, no other");
+		hidden->m_StartedBy = Core::String();
+		hidden->m_ParentChatId = Core::String("c2");
+		assert_true(Ai::SeesChat(other, hidden, true), "the chat that ran it as a sub-agent sees it");
+		hidden->m_ParentChatId = Core::String();
+		Ai::ReplyOwed* owed = new Ai::ReplyOwed();
+		owed->m_ChatId = Core::String("c1");
+		hidden->m_Owes.Push(owed);
+		assert_true(Ai::ChatsLinked(lead, hidden) && Ai::SeesChat(lead, hidden, true), "a chat it owes a reply sees it");
+	}
+
+	[test("the_file_tools_are_refused_a_hidden_chats_folder")]
+	public static void TestFolders() {
+		assert_se("fs.*(.ied/local/chats/c3/**)", Ai::ChatFolderRule("chats", PrivacyText("c3")).CStr(), "the rule");
+		Ai::PermissionRules rules;
+		rules.m_Hidden.Push(Ai::ChatFolderRule("chats", PrivacyText("c3")));
+		rules.m_Hidden.Push(Ai::ChatFolderRule("chats-archived", PrivacyText("c9")));
+		rules.m_Allow.Push(Core::String("fs.*(**)"));
+		Core::Array<Core::String> allowedForChat;
+		Core::String why;
+		Ai::Permit decided = Ai::Decide(Ai::PermissionMode::Auto, Ai::ToolClass::Read, rules, allowedForChat, PrivacyText("fs.read(.ied/local/chats/c3/turns.jsonl)"), why);
+		assert_true(decided == Ai::Permit::Deny, "a read of its turns is refused");
+		assert_true(why.View().Contains(PrivacyText("hidden from this chat")), why.CStr());
+		assert_true(Ai::Decide(Ai::PermissionMode::Auto, Ai::ToolClass::Read, rules, allowedForChat, PrivacyText("fs.read(.ied/local/chats-archived/c9/chat.json)"), why) == Ai::Permit::Deny, "an archived one's too");
+		assert_true(Ai::Decide(Ai::PermissionMode::Auto, Ai::ToolClass::Read, rules, allowedForChat, PrivacyText("fs.read(.ied/local/chats/c2/turns.jsonl)"), why) == Ai::Permit::Allow, "another chat's folder is not");
+	}
+
+	[test("privacy_reads_back_and_a_started_chat_takes_its_starters")]
+	public static void TestJson() {
+		Ai::ChatPrivacy privacy = Ai::ReadPrivacy(PrivacyJson("{\"noCloudModels\": true, \"noWeb\": true}"));
+		assert_true(privacy.m_NoCloudModels && !privacy.m_Hidden && privacy.m_NoWeb && privacy.Any(), "two of three");
+		IED::JsonWriter json;
+		Ai::WritePrivacy(json, privacy);
+		assert_se("{\"noCloudModels\":true,\"noWeb\":true}", json.ToString().CStr(), "only what is on");
+		assert_true(!Ai::ReadPrivacy(PrivacyJson("{}")).Any() && !Ai::ReadPrivacy(PrivacyJson("null")).Any(), "none");
+		Ai::ChatPrivacy solution;
+		solution.m_Hidden = true;
+		Ai::ChatPrivacy joined = Ai::JoinPrivacy(privacy, solution);
+		assert_true(joined.m_NoCloudModels && joined.m_Hidden && joined.m_NoWeb, "the solution's adds to the chat's");
+		Ai::Chat* starter = PrivacyChat("c1");
+		starter->m_Privacy = privacy;
+		Ai::Chat* started = PrivacyChat("c2");
+		started->m_Privacy.m_Hidden = true;
+		Ai::TakePrivacy(started, starter);
+		assert_true(started->m_Privacy.m_NoCloudModels && started->m_Privacy.m_Hidden && started->m_Privacy.m_NoWeb, "it keeps its own and takes its starter's");
+		assert_se("c1", started->m_StartedBy.CStr(), "and who started it");
+		assert_true(Ai::PrivacyLines(Ai::ChatPrivacy()).IsEmpty(), "no lines for none");
+		Core::String lines = Ai::PrivacyLines(privacy);
+		assert_true(lines.View().Contains(PrivacyText("- No cloud models")) && lines.View().Contains(PrivacyText("- No web")) && !lines.View().Contains(PrivacyText("- Hidden")), lines.CStr());
+	}
+
+	[test("a_chat_with_no_web_is_offered_no_net_or_web_tool")]
+	public static void TestWebTools() {
+		Ai::ToolRegistry* registry = new Ai::ToolRegistry();
+		const char*[3] entries = {
+			"{\"name\": \"web_search\", \"description\": \"Search.\", \"class\": \"net\", \"inputSchema\": {\"type\": \"object\"}, \"function\": \"Web::Search\"}",
+			"{\"name\": \"browser_snapshot\", \"description\": \"Read a page.\", \"class\": \"read\", \"web\": true, \"inputSchema\": {\"type\": \"object\"}, \"function\": \"Browser::Snapshot\"}",
+			"{\"name\": \"lint_file\", \"description\": \"Lint.\", \"class\": \"read\", \"inputSchema\": {\"type\": \"object\"}, \"function\": \"Lint::File\"}" };
+		for (int64 i = 0; i < 3; ++i) {
+			const char* entry = entries[i];
+			Core::String problem;
+			Ai::ToolSpec* spec = Ai::CodeTool(PrivacyJson(entry), PrivacyText("test.plugin"), problem);
+			assert_true(spec != nullptr, problem.CStr());
+			registry->Add(spec);
+		}
+		assert_true(registry->Find(PrivacyText("web_search"))->m_Web && registry->Find(PrivacyText("browser_snapshot"))->m_Web && !registry->Find(PrivacyText("lint_file"))->m_Web, "net and web: true reach the web");
+		registry->DropWeb();
+		assert_eq((int64)1, registry->m_Tools.Count(), "one tool is left");
+		assert_true(registry->Find(PrivacyText("lint_file")) != nullptr && registry->Find(PrivacyText("web_search")) == nullptr, "the one that does not");
+	}
+}

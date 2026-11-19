@@ -6,7 +6,7 @@
 import { h, icon } from "/ui-kit/dom.js";
 import { confirmDialog } from "/ui-kit/dialog.js";
 import { openAddress } from "/ui-kit/linkclicks.js";
-import { ChatModel } from "./chatmodel.js";
+import { ChatModel, solutionPrivacy } from "./chatmodel.js";
 import { TranscriptView } from "./transcript.js";
 import { CodeColors } from "./codecolors.js";
 import { Composer } from "./composer.js";
@@ -121,9 +121,15 @@ export class ChatPane {
 		});
 	}
 
-	// ai.chats.panelRows: how many rows a long list of the details panel shows until Show all.
+	// ai.chats.panelRows: how many rows a long list of the details panel shows until Show all; ai.privacy.*: what the
+	// solution turns on for every chat, which the Privacy menu shows (docs/04 "Three settings, each its own").
 	settingsChanged(values) {
 		this.notify = notifySetting(values);
+		const privacy = solutionPrivacy(values);
+		if (JSON.stringify(privacy) !== JSON.stringify(this.composer.solutionPrivacy)) {
+			this.composer.solutionPrivacy = privacy;
+			this.composer.update(this.model);
+		}
 		const rows = values && values["ai.chats.panelRows"] ? values["ai.chats.panelRows"].value : PREVIEW_ROWS;
 		const count = Number.isInteger(rows) && rows > 0 ? rows : PREVIEW_ROWS;
 		if (count === this.panel.previewRows) return;

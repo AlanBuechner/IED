@@ -20,6 +20,7 @@ namespace Ai
 		public bool m_Deferred;            // some tools are sent as stubs tool_search shows whole (item 7, docs/13)
 		public Core::String m_Agents;      // the sub-agents it may run and when delegating pays (docs/04); "" for none
 		public bool m_Endless;             // the chat runs until the owner stops it: Agent mode's instructions without finish
+		public Core::String m_Privacy;     // the chat's privacy settings that are on, a line each (Privacy.ch); "" for none
 	}
 
 	class Prompts

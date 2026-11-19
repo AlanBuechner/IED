@@ -44,6 +44,7 @@ namespace Ai
 		public int64 m_UpdatedMs;
 		public int64 m_DeletedMs;
 		public int64 m_TurnCount;
+		public bool m_Hidden;          // its own privacy hid it from other chats: its folder stays refused to them (Privacy.ch)
 	}
 
 	FS::Path DeletedChatFolder(const FS::Path& state, Core::StringView chatId);

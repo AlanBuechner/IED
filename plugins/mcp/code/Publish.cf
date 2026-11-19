@@ -145,6 +145,8 @@ namespace Mcp
 				if (config->Preloads(tool->m_Name.View())) json.BoolField("preload", true);
 				if (config->m_Permission == Permission::Ask) json.Field("approval", "ask");
 				if (config->m_Permission == Permission::Read) json.BoolField("parallelSafe", true);
+				// A server on the internet: a chat whose privacy says no web is not offered its tools (docs/04).
+				if (config->m_Privacy == "cloud") json.BoolField("web", true);
 				json.EndObject();
 			}
 		}

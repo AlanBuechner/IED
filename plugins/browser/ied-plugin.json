@@ -73,7 +73,7 @@
 			{ "command": "ied.browser.previewBeside", "key": "ctrl+k v", "when": "activeTabKind == 'doc' && editorLanguage == 'html'" }
 		],
 		"systemMessageSections": [
-			{ "id": "browser", "text": "You can render web pages in a headless browser on the server: browser_open a URL (the workspace's dev server on localhost, a file of the workspace, or the web), then browser_snapshot to read it with element refs, browser_act to click and type, browser_screenshot to see it, browser_console for its errors. The user can watch your pages live. Read the browser skill for the workflow." }
+			{ "id": "browser", "web": true, "text": "You can render web pages in a headless browser on the server: browser_open a URL (the workspace's dev server on localhost, a file of the workspace, or the web), then browser_snapshot to read it with element refs, browser_act to click and type, browser_screenshot to see it, browser_console for its errors. The user can watch your pages live. Read the browser skill for the workflow." }
 		],
 		"toolCalls": [
 			{
@@ -98,6 +98,7 @@
 				"name": "browser_snapshot",
 				"description": "Read a page. mode a11y (default): the accessibility tree, one element per line - role, name, value, states - with refs like [ref=e12] that browser_act takes. mode text: the visible text. mode dom: the HTML.",
 				"class": "read",
+				"web": true,
 				"group": "browser",
 				"parallelSafe": true,
 				"inputSchema": { "type": "object", "properties": { "page": { "type": "string" }, "mode": { "enum": ["a11y", "text", "dom"] } }, "required": ["page"], "additionalProperties": false },
@@ -108,6 +109,7 @@
 				"name": "browser_screenshot",
 				"description": "A PNG of the page's viewport (or the whole page with full_page), saved under .ied/local/browser/shots; models that see images get the image.",
 				"class": "read",
+				"web": true,
 				"group": "browser",
 				"inputSchema": { "type": "object", "properties": { "page": { "type": "string" }, "full_page": { "type": "boolean" } }, "required": ["page"], "additionalProperties": false },
 				"function": "Browser::ScreenshotTool"
@@ -124,6 +126,7 @@
 				"name": "browser_console",
 				"description": "A page's console messages and uncaught errors, each with its seq; since=<seq> gives only newer ones.",
 				"class": "read",
+				"web": true,
 				"group": "browser",
 				"parallelSafe": true,
 				"inputSchema": { "type": "object", "properties": { "page": { "type": "string" }, "since": { "type": "integer", "minimum": 0 } }, "required": ["page"], "additionalProperties": false },
@@ -133,6 +136,7 @@
 				"name": "browser_network",
 				"description": "A page's failed requests: network errors and responses of status 400 and up, each with its seq; since=<seq> gives only newer ones.",
 				"class": "read",
+				"web": true,
 				"group": "browser",
 				"parallelSafe": true,
 				"inputSchema": { "type": "object", "properties": { "page": { "type": "string" }, "since": { "type": "integer", "minimum": 0 } }, "required": ["page"], "additionalProperties": false },
@@ -142,6 +146,7 @@
 				"name": "browser_eval",
 				"description": "Run JavaScript in a page and get its value as JSON, or the exception it threw. It runs as in DevTools' console: the last expression is the value, a top-level await works and a promise is awaited, for at most 10 s; a script with a top-level return runs as an async function's body instead, its return the value (to wait longer, call again). A script ends where the page navigates (location.reload(), a link): reload with browser_navigate, then evaluate.",
 				"class": "exec",
+				"web": true,
 				"group": "browser",
 				"inputSchema": { "type": "object", "properties": { "page": { "type": "string" }, "js": { "type": "string" } }, "required": ["page", "js"], "additionalProperties": false },
 				"function": "Browser::EvalTool"
@@ -150,6 +155,7 @@
 				"name": "browser_close",
 				"description": "Close a page you opened.",
 				"class": "meta",
+				"web": true,
 				"group": "browser",
 				"inputSchema": { "type": "object", "properties": { "page": { "type": "string" } }, "required": ["page"], "additionalProperties": false },
 				"function": "Browser::CloseTool"

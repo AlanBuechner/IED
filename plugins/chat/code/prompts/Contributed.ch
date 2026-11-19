@@ -26,8 +26,8 @@ namespace Ai
 	// {tool} is the tool's name, an optional `when`), in load order, a blank line apart; "" when none holds.
 	Core::String FailureNotes(const IED::Workspace& ws, Core::StringView tool);
 	// The plugins' sections for the system message (docs/14 item 5): in load order, each within its maxTokens and all
-	// within kSectionsMostTokens; empty when none holds.
-	Core::String PluginSections(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems);
+	// within kSectionsMostTokens; empty when none holds. `noWeb`: those marked web are left out (a chat with no web, Privacy.ch).
+	Core::String PluginSections(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems, bool noWeb = false);
 	// The core tools, docs_search and docs_read when the plugins have reference docs, and the plugins' tool calls that run
 	// a command and whose `when` holds; a tool whose name is taken, or that is implemented some other way, is a problem.
 	ToolRegistry* ToolsFor(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems);

@@ -25,6 +25,7 @@ namespace Ai
 		public Serialization::DomNode m_Args;
 		public const bool* m_Cancelled;
 		public Core::String m_Shown;      // what the tool shows workspace paths under, so they can be passed back: "ied:/"
+		public bool m_ByOwner;            // the owner's own @-mention runs it (Mentions.ch): it reads what the owner sees, a hidden chat too
 	}
 
 	class ToolOutcome
@@ -75,6 +76,7 @@ namespace Ai
 		public bool m_OwnPaths;             // its path names no workspace's file (docs_read's "c4/library/x.md"): no root alias takes it
 		public bool m_SearchesRoots;        // a name it finds nowhere in the chat's workspace, no path given, is looked for in its roots (ied:/)
 		public bool m_Asks;                 // every call asks until a rule allows it (a toolCalls entry's approval "ask")
+		public bool m_Web;                  // it reaches the web (a toolCalls entry of class net or marked web): a chat without web has none (Privacy.ch)
 		public ToolPlanner m_Plan;
 		public ToolDetailer m_Detail;       // null: the card shows the plan as it is
 		public ToolRunner m_Run;            // null: the run handles the call itself
@@ -97,6 +99,8 @@ namespace Ai
 		public Core::Array<ToolSpec*> SearchDeferred(Core::StringView query, ChatMode mode, int64 most) const;
 		// Every deferred tool loaded: the setting ai.tools.loadAll.
 		public void LoadAll();
+		// The tools that reach the web taken out, for a chat whose privacy says no web (docs/04 "Three settings, each its own").
+		public void DropWeb();
 		// The problems of `args` against the tool's schema, "<pointer>: <message>" each.
 		public Core::Array<Core::String> Check(const ToolSpec* spec, const Serialization::DomNode& args) const;
 		// The offered tools whose names look like `name`, best first.

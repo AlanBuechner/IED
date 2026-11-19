@@ -125,10 +125,28 @@ Privacy always wins: a private request waits for a local slot rather than fall b
 
 ## Privacy
 
-- **Classes** on models and MCP servers (`local`, `lan`, `cloud`).
-- **Per-chat private toggle** (lock icon) and **solution policy** `aiEgress.models: any | local-only | lan-only` in `.ied/solution.json` (committed: a repo can declare itself private).
-- **Taint tracking:** `.ied/privacy.json` path globs (and optional detectors for key-like strings) mark content sensitive. When sensitive content enters a chat's context (file read, attachment, tool result), the chat becomes local-only and stays so (sticky), with the reason shown on the lock. Removing taint means forking without that content.
-- Private chats also restrict tools: web tools follow the egress policy (tor if configured), `cloud` MCP servers are hidden.
+- **Classes** on models and MCP servers (`local`, `lan`, `cloud`). A Claude model is always `cloud`.
+- **Taint tracking** (not built): `.ied/privacy.json` path globs (and optional detectors for key-like strings) mark content sensitive. When sensitive content enters a chat's context (file read, attachment, tool result), the chat becomes local-only and stays so (sticky), with the reason shown on the lock. Removing taint means forking without that content.
+
+### Three settings, each its own (2026-11-19)
+
+Owner, 2026-11-19: "we should add privacy settings for a project and individual chats. things like disabling cloud
+models on private projects preventing chats from seeing other chats that are marked as such and disabling web
+functionality for a given chat. each setting its own." So there is no one "private" switch: a chat has three, set on
+it (`chat.set {privacy}`, the composer's **Privacy** menu) or for every chat of a solution (the Solution tier's
+`ai.privacy.*`, committed, so a repository can declare itself private). The solution's is a floor: a chat adds to it and
+never takes it away - its menu shows those rows checked and greyed, "set by the solution".
+
+| Setting | On the chat | For the solution | What it does |
+|---|---|---|---|
+| No cloud models | `noCloudModels` | `ai.privacy.noCloudModels` | The chat's turns run only on `local` and `lan` models: a cloud model - Claude, any profile whose `privacy` is `cloud` - leaves its chain, its pinned model too, and the turn goes on the next one ("Scheduling and routing": privacy always wins). With none left the turn stops with a note that says why and what to add (`no_model`). No request of the chat goes to a cloud model: its context is not counted by Claude either. The Model menu greys its cloud models; `chat_create` and `chat_set_model` refuse one for it. |
+| Hidden from other chats | `hidden` | `ai.privacy.hiddenChats` (every chat hidden from the others) | No other chat's AI sees it: `chat_list` leaves it out, and `chat_read`, `chat_send`, `chat_wait` and `chat_set_model` answer as for a chat that is not there; the file tools are refused its folder (`.ied/local/chats/<id>/`, a deny rule added for the turn). Chats it is linked to still see it: the chat that started it (`chat_create`, `agent_run`) and those it started, and a chat that owes it a reply or that it owes one. The owner sees every chat. A shell command is not a privacy boundary: its process can read any file. |
+| No web | `noWeb` | `ai.privacy.noWeb` | The chat is offered no tool that reaches the web - one of class `net` or marked `"web": true` (`docs/26`): web search, web fetch, the browser, an MCP server whose privacy is `cloud` - and no system-message section marked `"web": true` (web search's). The model is told the chat has no web and not to reach it another way. Claude's own web tools are never on (`--tools ""`, "Claude" below). |
+
+What a chat starts takes its privacy: a chat `chat_create` or `agent_run` starts gets the starter's three settings (and
+`startedBy`, the starter's id), so a helper never carries a private chat's work where the chat could not go. The system
+message says which of the three a chat has (`docs/14`). Each is checked when a turn starts, so a change applies from
+the next turn - and the solution's at once, settings being live.
 
 ## Claude
 
@@ -481,7 +499,8 @@ name replacing the shallower one's; `docs/07`), or of a plugin's `contributes.mc
 - `preload`: `true`, or the names of its tools to send whole with every request; otherwise they are deferred
   (`docs/13` "Loading tools on demand").
 - `privacy`: `local`, `lan` or `cloud` (default `local` for a command or a loopback URL, `cloud` for any other URL): the class
-  a private chat's routing reads ("Privacy" above; a private chat leaves `cloud` servers out once private chats are built).
+  a private chat's routing reads ("Privacy" above): a chat with no web is offered no `cloud` server's tools, which the
+  plugin marks `"web": true` ("Three settings, each its own").
 - `timeoutSeconds`: how long a call may take (120; at most 1800); `startSeconds`: how long a start may take to answer
   `initialize` (30; at most 300 - `uvx` or `npx` may download the server on its first run).
 - `mcp.idleMinutes` (app, solution; 10, 0 never): a server no call used for this long is stopped.
@@ -883,4 +902,4 @@ The runtime is the `ied.chat` plugin's server code (`plugins/chat/code/`, compil
 
 **Discovery and settings:** `ai.probe` asks a model's server what it serves (`docs/10`), and llama.cpp's `/props` whether it takes images (`vision`, its `modalities`); a turn asks each profile's server once per server run: a profile without `contextWindow` uses the slot context it reports, a profile without `vision` takes what the server says of images, and a llama.cpp server streams the prompt read so far (`docs/12` "Watchdogs"). Settings > AI (`docs/07` "The settings window as built"): **Models** lists the profiles with Test connection and a form to add or change one (written to the User tier; "Images tool results show" is `vision`: as its server says - left out -, send them, or never); **Model Groups** shows the groups (the default starred; New, Duplicate, Rename, Make default, Delete) and the roles table - an on/off toggle per role, a model, a temperature, an effort and fallbacks in order. An off role is grayed out and uses the primary.
 
-**Not yet:** Ollama's `/api/show`, the scheduler with slots and privacy routing, the summary tier of compression (only the mechanical tier: old tool results trimmed, then whole earlier turns left out of the request), checkpoints and rewind, the trajectory files. Sub-agents and background tasks are built (2026-10-23, above); MCP is built (2026-10-26, "MCP" above) as the `ied.mcp` plugin.
+**Not yet:** Ollama's `/api/show`, the scheduler with slots (privacy is built as a chat's three settings, "Three settings, each its own": a cloud model is left out of a turn's models; taint is not), the summary tier of compression (only the mechanical tier: old tool results trimmed, then whole earlier turns left out of the request), checkpoints and rewind, the trajectory files. Sub-agents and background tasks are built (2026-10-23, above); MCP is built (2026-10-26, "MCP" above) as the `ied.mcp` plugin.

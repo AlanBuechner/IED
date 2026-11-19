@@ -3,12 +3,12 @@
 // the chat to before it), the files the message carries, the text box (Enter sends - to a running turn, at its next
 // step - Ctrl+Enter queues for the next turn, Shift+Enter breaks the line, Esc stops a running turn, "@" mentions drawn
 // as chips, docs/04; pasted text goes in plain), Attach / Stop / Send, what the chat runs on and how hard it thinks (a
-// group or a model and the effort slider, modelpicker.js), its mode and permission, and the running numbers - tokens in
-// and out, speed, time to first token, context use.
+// group or a model and the effort slider, modelpicker.js), its mode, permission and privacy, and the running numbers -
+// tokens in and out, speed, time to first token, context use.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
 import { MenuHost } from "/ui-kit/menu.js";
-import { MODE_CHOICES, PERMISSIONS, compact, contextBar, duration, effortDefaultDetail, effortLabel, modeChange, modeChoice, tokensPerSecond } from "./chatmodel.js";
+import { MODE_CHOICES, PERMISSIONS, PRIVACY, compact, contextBar, duration, effortDefaultDetail, effortLabel, modeChange, modeChoice, privacyInEffect, privacyLabel, privacyRows, privacyToggled, tokensPerSecond } from "./chatmodel.js";
 import { keptMentions } from "./mentions.js";
 import { choiceLabel, effortFallback, nextModel, showModelPicker, useOf } from "./modelpicker.js";
 import { MentionList } from "./mentionlist.js";
@@ -26,6 +26,7 @@ export class Composer {
 	constructor(actions) {
 		this.actions = actions;
 		this.mentions = [];
+		this.solutionPrivacy = {};   // what the chat's solution turns on for every chat (ai.privacy.*), from its settings
 		this.editing = null;   // the owner's message being edited: {turnId, atMs}
 		this.queuedEl = h("div.chat-queued-list");
 		this.editingEl = h("div.chat-editing", { hidden: true });
@@ -259,7 +260,22 @@ export class Composer {
 		replace(this.selectors,
 			h("span.chat-sel", null, h("span.muted", null, "Model"), this.modelButton(summary, model)),
 			h("span.chat-sel", null, h("span.muted", null, "Mode"), this.dropdown(mode[1], "Mode", () => rowsOf(MODE_CHOICES, mode[0]), (row) => this.actions.set(modeChange(row.value)))),
-			h("span.chat-sel", null, h("span.muted", null, "Permissions"), this.dropdown(permission[1], "Permissions", () => rowsOf(PERMISSIONS, summary.permission), (row) => this.actions.set({ permission: row.value }))));
+			h("span.chat-sel", null, h("span.muted", null, "Permissions"), this.dropdown(permission[1], "Permissions", () => rowsOf(PERMISSIONS, summary.permission), (row) => this.actions.set({ permission: row.value }))),
+			h("span.chat-sel", null, h("span.muted", null, "Privacy"), this.privacyButton(summary)));
+	}
+
+	// The Privacy menu (docs/04 "Three settings, each its own"): each of the chat's three settings turned on or off on its
+	// own, from the next turn; one its solution turns on (ai.privacy.*) stays on, greyed.
+	privacyButton(summary) {
+		const own = summary.privacy || {};
+		const solution = this.solutionPrivacy;
+		const on = privacyInEffect(own, solution);
+		const said = PRIVACY.filter(([key]) => on[key]).map(([key, label, , , what]) => label + (solution[key] ? " (the solution's)" : "") + ": " + what);
+		const title = said.length ? "Privacy - " + said.join("; ") : "Privacy: none. No cloud models, hidden from other chats and no web can each be turned on";
+		return h("button.chat-dd.chat-privacy-dd" + (said.length ? ".on" : ""), { title, "aria-haspopup": "menu", on: { click: (event) => {
+			const at = event.currentTarget;
+			menus.show({ rows: privacyRows(own, solution), at, label: "Privacy", pick: (row) => this.actions.set(privacyToggled(own, row.value)) });
+		} } }, said.length ? icon("lock") : null, h("span", null, privacyLabel(own, solution)), icon("chevron-down"));
 	}
 
 	dropdown(label, title, rows, pick) {
@@ -294,7 +310,8 @@ export class Composer {
 			const at = event.currentTarget;
 			const choices = await this.actions.choices();
 			if (choices) this.choices = choices;
-			const current = { model: summary.pinnedModel || "", mode: summary.mode || "agent", effort: summary.effort || "", now: model.model || "", use: summary.use || "chat", defaultEffort: model.defaultEffort };
+			const current = { model: summary.pinnedModel || "", mode: summary.mode || "agent", effort: summary.effort || "", now: model.model || "", use: summary.use || "chat", defaultEffort: model.defaultEffort,
+				noCloudModels: privacyInEffect(summary.privacy, this.solutionPrivacy).noCloudModels };
 			if (choices) showModelPicker(at, choices, current, (change) => this.actions.set(change), (value) => this.actions.set({ effort: value }));
 		} } }, h("span", null, label), h("span.chat-dd-effort", { title: "Effort" + (summary.effort ? "" : ": the chat names none, so " + effortDefaultDetail(fallback)) }, effort), icon("chevron-down"));
 	}

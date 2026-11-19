@@ -66,6 +66,10 @@ namespace Ai
 		}
 		out.Append("\n\n# Workspace\n\n");
 		out.Append(context.m_Workspace.View());
+		if (!context.m_Privacy.IsEmpty()) {
+			out.Append("\n\n# Privacy\n\nThe owner set this chat's privacy:\n");
+			out.Append(context.m_Privacy.View());
+		}
 		if (context.m_Deferred) {
 			out.Append("\n\n# Deferred tools\n\nTools whose description ends in [deferred] are listed with their first sentence only, to keep the context small. tool_search gives a deferred tool's whole description and parameters (words for what you need, or select: and their names). You may also call one directly: if its arguments are wrong, the error shows its parameters.");
 		}

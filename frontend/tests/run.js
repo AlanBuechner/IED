@@ -43,6 +43,7 @@ import "./chatpane.test.js";
 import "./chatcomposer.test.js";
 import "./chatnotices.test.js";
 import "./chatreplies.test.js";
+import "./chatprivacy.test.js";
 import "./chatwindow.test.js";
 import "./agents.test.js";
 import "./claudecatalog.test.js";

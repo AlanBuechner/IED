@@ -243,7 +243,11 @@ What `shell_run` and `build_run` with `background`, and `agent_run`, started (`d
 
 ### `chats` (built, 2026-10-21; deferred)
 
-Chats of one workspace talking to each other (`docs/04` "Chats talk to each other").
+Chats of one workspace talking to each other (`docs/04` "Chats talk to each other"). A chat hidden from this one
+(`docs/04` "Three settings, each its own": its own privacy or its solution's `ai.privacy.hiddenChats`) is not there for
+them - `chat_list` leaves it out and the others answer "there is no chat" - unless the two are linked (one started the
+other, or one owes the other a reply); the owner's own `@chat` mention reads any. A chat started by `chat_create` takes
+its starter's privacy, and one with no cloud models is refused a cloud `model`.
 
 | Tool | Class | Notes |
 |---|---|---|

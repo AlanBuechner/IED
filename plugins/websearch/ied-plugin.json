@@ -35,7 +35,7 @@
 			]
 		},
 		"systemMessageSections": [
-			{ "id": "websearch", "text": "web_search(query) searches the web: results from several engines at once, through a SearXNG on this machine whose requests leave through Tor. Search when the answer lies outside the workspace - current documentation, an error message, a library's API - and say where an answer came from." }
+			{ "id": "websearch", "web": true, "text": "web_search(query) searches the web: results from several engines at once, through a SearXNG on this machine whose requests leave through Tor. Search when the answer lies outside the workspace - current documentation, an error message, a library's API - and say where an answer came from." }
 		],
 		"toolCalls": [
 			{

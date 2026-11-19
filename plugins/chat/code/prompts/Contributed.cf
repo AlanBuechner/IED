@@ -158,12 +158,13 @@ namespace Ai
 
 	static Core::StringView Capped(Core::StringView text, int64 bytes) { return text.ByteLength() <= bytes ? text : text.Substring(0, bytes); }
 
-	Core::String PluginSections(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems) {
+	Core::String PluginSections(IED::PluginContext* context, const IED::Workspace& ws, Core::Array<Core::String>& problems, bool noWeb) {
 		Core::StringBuilder out;
 		int64 left = c_SectionsMostTokens * c_BytesPerToken;
 		for (const IED::Contribution& given : IED::Contributions(WsId(ws), Core::StringView("systemMessageSections"))) {
 			if (left <= 0) break;
 			Serialization::DomNode section = given.m_Entry;
+			if (noWeb && section.Member("web").AsBool()) continue;
 			Core::String error;
 			if (!IED::WhenHolds(ws, section.Member("when").AsView(), error)) {
 				if (!error.IsEmpty()) problems.Push(((Who(given) + ": the when of section ") + section.Member("id").AsView()) + " does not parse: " + error.View());

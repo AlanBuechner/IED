@@ -3,6 +3,7 @@ include "ModelTools.ch"
 include "claude/Pacing.ch"
 include "chats/DefaultChain.ch"
 include "chats/Uses.ch"
+include "chats/Privacy.ch"
 
 namespace Ai
 {
@@ -163,11 +164,11 @@ namespace Ai
 		return ToolResult(out.View(), Core::StringView("Claude usage"));
 	}
 
-	// The chat the call names, this one when it names none; null with `problem`.
+	// The chat the call names, this one when it names none - one it sees (Privacy.ch); null with `problem`.
 	static Chat* Target(Chats* chats, Chat* self, const ToolInvocation& call, Core::String& problem) {
 		Core::StringView id = call.m_Args.Member("chat").AsView();
 		if (id.IsEmpty() || id == self->m_ChatId.View()) return self;
-		for (Chat* each : chats->InWorkspace(call.m_Ws.m_Id.View()))
+		for (Chat* each : chats->SeenBy(self))
 			if (each->m_ChatId.View() == id) return each;
 		problem = (Core::String("there is no chat ") + id) + " in this workspace; chat_list lists them";
 		return nullptr;
@@ -188,6 +189,8 @@ namespace Ai
 		Core::String problem;
 		Chat* chat = Target(chats, self, call, problem);
 		if (!chat) return ToolError((Core::String("chat_set_model: ") + problem.View()).View());
+		Core::String refusal = ModelRefusal(models, name, PrivacyOf(call.m_Context, chat));
+		if (!refusal.IsEmpty()) return ToolError((Core::String("chat_set_model: ") + refusal.View()).View());
 		chat->m_PinnedModel = Core::String(name);
 		Core::StringView effort = call.m_Args.Member("effort").AsView();
 		if (!effort.IsEmpty()) {

@@ -47,6 +47,11 @@ namespace Ai
 		if (!chat->m_Effort.IsEmpty()) json.Field("effort", chat->m_Effort.View());
 		if (!chat->m_PinnedModel.IsEmpty()) json.Field("pinnedModel", chat->m_PinnedModel.View());
 		if (chat->m_Endless) json.BoolField("endless", true);
+		if (chat->m_Privacy.Any()) {
+			json.Key(Core::StringView("privacy"));
+			WritePrivacy(json, chat->m_Privacy);
+		}
+		if (!chat->m_StartedBy.IsEmpty()) json.Field("startedBy", chat->m_StartedBy.View());
 		if (!chat->m_ClaudeSession.IsEmpty()) {
 			json.Key(Core::StringView("claude"));
 			json.BeginObject();
@@ -200,7 +205,9 @@ namespace Ai
 		if (IsEffort(header.Member("effort").AsView())) chat->m_Effort = Core::String(header.Member("effort").AsView());
 		chat->m_PinnedModel = Core::String(header.Member("pinnedModel").AsView());
 		chat->m_Endless = header.Member("endless").AsBool();
-		chat->m_ClaudeSession = Core::String(header.Member("claude").Member("session").AsView());
+		chat->m_Privacy = ReadPrivacy(header.Member("privacy"));
+		chat->m_StartedBy = Core::String(header.Member("startedBy").AsView());
+		chat->m_ClaudeSession =Core::String(header.Member("claude").Member("session").AsView());
 		Serialization::DomNode claudeTurns = header.Member("claude").Member("turns");
 		for (int64 i = 0; i < claudeTurns.Count(); ++i) chat->m_ClaudeTurns.Push(Core::String(claudeTurns.At(i).AsView()));
 		if (header.Member("context").Kind() == Serialization::DomKind::Object) {
@@ -518,6 +525,7 @@ namespace Ai
 		chat->m_UpdatedMs = header.Member("updatedMs").AsInt();
 		chat->m_DeletedMs = when.Member(field).AsInt();
 		chat->m_TurnCount = CountLines(ReadWhole(folder / "turns.jsonl").View());
+		chat->m_Hidden = header.Member("privacy").Member("hidden").AsBool();
 		return chat;
 	}
 

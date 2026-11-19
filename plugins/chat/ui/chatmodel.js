@@ -25,6 +25,56 @@ export function modeChange(choice) {
 	return choice === "endless" ? { mode: "agent", endless: true } : { mode: choice, endless: false };
 }
 export const PERMISSIONS = [["plan", "Read only"], ["ask", "Ask for edits"], ["acceptEdits", "Accept edits"], ["auto", "Auto"]];
+
+// A chat's privacy (docs/04 "Three settings, each its own"): [its key in the chat's `privacy`, the Privacy menu's row,
+// the button's short word, the solution's setting that turns it on for every chat, what it does].
+export const PRIVACY = [
+	["noCloudModels", "No cloud models", "Local only", "ai.privacy.noCloudModels", "Runs on local and LAN models only: Claude and cloud models are left out"],
+	["hidden", "Hidden from other chats", "Hidden", "ai.privacy.hiddenChats", "Other chats' AI cannot list, read, message or wait on it, nor read its folder - but the chats it started or that started it"],
+	["noWeb", "No web", "No web", "ai.privacy.noWeb", "No web search, web fetch, browser or cloud MCP tools"],
+];
+
+// What the solution turns on for every chat, from settings:<wsId>'s values: {noCloudModels, hidden, noWeb}.
+export function solutionPrivacy(values) {
+	const out = {};
+	for (const [key, , , setting] of PRIVACY) out[key] = Boolean(values && values[setting] && values[setting].value === true);
+	return out;
+}
+
+// The privacy a chat keeps: its own (`own`, the summary's) and its solution's, each on where either is.
+export function privacyInEffect(own, solution) {
+	const out = {};
+	for (const [key] of PRIVACY) out[key] = Boolean((own && own[key]) || (solution && solution[key]));
+	return out;
+}
+
+// The Privacy button's words: "None", the one on ("No web"), or those on joined ("Local only, Hidden").
+export function privacyLabel(own, solution) {
+	const on = privacyInEffect(own, solution);
+	const words = PRIVACY.filter(([key]) => on[key]).map(([, , word]) => word);
+	return words.length ? words.join(", ") : "None";
+}
+
+// The Privacy menu: a row per setting, checked when on; one the solution turns on is checked and greyed, "solution".
+export function privacyRows(own, solution) {
+	return PRIVACY.map(([key, label]) => {
+		const forced = Boolean(solution && solution[key]);
+		const on = forced || Boolean(own && own[key]);
+		return { kind: "item", label, value: key, enabled: !forced, icon: on ? "$(check)" : null, keys: forced ? "solution" : "" };
+	});
+}
+
+// What chat.set takes when the owner flips `key`: the chat's own privacy, whole.
+export function privacyToggled(own, key) {
+	const out = {};
+	for (const [each] of PRIVACY) if (Boolean(own && own[each]) !== (each === key)) out[each] = true;
+	return { privacy: out };
+}
+
+// The same privacy as one word, to tell a change from none.
+function privacyKey(privacy) {
+	return PRIVACY.map(([key]) => (privacy && privacy[key] ? "1" : "0")).join("");
+}
 export const EFFORTS = [["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]];
 // The summary's fields that change which model a chat's next turn starts on.
 const CHOICE_KEYS = ["pinnedModel", "group", "mode", "use"];
@@ -219,7 +269,8 @@ export class ChatModel {
 				// Its own choice changed, or the settings did (`settingsChanged`: a use's defaults, ai.defaultModel) while no
 				// turn runs: what the server says it starts on now. Otherwise a turn's end keeps the model it ran on.
 				const resting = this.summary.state !== "running";
-				if (data.model !== undefined && (CHOICE_KEYS.some((key) => before[key] !== this.summary[key]) || (data.settingsChanged && resting))) this.choose(data);
+				const choiceChanged = CHOICE_KEYS.some((key) => before[key] !== this.summary[key]) || privacyKey(before.privacy) !== privacyKey(this.summary.privacy);
+				if (data.model !== undefined && (choiceChanged || (data.settingsChanged && resting))) this.choose(data);
 				return { summary: true };
 			}
 			case "turn.start": {
@@ -364,7 +415,7 @@ export class ChatModel {
 
 function summaryOf(data) {
 	const keys = ["chatId", "wsId", "title", "section", "use", "mode", "permission", "group", "effort", "pinnedModel", "endless", "state", "stateReason", "turnCount", "updatedMs", "tasksDone", "tasksTotal", "approvalsWaiting",
-		"backgroundRunning", "agent", "parentChatId", "owes", "awaits"];
+		"backgroundRunning", "agent", "parentChatId", "startedBy", "privacy", "owes", "awaits"];
 	const summary = {};
 	for (const key of keys) if (data[key] !== undefined) summary[key] = data[key];
 	return summary;

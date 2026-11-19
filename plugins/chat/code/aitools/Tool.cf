@@ -9,6 +9,13 @@ namespace Ai
 		m_Tools.Push(spec);
 	}
 
+	void ToolRegistry::DropWeb() {
+		Core::Array<ToolSpec*> kept;
+		for (ToolSpec* spec : m_Tools)
+			if (!spec->m_Web) kept.Push(spec);
+		m_Tools = kept;
+	}
+
 	ToolSpec* ToolRegistry::Find(Core::StringView name) const {
 		for (ToolSpec* spec : m_Tools)
 			if (spec->m_Name.View() == name) return spec;

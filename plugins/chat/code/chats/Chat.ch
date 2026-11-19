@@ -28,6 +28,17 @@ namespace Ai
 		public Core::String m_Label;   // as the message writes it, after its @
 	}
 
+	// A chat's privacy (docs/04 "Three settings, each its own"; Privacy.ch): its own, or a solution's ai.privacy.* for
+	// every chat of it - each its own setting.
+	struct ChatPrivacy
+	{
+		public bool m_NoCloudModels;   // its turns run on local and lan models only
+		public bool m_Hidden;          // no other chat's AI sees it, but the chats it is linked to
+		public bool m_NoWeb;           // no tool that reaches the web is offered
+
+		public bool Any() const { return m_NoCloudModels || m_Hidden || m_NoWeb; }
+	}
+
 	// What the owner typed in a chat's box and has not sent (docs/04 "Unsent messages", Drafts.ch).
 	class Draft
 	{
@@ -299,6 +310,10 @@ namespace Ai
 
 	// A list of them as the summary and chat.json have them: [{chatId, title, sinceMs, hops?}].
 	void WriteReplies(IED::JsonWriter& json, const Core::Array<ReplyOwed*>& replies);
+	// A chat's privacy as the summary, chat.json and chat.set have it: {noCloudModels?, hidden?, noWeb?}, each only when on.
+	void WritePrivacy(IED::JsonWriter& json, const ChatPrivacy& privacy);
+	// The same read back; a member that is not true is off.
+	ChatPrivacy ReadPrivacy(const Serialization::DomNode& node);
 
 	// The tasks a line each, as the model is shown them: "t2 Port Log.h (in_progress)".
 	Core::String TaskLines(const Core::Array<ChatTask*>& tasks);
@@ -360,6 +375,8 @@ namespace Ai
 		public Core::String m_Effort;                   // low, medium, high, xhigh or max; empty: its role's
 		public Core::String m_PinnedModel;              // a model of ai.models over its group's primary; empty: the group's
 		public bool m_Endless;                          // Agent, until stopped (docs/04 "Until stopped"): no finish, the turn goes on until the owner stops it
+		public ChatPrivacy m_Privacy;                   // its own; a solution's ai.privacy.* adds to it (Privacy.ch)
+		public Core::String m_StartedBy;                // the chat whose chat_create or agent_run started it; "" for the owner's
 		public Core::String m_ClaudeSession;            // the Claude Code session holding its conversation (docs/04)
 		public Core::Array<Core::String> m_ClaudeTurns; // the turns that session has
 		public ChatState m_State;

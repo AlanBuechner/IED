@@ -15,6 +15,8 @@ namespace Ai
 		public Core::Array<Core::String> m_Allow;
 		public Core::Array<Core::String> m_Confirm;
 		public Core::Array<Core::String> m_Deny;
+		// The folders of the chats hidden from this one, refused before any rule (Privacy.ch): "fs.*(.ied/local/chats/c1/**)".
+		public Core::Array<Core::String> m_Hidden;
 	}
 
 	// The rules of the ai.permissions value (JSON).

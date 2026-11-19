@@ -3248,6 +3248,56 @@ def ai_defaults_by_use(run):
 			run.request("settings.reset", {"tier": "app", "key": key})
 
 
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def chat_privacy(run):
+	"""A chat's privacy (docs/04 "Three settings, each its own"; owner, 2026-11-19: "privacy settings for a project and
+	individual chats ... each setting its own"): the composer's Privacy menu turns each of no cloud models, hidden from
+	other chats and no web on or off by itself; a chat with no cloud models has its cloud models greyed in the Model menu;
+	what the solution turns on (ai.privacy.*) shows checked, greyed and "solution"; the Chats list marks a chat with a
+	privacy of its own. What each setting does is a server check (test_chat_privacy)."""
+	page = open_chat(run)
+	ws_id = page.evaluate("ied_shell.wsId")
+	fake = {"endpoint": run.target.model_url + "/v1", "watchdog": {"prefillRate": 1000000}}
+	run.request("settings.set", {"tier": "app", "key": "ai.models", "value": {"fake": fake, "cloudy": dict(fake, privacy="cloud")}})
+	button = ".view[data-ref='chat:%s'] .chat-selectors .chat-privacy-dd" % run.chat_id
+	try:
+		run.wait_text(button + " > span", "None")
+		page.click(button)
+		page.wait_for_selector(".menu-item")
+		check(run.texts(".menu-item .label") == ["No cloud models", "Hidden from other chats", "No web"], "a row per setting: %r" % run.texts(".menu-item .label"))
+		run.shot("menu")
+		page.click(".menu-item:has-text('No cloud models')")
+		run.wait_text(button + " > span", "Local only")
+		check(page.query_selector(button + " .ci") is not None, "a lock while one is on")
+		run.shot("button")
+		summary = [c for c in run.request("chat.list", {"wsId": ws_id})["chats"] if c["chatId"] == run.chat_id][0]
+		check(summary["privacy"] == {"noCloudModels": True}, "the chat's own: %r" % summary["privacy"])
+		page.click(".view[data-ref='chat:%s'] .chat-selectors .chat-model-dd" % run.chat_id)
+		page.wait_for_selector(".chat-picker")
+		greyed = page.eval_on_selector_all(".chat-picker-row:disabled .name", "els => els.map(e => e.textContent)")
+		check(greyed == ["cloudy"], "the cloud model is greyed: %r" % greyed)
+		run.wait_text(".chat-picker-row:disabled .meta", "cloud: not for this chat")
+		run.shot("models")
+		page.keyboard.press("Escape")
+		page.wait_for_selector(".chat-picker", state="detached")
+		# The solution's setting: checked, greyed and said to be the solution's; the chat's own stays as it was.
+		run.request("settings.set", {"tier": "solution", "wsId": ws_id, "key": "ai.privacy.noWeb", "value": True})
+		run.wait_text(button + " > span", "Local only, No web")
+		page.click(button)
+		page.wait_for_selector(".menu-item")
+		forced = page.eval_on_selector_all(".menu-item.dis", "els => els.map(e => e.textContent.trim())")
+		check(forced == ["No websolution"], "the solution's row is greyed: %r" % forced)
+		run.shot("solution")
+		page.keyboard.press("Escape")
+		if not run.phone:
+			check(page.query_selector(".chats-row[data-chat='%s'] .chats-private" % run.chat_id) is not None, "the Chats list marks it")
+			run.shot("list")
+	finally:
+		run.request("settings.reset", {"tier": "solution", "wsId": ws_id, "key": "ai.privacy.noWeb"})
+		run.request("chat.set", {"chatId": run.chat_id, "privacy": {}})
+		run.request("settings.reset", {"tier": "app", "key": "ai.models"})
+
+
 @scenario(viewports=("desktop", "phone"), targets=("mock",))
 def claude_model_versions(run):
 	"""The Claude models the CLI offers (docs/04 "The Claude models"; owner, 2026-11-11: "kept up to date with the latest

@@ -3,6 +3,7 @@ include "chats/Uses.ch"
 include "ChatTools.ch"
 include "chats/Pages.ch"
 include "chats/Replies.ch"
+include "chats/Privacy.ch"
 
 namespace Ai
 {
@@ -19,9 +20,11 @@ namespace Ai
 		return text.Substring(0, end < c_ChatLineBytes ? end : c_ChatLineBytes);
 	}
 
-	// The workspace's chat of that id, or null with why there is none.
-	static Chat* Named(Chats* chats, const IED::Workspace& ws, Core::StringView id, Core::String& problem) {
-		for (Chat* each : chats->InWorkspace(ws.m_Id.View()))
+	// The chat of that id `self` sees (a chat hidden from it is not there, docs/04 "Three settings, each its own"; the
+	// owner's @-mention sees every one), or null with why there is none.
+	static Chat* Named(Chats* chats, const Chat* self, const ToolInvocation& call, Core::StringView id, Core::String& problem) {
+		Core::Array<Chat*> seen = call.m_ByOwner ? chats->InWorkspace(call.m_Ws.m_Id.View()) : chats->SeenBy(self);
+		for (Chat* each : seen)
 			if (each->m_ChatId.View() == id) return each;
 		problem = (Core::String("there is no chat ") + id) + " in this workspace; chat_list lists them";
 		return nullptr;
@@ -74,7 +77,7 @@ namespace Ai
 		IED::HostLock guard(*call.m_Context);
 		Core::StringBuilder out;
 		int64 count = 0;
-		for (Chat* each : chats->InWorkspace(call.m_Ws.m_Id.View())) {
+		for (Chat* each : chats->SeenBy(self)) {
 			Describe(out, each);
 			if (each == self) out.Append(" - this chat");
 			if (each->m_State == ChatState::Suspended) {
@@ -97,12 +100,12 @@ namespace Ai
 		return ToolResult(out.View(), preview.View());
 	}
 
-	static ToolOutcome ReadRun(Chats* chats, const ToolInvocation& call) {
+	static ToolOutcome ReadRun(Chats* chats, Chat* self, const ToolInvocation& call) {
 		int64 most = call.m_Args.Member("turns").IsValid() ? call.m_Args.Member("turns").AsInt() : 1;
 		most = most < 1 ? 1 : most > c_ChatReadTurnsMost ? c_ChatReadTurnsMost : most;
 		IED::HostLock guard(*call.m_Context);
 		Core::String problem;
-		Chat* chat = Named(chats, call.m_Ws, call.m_Args.Member("chat").AsView(), problem);
+		Chat* chat = Named(chats, self, call, call.m_Args.Member("chat").AsView(), problem);
 		if (!chat) return ToolError((Core::String("chat_read: ") + problem.View()).View());
 		Core::StringBuilder out;
 		Describe(out, chat);
@@ -131,7 +134,7 @@ namespace Ai
 	static ToolOutcome SendRun(Chats* chats, Chat* self, const ToolInvocation& call) {
 		IED::HostLock guard(*call.m_Context);
 		Core::String problem;
-		Chat* chat = Named(chats, call.m_Ws, call.m_Args.Member("chat").AsView(), problem);
+		Chat* chat = Named(chats, self, call, call.m_Args.Member("chat").AsView(), problem);
 		if (!chat) return ToolError((Core::String("chat_send: ") + problem.View()).View());
 		if (chat == self) return ToolError(Core::StringView("chat_send: that is this chat"));
 		const bool requires = call.m_Args.Member("require_reply").AsBool();
@@ -193,7 +196,11 @@ namespace Ai
 		}
 		if (effort.IsEmpty() || (effort != "default" && !IsEffort(effort)))
 			return ToolError(Core::StringView("chat_create: name the effort the job needs, one step higher - low, medium, high, xhigh or max - or default for the model's own (ai_usage says it)"));
+		// The new chat keeps this one's privacy (Privacy.ch): it cannot run on a model this chat could not.
+		Core::String refusal = ModelRefusal(models, model, PrivacyOf(call.m_Context, self));
+		if (!refusal.IsEmpty()) return ToolError((Core::String("chat_create: ") + refusal.View()).View());
 		Chat* made = chats->Create(call.m_Ws, title.IsEmpty() ? Core::StringView(c_NewChatTitle) : title, mode, self->m_Group.View());
+		TakePrivacy(made, self);
 		// A chat the AI starts runs on what it chose; no setting's default applies to it (its use, `agent`, has none).
 		made->m_Use = Core::String(c_UseAgent);
 		made->m_PinnedModel = Core::String(model);
@@ -224,7 +231,7 @@ namespace Ai
 			{
 				IED::HostLock guard(*call.m_Context);
 				Core::String problem;
-				Chat* chat = Named(chats, call.m_Ws, call.m_Args.Member("chat").AsView(), problem);
+				Chat* chat = Named(chats, self, call, call.m_Args.Member("chat").AsView(), problem);
 				if (!chat) return ToolError((Core::String("chat_wait: ") + problem.View()).View());
 				Core::Array<Turn*> lastTurns = chat->m_Run ? Core::Array<Turn*>() : LastTurnsWhole(LocalStateOf(call.m_Ws), chat, 1);
 				const Turn* last = lastTurns.IsEmpty() ? nullptr : lastTurns[0];
@@ -310,7 +317,7 @@ namespace Ai
 		ToolSpec* read = ChatTool("chat_read", "Another chat's last turns: each message and its answer, without the tool calls. Example: chat_read({\"chat\": \"c18f2a\", \"turns\": 2})",
 			"{\"type\": \"object\", \"properties\": {\"chat\": {\"type\": \"string\", \"minLength\": 1}, \"turns\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 5}}, \"required\": [\"chat\"], \"additionalProperties\": false}", ToolClass::Read);
 		read->m_Plan = [](const ToolInvocation& call) -> ToolPlan { return ChatPlan(call, "chat.read"); };
-		read->m_Run = [chats](const ToolInvocation& call) -> ToolOutcome { return ReadRun(chats, call); };
+		read->m_Run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return ReadRun(chats, chat, call); };
 		registry.Add(read);
 		ToolSpec* send = ChatTool("chat_send", "Send another chat a message: it starts a turn there, or reaches its running turn at the next step. It is told this chat sent it, and can answer with chat_send. Chats reply to each other at most 3 times in a row, counting the other chat's messages to this one too (an owner's message starts the count again); the count is the turn's chain, so a turn a chat's third message began can message no chat at all - not even a third one - but the reply it owes: send only what the other chat needs, in as few messages as you can, and once it is told, answer the owner - what is left goes in your answer. require_reply: the other chat owes this one a reply - it cannot finish before it sends one, and IED tells this chat if its turn ends without one - so this chat can suspend until it comes. A message to a chat that required your reply is that reply (outside the count of 3; past the count it cannot set require_reply itself). Example: chat_send({\"chat\": \"c18f2a\", \"text\": \"Port Ring.h and its tests, then tell me what changed.\", \"require_reply\": true})",
 			"{\"type\": \"object\", \"properties\": {\"chat\": {\"type\": \"string\", \"minLength\": 1}, \"text\": {\"type\": \"string\", \"minLength\": 1}, \"require_reply\": {\"type\": \"boolean\"}}, \"required\": [\"chat\", \"text\"], \"additionalProperties\": false}", ToolClass::Exec);

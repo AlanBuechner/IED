@@ -8,7 +8,7 @@
 import { h, icon, iconFrom, replace } from "/ui-kit/dom.js";
 import { MenuHost } from "/ui-kit/menu.js";
 import { confirmDialog } from "/ui-kit/dialog.js";
-import { ChatList, STATE_LABELS, ago, chatLook, keptFor } from "./chatmodel.js";
+import { ChatList, PRIVACY, STATE_LABELS, ago, chatLook, keptFor } from "./chatmodel.js";
 import { archiveChat, chatRequest, deleteChat, restoreChat, unarchiveChat } from "./chatactions.js";
 import { stored, store } from "./stored.js";
 
@@ -127,6 +127,8 @@ export class ChatsView {
 		const look = chatLook(summary);
 		const shown = this.tabs.shown.includes("chat:" + summary.chatId);
 		const state = STATE_LABELS[summary.state] || summary.state;
+		// The chat's own privacy settings (docs/04 "Three settings, each its own"); a solution's, every chat's, is not marked.
+		const privacy = PRIVACY.filter(([key]) => summary.privacy && summary.privacy[key]).map(([, label]) => label);
 		return h("div.chats-row" + (shown ? ".shown" : "") + (look.attention ? ".attn" : "") + (depth ? ".sub" : ""), {
 			role: "treeitem", tabindex: "-1", title: (summary.agent ? "Agent " + summary.agent + ": " : "") + summary.title + " - " + state + (summary.state === "suspended" && summary.stateReason ? ": " + summary.stateReason : ""),
 			"aria-level": String((depth || 0) + 1), style: { "--depth": String(depth || 0) }, dataset: { chat: summary.chatId, state: summary.state },
@@ -137,6 +139,7 @@ export class ChatsView {
 			},
 		},
 		iconFrom(look.icon, null, "chats-state " + look.tone), h("span.name", null, summary.title),
+		privacy.length ? h("span.chats-private", { title: "Privacy: " + privacy.join(", ") }, icon("lock")) : null,
 		look.attention ? h("span.chats-flag", null, state) : null,
 		h("span.meta", null, look.tasks || ago(summary.updatedMs || now, now)));
 	}

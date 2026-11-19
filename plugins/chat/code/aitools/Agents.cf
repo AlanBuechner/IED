@@ -1,5 +1,6 @@
 include "Agents.ch"
 include "chats/DefaultChain.ch"
+include "chats/Privacy.ch"
 
 namespace Ai
 {
@@ -330,6 +331,8 @@ namespace Ai
 			target->m_Agent = Core::String(name);
 			target->m_ParentChatId = chat->m_ChatId;
 			target->m_Permission = chat->m_Permission;
+			// It keeps its parent's privacy (Privacy.ch): an agent never carries a private chat's work where it could not go.
+			TakePrivacy(target, chat);
 			chats->Changed(target);
 		}
 		BackgroundTask* task = chats->StartBackground(chat, Core::StringView("agent"), AgentTitle(name, brief).View());

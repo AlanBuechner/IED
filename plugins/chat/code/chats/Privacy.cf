@@ -1,0 +1,126 @@
+include "Privacy.ch"
+include "Replies.ch"
+include "ChatService.ch"
+
+namespace Ai
+{
+	static bool SettingOn(const IED::PluginContext* context, Core::StringView wsId, const char* key) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		return Serialization::ReadJson(context->Setting(Core::StringView(key), wsId).View(), *doc).root.AsBool();
+	}
+
+	ChatPrivacy SolutionPrivacy(const IED::PluginContext* context, Core::StringView wsId) {
+		ChatPrivacy privacy;
+		privacy.m_NoCloudModels = SettingOn(context, wsId, "ai.privacy.noCloudModels");
+		privacy.m_Hidden = SettingOn(context, wsId, "ai.privacy.hiddenChats");
+		privacy.m_NoWeb = SettingOn(context, wsId, "ai.privacy.noWeb");
+		return privacy;
+	}
+
+	ChatPrivacy JoinPrivacy(const ChatPrivacy& a, const ChatPrivacy& b) {
+		ChatPrivacy joined;
+		joined.m_NoCloudModels = a.m_NoCloudModels || b.m_NoCloudModels;
+		joined.m_Hidden = a.m_Hidden || b.m_Hidden;
+		joined.m_NoWeb = a.m_NoWeb || b.m_NoWeb;
+		return joined;
+	}
+
+	ChatPrivacy PrivacyOf(const IED::PluginContext* context, const Chat* chat) {
+		return JoinPrivacy(chat->m_Privacy, SolutionPrivacy(context, chat->m_WsId.View()));
+	}
+
+	// --- Models --------------------------------------------------------------------------------------------------------
+
+	bool ModelAllowed(const ModelProfile* profile, const ChatPrivacy& privacy) {
+		return !privacy.m_NoCloudModels || (profile->m_Privacy != Privacy::Cloud && !profile->IsClaude());
+	}
+
+	Core::Array<ModelProfile*> AllowedModels(const Core::Array<ModelProfile*>& candidates, const ChatPrivacy& privacy) {
+		Core::Array<ModelProfile*> allowed;
+		for (ModelProfile* profile : candidates)
+			if (ModelAllowed(profile, privacy)) allowed.Push(profile);
+		return allowed;
+	}
+
+	static Core::String AllowedNames(const Core::Array<ModelProfile*>& models, const ChatPrivacy& privacy) {
+		Core::StringBuilder names;
+		for (const ModelProfile* profile : models) {
+			if (!ModelAllowed(profile, privacy)) continue;
+			if (!names.IsEmpty()) names.Append(", ");
+			names.Append(profile->m_Name.View());
+		}
+		return names.ToString();
+	}
+
+	Core::String ModelRefusal(const Core::Array<ModelProfile*>& models, Core::StringView name, const ChatPrivacy& privacy) {
+		ModelProfile* profile = FindModel(models, name);
+		if (!profile || ModelAllowed(profile, privacy)) return Core::String();
+		Core::String allowed = AllowedNames(models, privacy);
+		return ((Core::String(name) + " is a cloud model, and the chat runs on local models only (its privacy: no cloud models); ")
+			+ (allowed.IsEmpty() ? Core::String("no local model is set up in ai.models") : Core::String("its local models are ") + allowed.View()));
+	}
+
+	Core::String NoAllowedModelNote(const Core::Array<ModelProfile*>& candidates) {
+		Core::StringBuilder out;
+		out.Append("This chat runs on local models only - its privacy says no cloud models (the Privacy menu, or the solution's ai.privacy.noCloudModels) - and every model it would run on is a cloud model");
+		if (!candidates.IsEmpty()) {
+			out.Append(" (");
+			for (int64 i = 0; i < candidates.Count(); ++i) {
+				if (i > 0) out.Append(", ");
+				out.Append(candidates[i]->m_Name.View());
+			}
+			out.Append(")");
+		}
+		out.Append(". Add a local model to ai.models (an OpenAI-compatible endpoint) in Settings > AI > Models, or pin one in the Model menu.");
+		return out.ToString();
+	}
+
+	// --- Other chats ---------------------------------------------------------------------------------------------------
+
+	bool ChatsLinked(const Chat* a, const Chat* b) {
+		if (a->m_StartedBy == b->m_ChatId || b->m_StartedBy == a->m_ChatId) return true;
+		if (a->m_ParentChatId == b->m_ChatId || b->m_ParentChatId == a->m_ChatId) return true;
+		return DebtTo(a, b->m_ChatId.View()) != nullptr || DebtTo(b, a->m_ChatId.View()) != nullptr;
+	}
+
+	bool SeesChat(const Chat* self, const Chat* other, bool otherHidden) {
+		return other == self || !otherHidden || ChatsLinked(self, other);
+	}
+
+	Core::String ChatFolderRule(const char* shelf, Core::StringView chatId) {
+		return (((Core::String("fs.*(.ied/local/") + shelf) + "/") + chatId) + "/**)";
+	}
+
+	Core::Array<Chat*> Chats::SeenBy(const Chat* self) const {
+		const bool allHidden = SolutionPrivacy(m_Context, self->m_WsId.View()).m_Hidden;
+		Core::Array<Chat*> seen;
+		for (Chat* each : InWorkspace(self->m_WsId.View()))
+			if (SeesChat(self, each, allHidden || each->m_Privacy.m_Hidden)) seen.Push(each);
+		return seen;
+	}
+
+	Core::Array<Core::String> Chats::HiddenFolderRules(const Chat* self) const {
+		const bool allHidden = SolutionPrivacy(m_Context, self->m_WsId.View()).m_Hidden;
+		Core::Array<Core::String> rules;
+		for (Chat* each : InWorkspace(self->m_WsId.View()))
+			if (!SeesChat(self, each, allHidden || each->m_Privacy.m_Hidden)) rules.Push(ChatFolderRule("chats", each->m_ChatId.View()));
+		for (const DeletedChat* gone : m_Archived)
+			if (gone->m_WsId == self->m_WsId && (allHidden || gone->m_Hidden)) rules.Push(ChatFolderRule("chats-archived", gone->m_ChatId.View()));
+		for (const DeletedChat* gone : m_Deleted)
+			if (gone->m_WsId == self->m_WsId && (allHidden || gone->m_Hidden)) rules.Push(ChatFolderRule("chats-deleted", gone->m_ChatId.View()));
+		return rules;
+	}
+
+	void TakePrivacy(Chat* started, const Chat* starter) {
+		started->m_Privacy = JoinPrivacy(started->m_Privacy, starter->m_Privacy);
+		started->m_StartedBy = starter->m_ChatId;
+	}
+
+	Core::String PrivacyLines(const ChatPrivacy& privacy) {
+		Core::StringBuilder out;
+		if (privacy.m_NoCloudModels) out.Append("- No cloud models: this chat runs on local models only. A chat you start (chat_create, agent_run) takes the same setting and can only run on a local model.\n");
+		if (privacy.m_Hidden) out.Append("- Hidden: other chats do not see this chat; the chats you start see it, and keep its privacy.\n");
+		if (privacy.m_NoWeb) out.Append("- No web: this chat has no tools that reach the web. Do not fetch from it another way (curl, wget or a script in a shell), and say so when a task needs the web.\n");
+		return Core::String(out.View().Trimmed());
+	}
+}

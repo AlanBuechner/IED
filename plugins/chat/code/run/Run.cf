@@ -9,6 +9,7 @@ include "aitools/ModelTools.ch"
 include "chats/Mentions.ch"
 include "aitools/Agents.ch"
 include "chats/DefaultChain.ch"
+include "chats/Privacy.ch"
 
 namespace Ai
 {
@@ -126,13 +127,24 @@ namespace Ai
 		// The chat's own model, else its use's default (Uses.ch), first; then the chain.
 		m_Chosen = ChosenModelOf(m_Context, WsId(m_Ws), m_Chat);
 		m_Candidates = TurnCandidates(models, groups.View(), m_Turn->m_Group.View(), m_Chat->m_Agent.View(), Core::StringView(ChatModeName(m_Turn->m_Mode)), m_Chosen.View(), m_Role);
+		// Privacy always wins (docs/04 "Three settings, each its own"): a chat with no cloud models passes its cloud ones
+		// over, its own model too, and stops rather than run on one.
+		Core::Array<ModelProfile*> wanted = m_Candidates;
+		m_Candidates = AllowedModels(m_Candidates, PrivacyOf(m_Context, m_Chat));
+		const bool privacyLeftNone = m_Candidates.IsEmpty() && !wanted.IsEmpty();
 		m_Role.m_Effort = DefaultEffortOf(m_Context, WsId(m_Ws), m_Chat, m_Chat->RunsAlone() ? Core::StringView("") : m_Role.m_Effort.View());
 		m_Rules = ReadPermissionRules(m_Context->Setting(Core::StringView("ai.permissions"), WsId(m_Ws)).View());
+		m_Rules.m_Hidden = m_Chats->HiddenFolderRules(m_Chat);
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
 		m_MaxSteps = Serialization::ReadJson(m_Context->Setting(Core::StringView("ai.maxSteps"), WsId(m_Ws)).View(), *doc).root.AsInt();
 		if (m_MaxSteps < 0) m_MaxSteps = 0;
 		ChooseClaude();
 		if (!m_Candidates.IsEmpty()) m_Turn->m_Model = m_Candidates[0]->m_Name;
+		if (privacyLeftNone) {
+			UiNote(Core::StringView("no_model"), NoAllowedModelNote(wanted).View());
+			Finish(Core::StringView("no_model"));
+			return false;
+		}
 		if (m_Candidates.IsEmpty()) {
 			UiNote(Core::StringView("no_model"), Core::StringView(c_ClaudeSubscriptionOffered ? "No model is set up for this chat: sign in to Claude with your Pro or Max subscription in Settings > AI > Claude, or add a model to ai.models (an OpenAI-compatible endpoint) in Settings." : "No model is set up for this chat: add one to ai.models (an OpenAI-compatible endpoint) and, optionally, a group to ai.groups, in Settings."));
 			Finish(Core::StringView("no_model"));
@@ -148,6 +160,7 @@ namespace Ai
 	ToolRegistry* TurnTools(Chats* chats, Chat* chat, const IED::Workspace& ws, Core::Array<Core::String>& contributed) {
 		IED::PluginContext* context = chats->m_Context;
 		ToolRegistry* tools = ToolsFor(context, ws, contributed);
+		if (PrivacyOf(context, chat).m_NoWeb) tools->DropWeb();
 		AddChatTools(*tools, chats, chat);
 		AddHistoryTools(*tools, chat);
 		AddClipboardTools(*tools, chats, chat);
@@ -164,7 +177,9 @@ namespace Ai
 		IED::PluginContext* context = chats->m_Context;
 		SystemContext prompt;
 		prompt.m_AgentsMd = AgentsMd(ws);
-		prompt.m_Sections = PluginSections(context, ws, contributed);
+		const ChatPrivacy privacy = PrivacyOf(context, chat);
+		prompt.m_Sections = PluginSections(context, ws, contributed, privacy.m_NoWeb);
+		prompt.m_Privacy = PrivacyLines(privacy);
 		prompt.m_Workspace = WorkspaceSummary(ws);
 		// The skills a long list names are the ones the chat's first message asks about, for the whole chat: a system
 		// message that changed with each turn's words would make the model's server read the conversation again.
@@ -241,6 +256,7 @@ namespace Ai
 		call.m_Ws = m_Ws;
 		call.m_Chat = m_Chat;
 		call.m_CallId = Core::String("mention");
+		call.m_ByOwner = true;
 		call.m_Cancelled = &m_Run->m_Cancelled;
 		Core::StringBuilder added;
 		for (const Mention& mention : mentions) {

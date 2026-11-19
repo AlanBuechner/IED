@@ -884,6 +884,7 @@
 				"description": { "type": "string" },
 				"group": { "type": "string" },
 				"class": { "enum": ["read", "write", "exec", "net", "meta"] },
+				"web": { "type": "boolean", "default": false, "description": "It reaches the web, or works on what the web gave (a page the browser shows), whatever its class: a chat whose privacy says no web is not offered it, nor one of class net (docs/04 Three settings, each its own)." },
 				"parallelSafe": { "type": "boolean", "default": false },
 				"availableUntrusted": { "type": "boolean", "default": false },
 				"preload": { "type": "boolean", "default": false, "description": "Send its definition with every request. Off, the chat lists it by name and loads it on demand (tool_search, docs/13)." },
@@ -912,7 +913,8 @@
 				"file": { "type": "string" },
 				"function": { "type": "string", "description": "A function of the plugin's C4 code, `Core::String <Name>(const IED::Workspace& ws)`, that computes the text per workspace (empty: no section)." },
 				"maxTokens": { "type": "integer", "maximum": 600, "default": 200 },
-				"when": { "$ref": "#/$defs/when" }
+				"when": { "$ref": "#/$defs/when" },
+				"web": { "type": "boolean", "default": false, "description": "It tells of tools that reach the web: a chat whose privacy says no web is not given it (docs/04 Three settings, each its own)." }
 			},
 			"oneOf": [ { "required": ["text"] }, { "required": ["file"] }, { "required": ["function"] } ]
 		},

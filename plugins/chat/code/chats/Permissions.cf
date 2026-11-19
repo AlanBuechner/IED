@@ -68,6 +68,10 @@ namespace Ai
 
 	Permit Decide(PermissionMode mode, ToolClass toolClass, const PermissionRules& rules, const Core::Array<Core::String>& allowedForChat, Core::StringView subject, Core::String& why) {
 		Core::String rule;
+		if (AnyMatches(rules.m_Hidden, subject, rule)) {
+			why = Core::String("that is the folder of a chat hidden from this chat (its privacy, docs/04)");
+			return Permit::Deny;
+		}
 		if (AnyMatches(rules.m_Deny, subject, rule)) {
 			why = Core::String("denied by the rule ") + rule.View();
 			return Permit::Deny;

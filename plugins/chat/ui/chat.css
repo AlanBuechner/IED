@@ -41,6 +41,8 @@
 .chats-row .chats-state.c-warn { color: var(--accent-warn); }
 .chats-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .chats-row .meta { color: var(--text-2); font-size: var(--font-size-xs); font-variant-numeric: tabular-nums; flex: none; }
+.chats-private { display: inline-flex; flex: none; color: var(--text-2); }
+.chats-private .ci { width: 12px; height: 12px; }
 .chats-flag { flex: none; font-size: var(--font-size-xs); color: var(--accent-warn); padding: 0 var(--space-2); border-radius: var(--radius-2); background: var(--tint-warn); }
 .chats-row.deleted { color: var(--text-2); }
 .chats-row.deleted .name { text-decoration: line-through; text-decoration-color: var(--text-3); }
@@ -271,6 +273,9 @@ button.chat-chip:hover, a.chat-chip:hover { color: var(--text-0); border-color: 
 .chat-dd:hover { background: var(--bg-4); }
 .chat-model-dd span { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .chat-model-dd .chat-dd-effort { color: var(--text-2); padding-left: var(--space-2); border-left: var(--border-width) solid var(--border-1); }
+/* the Privacy menu's button: a lock while any of the chat's three settings is on */
+.chat-privacy-dd span { max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.chat-privacy-dd.on .ci:first-child { color: var(--text-0); }
 
 /* the Model menu (modelpicker.js): groups left, models right by family, the effort slider under both */
 .chat-picker { display: flex; flex-direction: column; max-height: min(480px, calc(100vh - 8px)); font-size: var(--font-size-sm); outline: none; }
@@ -280,6 +285,9 @@ button.chat-chip:hover, a.chat-chip:hover { color: var(--text-0); border-color: 
 .chat-picker-head { padding: var(--space-2) var(--space-4); color: var(--text-2); font-size: var(--font-size-xs); text-transform: uppercase; letter-spacing: 0.04em; }
 .chat-picker-row { display: flex; align-items: center; gap: var(--space-3); width: 100%; height: var(--row-h); padding: 0 var(--space-4); border: 0; background: none; color: var(--text-0); font: inherit; text-align: left; white-space: nowrap; cursor: pointer; }
 .chat-picker-row:hover, .chat-picker-row:focus { background: var(--bg-4); outline: none; }
+/* a model the chat's privacy leaves out: shown, not chosen */
+.chat-picker-row:disabled { color: var(--text-2); cursor: default; }
+.chat-picker-row:disabled:hover { background: none; }
 .chat-picker-row .ci { width: 14px; height: 14px; flex: none; color: var(--text-2); }
 .chat-picker-row.on .ci { color: var(--text-0); }
 .chat-picker-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }

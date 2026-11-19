@@ -145,6 +145,7 @@ namespace Ai
 		spec->m_Deferred = !node.Member("preload").AsBool();
 		spec->m_Group = node.Member("group").AsView().IsEmpty() ? Core::String(pluginId) : Core::String(node.Member("group").AsView());
 		spec->m_Asks = node.Member("approval").AsView() == "ask";
+		spec->m_Web = node.Member("class").AsView() == "net" || node.Member("web").AsBool();
 		spec->m_Plan = [entry](const ToolInvocation& call) -> ToolPlan { return CodeToolPlan(entry, call); };
 		if (!node.Member("plan").AsView().IsEmpty()) spec->m_Detail = [entry](const ToolInvocation& call, ToolPlan& plan) { CodeToolDetail(entry, call, plan); };
 		spec->m_Run = [entry](const ToolInvocation& call) -> ToolOutcome { return CodeToolRun(entry, call); };

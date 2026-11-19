@@ -536,10 +536,30 @@ namespace Ai
 		json.IntField("backgroundRunning", running);
 		if (!m_Agent.IsEmpty()) json.Field("agent", m_Agent.View());
 		if (!m_ParentChatId.IsEmpty()) json.Field("parentChatId", m_ParentChatId.View());
+		if (!m_StartedBy.IsEmpty()) json.Field("startedBy", m_StartedBy.View());
+		// Its own privacy, always: a client tells "none" from a server that has none (the solution's is its settings').
+		json.Key(Core::StringView("privacy"));
+		WritePrivacy(json, m_Privacy);
 		json.Key(Core::StringView("owes"));
 		WriteReplies(json, m_Owes);
 		json.Key(Core::StringView("awaits"));
 		WriteReplies(json, m_Awaits);
+	}
+
+	void WritePrivacy(IED::JsonWriter& json, const ChatPrivacy& privacy) {
+		json.BeginObject();
+		if (privacy.m_NoCloudModels) json.BoolField("noCloudModels", true);
+		if (privacy.m_Hidden) json.BoolField("hidden", true);
+		if (privacy.m_NoWeb) json.BoolField("noWeb", true);
+		json.EndObject();
+	}
+
+	ChatPrivacy ReadPrivacy(const Serialization::DomNode& node) {
+		ChatPrivacy privacy;
+		privacy.m_NoCloudModels = node.Member("noCloudModels").AsBool();
+		privacy.m_Hidden = node.Member("hidden").AsBool();
+		privacy.m_NoWeb = node.Member("noWeb").AsBool();
+		return privacy;
 	}
 
 	void ReplyOwed::WriteJson(IED::JsonWriter& json) const {

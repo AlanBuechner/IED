@@ -62,7 +62,7 @@ export function useOf(choices, use) {
 	return choices ? (choices.uses || []).find((u) => u.id === (use || "chat")) : null;
 }
 
-// The settings a picker lists: {models: [{name, label, claude, endpoint, efforts, defaultEffort, family, follows,
+// The settings a picker lists: {models: [{name, label, claude, cloud, endpoint, efforts, defaultEffort, family, follows,
 // version}], defaultModel, chains, uses} from settings.get's values, the aiusage snapshot's chains (the default chain, and
 // the model a turn on it uses now) and its catalog (`claude.models`): a Claude profile labelled by the model it runs now,
 // with the effort Claude Code gives it when a request names none, then every version the CLI offers that no profile is
@@ -75,11 +75,11 @@ export function choicesFrom(values, chains, catalog, uses) {
 		const profile = models[name];
 		const claude = profile.provider === "claude-code";
 		const runs = claude ? runsOf(profile.model || "default", catalog) : null;
-		return { name, label: profile.label || (runs && runs.label) || name, claude, endpoint: profile.endpoint || "", family: runs ? runs.family : "",
+		return { name, label: profile.label || (runs && runs.label) || name, claude, cloud: claude || profile.privacy === "cloud", endpoint: profile.endpoint || "", family: runs ? runs.family : "",
 			follows: claude && follows(profile.model), efforts: runs && !Array.isArray(profile.efforts) ? catalogEfforts(runs) : effortsOf(profile),
 			defaultEffort: runs ? runs.defaultEffort || "" : "" };
 	});
-	const versions = versionsOf(catalog).filter((m) => !models[m.value]).map((m) => ({ name: m.value, label: m.label || m.value, claude: true, endpoint: "",
+	const versions = versionsOf(catalog).filter((m) => !models[m.value]).map((m) => ({ name: m.value, label: m.label || m.value, claude: true, cloud: true, endpoint: "",
 		family: m.family, version: true, efforts: catalogEfforts(m), defaultEffort: m.defaultEffort || "" }));
 	return {
 		models: listed.concat(versions),
@@ -110,7 +110,8 @@ export function defaultNow(choices) {
 
 // Shows the picker at `at` (the button) for a chat whose choice is `current` ({model - "" for its use's default or the
 // default chain -, mode, effort, now - the model its next turn starts on, "" before a snapshot -, use, defaultEffort -
-// its use's, as the snapshot says, null before one}); `pick({model})` gets a change of choice and closes it,
+// its use's, as the snapshot says, null before one -, noCloudModels - its privacy leaves cloud models out, which are
+// shown greyed, docs/04 "Three settings, each its own"}); `pick({model})` gets a change of choice and closes it,
 // `setEffort(effort)` a change of effort ("" the default), which leaves it open. Returns the function that closes it.
 export function showModelPicker(at, choices, current, pick, setEffort) {
 	const sheet = window.matchMedia(PHONE).matches;
@@ -158,8 +159,10 @@ export function showModelPicker(at, choices, current, pick, setEffort) {
 function modelRows(models, current, chosen) {
 	if (!models.length) return [h("div.chat-picker-empty.muted", null, "No models yet: Settings > AI > Models")];
 	const rows = [];
-	const modelRow = (model) => row(model.name === current.model, model.label || model.name, model.label && model.label !== model.name ? model.name : model.claude ? "Claude subscription" : "",
-		modelTitle(model), () => chosen({ model: model.name }), model.claude ? "sparkle" : "server");
+	const modelRow = (model) => current.noCloudModels && model.cloud
+		? row(model.name === current.model, model.label || model.name, "cloud: not for this chat", modelTitle(model) + " - a cloud model, and this chat's privacy says no cloud models", null, model.claude ? "sparkle" : "server")
+		: row(model.name === current.model, model.label || model.name, model.label && model.label !== model.name ? model.name : model.claude ? "Claude subscription" : "",
+			modelTitle(model), () => chosen({ model: model.name }), model.claude ? "sparkle" : "server");
 	for (const family of modelFamilies(models)) {
 		const holds = family.models.some((m) => m.name === current.model);
 		const main = family.models.filter((m) => !m.version);
@@ -203,8 +206,9 @@ function replaceChevron(head, folded) {
 	head.firstChild.replaceWith(icon(folded ? "chevron-right" : "chevron-down"));
 }
 
+// A row without `run` is shown but cannot be chosen.
 function row(on, label, detail, title, run, glyph) {
-	return h("button.chat-picker-row" + (on ? ".on" : ""), { type: "button", title, "aria-pressed": on ? "true" : "false", on: { click: run } },
+	return h("button.chat-picker-row" + (on ? ".on" : ""), { type: "button", title, "aria-pressed": on ? "true" : "false", disabled: run ? null : true, on: run ? { click: run } : {} },
 		icon(on ? "check" : glyph), h("span.name", null, label), detail ? h("span.meta", null, detail) : null);
 }
 

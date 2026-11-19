@@ -175,6 +175,24 @@
 			},
 			"additionalProperties": false
 		},
+		"ai.privacy.noCloudModels": {
+			"type": "boolean",
+			"default": false,
+			"x-ied-tiers": ["solution"],
+			"description": "No chat of this solution runs on a cloud model - Claude, or a profile of ai.models whose privacy is cloud - only on local and LAN ones; a chat with none of those stops and says so. A chat can turn this on for itself in its Privacy menu, not off here (docs/04 Three settings, each its own)."
+		},
+		"ai.privacy.hiddenChats": {
+			"type": "boolean",
+			"default": false,
+			"x-ied-tiers": ["solution"],
+			"description": "Every chat of this solution is hidden from the others: no chat's AI lists, reads, messages or waits on another, nor reads its folder, but the chats it started or that started it, and those it owes a reply or that owe it one. A chat can hide itself in its Privacy menu (docs/04 Three settings, each its own)."
+		},
+		"ai.privacy.noWeb": {
+			"type": "boolean",
+			"default": false,
+			"x-ied-tiers": ["solution"],
+			"description": "No chat of this solution is offered a tool that reaches the web: web search, web fetch, the browser, an MCP server whose privacy is cloud. A chat can turn this on for itself in its Privacy menu (docs/04 Three settings, each its own)."
+		},
 		"ai.resumeInterrupted": {
 			"enum": ["agent", "always", "never"],
 			"default": "agent",
