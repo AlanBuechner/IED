@@ -16,6 +16,19 @@
 
 namespace C4LSP::Features
 {
+	// An annotation's name as written before its `(`, qualifier and all: `Lib::Range` of `[Lib::Range(0, `.
+	static std::string WrittenName(const Scripting::Source& source, size_t start)
+	{
+		std::string name;
+		for (size_t i = start; i < source.Size(); ++i)
+		{
+			const char c = source.Data()[i];
+			if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == ':')) break;
+			name.push_back(c);
+		}
+		return name;
+	}
+
 	SignatureHelpResult SignatureHelp::At(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position)
 	{
 		SignatureHelpResult result;
@@ -56,7 +69,8 @@ namespace C4LSP::Features
 		size_t calleeStart = 0;
 		if (LexicalCall(source, std::min(caretOffset, source.Size()), calleeName, lexicalArg, &calleeStart))
 		{
-			if (InAnnotationGroup(source, calleeStart) && AnnotationSignatures(session.GetResolver(), calleeName, lexicalArg, result))
+			if (InAnnotationGroup(source, calleeStart) &&
+				AnnotationSignatures(session.GetResolver(), WrittenName(source, calleeStart), session.GetResolver().AnnotationContextAt(located.path, sourceId), lexicalArg, result))
 				return result;
 			const Scripting::AstNode* declaration = FindFunctionByName(session, sourceId, calleeName);
 			if (declaration)
@@ -179,15 +193,16 @@ namespace C4LSP::Features
 		return false;
 	}
 
-	bool SignatureHelp::AnnotationSignatures(const Server::SemanticResolver& resolver, const std::string& name, uint32 activeArg, SignatureHelpResult& result)
+	bool SignatureHelp::AnnotationSignatures(const Server::SemanticResolver& resolver, const std::string& name, const Scripting::AnnotationContext& at,
+		uint32 activeArg, SignatureHelpResult& result)
 	{
-		const Scripting::DeclaredAnnotations::Overloads* overloads = resolver.Annotations().Find(name);
-		if (!overloads || overloads->Empty())
+		const Scripting::DeclaredAnnotations::Overloads overloads = resolver.Annotations().Find(name, at);
+		if (overloads.Empty())
 			return false;
-		const Scripting::AnnotationSignature* likely = Scripting::LikelyOverload(*overloads, activeArg + 1);
-		for (uint32 i = 0; i < overloads->Count(); ++i)
+		const Scripting::AnnotationSignature* likely = Scripting::LikelyOverload(overloads, activeArg + 1);
+		for (uint32 i = 0; i < overloads.Count(); ++i)
 		{
-			const Scripting::AnnotationSignature& overload = *(*overloads)[i];
+			const Scripting::AnnotationSignature& overload = *overloads[i];
 			SignatureInfo info;
 			info.label = overload.ToString().c_str();
 			for (const Scripting::AnnotationParameter& parameter : overload.parameters)

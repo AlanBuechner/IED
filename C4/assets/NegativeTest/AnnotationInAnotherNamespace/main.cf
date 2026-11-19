@@ -1,0 +1,8 @@
+namespace Scene { annotation Range(double min, double max) on field; }
+
+struct Light
+{
+	[Range(0, 1)] public float intensity;
+}
+
+int32 main() { Light l; return (int32)l.intensity; }

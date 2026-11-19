@@ -26,6 +26,9 @@ namespace Testing
 		void TestCompletionOfPlacesAfterOn();
 
 		TEST_FUNC(Lsp.Features.DeclaredAnnotations)
+		void TestCompletionFollowsNamespaces();
+
+		TEST_FUNC(Lsp.Features.DeclaredAnnotations)
 		void TestTheDeclarationIsHighlightedAndListed();
 
 		TEST_FUNC(Lsp.Features.DeclaredAnnotations)

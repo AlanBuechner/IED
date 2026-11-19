@@ -33,17 +33,20 @@ namespace Testing
 
 struct Mover { public float speed; }
 
-[Requires(Mover)]
+[Lib::Requires(Mover)]
 struct Player { public float speed; }
 
-[Lib::Requires("Mover")]
-struct Enemy { [Range(0, 1)] public float speed; }
+namespace Lib
+{
+	[Requires("Mover")]
+	struct Enemy { [Range(0, 1)] public float speed; }
+}
 
 int32 main() { int32[4] values; return values[0]; }
 )";
 
 		const char* kTypo =
-			R"(namespace Lib { annotation Requires(typename component) on type; }
+			R"(annotation Requires(typename component) on type;
 struct Mover { public float speed; }
 
 [Requiers(Mover)]
@@ -51,7 +54,7 @@ struct Player { public float speed; }
 )";
 
 		const char* kWrong =
-			R"(namespace Lib { annotation Range(double min, double max) on field; }
+			R"(annotation Range(double min, double max) on field;
 struct Player { [Range(0, "far")] public float speed; }
 )";
 
@@ -100,8 +103,8 @@ struct Player { [Range(0, "far")] public float speed; }
 		auto session = Testing::Lsp::MakeSession(kFile, kDeclared);
 		const auto byType = Testing::Lsp::PositionOf(kDeclared, "Requires", 1);
 		const auto byName = Testing::Lsp::PositionOf(kDeclared, "Requires", 2);
-		TEST_ASSERT(LandsOn(session, Testing::Lsp::PositionOf(kDeclared, "Requires", 3), byType));  // [Requires(Mover)]
-		TEST_ASSERT(LandsOn(session, Testing::Lsp::PositionOf(kDeclared, "Requires", 4), byName)); // [Lib::Requires("Mover")]
+		TEST_ASSERT(LandsOn(session, Testing::Lsp::PositionOf(kDeclared, "Requires", 3), byType));  // [Lib::Requires(Mover)]
+		TEST_ASSERT(LandsOn(session, Testing::Lsp::PositionOf(kDeclared, "Requires", 4), byName)); // [Requires("Mover")] in namespace Lib
 		TEST_ASSERT(LandsOn(session, Testing::Lsp::PositionOf(kDeclared, "Mover)"), Testing::Lsp::PositionOf(kDeclared, "Mover"))); // its argument: the type
 		TEST_PASSED();
 	}
@@ -162,8 +165,8 @@ struct Player { [Range(0, "far")] public float speed; }
 
 	void LspDeclaredAnnotationsTest::TestCompletionOffersWhatGoesThere()
 	{
-		const std::string beforeType = std::string(kDeclared) + "[\nstruct Fresh { public int32 v; }\n";
-		auto onType = CompleteAt(beforeType, "values[0]; }\n[");
+		const std::string beforeType = std::string(kDeclared) + "namespace Lib\n{\n[\nstruct Fresh { public int32 v; }\n}\n";
+		auto onType = CompleteAt(beforeType, "values[0]; }\nnamespace Lib\n{\n[");
 		std::set<std::string> labels = Labels(onType);
 		TEST_ASSERT(labels.count("Requires") && labels.count("Component"));
 		TEST_ASSERT(!labels.count("Range")); // a field's
@@ -172,11 +175,11 @@ struct Player { [Range(0, "far")] public float speed; }
 		TEST_ASSERT(declared && Testing::Lsp::Contains(declared->detail, "[Requires(typename component, typename... more)]"));
 		TEST_ASSERT(declared->sortText < "Mover"); // before code's names
 
-		const std::string beforeField = std::string(kDeclared) + "struct Fresh { [Ra public float v; }\n";
+		const std::string beforeField = std::string(kDeclared) + "namespace Lib { struct Fresh { [Ra public float v; } }\n";
 		std::set<std::string> field = Labels(CompleteAt(beforeField, "[Ra"));
 		TEST_ASSERT(field.count("Range") && !field.count("Requires") && !field.count("Component"));
 
-		const std::string inParameters = std::string(kDeclared) + "void Move([ float d) { }\n";
+		const std::string inParameters = std::string(kDeclared) + "namespace Lib { void Move([ float d) { } }\n";
 		std::set<std::string> parameter = Labels(CompleteAt(inParameters, "Move(["));
 		TEST_ASSERT(parameter.count("Range") && !parameter.count("Component"));
 		TEST_PASSED();
@@ -184,7 +187,7 @@ struct Player { [Range(0, "far")] public float speed; }
 
 	void LspDeclaredAnnotationsTest::TestCompletionAfterAComma()
 	{
-		const std::string text = std::string(kDeclared) + "[Component, Re]\nstruct Fresh { public int32 v; }\n";
+		const std::string text = std::string(kDeclared) + "namespace Lib { [Component, Re]\nstruct Fresh { public int32 v; } }\n";
 		std::set<std::string> labels = Labels(CompleteAt(text, "[Component, Re"));
 		TEST_ASSERT(labels.count("Requires") && !labels.count("Range") && !labels.count("Component"));
 		TEST_PASSED();
@@ -234,7 +237,7 @@ struct Player { [Range(0, "far")] public float speed; }
 		auto symbols = DocumentSymbols::ForDocument(session, Testing::Lsp::UriFor(kFile));
 		const DocumentSymbol* lib = nullptr;
 		for (const auto& symbol : symbols)
-			if (symbol.name == "Lib") lib = &symbol;
+			if (symbol.name == "Lib" && !lib) lib = &symbol; // the first, which declares them
 		TEST_ASSERT(lib != nullptr);
 		int declarations = 0;
 		for (const auto& child : lib->children)
@@ -248,6 +251,24 @@ struct Player { [Range(0, "far")] public float speed; }
 		TEST_PASSED();
 	}
 
+	void LspDeclaredAnnotationsTest::TestCompletionFollowsNamespaces()
+	{
+		const std::string global = std::string(kDeclared) + "annotation Everywhere on type;\n[\nstruct Fresh { public int32 v; }\n";
+		std::set<std::string> outside = Labels(CompleteAt(global, "on type;\n["));
+		TEST_ASSERT(outside.count("Everywhere") && !outside.count("Requires") && !outside.count("Component")); // Lib's are Lib's
+
+		const std::string qualified = std::string(kDeclared) + "[Lib::]\nstruct Fresh { public int32 v; }\n";
+		auto named = CompleteAt(qualified, "[Lib::");
+		std::set<std::string> inLib = Labels(named);
+		TEST_ASSERT(inLib.count("Requires") && inLib.count("Component") && !inLib.count("Range")); // Range goes on a field
+		TEST_ASSERT(!inLib.count("test") && !inLib.count("Mover")); // only Lib's annotations follow `Lib::`
+
+		const std::string typed = std::string(kDeclared) + "[Lib::Co]\nstruct Fresh { public int32 v; }\n";
+		std::set<std::string> prefixed = Labels(CompleteAt(typed, "[Lib::Co"));
+		TEST_ASSERT(prefixed.size() == 1 && prefixed.count("Component"));
+		TEST_PASSED();
+	}
+
 	void LspDeclaredAnnotationsTest::TestNoAnnotationsInAnIndex()
 	{
 		std::set<std::string> labels = Labels(CompleteAt(kDeclared, "return values["));
@@ -257,7 +278,7 @@ struct Player { [Range(0, "far")] public float speed; }
 
 	void LspDeclaredAnnotationsTest::TestSignatureHelpShowsEveryOverload()
 	{
-		const std::string text = std::string(kDeclared) + "[Requires(Mover, \nstruct Fresh { public int32 v; }\n";
+		const std::string text = std::string(kDeclared) + "namespace Lib { [Requires(Mover, \nstruct Fresh { public int32 v; } }\n";
 		auto session = Testing::Lsp::MakeSession(kFile, text);
 		auto help = SignatureHelp::At(session, Testing::Lsp::UriFor(kFile), After(text, "[Requires(Mover, "));
 		TEST_ASSERT(help.found);
@@ -268,9 +289,9 @@ struct Player { [Range(0, "far")] public float speed; }
 		TEST_ASSERT(help.signatures[0].parameters[1].label == "typename... more");
 		TEST_ASSERT_EQ(help.activeParameter, 1u);
 
-		const std::string range = std::string(kDeclared) + "struct Fresh { [Range(0, ] public float v; }\n";
+		const std::string range = std::string(kDeclared) + "struct Fresh { [Lib::Range(0, ] public float v; }\n";
 		auto rangeSession = Testing::Lsp::MakeSession(kFile, range);
-		auto rangeHelp = SignatureHelp::At(rangeSession, Testing::Lsp::UriFor(kFile), After(range, "[Range(0, "));
+		auto rangeHelp = SignatureHelp::At(rangeSession, Testing::Lsp::UriFor(kFile), After(range, "[Lib::Range(0, "));
 		TEST_ASSERT(rangeHelp.found && rangeHelp.signatures.Count() == 1 && rangeHelp.activeParameter == 1);
 		TEST_ASSERT(rangeHelp.signatures[0].label == "Range(double min, double max)");
 		TEST_PASSED();

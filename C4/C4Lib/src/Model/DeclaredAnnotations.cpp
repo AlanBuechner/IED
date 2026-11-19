@@ -8,6 +8,7 @@
 #include "Parser/NearNames.h"
 #include "Parser/Nodes/Declarations/AnnotationDeclarationNode.h"
 #include "Parser/Nodes/Declarations/ParameterNode.h"
+#include <algorithm>
 
 namespace Scripting
 {
@@ -42,6 +43,26 @@ namespace Scripting
 			for (const Scope* at = scope; at; at = at->GetParent())
 				if (at->GetKind() == Scope::Kind::Namespace && !at->GetName().empty()) qualified = at->GetName() + "::" + qualified;
 			return qualified;
+		}
+
+		// The namespaces a name written in `scope` is looked up in, innermost first, as each qualifies a name: `Scene::Inner`,
+		// `Scene`, then the global namespace's "". A type's scope adds nothing: annotations are declared in namespaces.
+		std::vector<std::string> NamespacesOutward(const Scope* scope)
+		{
+			std::vector<std::string> outward;
+			for (const Scope* at = scope; at; at = at->GetParent())
+				if (at->GetKind() == Scope::Kind::Namespace && !at->GetName().empty()) outward.push_back(QualifiedNameOf(at->GetParent(), at->GetName()).c_str());
+			outward.push_back("");
+			return outward;
+		}
+
+		std::string Qualify(const std::string& prefix, const std::string& name) { return prefix.empty() ? name : prefix + "::" + name; }
+
+		// `namespace Scene`, `the global namespace`: where an error says an annotation is declared.
+		Core::String NamespaceOf(const AnnotationSignature& signature)
+		{
+			const size_t colon = signature.qualifiedName.rfind("::");
+			return colon == Core::String::npos ? Core::String("the global namespace") : "namespace " + signature.qualifiedName.substr(0, colon);
 		}
 
 		bool SameParameters(const AnnotationSignature& a, const AnnotationSignature& b)
@@ -86,6 +107,7 @@ namespace Scripting
 	// --- DeclaredAnnotations -------------------------------------------------------------------------------------------------
 
 	DeclaredAnnotations::DeclaredAnnotations(const ProgramModel& model, const Core::Vector<AnnotationDeclarationSite>& sites)
+		: m_Symbols(model.Symbols())
 	{
 		for (const AnnotationDeclarationSite& site : sites)
 			if (site.declaration) Declare(model, site);
@@ -99,6 +121,8 @@ namespace Scripting
 		signature->declaration = &declaration;
 		signature->name = declaration.GetName();
 		signature->qualifiedName = QualifiedNameOf(site.scope, signature->name);
+		signature->scope = site.scope;
+		signature->unit = site.unitId;
 		if (signature->name == kAnnotationKeyword)
 		{
 			Problem(at, "'annotation' starts an annotation's declaration: it names none");
@@ -111,12 +135,11 @@ namespace Scripting
 		}
 		if (!ReadPlaces(declaration, *signature) || !ReadParameters(model, site, *signature)) return;
 
-		Overloads& overloads = m_ByName[signature->name.c_str()];
+		Overloads& overloads = m_ByQualifiedName[signature->qualifiedName.c_str()];
 		for (const AnnotationSignature* earlier : overloads)
 			if (SameParameters(*earlier, *signature))
 			{
-				Problem(at, "[" + signature->name + "] is declared twice with the same parameters: " +
-					earlier->qualifiedName + " already declares " + earlier->ToString());
+				Problem(at, "[" + signature->qualifiedName + "] is declared twice with the same parameters: " + earlier->ToString());
 				return;
 			}
 		overloads.Push(signature.get());
@@ -203,29 +226,80 @@ namespace Scripting
 		return colon == std::string::npos ? name : name.substr(colon + 2);
 	}
 
-	const DeclaredAnnotations::Overloads* DeclaredAnnotations::Find(const std::string& name) const
+	DeclaredAnnotations::Overloads DeclaredAnnotations::Seen(const std::string& qualifiedName, uint32 unit) const
 	{
-		auto found = m_ByName.find(OwnName(name));
-		return found == m_ByName.end() ? nullptr : &found->second;
+		Overloads seen;
+		if (const Overloads* overloads = Named(qualifiedName))
+			for (const AnnotationSignature* overload : *overloads)
+				if (!m_Symbols || m_Symbols->IsVisible(overload->unit, unit)) seen.Push(overload);
+		return seen;
 	}
 
-	const DeclaredAnnotations::Overloads* DeclaredAnnotations::MisspeltBy(const std::string& name) const
+	const DeclaredAnnotations::Overloads* DeclaredAnnotations::Named(const std::string& qualifiedName) const
 	{
-		const std::string own = OwnName(name);
-		if (m_ByName.count(own)) return nullptr;
-		const Overloads* closest = nullptr;
+		auto found = m_ByQualifiedName.find(qualifiedName);
+		return found == m_ByQualifiedName.end() ? nullptr : &found->second;
+	}
+
+	// As C4 looks up any name: the innermost namespace around the use whose `written` the use's file sees wins, and hides
+	// the ones further out.
+	DeclaredAnnotations::Overloads DeclaredAnnotations::Find(const std::string& written, const AnnotationContext& at) const
+	{
+		for (const std::string& prefix : NamespacesOutward(at.scope))
+		{
+			Overloads seen = Seen(Qualify(prefix, written), at.unit);
+			if (!seen.Empty()) return seen;
+		}
+		return {};
+	}
+
+	DeclaredAnnotations::Overloads DeclaredAnnotations::MisspeltBy(const std::string& written, const AnnotationContext& at) const
+	{
+		const std::string own = OwnName(written);
+		const std::string qualifier = written.substr(0, written.size() - own.size()); // `Scene::` of `Scene::Rnage`
+		Overloads closest;
 		std::string closestName;
 		size_t closestEdits = 0;
-		for (const auto& [declared, overloads] : m_ByName)
+		for (const auto& [qualified, overloads] : m_ByQualifiedName)
 		{
-			if (!IsNearMiss(own, declared)) continue;
+			const std::string declared = overloads[0]->name.c_str();
+			if (declared == own || !IsNearMiss(own, declared)) continue;
 			const size_t edits = EditDistance(own, declared);
-			if (closest && (edits > closestEdits || (edits == closestEdits && declared > closestName))) continue; // the same answer in any map order
-			closest = &overloads;
+			if (!closest.Empty() && (edits > closestEdits || (edits == closestEdits && declared >= closestName))) continue; // the same answer in any map order
+			Overloads meant = Find(qualifier + declared, at);
+			if (meant.Empty()) continue;
+			closest = std::move(meant);
 			closestName = declared;
 			closestEdits = edits;
 		}
 		return closest;
+	}
+
+	Core::String DeclaredAnnotations::Unseen(const ProgramModel& model, const std::string& written, const AnnotationContext& at) const
+	{
+		const std::string own = OwnName(written);
+		std::vector<std::string> sameName;
+		for (const auto& [qualified, overloads] : m_ByQualifiedName)
+			if (overloads[0]->name == own) sameName.push_back(qualified);
+		std::sort(sameName.begin(), sameName.end());
+		const std::vector<std::string> outward = NamespacesOutward(at.scope);
+		auto reached = [&](const std::string& qualified) {
+			for (const std::string& prefix : outward)
+				if (Qualify(prefix, written) == qualified) return true;
+			return false;
+		};
+		const Core::String here = "annotation [" + Core::String(written.c_str()) + "] is not visible here: ";
+		for (const std::string& qualified : sameName) // one the use names, in a file its file does not include, comes first
+			if (reached(qualified))
+			{
+				const AnnotationSignature& declared = *(*Named(qualified))[0];
+				return here + "it is declared in " + model.SourceName(declared.unit) + ", which this file does not include";
+			}
+		if (sameName.empty()) return {};
+		const AnnotationSignature& declared = *(*Named(sameName[0]))[0];
+		const bool seen = !Seen(sameName[0], at.unit).Empty();
+		return here + declared.qualifiedName + " is declared in " + NamespaceOf(declared) + ": write [" + declared.qualifiedName + "]" +
+			(seen ? Core::String() : ", and include " + model.SourceName(declared.unit));
 	}
 
 	const AnnotationSignature* DeclaredAnnotations::Declared(const AstNode* declaration) const

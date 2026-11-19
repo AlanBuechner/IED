@@ -11,6 +11,7 @@
 namespace Scripting
 {
 	class ProgramModel;
+	class SymbolTable;
 	class Type;
 	struct AstNode;
 	struct ParameterNode;
@@ -45,8 +46,10 @@ namespace Scripting
 	struct AnnotationSignature
 	{
 		const AnnotationDeclarationNode* declaration = nullptr;
-		Core::String name;          // its own name, `Range`
-		Core::String qualifiedName; // `Scene::Range`
+		Core::String name;            // its own name, `Range`
+		Core::String qualifiedName;   // `Scene::Range` in namespace Scene; what reflection registers it as
+		const Scope* scope = nullptr; // the namespace it is declared in; the global one's scope at namespace scope
+		uint32 unit = 0;              // the file that declares it: a use sees it when the use's file includes it
 		AnnotationPlaces places = AnnotationPlaces::Everywhere();
 		Core::Vector<AnnotationParameter> parameters;
 
@@ -69,6 +72,15 @@ namespace Scripting
 		uint32 unitId = 0;
 	};
 
+	/// Where a use of an annotation is written, which is where its name is looked up from: the scope of what it is on (a
+	/// type's own scope for the type, its fields and methods; a namespace for the rest; null for the global namespace) and
+	/// its file.
+	struct AnnotationContext
+	{
+		const Scope* scope = nullptr;
+		uint32 unit = 0;
+	};
+
 	/// A declaration that declares nothing as written: said where it is, by the model's check.
 	struct AnnotationDeclarationProblem
 	{
@@ -76,8 +88,9 @@ namespace Scripting
 		Core::String message;
 	};
 
-	/// The annotations a program declares, each by its own name with its overloads: `annotation Range(double min, double max)
-	/// on field;` declares `[Range]`, whatever namespace it is written in.
+	/// The annotations a program declares, each by its qualified name with its overloads. A use names one as any name is
+	/// named (docs/language/12 section 4.2): `[Range]` from the use's scope out to the global namespace, the first that
+	/// declares it in a file the use's file includes; `[Scene::Range]` the one namespace Scene declares.
 	class DeclaredAnnotations
 	{
 	public:
@@ -86,13 +99,19 @@ namespace Scripting
 		DeclaredAnnotations() = default;
 		DeclaredAnnotations(const ProgramModel& model, const Core::Vector<AnnotationDeclarationSite>& sites);
 
-		/// The declarations of the annotation `name` (`Range`, or `Scene::Range` by its last part); null when none declares it.
-		const Overloads* Find(const std::string& name) const;
-		/// The declarations of the annotation `name` is a typo of: none is named so, and one is a near miss of it (the closest);
-		/// null otherwise.
-		const Overloads* MisspeltBy(const std::string& name) const;
-		/// Every declared annotation's overloads, by its own name.
-		const std::unordered_map<std::string, Overloads>& All() const { return m_ByName; }
+		/// The declarations `written` (`Range`, `Scene::Range`) names at `at`: those of the innermost namespace around the
+		/// use that declares it, the ones the use's file sees; empty when none is seen.
+		Overloads Find(const std::string& written, const AnnotationContext& at) const;
+		/// Every declaration of the annotation `qualifiedName` (`Scene::Range`), or null.
+		const Overloads* Named(const std::string& qualifiedName) const;
+		/// The declarations a use of `written` that names none means: the closest near miss of its own name that it would
+		/// name with the same qualifier; empty when there is none.
+		Overloads MisspeltBy(const std::string& written, const AnnotationContext& at) const;
+		/// Why an annotation of `written`'s own name is declared but not seen at `at` - in a namespace the use is not in,
+		/// or in a file its file does not include - as an error says it; empty when none is declared.
+		Core::String Unseen(const ProgramModel& model, const std::string& written, const AnnotationContext& at) const;
+		/// Every declared annotation's overloads, by its qualified name.
+		const std::unordered_map<std::string, Overloads>& All() const { return m_ByQualifiedName; }
 		/// The declarations that declare nothing as written, each with why.
 		const Core::Vector<AnnotationDeclarationProblem>& Problems() const { return m_Problems; }
 		/// The signature `declaration` declares, or null.
@@ -110,9 +129,12 @@ namespace Scripting
 		bool ReadDefault(const ProgramModel& model, const AnnotationDeclarationSite& site, const ParameterNode& written,
 			AnnotationParameter& parameter);
 		bool Problem(const SourceLocation& at, const Core::String& message) { m_Problems.Push({ at, message }); return false; }
+		/// The overloads of `qualifiedName` a use in `unit` sees.
+		Overloads Seen(const std::string& qualifiedName, uint32 unit) const;
 
+		const SymbolTable* m_Symbols = nullptr; // whose include closures say which file sees which
 		std::vector<std::unique_ptr<AnnotationSignature>> m_Signatures; // std::vector: Core::Vector copies when it is assigned
-		std::unordered_map<std::string, Overloads> m_ByName;
+		std::unordered_map<std::string, Overloads> m_ByQualifiedName;
 		Core::Vector<AnnotationDeclarationProblem> m_Problems;
 	};
 

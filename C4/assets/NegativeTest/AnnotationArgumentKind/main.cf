@@ -1,4 +1,4 @@
-namespace Editor { annotation Range(double min, double max) on field; }
+annotation Range(double min, double max) on field;
 
 struct Light
 {

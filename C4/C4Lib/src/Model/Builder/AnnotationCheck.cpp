@@ -107,22 +107,25 @@ namespace Scripting
 		if (item.IsCompilerAnnotation() || item.GetName() == kAnnotationKeyword) return;
 		auto folded = FoldAnnotation(m_Model, item, place, scope);
 		if (!folded.Ok()) return Report(folded.loc, folded.message);
-		if (!folded.value.declaration) CheckUndeclared(item);
+		if (!folded.value.declaration) CheckUndeclared(item, AnnotationContext{ scope, item.startLocation.sourceId });
 	}
 
-	void AnnotationCheck::CheckUndeclared(const AnnotationItem& item)
+	// A name nothing declares where it is written is a warning; one that means a declared annotation - declared where the
+	// use does not see it, or misspelt - is an error.
+	void AnnotationCheck::CheckUndeclared(const AnnotationItem& item, const AnnotationContext& at)
 	{
-		if (const DeclaredAnnotations::Overloads* meant = m_Model.Annotations().MisspeltBy(item.GetName().c_str()))
+		const DeclaredAnnotations& declared = m_Model.Annotations();
+		if (const Core::String unseen = declared.Unseen(m_Model, item.GetName().c_str(), at); !unseen.empty())
+			return Report(item.startLocation, unseen);
+		if (const DeclaredAnnotations::Overloads meant = declared.MisspeltBy(item.GetName().c_str(), at); !meant.Empty())
 		{
-			const AnnotationSignature& declared = *(*meant)[0];
-			return Report(item.startLocation, "unknown annotation '" + item.GetName() + "': did you mean '" + declared.name + "', which " +
-				declared.qualifiedName + " declares? (an annotation nothing declares is kept for reflection, and nothing that reads '" +
-				declared.name + "' sees it)");
+			const AnnotationSignature& signature = *meant[0];
+			return Report(item.startLocation, "unknown annotation '" + item.GetName() + "': did you mean '" + signature.name + "'? (an annotation "
+				"nothing declares is kept for reflection, and nothing that reads [" + signature.qualifiedName + "] sees it)");
 		}
 		if (item.NearCompilerAnnotation()) return; // the parser warned that it is probably a compiler annotation
-		const Core::String name = item.GetOwnName();
-		Report(item.startLocation, "annotation [" + name + "] is not declared: declare it, what it takes and where it goes, with `annotation " + name +
-			"(...) on ...;` (docs/language/12 section 4) so its uses are checked", ErrorSeverity::Warning);
+		Report(item.startLocation, "annotation [" + item.GetName() + "] is not declared: declare it, what it takes and where it goes, with `annotation " +
+			item.GetOwnName() + "(...) on ...;` (docs/language/12 section 4) so its uses are checked", ErrorSeverity::Warning);
 	}
 
 	void AnnotationCheck::Report(const SourceLocation& at, const Core::String& message, ErrorSeverity severity)

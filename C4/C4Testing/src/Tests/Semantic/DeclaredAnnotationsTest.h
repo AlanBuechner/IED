@@ -6,16 +6,28 @@
 namespace Testing
 {
 	// Annotation declarations (docs/language/12 section 4, D-87): `annotation Range(double min, double max) on field;` declares
-	// [Range], its parameters the arguments, its places where it goes and its overloads the forms a use may take; a use is
-	// checked against them where it is written, an undeclared one is a warning, and reflection registers the arguments as the
-	// declaration takes them.
+	// [Range], its parameters the arguments, its places where it goes and its overloads the forms a use may take; a use names
+	// one as any name is named, from its namespace out, and is checked against it where it is written; an undeclared one is a
+	// warning, and reflection registers the arguments as the declaration takes them, under its qualified name.
 	CLASS(GROUP = Testing) DeclaredAnnotationsTest : public Test
 	{
 	public:
 		REFLECTED_BODY(Testing::DeclaredAnnotationsTest);
 
 		TEST_FUNC(Semantic.DeclaredAnnotations)
-		void FoundByTheirOwnName();
+		void FoundByTheirQualifiedName();
+
+		TEST_FUNC(Semantic.DeclaredAnnotations)
+		void AUseNamesOneAsAnyNameIsNamed();
+
+		TEST_FUNC(Semantic.DeclaredAnnotations)
+		void AnInnerOneHidesAnOuterOne();
+
+		TEST_FUNC(Semantic.DeclaredAnnotations)
+		void ANamespacesOneIsNotSeenOutsideIt();
+
+		TEST_FUNC(Semantic.DeclaredAnnotations)
+		void AMisspeltOneIsLookedUpWhereItIsWritten();
 
 		TEST_FUNC(Semantic.DeclaredAnnotations)
 		void AMisspeltOneIsAnError();

@@ -15,7 +15,7 @@ namespace Scripting
 	/// 4.3), or as written when none declares it.
 	struct ReflectedAnnotation
 	{
-		Core::String name;
+		Core::String name; // a declared annotation's qualified name (`Scene::Range`); else as written
 		Core::Vector<ReflectedArgument> arguments;
 		const AnnotationSignature* declaration = nullptr; // the overload it takes; null when none declares it
 	};

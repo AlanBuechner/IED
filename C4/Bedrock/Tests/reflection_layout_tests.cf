@@ -3,10 +3,8 @@
 
 include "bedrock.ch"
 
-namespace RlAnnotations {
-	annotation Wire(int32 version) on union;
-	annotation Hint(int32 hint) on field;
-}
+annotation Wire(int32 version) on union;
+annotation Hint(int32 hint) on field;
 
 [group("rl"), Wire(2)] union RlValue {
 	public int32 whole;

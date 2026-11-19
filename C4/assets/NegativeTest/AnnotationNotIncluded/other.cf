@@ -1,0 +1,3 @@
+include "marks.ch"
+
+[Marked] struct Lamp { public float glow; }

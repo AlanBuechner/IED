@@ -9,11 +9,10 @@ namespace Testing
 {
 	namespace
 	{
-		const char* kLibrary = R"(namespace Lib { namespace Annotations {
-	annotation Requires(typename component, typename... more) on type;
-	annotation Requires(const char* typeName, const char*... more) on type;
-	annotation Component on type;
-} }
+		// A library's annotations, declared in the global namespace so a use anywhere names them alone.
+		const char* kLibrary = R"(annotation Requires(typename component, typename... more) on type;
+annotation Requires(const char* typeName, const char*... more) on type;
+annotation Component on type;
 )";
 
 		const Scripting::ProgramModel& MakeModel(Scripting::CompilerInstance& compiler, const std::string& source)
@@ -65,27 +64,106 @@ namespace Testing
 			return {};
 		}
 
-		size_t OverloadCount(const Scripting::DeclaredAnnotations& declared, const char* name)
+		size_t OverloadCount(const Scripting::DeclaredAnnotations& declared, const char* qualifiedName)
 		{
-			const auto* overloads = declared.Find(name);
+			const auto* overloads = declared.Named(qualifiedName);
 			return overloads ? overloads->Count() : 0;
+		}
+
+		// What the annotations a type carries register as: each one's name.
+		Core::String NamesOn(const Scripting::ProgramModel& model, const char* type)
+		{
+			Core::String names;
+			for (const Scripting::ReflectedAnnotation& annotation : Registered(model, type)) names += (names.empty() ? "" : " ") + annotation.name;
+			return names;
 		}
 	}
 
-	void DeclaredAnnotationsTest::FoundByTheirOwnName()
+	void DeclaredAnnotationsTest::FoundByTheirQualifiedName()
 	{
 		Scripting::CompilerInstance compiler;
-		const auto& model = MakeModel(compiler, std::string(kLibrary) + "struct M { public int32 v; }\n[Lib::Annotations::Requires(M), Component] struct C { public int32 v; }\n");
+		const auto& model = MakeModel(compiler, std::string(kLibrary) + "struct M { public int32 v; }\n[Requires(M), Component] struct C { public int32 v; }\n"
+			"namespace Lib { annotation Requires(int32 n) on type; }\n");
 		TEST_ASSERT(compiler.GetAllErrors().Empty());
 		const Scripting::DeclaredAnnotations& declared = model.Annotations();
 		TEST_ASSERT_EQ((int)OverloadCount(declared, "Requires"), 2);
-		TEST_ASSERT_EQ((int)OverloadCount(declared, "Lib::Requires"), 2); // by its last part
+		TEST_ASSERT_EQ((int)OverloadCount(declared, "Lib::Requires"), 1); // another annotation, of its namespace
 		TEST_ASSERT_EQ((int)OverloadCount(declared, "Component"), 1);
-		TEST_ASSERT(declared.Find("Range") == nullptr);
-		TEST_ASSERT((*declared.Find("Requires"))[0]->qualifiedName == "Lib::Annotations::Requires");
-		TEST_ASSERT((*declared.Find("Requires"))[0]->ToString() == "Requires(typename component, typename... more)");
-		TEST_ASSERT((*declared.Find("Requires"))[1]->ToString() == "Requires(const char* typeName, const char*... more)");
-		TEST_ASSERT(declared.MisspeltBy("Requires") == nullptr); // a declared name misspells nothing
+		TEST_ASSERT(declared.Named("Range") == nullptr);
+		TEST_ASSERT((*declared.Named("Requires"))[0]->qualifiedName == "Requires");
+		TEST_ASSERT((*declared.Named("Lib::Requires"))[0]->qualifiedName == "Lib::Requires");
+		TEST_ASSERT((*declared.Named("Requires"))[0]->ToString() == "Requires(typename component, typename... more)");
+		TEST_ASSERT((*declared.Named("Requires"))[1]->ToString() == "Requires(const char* typeName, const char*... more)");
+		TEST_ASSERT(declared.MisspeltBy("Requires", {}).Empty()); // a declared name misspells nothing
+		TEST_PASSED();
+	}
+
+	void DeclaredAnnotationsTest::AUseNamesOneAsAnyNameIsNamed()
+	{
+		Scripting::CompilerInstance compiler;
+		const auto& model = MakeModel(compiler, R"(annotation Tag on type;
+namespace A
+{
+	annotation Tag(int32 n) on type;
+	[Tag(1)] struct In { public int32 v; }
+	namespace B { [Tag(2)] struct Deep { public int32 v; } }
+}
+[Tag] struct Out { public int32 v; }
+[A::Tag(3)] struct Qualified { public int32 v; }
+namespace C { [Tag] struct Other { public int32 v; } }
+namespace A { struct Holder { [Tag(4)] struct Nested { public int32 v; } public int32 w; } }
+)");
+		TEST_ASSERT(compiler.GetAllDiagnostics().Empty());
+		TEST_ASSERT(NamesOn(model, "In") == "A::Tag"); // the namespace's own hides the global one
+		TEST_ASSERT(NamesOn(model, "Deep") == "A::Tag"); // from an inner namespace, out
+		TEST_ASSERT(NamesOn(model, "Out") == "Tag");
+		TEST_ASSERT(NamesOn(model, "Qualified") == "A::Tag");
+		TEST_ASSERT(NamesOn(model, "Other") == "Tag"); // another namespace sees the global one
+		TEST_ASSERT(NamesOn(model, "Nested") == "A::Tag"); // from a type, out through its namespace
+		TEST_PASSED();
+	}
+
+	void DeclaredAnnotationsTest::AnInnerOneHidesAnOuterOne()
+	{
+		Scripting::CompilerInstance compiler;
+		MakeModel(compiler, R"(annotation Tag on type;
+namespace A { annotation Tag(int32 n) on type; [Tag] struct NoArgument { public int32 v; } }
+)");
+		TEST_ASSERT_EQ((int)Saying(compiler, "[Tag] takes 1 argument (n), not 0").Count(), 1); // the global [Tag] is not tried
+		TEST_ASSERT_EQ(Errors(compiler), 1);
+		TEST_PASSED();
+	}
+
+	void DeclaredAnnotationsTest::ANamespacesOneIsNotSeenOutsideIt()
+	{
+		Scripting::CompilerInstance compiler;
+		MakeModel(compiler, R"(namespace Scene { annotation Range(double min, double max) on field; }
+struct S { [Range(0, 1)] public float a; [Scene::Range(0, 1)] public float b; }
+namespace Scene { struct T { [Range(0, 1)] public float c; } }
+namespace Other { struct U { [Range(0, 1)] public float d; } }
+annotation Global on type;
+[Scene::Global] struct V { public int32 v; }
+)");
+		auto outside = Saying(compiler, "annotation [Range] is not visible here: Scene::Range is declared in namespace Scene: write [Scene::Range]");
+		TEST_ASSERT_EQ((int)outside.Count(), 2); // at global scope and in another namespace
+		TEST_ASSERT(At(outside[0], 2, 13));
+		TEST_ASSERT_EQ((int)Saying(compiler, "annotation [Scene::Global] is not visible here: Global is declared in the global namespace: write [Global]").Count(), 1);
+		TEST_ASSERT_EQ(Errors(compiler), 3); // b and c see it
+		TEST_PASSED();
+	}
+
+	void DeclaredAnnotationsTest::AMisspeltOneIsLookedUpWhereItIsWritten()
+	{
+		Scripting::CompilerInstance compiler;
+		MakeModel(compiler, R"(namespace Scene { annotation Range(double min, double max) on field; struct S { [Rang(0, 1)] public float a; } }
+struct T { [Scene::Rang(0, 1)] public float b; [Rang(0, 1)] public float c; }
+)");
+		TEST_ASSERT_EQ((int)Saying(compiler, "unknown annotation 'Rang': did you mean 'Range'?").Count(), 1);
+		TEST_ASSERT_EQ((int)Saying(compiler, "unknown annotation 'Scene::Rang': did you mean 'Range'?").Count(), 1);
+		auto unseen = Saying(compiler, "annotation [Rang] is not declared");
+		TEST_ASSERT_EQ((int)unseen.Count(), 1); // outside Scene, nothing it sees is near it
+		TEST_ASSERT(unseen[0].severity == Scripting::ErrorSeverity::Warning);
+		TEST_ASSERT_EQ(Errors(compiler), 2);
 		TEST_PASSED();
 	}
 
@@ -93,9 +171,10 @@ namespace Testing
 	{
 		Scripting::CompilerInstance compiler;
 		MakeModel(compiler, std::string(kLibrary) + "struct M { public int32 v; }\n[Component, Requiers(M)] struct P { public int32 v; }\n");
-		auto errors = Saying(compiler, "unknown annotation 'Requiers': did you mean 'Requires', which Lib::Annotations::Requires declares?");
+		auto errors = Saying(compiler, "unknown annotation 'Requiers': did you mean 'Requires'? (an annotation nothing declares is kept for reflection, "
+			"and nothing that reads [Requires] sees it)");
 		TEST_ASSERT_EQ((int)errors.Count(), 1);
-		TEST_ASSERT(At(errors[0], 7, 13));
+		TEST_ASSERT(At(errors[0], 5, 13));
 		TEST_ASSERT(errors[0].severity == Scripting::ErrorSeverity::Error);
 		Scripting::CompilerInstance cased;
 		MakeModel(cased, std::string(kLibrary) + "[requires] struct Q { public int32 v; }\n");
@@ -125,9 +204,9 @@ union U { [Componnent] int32 i; float f; }
 		auto serialize = Saying(compiler, "annotation [Serialize] is not declared: declare it, what it takes and where it goes, with `annotation Serialize(...) on ...;`");
 		TEST_ASSERT_EQ((int)serialize.Count(), 1);
 		TEST_ASSERT(serialize[0].severity == Scripting::ErrorSeverity::Warning);
-		TEST_ASSERT(At(serialize[0], 6, 2));
+		TEST_ASSERT(At(serialize[0], 4, 2));
 		TEST_ASSERT_EQ((int)Saying(compiler, "annotation [Tint] is not declared").Count(), 1);
-		TEST_ASSERT_EQ((int)Saying(compiler, "annotation [Hidden] is not declared").Count(), 1); // by its own name
+		TEST_ASSERT_EQ((int)Saying(compiler, "annotation [Lib::Hidden] is not declared: declare it, what it takes and where it goes, with `annotation Hidden(").Count(), 1);
 		Scripting::CompilerInstance typo;
 		MakeModel(typo, "[Test] void F() { }\nint32 main() { return 0; }\n");
 		TEST_ASSERT_EQ((int)typo.GetAllDiagnostics().Count(), 1); // the parser's "did you mean 'test'", not a second warning
@@ -140,9 +219,9 @@ union U { [Componnent] int32 i; float f; }
 		Scripting::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, "annotation Hidden; annotation Hinted; annotation Bidden;\n");
 		const Scripting::DeclaredAnnotations& declared = model.Annotations();
-		TEST_ASSERT((*declared.MisspeltBy("Hiddem"))[0]->name == "Hidden"); // one edit beats two
-		TEST_ASSERT((*declared.MisspeltBy("Xidden"))[0]->name == "Bidden"); // a tie: the name first in order, whatever the map's
-		TEST_ASSERT(declared.MisspeltBy("Hxxxxx") == nullptr);
+		TEST_ASSERT(declared.MisspeltBy("Hiddem", {})[0]->name == "Hidden"); // one edit beats two
+		TEST_ASSERT(declared.MisspeltBy("Xidden", {})[0]->name == "Bidden"); // a tie: the name first in order, whatever the map's
+		TEST_ASSERT(declared.MisspeltBy("Hxxxxx", {}).Empty());
 		TEST_PASSED();
 	}
 
@@ -374,7 +453,7 @@ annotation Fine(int32 a, int32 b = 2, int32... rest);
 		TEST_ASSERT_EQ((int)Saying(compiler, "the default of 'int32 n' is an int32: \"x\" is a string").Count(), 1);
 		TEST_ASSERT_EQ((int)Saying(compiler, "'test' is the compiler's own annotation").Count(), 1);
 		TEST_ASSERT_EQ((int)Saying(compiler, "'annotation' starts an annotation's declaration: it names none").Count(), 1);
-		auto twice = Saying(compiler, "[Twice] is declared twice with the same parameters: Twice already declares Twice(int32 a)");
+		auto twice = Saying(compiler, "[Twice] is declared twice with the same parameters: Twice(int32 a)");
 		TEST_ASSERT_EQ((int)twice.Count(), 1);
 		TEST_ASSERT(At(twice[0], 12, 12)); // at the second one's name
 		TEST_ASSERT_EQ((int)Saying(compiler, "[TwoFields] goes on a field once: 'field' is written twice").Count(), 1);

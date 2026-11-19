@@ -44,6 +44,17 @@ namespace C4LSP::Features
 
 		size_t offset = OffsetAt(text, position);
 		const Server::SemanticResolver& resolver = session.GetResolver();
+		const std::optional<AnnotationCompletion::Site> annotation = AnnotationCompletion::Find(text, offset, InTypeBody(located.path));
+		const Scripting::AnnotationContext annotationAt = resolver.AnnotationContextAt(located.path, sourceId);
+		if (annotation && !annotation->qualifier.empty()) // `[Scene::Ra`: only an annotation is named there
+		{
+			Core::Vector<CompletionItem> named;
+			AnnotationCompletion::Add(resolver, *annotation, annotationAt, named);
+			Core::Vector<CompletionItem> matching;
+			for (CompletionItem& item : named)
+				if (prefix.empty() || StartsWith(item.label, prefix)) matching.Push(std::move(item));
+			return matching;
+		}
 		if (const std::string qualifier = QualifierBefore(text, offset); !qualifier.empty())
 		{
 			Core::Vector<Candidate> members;
@@ -89,8 +100,8 @@ namespace C4LSP::Features
 		const bool places = AnnotationCompletion::InPlaces(text, offset);
 		if (places)
 			AnnotationCompletion::AddPlaces(items);
-		else if (const auto annotation = AnnotationCompletion::Find(text, offset, InTypeBody(located.path)))
-			AnnotationCompletion::Add(resolver, *annotation, items);
+		else if (annotation)
+			AnnotationCompletion::Add(resolver, *annotation, annotationAt, items);
 		Core::Vector<CompletionItem> named;
 		for (CompletionItem& item : items)
 			if (prefix.empty() || StartsWith(item.label, prefix)) named.Push(std::move(item));

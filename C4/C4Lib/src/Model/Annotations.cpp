@@ -112,14 +112,15 @@ namespace Scripting
 		}
 		ReflectedAnnotation annotation;
 		annotation.name = item.GetName();
-		const DeclaredAnnotations::Overloads* overloads = model.Annotations().Find(item.GetName().c_str());
-		if (!overloads)
+		const DeclaredAnnotations::Overloads overloads = model.Annotations().Find(item.GetName().c_str(), AnnotationContext{ scope, item.startLocation.sourceId });
+		if (overloads.Empty())
 		{
 			annotation.arguments = std::move(folded);
 			return Result::Success(std::move(annotation));
 		}
-		auto match = ChooseAnnotationOverload(*overloads, item, place, folded);
+		auto match = ChooseAnnotationOverload(overloads, item, place, folded);
 		if (!match.Ok()) return Result::Fail(match.error, match.message, match.loc);
+		annotation.name = match.value.signature->qualifiedName; // however it is written: `[Range]` in namespace Scene is Scene::Range
 		annotation.arguments = std::move(match.value.arguments);
 		annotation.declaration = match.value.signature;
 		return Result::Success(std::move(annotation));

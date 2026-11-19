@@ -2,6 +2,7 @@
 #include "Core/Core.h"
 #include "Protocol/LspTypes.h"
 #include "Server/NodeLocator.h"
+#include "Model/DeclaredAnnotations.h"
 
 namespace Scripting { class AstNode; class ProgramModel; struct Source; struct FunctionDefinitionNode; struct ParameterNode; class Type; }
 namespace C4LSP::Server { class CompilationSession; class SemanticResolver; }
@@ -54,7 +55,8 @@ namespace C4LSP::Features
 		static bool InAnnotationGroup(const Scripting::Source& source, size_t calleeStart);
 
 		// Every overload of the declared annotation `name`, the one `arguments` arguments most likely mean active.
-		static bool AnnotationSignatures(const Server::SemanticResolver& resolver, const std::string& name, uint32 activeArg, SignatureHelpResult& result);
+		static bool AnnotationSignatures(const Server::SemanticResolver& resolver, const std::string& name, const Scripting::AnnotationContext& at,
+			uint32 activeArg, SignatureHelpResult& result);
 
 		// Resolve a free function (or method) definition by its simple name so the lexical fallback can build a
 		// signature. Prefers the unit that contains the caret; falls back to any other unit in the project (the call's

@@ -197,6 +197,8 @@ namespace C4LSP::Features
 		if (bracket == std::string::npos || !OpensGroup(text, bracket)) return std::nullopt;
 
 		Site site;
+		const size_t nameStart = NameStart(text, caret);
+		site.qualifier = text.substr(nameStart, WordStart(text, caret) - nameStart);
 		if (InParameters(text, bracket)) site.place = Scripting::AnnotationPlace::Parameter;
 		else if (const size_t past = PastGroup(text, bracket); past != std::string::npos) site.place = DeclarationAt(text, past, inType);
 		else site.place = DeclarationAt(text, WordEnd(text, caret), inType); // the group is still being typed: what follows the name
@@ -239,18 +241,25 @@ namespace C4LSP::Features
 		}
 	}
 
-	void AnnotationCompletion::Add(const Server::SemanticResolver& resolver, const Site& site, Core::Vector<CompletionItem>& out)
+	// An annotation is offered by its own name where, written after the site's qualifier, that name leads to it: the
+	// annotations of the namespaces around the caret and the global one, in files this one includes.
+	void AnnotationCompletion::Add(const Server::SemanticResolver& resolver, const Site& site, const Scripting::AnnotationContext& at,
+		Core::Vector<CompletionItem>& out)
 	{
-		for (const auto& [name, overloads] : resolver.Annotations().All())
+		const Scripting::DeclaredAnnotations& declared = resolver.Annotations();
+		for (const auto& [qualified, overloads] : declared.All())
 		{
-			if (!GoesThere(overloads, site.place)) continue;
+			const std::string name = overloads[0]->name.c_str();
+			const Scripting::DeclaredAnnotations::Overloads named = declared.Find(site.qualifier + name, at);
+			if (named.Empty() || named[0]->qualifiedName != overloads[0]->qualifiedName || !GoesThere(named, site.place)) continue;
 			CompletionItem item;
 			item.label = name;
 			item.kind = Kind::Function;
-			item.detail = Detail(overloads);
+			item.detail = Detail(named);
 			item.sortText = "0" + name;
 			out.Push(item);
 		}
+		if (!site.qualifier.empty()) return; // the compiler's own are named alone
 		for (const char* name : Scripting::CompilerAnnotationNames())
 		{
 			CompletionItem item;

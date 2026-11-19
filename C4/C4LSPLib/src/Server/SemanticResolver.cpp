@@ -596,6 +596,11 @@ namespace C4LSP::Server
 
 	const Scripting::DeclaredAnnotations& SemanticResolver::Annotations() const { return m_Model.Annotations(); }
 
+	Scripting::AnnotationContext SemanticResolver::AnnotationContextAt(const Core::Vector<const Scripting::AstNode*>& path, uint32 sourceId) const
+	{
+		return { DeclarationScope(path), sourceId };
+	}
+
 	const Scripting::AstNode* SemanticResolver::AnnotationNamedAt(const Core::Vector<const Scripting::AstNode*>& path, uint32 line, uint32 column) const
 	{
 		for (uint32 i = path.Count(); i-- > 0;)
@@ -609,8 +614,8 @@ namespace C4LSP::Server
 				const bool after = line > start.line || (line == start.line && column >= start.column);
 				const bool before = line < end.line || (line == end.line && column <= end.column);
 				if (!after || !before) continue;
-				const Scripting::DeclaredAnnotations::Overloads* overloads = Annotations().Find(item.GetName().c_str());
-				const Scripting::AnnotationSignature* likely = overloads ? Scripting::LikelyOverload(*overloads, item) : nullptr;
+				const Scripting::DeclaredAnnotations::Overloads overloads = Annotations().Find(item.GetName().c_str(), AnnotationContextAt(path, token.GetStartLocation().sourceId));
+				const Scripting::AnnotationSignature* likely = overloads.Empty() ? nullptr : Scripting::LikelyOverload(overloads, item);
 				return likely ? likely->declaration : nullptr;
 			}
 			return nullptr; // in its arguments: what they name, not the annotation
@@ -745,7 +750,7 @@ namespace C4LSP::Server
 	{
 		if (const Scripting::AnnotationSignature* declared = Annotations().Declared(declaration))
 		{
-			for (const Scripting::AnnotationSignature* overload : *Annotations().Find(declared->name.c_str())) // a use names them all
+			for (const Scripting::AnnotationSignature* overload : *Annotations().Named(declared->qualifiedName.c_str())) // a use names them all
 				if (std::find(out.begin(), out.end(), overload->declaration) == out.end())
 					out.push_back(overload->declaration);
 			return;

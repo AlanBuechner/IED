@@ -1,0 +1,6 @@
+// marks.ch declares [Marked]; other.cf includes it, this file does not.
+
+[Marked]
+struct Light { public float intensity; }
+
+int32 main() { Light l; return (int32)l.intensity; }

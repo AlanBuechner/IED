@@ -10,6 +10,7 @@ namespace Scripting
 {
 	class ObjectType;
 	class ProgramModel;
+	struct AnnotationContext;
 	struct AnnotationItem;
 	struct AstNode;
 	struct FunctionRecord;
@@ -38,7 +39,7 @@ namespace Scripting
 		void Check(const Core::Vector<const AstNode*>& declarations, AnnotationPlace place, const Scope* scope);
 		void Check(const AstNode* declaration, AnnotationPlace place, const Scope* scope);
 		void CheckItem(const AnnotationItem& item, AnnotationPlace place, const Scope* scope);
-		void CheckUndeclared(const AnnotationItem& item);
+		void CheckUndeclared(const AnnotationItem& item, const AnnotationContext& at);
 		void Report(const SourceLocation& at, const Core::String& message, ErrorSeverity severity = ErrorSeverity::Error);
 		bool IsNew(const void* entity) { return m_Checked.insert(entity).second; }
 

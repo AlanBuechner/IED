@@ -186,7 +186,7 @@ namespace C4LSP::Features
 		std::string uses;
 		std::string doc = DocComment::Of(session, declaration);
 		Scripting::AnnotationPlaces places = Scripting::AnnotationPlaces::None();
-		for (const Scripting::AnnotationSignature* overload : *annotations.Find(declared->name.c_str()))
+		for (const Scripting::AnnotationSignature* overload : *annotations.Named(declared->qualifiedName.c_str()))
 		{
 			uses += (uses.empty() ? "[" : "\n[") + std::string(overload->ToString().c_str()) + "]";
 			places.Add(overload->places);

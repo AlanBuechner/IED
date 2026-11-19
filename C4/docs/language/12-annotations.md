@@ -95,7 +95,8 @@ Details worth knowing:
 **Status:** **Implemented**
 
 Any other annotation name is legal and has no compile-time effect beyond its check (section 4.2). It is kept on the
-declaration and registered with runtime reflection (D-42): its name as written and its folded arguments, on types, enums,
+declaration and registered with runtime reflection (D-42): its name (as written; a declared one's qualified name, section 4.2) and its
+folded arguments, on types, enums,
 fields, methods, parameters, functions and variables, so libraries and tools define their own (a
 serializer's `[Serialize]`, an editor's `[Range(0, 1)]`). See
 [runtime/02-reflection.md](../runtime/02-reflection.md) section 3.3.
@@ -123,30 +124,31 @@ short compiler annotation (`test`, `link`, `uuid`, `group`) or two from a longer
 
 A library declares the annotations it reads, with the arguments each takes and where it goes, so a use is checked where
 it is written - a misspelt name, a missing or extra argument, a string where a number belongs, an annotation on the
-wrong kind of declaration - and the editor completes the name and shows the arguments as you type them.
+wrong kind of declaration - and the editor completes the name and shows the arguments as you type them. A library
+declares the annotations every user writes in the global namespace, so a use anywhere names them alone; one declared
+in a namespace is named as any of its names is (section 4.2).
 
 ```c4
-namespace Scene
-{
-	/// [Component]: a type tools list as a component.
-	annotation Component on type;
+/// [Component]: a type tools list as a component.
+annotation Component on type;
 
-	/// [Requires(Render::MeshRenderer, ...)]: the components a component's entity cannot be without.
-	annotation Requires(typename component, typename... more) on type;
+/// [Requires(Render::MeshRenderer, ...)]: the components a component's entity cannot be without.
+annotation Requires(typename component, typename... more) on type;
 
-	/// [Range(min, max)]: the inspector's slider bounds.
-	annotation Range(int64 min, int64 max) on field, parameter;
-	annotation Range(double min, double max) on field, parameter;
+/// [Range(min, max)]: the inspector's slider bounds.
+annotation Range(int64 min, int64 max) on field, parameter;
+annotation Range(double min, double max) on field, parameter;
 
-	/// [Step(by)]: the inspector's step; 1 when written [Step].
-	annotation Step(double by = 1.0) on field;
+/// [Step(by)]: the inspector's step; 1 when written [Step].
+annotation Step(double by = 1.0) on field;
 
-	/// [System] or [System("group", ...)]: the worlds a system is made in.
-	annotation System(const char*... groups) on type;
+/// [System] or [System("group", ...)]: the worlds a system is made in.
+annotation System(const char*... groups) on type;
 
-	/// [Tag("name")]: anywhere.
-	annotation Tag(const char* name);
-}
+/// [Tag("name")]: anywhere.
+annotation Tag(const char* name);
+
+namespace Script { annotation Callable on function; } // [Script::Callable] outside namespace Script
 
 [Component, Requires(Render::MeshRenderer)]          // fine
 struct MeshCollider { [Range(0, 1)] public float friction; }
@@ -198,21 +200,32 @@ annotation_declaration := 'annotation' name [ '(' [ parameter { ',' parameter } 
   | `variable` | variables at namespace scope |
 
   Each overload has its own places; a use takes only an overload that goes where it is written.
-- An annotation is named by its **own name**, the last part of what is written: `[Requires]` and `[Scene::Requires]`
-  both name the one `Requires` declares, wherever it is declared and whether or not the file sees its namespace. The
-  compiler's own annotations (section 2) cannot be declared.
+- An annotation belongs to the namespace it is declared in, and a use names it as section 4.2 says. The compiler's own
+  annotations (section 2) cannot be declared.
 - A declaration declares an annotation and nothing else: it is no function, type or variable, so `Scene::Range(0, 1)` is
   the error `'Scene::Range' declares the annotation [Range] ...: it is written in brackets on a declaration, not called`.
 - `[annotation]` declares nothing: written anywhere, it is an error naming this form.
 
 ### 4.2 Uses
 
+A use names a declared annotation as any name is named (D-87):
+
+- `[Range]` is looked up from where it is written - the type it is on or in, then each namespace around it - out to the
+  global namespace, and the first namespace that declares a `Range` the use sees has it; an inner one hides an outer one.
+  `[Scene::Range]` names the one namespace `Scene` declares, from anywhere.
+- A use sees the declarations of its own file and of the files it includes, as it sees their types.
+- Reflection registers a declared annotation by its qualified name, however it is written: `[Range]` inside namespace
+  `Scene` and `[Scene::Range]` outside it are both `Scene::Range`; one declared in the global namespace is its own name.
+
 Every annotation of what reflection registers is checked (types, fields, enums, unions, globals, functions and their
 parameters), as the program's model is built, so the editor shows each error where it is written:
 
 - A **declared** annotation must fit one of its declarations: their places, their argument count and each argument's
   kind. The error names the declarations it was matched against.
-- An **undeclared** name that is a near miss of a declared one (one edit from a name shorter than 6 characters, two
+- A name a declaration has but the use does not see is an error saying why: `annotation [Range] is not visible here:
+  Scene::Range is declared in namespace Scene: write [Scene::Range]`, or `... it is declared in scene.ch, which this file
+  does not include`.
+- An **undeclared** name that is a near miss of one the use sees (one edit from a name shorter than 6 characters, two
   from a longer one, case counting) is an error naming the one it misspells. Any other undeclared annotation is a
   **warning** (`annotation [Serialize] is not declared: declare it, what it takes and where it goes, with
   `annotation Serialize(...) on ...;``) and is kept for reflection as written (section 3), as before.
@@ -230,8 +243,8 @@ Reflection registers the arguments as the chosen overload's parameters take them
 
 ### 4.4 In the editor
 
-C4LSP knows a declared annotation as code: completion inside `[...]` offers the declared annotations that go where the
-caret is (and the compiler's own), and after `on` the places; signature help inside its parentheses shows every overload
+C4LSP knows a declared annotation as code: completion inside `[...]` offers the declared annotations the caret sees
+that go where it is (and the compiler's own), after `[Scene::` those of namespace `Scene`, and after `on` the places; signature help inside its parentheses shows every overload
 with the current argument; hover on a use or a declaration shows its declarations and doc comment; go-to-definition
 leads to the overload whose parameters the use's written arguments fit; find-references and rename of any of its
 declarations reach every declaration and use; and its declarations are in the outline and workspace symbols, `annotation`,

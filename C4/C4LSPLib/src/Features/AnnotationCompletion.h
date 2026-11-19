@@ -1,6 +1,7 @@
 #pragma once
 #include "Features/Completion.h" // CompletionItem
 #include "Model/AnnotationPlaces.h"
+#include "Model/DeclaredAnnotations.h"
 #include <optional>
 #include <string>
 
@@ -17,6 +18,7 @@ namespace C4LSP::Features
 		struct Site
 		{
 			std::optional<Scripting::AnnotationPlace> place; // what the annotations are written on, when the text says
+			std::string qualifier;                           // what is written before the name: `Scene::` of `[Scene::Ra`
 		};
 
 		/// The annotation name the caret at byte `caret` of `text` is on; nothing when it is on none. `inType`: the caret is in
@@ -24,7 +26,7 @@ namespace C4LSP::Features
 		static std::optional<Site> Find(const std::string& text, size_t caret, bool inType);
 
 		/// The annotations `site` may name, listed before code's names (a `[` may also start a lambda or a return list).
-		static void Add(const Server::SemanticResolver& resolver, const Site& site, Core::Vector<CompletionItem>& out);
+		static void Add(const Server::SemanticResolver& resolver, const Site& site, const Scripting::AnnotationContext& at, Core::Vector<CompletionItem>& out);
 
 		/// Whether the caret at byte `caret` of `text` is on a place of an annotation declaration: after its `on`, or after a
 		/// `,` of the places (`annotation Range(double min, double max) on field, |`).

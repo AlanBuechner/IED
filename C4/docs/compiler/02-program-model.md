@@ -111,8 +111,9 @@ declarations, then finalizes:
    an error here, so an editor shows it; a template instance an argument names is made here, and when one was, steps
    3 and 4 run again for it, so the model never makes a type while the reflection image reads it. The annotations the
    program declares (`annotation Range(double min, double max) on field;`, each kept as a site when its namespace is
-   registered) are read first, every type known (`Model/DeclaredAnnotations`), and each use is matched against its
-   annotation's overloads (`Model/AnnotationOverloads`).
+   registered) are read first, every type known (`Model/DeclaredAnnotations`); each use is looked up as a name is, from
+   its scope out through its namespaces and among the files its file includes, then matched against the overloads it
+   finds (`Model/AnnotationOverloads`).
 
 Build-time type resolution is program-wide (unit 0). Errors (duplicate definitions, unresolved types) are
 reported through the builder's error tracker.

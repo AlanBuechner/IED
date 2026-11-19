@@ -44,6 +44,9 @@ namespace C4LSP::Server
 		/// The declaration of the annotation whose name is at `position` (`Requires` of `[Requires(Mesh)]`): the overload its
 		/// arguments take, else the first; null off an annotation's name, and for a name nothing declares.
 		const Scripting::AstNode* AnnotationNamedAt(const Core::Vector<const Scripting::AstNode*>& path, uint32 line, uint32 column) const;
+		/// Where an annotation written at the end of `path`, in the file `sourceId`, is looked up from, as the model looks it
+		/// up (docs/language/12 section 4.2): the type it is in, else its namespace.
+		Scripting::AnnotationContext AnnotationContextAt(const Core::Vector<const Scripting::AstNode*>& path, uint32 sourceId) const;
 
 		/// Resolve a reference node to its type + declaring declaration, given the enclosing AST path
 		/// (outermost first, innermost last) that contains it. The path supplies the function-local

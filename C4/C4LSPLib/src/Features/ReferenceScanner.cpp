@@ -221,8 +221,9 @@ namespace C4LSP::Features
 		if (node.Type() == Scripting::NodeType::AnnotationItem)
 		{
 			const auto& item = static_cast<const Scripting::AnnotationItem&>(node);
-			const Scripting::DeclaredAnnotations::Overloads* overloads = search.resolver.Annotations().Find(item.GetName().c_str());
-			if (overloads && std::any_of(overloads->begin(), overloads->end(),
+			const Scripting::DeclaredAnnotations::Overloads overloads = search.resolver.Annotations().Find(item.GetName().c_str(),
+				search.resolver.AnnotationContextAt(path, item.startLocation.sourceId));
+			if (std::any_of(overloads.begin(), overloads.end(),
 				[&](const Scripting::AnnotationSignature* overload) { return search.targets.count(overload->declaration) > 0; }))
 				search.sink(Occurrence{ &node, NameOf(node), true }, path);
 			return;   // its arguments are walked as children

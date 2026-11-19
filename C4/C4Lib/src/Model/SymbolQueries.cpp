@@ -250,7 +250,7 @@ namespace Scripting
 		// arguments (D-17); a call that writes template arguments names only templates.
 		if (tmplArgs) candidates.Clear();
 		if (!isOperatorName) FunctionTemplates::Collect(model, templates, candidates, reasons);
-		if (candidates.Empty() && !haveReceiver && reasons.Empty() && model.Annotations().Find(name.c_str()))
+		if (candidates.Empty() && !haveReceiver && reasons.Empty() && !model.Annotations().Find(name.c_str(), AnnotationContext{ ctx.scope, ctx.unitId }).Empty())
 			reasons.Push("'" + name + "' declares the annotation [" + DeclaredAnnotations::OwnName(name.c_str()) + "] (docs/language/12 section 4): it is "
 				"written in brackets on a declaration, not called");
 		if (candidates.Empty())

@@ -1597,7 +1597,7 @@
         "reason": "An argument that reads only as a type must name one."
     },
     "AnnotationMisspelt": {
-        "expect": ["main.cf (5:2) error: unknown annotation 'Requiers': did you mean 'Requires', which Scene::Annotations::Requires declares?"],
+        "expect": ["main.cf (5:2) error: unknown annotation 'Requiers': did you mean 'Requires'? (an annotation nothing declares is kept for reflection, and nothing that reads [Requires] sees it)"],
         "reason": "A near miss of a declared annotation (annotation Requires(...) on type;) is a typo nothing would read: the owner's [Requiers] silently required nothing."
     },
     "AnnotationArgumentKind": {
@@ -1615,6 +1615,14 @@
     "AnnotationStructDeclaration": {
         "expect": ["main.cf (1:2) error: [annotation] declares nothing: an annotation is declared by `annotation Name(parameters) on places;` at namespace scope (docs/language/12 section 4)"],
         "reason": "An annotation is declared by its own declaration, with what it takes and where it goes (D-87); the struct form, and the [annotation] function form after it, declare nothing."
+    },
+    "AnnotationInAnotherNamespace": {
+        "expect": ["main.cf (5:3) error: annotation [Range] is not visible here: Scene::Range is declared in namespace Scene: write [Scene::Range]"],
+        "reason": "An annotation is named as any name is (D-87): a namespace's is seen in that namespace, and elsewhere by its qualified name. It used to be found by its own name from anywhere."
+    },
+    "AnnotationNotIncluded": {
+        "expect": ["main.cf (3:2) error: annotation [Marked] is not visible here: it is declared in ", "marks.ch, which this file does not include"],
+        "reason": "A file sees the annotations of the files it includes, as it sees their types (D-87)."
     },
     "AnnotationDeclaredInType": {
         "expect": ["main.cf (3:2) error: [Tint] is declared at namespace scope, not in a type (docs/language/12 section 4)"],
