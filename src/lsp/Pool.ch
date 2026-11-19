@@ -14,7 +14,7 @@ namespace Ied
 	const int64 c_LspIndexWaitMs = 30000;     // how long workspace symbols wait for the servers' indexes
 	const int64 c_LspIndexGraceMs = 2000;     // a server this new is given this long to begin indexing
 	const int64 c_LspIndexSliceNs = 50000000;
-	const int64 c_LspSweepNs = 1000000000;    // how often idle servers are looked for (lsp.idleStopMinutes)
+	const int64 c_LspSweepNs = 1000000000;    // how often idle and rebuilt servers are looked for (lsp.idleStopMinutes)
 	const char* c_LspIdleSetting = "lsp.idleStopMinutes";
 
 	// A transient file closed to keep its server under c_LspTransientMost: its path, and whether the server had published
@@ -127,9 +127,11 @@ namespace Ied
 		// The server started again when its options with its initializationOptionsFile read otherwise than it started with
 		// (initialization options reach a server only when it starts).
 		private void RestartIfOptionsChanged(LanguageServer* language);
-		// Every second, on a thread of its own: a server none of whose documents a window shows, and that nothing asked or
-		// told anything for lsp.idleStopMinutes, stops and leaves the pool; it starts again when it is needed.
+		// Every second, on a thread of its own: a server whose staged program was rebuilt starts again from a new copy; a
+		// server none of whose documents a window shows, and that nothing asked or told anything for lsp.idleStopMinutes,
+		// stops and leaves the pool; it starts again when it is needed.
 		private void SweepLoop();
+		private void RestartRebuilt(int64 nowNs);
 		private void StopIdle(int64 nowNs);
 		// Whether a window shows one of the documents `language` has open (a client follows its doc: topic).
 		private bool Shown(const LanguageServer* language) const;

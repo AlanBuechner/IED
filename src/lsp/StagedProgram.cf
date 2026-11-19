@@ -1,0 +1,32 @@
+include "StagedProgram.ch"
+
+namespace Ied
+{
+	Core::String StagedKeyOf(Core::StringView program) {
+		FS::FileInfo info;
+		if (!FS::GetInfo(Core::String(program).CStr(), info)) return Core::String();
+		Core::StringBuilder key;
+		key.AppendInt(info.size);
+		key.Append("-");
+		key.AppendInt(info.modifiedNs);
+		return key.ToString();
+	}
+
+	void RebuildWatch::Started(Core::StringView key) {
+		m_StartedFrom = Core::String(key);
+		m_Seen = Core::String();
+		m_SeenSinceNs = 0;
+	}
+
+	bool RebuildWatch::Rebuilt(Core::StringView key, int64 nowNs, int64 settleNs) {
+		if (key.IsEmpty() || m_StartedFrom.IsEmpty() || key == m_StartedFrom.View()) {
+			m_Seen = Core::String();
+			return false;
+		}
+		if (key != m_Seen.View()) {
+			m_Seen = Core::String(key);
+			m_SeenSinceNs = nowNs;
+		}
+		return nowNs - m_SeenSinceNs >= settleNs;
+	}
+}

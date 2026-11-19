@@ -4,6 +4,7 @@
 #include "Model/DeclaredAnnotations.h"
 #include "Model/ProgramModel.h"
 #include "Model/Types/ObjectType.h"
+#include "Parser/NearNames.h"
 
 namespace Testing
 {
@@ -179,6 +180,31 @@ struct T { [Scene::Rang(0, 1)] public float b; [Rang(0, 1)] public float c; }
 		Scripting::CompilerInstance cased;
 		MakeModel(cased, std::string(kLibrary) + "[requires] struct Q { public int32 v; }\n");
 		TEST_ASSERT_EQ((int)Saying(cased, "unknown annotation 'requires': did you mean 'Requires'").Count(), 1); // case counts
+		TEST_PASSED();
+	}
+
+	// BUG-470: `[Rnage(0, 1)]` was two edits from Range, past a short name's one, so it was only the warning of an undeclared
+	// annotation - nothing said in a script build, and the field had no range.
+	void DeclaredAnnotationsTest::TwoSwappedNeighborsAreOneEdit()
+	{
+		TEST_ASSERT_EQ((int)Scripting::EditDistance("Rnage", "Range"), 1);
+		TEST_ASSERT_EQ((int)Scripting::EditDistance("Range", "Rnaeg"), 2); // two swaps
+		TEST_ASSERT_EQ((int)Scripting::EditDistance("Rang", "Range"), 1);
+		TEST_ASSERT_EQ((int)Scripting::EditDistance("ab", "ba"), 1);
+		TEST_ASSERT_EQ((int)Scripting::EditDistance("", "Step"), 4);
+		Scripting::CompilerInstance compiler;
+		MakeModel(compiler, R"(annotation Range(double min, double max) on field;
+annotation Step(double by) on field;
+struct S { [Rnage(0, 1)] public float a; [Setp(0.1)] public float b; [Rnaeg(0, 1)] public float c; }
+)");
+		auto range = Saying(compiler, "unknown annotation 'Rnage': did you mean 'Range'?");
+		TEST_ASSERT_EQ((int)range.Count(), 1);
+		TEST_ASSERT(range[0].severity == Scripting::ErrorSeverity::Error);
+		TEST_ASSERT_EQ((int)Saying(compiler, "unknown annotation 'Setp': did you mean 'Step'?").Count(), 1);
+		auto twice = Saying(compiler, "annotation [Rnaeg] is not declared");
+		TEST_ASSERT_EQ((int)twice.Count(), 1); // two swaps from a short name: no near miss
+		TEST_ASSERT(twice[0].severity == Scripting::ErrorSeverity::Warning);
+		TEST_ASSERT_EQ(Errors(compiler), 2);
 		TEST_PASSED();
 	}
 

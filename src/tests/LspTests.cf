@@ -1,4 +1,5 @@
-// lsp/: message framing, positions between UTF-16 and UTF-8, URIs, and the pool's message helpers.
+// lsp/: message framing, positions between UTF-16 and UTF-8, URIs, the pool's message helpers, and when a staged server's
+// program counts as rebuilt.
 
 include "lsp/Framing.ch"
 include "lsp/Positions.ch"
@@ -6,6 +7,7 @@ include "lsp/Uris.ch"
 include "lsp/Profiles.ch"
 include "lsp/Rewrite.ch"
 include "lsp/Pool.ch"
+include "lsp/StagedProgram.ch"
 
 static int64 Col(const char* line, int64 col, Ied::PositionEncoding from, Ied::PositionEncoding to) { return Ied::ConvertColumn(Core::StringView(line), col, from, to); }
 
@@ -271,5 +273,38 @@ class LspTests {
 		Ied::RpcError failed = Ied::LspServerError(Core::StringView("{\"code\":-32603,\"message\":\"boom\"}"));
 		assert_true(failed.m_Code == Ied::ErrorCode::PluginError && failed.m_Data.View().Contains(Core::StringView("-32603")), "any other error is the server's failure, its object kept");
 		assert_se("the language server failed", Ied::LspServerError(Core::StringView("{\"code\":-32603}")).m_Message.CStr(), "one without a message");
+	}
+
+	[test("staged_key")]
+	public static void TestStagedKey() {
+		FS::Path file = FS::TempDirectory() / "ied-lsp-staged-key-test.exe";
+		FS::RemoveFile(file.CStr());
+		assert_se("", Ied::StagedKeyOf(file.View()).CStr(), "no program: no key");
+		FS::File written = FS::File(file.CStr(), "wb");
+		written.Write((const void*)"abc", 3);
+		written.Close();
+		Core::String key = Ied::StagedKeyOf(file.View());
+		assert_true(key.View().StartsWith(Core::StringView("3-")) && key.ByteLength() > 2, "its size, then its time");
+		FS::RemoveFile(file.CStr());
+	}
+
+	[test("rebuild_watch")]
+	public static void TestRebuildWatch() {
+		const int64 settle = 3000;
+		Ied::RebuildWatch watch;
+		assert_true(!watch.Rebuilt(Core::StringView("9-1"), 10000, settle), "not started: nothing to compare with");
+		watch.Started(Core::StringView("9-1"));
+		assert_true(!watch.Rebuilt(Core::StringView("9-1"), 100, settle), "the program it started from");
+		assert_true(!watch.Rebuilt(Core::StringView(""), 200, settle), "a program a build removed is no rebuild");
+		assert_true(!watch.Rebuilt(Core::StringView("5-2"), 1000, settle), "a new program, seen first");
+		assert_true(!watch.Rebuilt(Core::StringView("8-3"), 3500, settle), "written on: seen anew");
+		assert_true(!watch.Rebuilt(Core::StringView("8-3"), 6000, settle), "not settled yet");
+		assert_true(watch.Rebuilt(Core::StringView("8-3"), 6500, settle), "the same for the settle time: rebuilt");
+		watch.Started(Core::StringView("8-3"));
+		assert_true(!watch.Rebuilt(Core::StringView("8-3"), 99999, settle), "started again from it");
+		assert_true(!watch.Rebuilt(Core::StringView("7-4"), 100000, settle), "rebuilt again");
+		assert_true(!watch.Rebuilt(Core::StringView("8-3"), 101000, settle), "put back as it was: nothing to do");
+		assert_true(!watch.Rebuilt(Core::StringView("7-4"), 102000, settle), "its clock starts again");
+		assert_true(watch.Rebuilt(Core::StringView("7-4"), 105000, settle), "settled");
 	}
 }

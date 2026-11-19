@@ -33,6 +33,9 @@ namespace Testing
 		void AMisspeltOneIsAnError();
 
 		TEST_FUNC(Semantic.DeclaredAnnotations)
+		void TwoSwappedNeighborsAreOneEdit();
+
+		TEST_FUNC(Semantic.DeclaredAnnotations)
 		void EveryKindOfDeclarationIsChecked();
 
 		TEST_FUNC(Semantic.DeclaredAnnotations)

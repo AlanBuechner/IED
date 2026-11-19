@@ -5,6 +5,7 @@
 
 include "Profiles.ch"
 include "Queue.ch"
+include "StagedProgram.ch"
 include "web/Rpc.ch"
 
 namespace Ied
@@ -83,6 +84,8 @@ namespace Ied
 		public void Stop();
 		// Stops it if it runs and starts it again, its exits forgotten (lsp.restart).
 		public void Relaunch();
+		// Whether it runs from a staged copy of a program rebuilt since it started, which has settled (RebuildWatch).
+		public bool Rebuilt(int64 nowNs);
 		// Whether a request to it waits for its answer.
 		public bool Answering() const { return m_Answers.Count() > 0; }
 		// What its profile's ${...} variables stand for.
@@ -91,7 +94,9 @@ namespace Ied
 		public Core::String Source() const;
 
 	private:
-		private Core::String ProgramToRun(Core::String& error) const;
+		// Its profile's command as an absolute path.
+		private FS::Path ProgramPath() const;
+		private Core::String ProgramToRun(Core::String& key, Core::String& error) const;
 		private Process::StartInfo StartInfoFor(Core::StringView program) const;
 		private Core::String InitializeParams();
 		private int64 Ask(Core::StringView method, Core::StringView params, CancelToken* wake);
@@ -116,5 +121,6 @@ namespace Ied
 		private int64 m_InitializeId;
 		private int64 m_Run;                    // which start the threads belong to; a later start leaves earlier ones be
 		private Core::Array<int64> m_ExitTimes;
+		private RebuildWatch m_Rebuild;          // the staged program it started from
 	}
 }

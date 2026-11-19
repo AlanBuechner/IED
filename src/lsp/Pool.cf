@@ -655,7 +655,18 @@ namespace Ied
 		for (;;) {
 			Threading::Thread::Sleep(c_LspSweepNs);
 			Threading::LockGuard guard(m_Server->m_Lock);
-			StopIdle(clock_now_ns());
+			const int64 nowNs = clock_now_ns();
+			RestartRebuilt(nowNs);
+			StopIdle(nowNs);
+		}
+	}
+
+	// A request it is answering waits: the restart would fail it.
+	void LspPool::RestartRebuilt(int64 nowNs) {
+		for (LanguageServer* language : m_Languages) {
+			if (language->Answering() || !language->Rebuilt(nowNs)) continue;
+			Log(language, Core::StringView("its program was rebuilt: starting it again from a new copy"));
+			language->Relaunch();
 		}
 	}
 

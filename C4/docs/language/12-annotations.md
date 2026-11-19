@@ -114,7 +114,8 @@ A function declared and defined apart carries both lists, the declaration's firs
 A near miss of a compiler annotation is a warning (D-42): `[operater("+")]` says `unknown annotation
 'operater': did you mean 'operator'?`. It is still kept as a user annotation. A near miss is one edit from a
 short compiler annotation (`test`, `link`, `uuid`, `group`) or two from a longer one, so `[Test]` warns and
-`[Tag]` does not. A near miss of a *declared* annotation (section 4) is an error, and any other undeclared annotation a warning.
+`[Tag]` does not; an edit is a character added, dropped or changed, or two neighbors swapped (`[tset]` is one edit
+from `test`). A near miss of a *declared* annotation (section 4) is an error, and any other undeclared annotation a warning.
 
 ---
 
@@ -226,7 +227,8 @@ parameters), as the program's model is built, so the editor shows each error whe
   Scene::Range is declared in namespace Scene: write [Scene::Range]`, or `... it is declared in scene.ch, which this file
   does not include`.
 - An **undeclared** name that is a near miss of one the use sees (one edit from a name shorter than 6 characters, two
-  from a longer one, case counting) is an error naming the one it misspells. Any other undeclared annotation is a
+  from a longer one, case counting; two swapped neighbors are one edit, so `[Rnage]` and `[Setp]` are near misses of
+  `Range` and `Step`) is an error naming the one it misspells. Any other undeclared annotation is a
   **warning** (`annotation [Serialize] is not declared: declare it, what it takes and where it goes, with
   `annotation Serialize(...) on ...;``) and is kept for reflection as written (section 3), as before.
 
