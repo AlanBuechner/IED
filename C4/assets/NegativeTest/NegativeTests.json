@@ -1598,7 +1598,7 @@
     },
     "AnnotationMisspelt": {
         "expect": ["main.cf (5:2) error: unknown annotation 'Requiers': did you mean 'Requires', which Scene::Annotations::Requires declares?"],
-        "reason": "A near miss of a declared annotation ([annotation] void Requires(...)) is a typo nothing would read: the owner's [Requiers] silently required nothing."
+        "reason": "A near miss of a declared annotation (annotation Requires(...) on type;) is a typo nothing would read: the owner's [Requiers] silently required nothing."
     },
     "AnnotationArgumentKind": {
         "expect": ["main.cf (5:12) error: [Range] argument 2 ('max') is a double: \"bright\" is a string"],
@@ -1606,15 +1606,19 @@
     },
     "AnnotationWrongPlace": {
         "expect": ["main.cf (3:2) error: [Range] goes on a field, not on a type"],
-        "reason": "[annotation(\"field\")] says where an annotation goes (D-87); on a type nothing reads it."
+        "reason": "`on field` says where an annotation goes (D-87); on a type nothing reads it."
     },
     "AnnotationCalled": {
         "expect": ["main.cf (3:16) error: 'Scene::Range' declares the annotation [Range] (docs/language/12 section 4): it is written in brackets on a declaration, not called"],
         "reason": "An annotation declaration is no function (D-87): it is never emitted, so a call to it would link to nothing."
     },
     "AnnotationStructDeclaration": {
-        "expect": ["main.cf (1:1) error: [annotation] declares an annotation by a function declaration, its parameters the annotation's arguments: write `[annotation] void Component(...);`"],
-        "reason": "An annotation is declared by a function declaration whose parameters are its arguments (D-87); the struct form it replaced declared no arguments."
+        "expect": ["main.cf (1:2) error: [annotation] declares nothing: an annotation is declared by `annotation Name(parameters) on places;` at namespace scope (docs/language/12 section 4)"],
+        "reason": "An annotation is declared by its own declaration, with what it takes and where it goes (D-87); the struct form, and the [annotation] function form after it, declare nothing."
+    },
+    "AnnotationDeclaredInType": {
+        "expect": ["main.cf (3:2) error: [Tint] is declared at namespace scope, not in a type (docs/language/12 section 4)"],
+        "reason": "An annotation is the program's, named by its own name wherever it is declared; a type's body holds none."
     },
     "CompilerAnnotationNotLiteral": {
         "expect": ["'group' takes string literal arguments"],

@@ -10,9 +10,9 @@ namespace Testing
 	namespace
 	{
 		const char* kLibrary = R"(namespace Lib { namespace Annotations {
-	[annotation("type")] void Requires(typename component, typename... more);
-	[annotation("type")] void Requires(const char* typeName, const char*... more);
-	[annotation("type")] void Component();
+	annotation Requires(typename component, typename... more) on type;
+	annotation Requires(const char* typeName, const char*... more) on type;
+	annotation Component on type;
 } }
 )";
 
@@ -122,7 +122,7 @@ union U { [Componnent] int32 i; float f; }
 		Scripting::CompilerInstance compiler;
 		MakeModel(compiler, std::string(kLibrary) + "[Serialize, Tint(1, 2)] struct U { [Lib::Hidden] public int32 v; }\n");
 		TEST_ASSERT_EQ(Errors(compiler), 0);
-		auto serialize = Saying(compiler, "annotation [Serialize] is not declared: declare it, and what it takes, with `[annotation] void Serialize(...);`");
+		auto serialize = Saying(compiler, "annotation [Serialize] is not declared: declare it, what it takes and where it goes, with `annotation Serialize(...) on ...;`");
 		TEST_ASSERT_EQ((int)serialize.Count(), 1);
 		TEST_ASSERT(serialize[0].severity == Scripting::ErrorSeverity::Warning);
 		TEST_ASSERT(At(serialize[0], 6, 2));
@@ -138,7 +138,7 @@ union U { [Componnent] int32 i; float f; }
 	void DeclaredAnnotationsTest::TheClosestIsNamed()
 	{
 		Scripting::CompilerInstance compiler;
-		const auto& model = MakeModel(compiler, "[annotation] void Hidden(); [annotation] void Hinted(); [annotation] void Bidden();\n");
+		const auto& model = MakeModel(compiler, "annotation Hidden; annotation Hinted; annotation Bidden;\n");
 		const Scripting::DeclaredAnnotations& declared = model.Annotations();
 		TEST_ASSERT((*declared.MisspeltBy("Hiddem"))[0]->name == "Hidden"); // one edit beats two
 		TEST_ASSERT((*declared.MisspeltBy("Xidden"))[0]->name == "Bidden"); // a tie: the name first in order, whatever the map's
@@ -149,10 +149,10 @@ union U { [Componnent] int32 i; float f; }
 	void DeclaredAnnotationsTest::TheArgumentCountIsChecked()
 	{
 		Scripting::CompilerInstance compiler;
-		MakeModel(compiler, R"([annotation] void None();
-[annotation] void Two(int32 a, int32 b);
-[annotation] void Optional(int32 a, int32 b = 2, int32 c = 3);
-[annotation] void AtLeast(int32 first, int32... more);
+		MakeModel(compiler, R"(annotation None;
+annotation Two(int32 a, int32 b);
+annotation Optional(int32 a, int32 b = 2, int32 c = 3);
+annotation AtLeast(int32 first, int32... more);
 [None(1), Two(1), Optional, AtLeast] struct S { public int32 v; }
 [Two(1, 2, 3)] struct T { public int32 v; }
 [Optional(1, 2, 3, 4)] struct U { public int32 v; }
@@ -171,11 +171,11 @@ union U { [Componnent] int32 i; float f; }
 	{
 		Scripting::CompilerInstance compiler;
 		MakeModel(compiler, R"(struct Mesh { public int32 v; }
-[annotation] void Range(double min, double max);
-[annotation] void Label(const char* text);
-[annotation] void On(bool on);
-[annotation] void Of(typename type);
-[annotation] void Count(int32 n);
+annotation Range(double min, double max);
+annotation Label(const char* text);
+annotation On(bool on);
+annotation Of(typename type);
+annotation Count(int32 n);
 [Range(0, "far")] struct A { public int32 v; }
 [Label(3), On(1), Of("Mesh"), Count(0.5)] struct B { public int32 v; }
 [Range(true, Mesh), Label(Mesh), Of(Mesh), Count(2), On(false), Label("ok")] struct C { public int32 v; }
@@ -196,9 +196,9 @@ union U { [Componnent] int32 i; float f; }
 	void DeclaredAnnotationsTest::AnIntegerMustFitItsParameter()
 	{
 		Scripting::CompilerInstance compiler;
-		MakeModel(compiler, R"([annotation] void Byte(uint8 b);
-[annotation] void Small(int8 s);
-[annotation] void Unsigned(uint64 u);
+		MakeModel(compiler, R"(annotation Byte(uint8 b);
+annotation Small(int8 s);
+annotation Unsigned(uint64 u);
 [Byte(255), Small(-128), Unsigned(0)] struct A { public int32 v; }
 [Byte(256)] struct B { public int32 v; }
 [Small(-129)] struct C { public int32 v; }
@@ -215,8 +215,8 @@ union U { [Componnent] int32 i; float f; }
 	{
 		Scripting::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, R"(namespace Render { enum class Pass { Opaque, Glass } enum class Other { Glass } enum Plain { First, Second } }
-[annotation] void Drawn(Render::Pass pass);
-[annotation] void Kind(Render::Plain kind);
+annotation Drawn(Render::Pass pass);
+annotation Kind(Render::Plain kind);
 [Drawn(Render::Pass::Glass)] struct A { public int32 v; }
 namespace Render { [Drawn(Pass::Opaque), Kind(Second)] struct B { public int32 v; } }
 [Drawn(Render::Other::Glass)] struct C { public int32 v; }
@@ -237,12 +237,12 @@ namespace Render { [Drawn(Pass::Opaque), Kind(Second)] struct B { public int32 v
 	{
 		Scripting::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, R"(struct Mesh { public int32 v; }
-[annotation] void Range(int64 min, int64 max);
-[annotation] void Range(double min, double max);
-[annotation] void Of(typename type);
-[annotation] void Of(const char* name);
-[annotation] void Pick(int64 a);
-[annotation] void Pick(int32 a);
+annotation Range(int64 min, int64 max);
+annotation Range(double min, double max);
+annotation Of(typename type);
+annotation Of(const char* name);
+annotation Pick(int64 a);
+annotation Pick(int32 a);
 [Range(0, 1), Of(Mesh)] struct Ints { public int32 v; }
 [Range(0, 1.5), Of("Mesh")] struct Mixed { public int32 v; }
 [Pick(1)] struct Tie { public int32 v; }
@@ -266,9 +266,9 @@ namespace Render { [Drawn(Pass::Opaque), Kind(Second)] struct B { public int32 v
 	void DeclaredAnnotationsTest::ReflectionRegistersWhatTheDeclarationTakes()
 	{
 		Scripting::CompilerInstance compiler;
-		const auto& model = MakeModel(compiler, R"([annotation("field")] void Range(double min, double max);
-[annotation("field")] void Step(double by = 0.25, bool snap = true);
-[annotation("field")] void Note(const char* text = "none");
+		const auto& model = MakeModel(compiler, R"(annotation Range(double min, double max) on field;
+annotation Step(double by = 0.25, bool snap = true) on field;
+annotation Note(const char* text = "none") on field;
 struct S { [Range(0, 2), Step, Note] public float a; [Step(1)] public float b; [Free(1)] public float c; }
 )");
 		TEST_ASSERT_EQ(Errors(compiler), 0);
@@ -290,7 +290,7 @@ struct S { [Range(0, 2), Step, Note] public float a; [Step(1)] public float b; [
 	void DeclaredAnnotationsTest::APackTakesAnyNumber()
 	{
 		Scripting::CompilerInstance compiler;
-		const auto& model = MakeModel(compiler, std::string(kLibrary) + R"([annotation("type")] void Groups(const char*... names);
+		const auto& model = MakeModel(compiler, std::string(kLibrary) + R"(annotation Groups(const char*... names) on type;
 struct A { public int32 v; } struct B { public int32 v; }
 [Groups, Requires(A)] struct One { public int32 v; }
 [Groups("x", "y", "z"), Requires(A, B, A)] struct Three { public int32 v; }
@@ -313,13 +313,13 @@ struct A { public int32 v; } struct B { public int32 v; }
 	void DeclaredAnnotationsTest::PlacesAreChecked()
 	{
 		Scripting::CompilerInstance compiler;
-		MakeModel(compiler, R"([annotation("type")] void OnType();
-[annotation("field", "parameter")] void Range(double min, double max);
-[annotation("method")] void Handler();
-[annotation("function")] void Entry();
-[annotation("variable")] void Setting();
-[annotation("enum", "union")] void Flags();
-[annotation] void Anywhere();
+		MakeModel(compiler, R"(annotation OnType on type;
+annotation Range(double min, double max) on field, parameter;
+annotation Handler on method;
+annotation Entry on function;
+annotation Setting on variable;
+annotation Flags on enum, union;
+annotation Anywhere;
 [OnType, Anywhere, Range(0, 1)] struct S
 {
 	[Range(0, 1), OnType, Anywhere] public float speed;
@@ -349,54 +349,85 @@ struct A { public int32 v; } struct B { public int32 v; }
 	{
 		Scripting::CompilerInstance compiler;
 		MakeModel(compiler, R"(struct Mesh { public int32 v; }
-[annotation("thing")] void BadPlace();
-[annotation] void BadType(Mesh m);
-[annotation] void Unknown(Nowhere n);
-[annotation] void BadOrder(int32 a = 1, int32 b);
-[annotation] void PackFirst(int32... a, int32 b);
-[annotation] void TypeDefault(typename t = 1);
-[annotation] void BadDefault(int32 n = "x");
-[annotation] void Variadic(int32 a, ...);
-[annotation] void test();
-[annotation] void Twice(int32 a);
-[annotation] void Twice(int32 b);
-[annotation] void Fine(int32 a, int32 b = 2, int32... rest);
+annotation BadPlace on thing;
+annotation BadType(Mesh m);
+annotation Unknown(Nowhere n);
+annotation BadOrder(int32 a = 1, int32 b);
+annotation PackFirst(int32... a, int32 b);
+annotation TypeDefault(typename t = 1);
+annotation BadDefault(int32 n = "x");
+annotation test;
+annotation annotation;
+annotation Twice(int32 a);
+annotation Twice(int32 b);
+annotation TwoFields on field, parameter, field;
+annotation Fine(int32 a, int32 b = 2, int32... rest);
 )");
-		TEST_ASSERT_EQ((int)Saying(compiler, "'thing' is no place an annotation goes: one of type, enum, union, field, method, function, parameter, variable").Count(), 1);
+		auto place = Saying(compiler, "'thing' is no place an annotation goes: one of type, enum, union, field, method, function, parameter, variable");
+		TEST_ASSERT_EQ((int)place.Count(), 1);
+		TEST_ASSERT(At(place[0], 2, 24)); // at the place
 		TEST_ASSERT_EQ((int)Saying(compiler, "an annotation parameter is a bool, an integer, a float or double, a const char*, an enum or typename: 'Mesh' is none of them").Count(), 1);
 		TEST_ASSERT_EQ((int)Saying(compiler, "'Nowhere' names no type").Count(), 1);
 		TEST_ASSERT_EQ((int)Saying(compiler, "a parameter with a default is followed only by parameters with one, or a pack: 'int32 b' has none").Count(), 1);
 		TEST_ASSERT_EQ((int)Saying(compiler, "a pack is an annotation's last parameter: 'int32... a' is followed by more").Count(), 1);
 		TEST_ASSERT_EQ((int)Saying(compiler, "'typename t' takes no default").Count(), 1);
 		TEST_ASSERT_EQ((int)Saying(compiler, "the default of 'int32 n' is an int32: \"x\" is a string").Count(), 1);
-		TEST_ASSERT_EQ((int)Saying(compiler, "an annotation takes no C '...'").Count(), 1);
 		TEST_ASSERT_EQ((int)Saying(compiler, "'test' is the compiler's own annotation").Count(), 1);
-		TEST_ASSERT_EQ((int)Saying(compiler, "[Twice] is declared twice with the same parameters: Twice already declares Twice(int32 a)").Count(), 1);
-		TEST_ASSERT_EQ(Errors(compiler), 10);
+		TEST_ASSERT_EQ((int)Saying(compiler, "'annotation' starts an annotation's declaration: it names none").Count(), 1);
+		auto twice = Saying(compiler, "[Twice] is declared twice with the same parameters: Twice already declares Twice(int32 a)");
+		TEST_ASSERT_EQ((int)twice.Count(), 1);
+		TEST_ASSERT(At(twice[0], 12, 12)); // at the second one's name
+		TEST_ASSERT_EQ((int)Saying(compiler, "[TwoFields] goes on a field once: 'field' is written twice").Count(), 1);
+		TEST_ASSERT_EQ(Errors(compiler), 11);
 		TEST_PASSED();
 	}
 
-	void DeclaredAnnotationsTest::OnlyAFunctionDeclarationAtNamespaceScopeDeclaresOne()
+	void DeclaredAnnotationsTest::ItsSyntaxErrorsAreSaidOnce()
 	{
 		Scripting::CompilerInstance compiler;
-		MakeModel(compiler, R"([annotation] struct Old {}
-[annotation] template<T> struct Box { public T value; }
-struct S { [annotation] public int32 field; [annotation] public void Method() { } }
-[annotation] int32 Returns();
-[annotation] void Body() { }
-[annotation] template<T> void Generic();
-namespace N { [annotation] void Fine(); }
-[annotation] void N::Qualified();
+		MakeModel(compiler, R"(annotation Open(int32 a;
+annotation NoPlace on 3;
+annotation Missing field;
+annotation Dots(int32 a, ...);
+annotation Fine(int32 a) on field;
+struct S { annotation Inner on field; public int32 v; }
+[annotation("type")] void Old();
+namespace N { annotation Last on type }
+struct T { [Fine(2)] public int32 v; }
 )");
-		TEST_ASSERT_EQ((int)Saying(compiler, "[annotation] declares an annotation by a function declaration, its parameters the annotation's arguments: write `[annotation] void Old(...);`").Count(), 1);
-		TEST_ASSERT_EQ((int)Saying(compiler, "write `[annotation] void Box(...);`").Count(), 1);
-		TEST_ASSERT_EQ((int)Saying(compiler, "on a field it declares nothing").Count(), 1);
-		TEST_ASSERT_EQ((int)Saying(compiler, "on a method it declares nothing").Count(), 1);
-		TEST_ASSERT_EQ((int)Saying(compiler, "declares [Returns] by a function declaration at namespace scope (`[annotation] void Returns(...);`): it returns void").Count(), 1);
-		TEST_ASSERT_EQ((int)Saying(compiler, "declares [Body] by a function declaration at namespace scope (`[annotation] void Body(...);`): it has no body").Count(), 1);
-		TEST_ASSERT_EQ((int)Saying(compiler, "declares [Generic] by a function declaration at namespace scope (`[annotation] void Generic(...);`): it is no template").Count(), 1);
-		TEST_ASSERT_EQ((int)Saying(compiler, "declares [Qualified] by a function declaration at namespace scope (`[annotation] void Qualified(...);`): write it in its namespace").Count(), 1);
-		TEST_ASSERT_EQ(Errors(compiler), 8);
+		TEST_ASSERT_EQ((int)Saying(compiler, "Expected ')' to close the parameters of [Open], got ';'").Count(), 1);
+		TEST_ASSERT_EQ((int)Saying(compiler, "Expected a place [NoPlace] goes (type, field, ...), got '3'").Count(), 1);
+		TEST_ASSERT_EQ((int)Saying(compiler, "Expected '(', 'on' or ';' after the declaration of [Missing], got 'field'").Count(), 1);
+		TEST_ASSERT_EQ((int)Saying(compiler, "an annotation takes no C '...': name what it takes as a pack").Count(), 1);
+		auto inner = Saying(compiler, "[Inner] is declared at namespace scope, not in a type");
+		TEST_ASSERT_EQ((int)inner.Count(), 1);
+		TEST_ASSERT(At(inner[0], 6, 12));
+		auto old = Saying(compiler, "[annotation] declares nothing: an annotation is declared by `annotation Name(parameters) on places;` at namespace scope");
+		TEST_ASSERT_EQ((int)old.Count(), 1);
+		TEST_ASSERT(At(old[0], 7, 2));
+		TEST_ASSERT_EQ((int)Saying(compiler, "Expected ',' or ';' after the declaration of [Last], got '}'").Count(), 1); // the namespace keeps its brace
+		TEST_ASSERT_EQ(Errors(compiler), 7); // each said once: what follows parses
+		TEST_PASSED();
+	}
+
+	void DeclaredAnnotationsTest::AnnotationIsStillAName()
+	{
+		Scripting::CompilerInstance compiler;
+		MakeModel(compiler, R"(struct Annotation { public int32 v; }
+Annotation annotation;
+int32 g_annotation = 1;
+struct Holder { public int32 annotation; }
+int32 Use(int32 annotation) { return annotation; }
+int32 main()
+{
+	int32 annotation = 2;
+	annotation = annotation + Use(annotation);
+	Holder holder;
+	holder.annotation = annotation;
+	return holder.annotation;
+}
+)");
+		TEST_ASSERT(compiler.GetAllDiagnostics().Empty());
 		TEST_PASSED();
 	}
 
@@ -404,7 +435,7 @@ namespace N { [annotation] void Fine(); }
 	{
 		// A call to one is the error NegativeTest AnnotationCalled says.
 		Scripting::CompilerInstance unused;
-		const auto& model = MakeModel(unused, "[annotation] void Marked();\n[Marked] int32 main() { return 0; }\n");
+		const auto& model = MakeModel(unused, "annotation Marked;\n[Marked] int32 main() { return 0; }\n");
 		TEST_ASSERT(unused.GetAllDiagnostics().Empty());
 		Core::Vector<const Scripting::FunctionRecord*> records;
 		model.AllFunctionRecords(records);

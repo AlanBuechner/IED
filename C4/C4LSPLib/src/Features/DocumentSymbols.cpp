@@ -82,6 +82,7 @@ namespace C4LSP::Features
 		case NodeType::VariableDefinition:
 		case NodeType::UnionDefinition:
 		case NodeType::AliasDefinition:
+		case NodeType::AnnotationDeclaration:
 			out.Push(MakeSymbol(walk, node, member));
 			break;
 		default:

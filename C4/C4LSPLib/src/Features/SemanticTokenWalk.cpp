@@ -10,6 +10,7 @@
 #include "Parser/Nodes/Declarations/EnumDefinitionNode.h"
 #include "Parser/Nodes/Declarations/UnionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/AliasDefinitionNode.h"
+#include "Parser/Nodes/Declarations/AnnotationDeclarationNode.h"
 #include "Parser/Nodes/Declarations/ExternDeclarationNode.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
@@ -162,6 +163,16 @@ namespace C4LSP::Features::TokenWalk
 			RecordName(ctx, al.GetNameToken().GetStartLocation(), al.GetNameToken().GetText(), info);
 			break;
 		}
+		case Scripting::NodeType::AnnotationDeclaration: {
+			// `annotation`, `on` and the places are keywords only here; the name reads as its uses do.
+			const auto& declaration = static_cast<const Scripting::AnnotationDeclarationNode&>(node);
+			RecordContextualKeyword(ctx, declaration.GetKeywordToken());
+			RecordOffset(ctx, declaration.GetNameToken().GetStartLocation(), TokInfo{ K(SemanticTokenKind::Macro), SemanticTokenModifiers::Definition });
+			RecordContextualKeyword(ctx, declaration.GetOnToken());
+			for (const Scripting::Token& place : declaration.GetPlaceTokens())
+				RecordContextualKeyword(ctx, place);
+			break;
+		}
 		case Scripting::NodeType::CastExpression:
 			RecordContextualKeyword(ctx, static_cast<const Scripting::CastExpressionNode&>(node).GetCastKeywordToken());
 			break;
@@ -279,7 +290,10 @@ namespace C4LSP::Features::TokenWalk
 		case Scripting::NodeType::QualType: {
 			const auto& qt = static_cast<const Scripting::QualTypeNode&>(node);
 			RecordContextualKeyword(ctx, qt.GetPackedToken());
-			ClassifyTypeSegments(qt, ctx, path);
+			if (qt.IsTypename())
+				RecordContextualKeyword(ctx, qt.BaseName()->GetFirstIdentifierToken()); // an annotation's parameter that takes a type
+			else
+				ClassifyTypeSegments(qt, ctx, path);
 			break;
 		}
 		case Scripting::NodeType::AnnotationItem: {

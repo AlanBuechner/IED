@@ -90,7 +90,7 @@ namespace C4LSP::Features
 		return Cleaned(text.substr(comment, lineEnd - comment));
 	}
 
-	// Where a field, constant, enum value or alias ends; npos for a declaration that is not one.
+	// Where a field, constant, enum value, alias or annotation declaration ends; npos for a declaration that is not one.
 	static size_t TrailingFrom(const Scripting::AstNode& decl)
 	{
 		switch (decl.Type())
@@ -101,6 +101,7 @@ namespace C4LSP::Features
 		}
 		case NodeType::EnumMember:
 		case NodeType::AliasDefinition:
+		case NodeType::AnnotationDeclaration:
 			return decl.endLocation.byteOffset;
 		default:
 			return std::string_view::npos;

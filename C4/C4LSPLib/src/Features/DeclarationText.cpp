@@ -12,6 +12,7 @@
 #include "Parser/Nodes/Declarations/EnumDefinitionNode.h"
 #include "Parser/Nodes/Declarations/UnionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/AliasDefinitionNode.h"
+#include "Parser/Nodes/Declarations/AnnotationDeclarationNode.h"
 #include "Parser/Nodes/Declarations/ParameterNode.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
 #include "Parser/Nodes/Statements/ForLoopNode.h"
@@ -103,6 +104,7 @@ namespace C4LSP::Features
 		case NodeType::EnumMember: return static_cast<const Scripting::EnumMemberNode&>(decl).GetNameToken().GetText();
 		case NodeType::UnionDefinition: return static_cast<const Scripting::UnionDefinitionNode&>(decl).GetNameToken().GetText();
 		case NodeType::AliasDefinition: return static_cast<const Scripting::AliasDefinitionNode&>(decl).GetNameToken().GetText();
+		case NodeType::AnnotationDeclaration: return static_cast<const Scripting::AnnotationDeclarationNode&>(decl).GetName();
 		case NodeType::Parameter: return static_cast<const Scripting::ParameterNode&>(decl).GetNameToken().GetText();
 		case NodeType::ForLoop: return static_cast<const Scripting::ForLoopNode&>(decl).GetRangeVarNameToken().GetText();
 		case NodeType::FunctionDefinition: {
@@ -139,6 +141,7 @@ namespace C4LSP::Features
 		case NodeType::EnumMember: return of(static_cast<const Scripting::EnumMemberNode&>(decl).GetNameToken());
 		case NodeType::UnionDefinition: return of(static_cast<const Scripting::UnionDefinitionNode&>(decl).GetNameToken());
 		case NodeType::AliasDefinition: return of(static_cast<const Scripting::AliasDefinitionNode&>(decl).GetNameToken());
+		case NodeType::AnnotationDeclaration: return of(static_cast<const Scripting::AnnotationDeclarationNode&>(decl).GetNameToken());
 		case NodeType::Parameter: return of(static_cast<const Scripting::ParameterNode&>(decl).GetNameToken());
 		case NodeType::ForLoop: {
 			const auto& loop = static_cast<const Scripting::ForLoopNode&>(decl);
@@ -240,6 +243,10 @@ namespace C4LSP::Features
 		}
 		case NodeType::ForLoop:
 			return NameSpan(decl).end;
+		case NodeType::AnnotationDeclaration: {
+			const Scripting::Token& semicolon = static_cast<const Scripting::AnnotationDeclarationNode&>(decl).GetSemicolonToken();
+			return Present(semicolon) ? semicolon.GetStartLocation().byteOffset : end;
+		}
 		case NodeType::Namespace:
 		case NodeType::ObjectDefinition:
 		case NodeType::EnumDefinition:
@@ -423,6 +430,7 @@ namespace C4LSP::Features
 		case NodeType::EnumMember: return SymbolKinds::EnumMember;
 		case NodeType::UnionDefinition:
 		case NodeType::AliasDefinition: return SymbolKinds::Class;
+		case NodeType::AnnotationDeclaration: return SymbolKinds::Function; // LSP has no annotation kind; its detail says `annotation`
 		case NodeType::FunctionDefinition:
 			if (!member)
 				return SymbolKinds::Function;

@@ -13,7 +13,6 @@
 #include "Parser/Nodes/Declarations/UnionDefinitionNode.h"
 #include "Parser/Nodes/Expressions/LiteralNode.h"
 #include "Model/ConstEvaluator.h"
-#include "Model/DeclaredAnnotations.h"
 #include "Model/OperatorAnnotations.h" // [group("name")] collection for reflection (plan 14)
 #include <functional>
 
@@ -67,9 +66,6 @@ namespace Scripting
 	void ModelBuilder::RegisterObject(Context& ctx, const ObjectDefinitionNode& obj)
 	{
 		const Core::String& name = obj.GetNameToken().GetText();
-		if (DeclaresAnnotation(&obj))
-			ErrorAt(ctx, &obj, "[annotation] declares an annotation by a function declaration, its parameters the annotation's arguments: write `[annotation] void " +
-				name + "(...);` (docs/language/12 section 4)");
 		if (obj.IsSpecialization())
 		{
 			// `template<T> struct Box<T*> { ... }`: kept with the primary template's name; instantiation picks it.

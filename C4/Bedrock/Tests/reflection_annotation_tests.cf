@@ -4,29 +4,29 @@
 include "bedrock.ch"
 
 namespace RaAnnotations {
-	[annotation("type")] void Serialize();
-	[annotation("type", "field")] void Range(int64 min, int64 max);
-	[annotation("type", "field")] void Range(double min, double max);
-	[annotation("type")] void Tooltip(const char* text);
-	[annotation("field")] void Hidden();
-	[annotation("method")] void Command(const char* name, bool now);
-	[annotation("parameter")] void Units(const char* units);
-	[annotation("enum")] void Flags();
-	[annotation("variable")] void Setting(const char* name);
-	[annotation("parameter")] void NotZero();
-	[annotation("function")] void Tag(int32 tag);
-	[annotation("function")] void Declared();
-	[annotation("function")] void Defined();
-	[annotation("type")] void Requires(typename component, typename... more);
-	[annotation("type")] void Holds(typename... types);
-	[annotation("type")] void Named(const char* name);
-	[annotation("type")] void Limit(int32 limit);
-	[annotation("field")] void Of(typename type);
-	[annotation("method")] void Bind(typename type);
-	[annotation("parameter")] void From(typename type);
-	[annotation("field")] void Gauge(double low, double high, double step = 0.25, const char* units = "m");
+	annotation Serialize on type;
+	annotation Range(int64 min, int64 max) on type, field;
+	annotation Range(double min, double max) on type, field;
+	annotation Tooltip(const char* text) on type;
+	annotation Hidden on field;
+	annotation Command(const char* name, bool now) on method;
+	annotation Units(const char* units) on parameter;
+	annotation Flags on enum;
+	annotation Setting(const char* name) on variable;
+	annotation NotZero on parameter;
+	annotation Tag(int32 tag) on function;
+	annotation Declared on function;
+	annotation Defined on function;
+	annotation Requires(typename component, typename... more) on type;
+	annotation Holds(typename... types) on type;
+	annotation Named(const char* name) on type;
+	annotation Limit(int32 limit) on type;
+	annotation Of(typename type) on field;
+	annotation Bind(typename type) on method;
+	annotation From(typename type) on parameter;
+	annotation Gauge(double low, double high, double step = 0.25, const char* units = "m") on field;
 }
-namespace Script { [annotation("function")] void Callable(); }
+namespace Script { annotation Callable on function; }
 
 namespace RaLimits { const int32 kMax = 10; }
 const float kRaScale = 0.5f;

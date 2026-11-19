@@ -1,4 +1,4 @@
-namespace Editor { [annotation("field")] void Range(double min, double max); }
+namespace Editor { annotation Range(double min, double max) on field; }
 
 [Range(0, 1)]
 struct Light { public float intensity; }

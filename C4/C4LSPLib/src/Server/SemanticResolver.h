@@ -39,10 +39,10 @@ namespace C4LSP::Server
 		/// Clear resolution caches. Called after every Recompile() so stale node facts are dropped.
 		void Invalidate() { m_RefCache.clear(); m_TypeCache.clear(); m_RecordByDeclaration.clear(); m_RecordsIndexed = false; }
 
-		/// The annotations the program declares (`[annotation] void Requires(typename component);`), read by the model.
+		/// The annotations the program declares (`annotation Requires(typename component) on type;`), read by the model.
 		const Scripting::DeclaredAnnotations& Annotations() const;
 		/// The declaration of the annotation whose name is at `position` (`Requires` of `[Requires(Mesh)]`): the overload its
-		/// arguments take, else the first; null off an annotation's name, and for a name no [annotation] declares.
+		/// arguments take, else the first; null off an annotation's name, and for a name nothing declares.
 		const Scripting::AstNode* AnnotationNamedAt(const Core::Vector<const Scripting::AstNode*>& path, uint32 line, uint32 column) const;
 
 		/// Resolve a reference node to its type + declaring declaration, given the enclosing AST path

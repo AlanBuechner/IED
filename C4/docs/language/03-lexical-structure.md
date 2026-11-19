@@ -49,6 +49,7 @@ These are ordinary identifiers that carry meaning only in specific positions:
 | Identifier | Where | Status |
 |---|---|---|
 | `include` | file root: `include "x.ch"` | Implemented |
+| `annotation`, `on` | an annotation's declaration at namespace scope: `annotation` followed by a name, and `on` before its places, `annotation Range(double min, double max) on field;` | Implemented (see [12-annotations](12-annotations.md#4-declaring-an-annotation)) |
 | `packed`, `unpacked` | lane views inside a union; `packed T[N]`, a SIMD vector value type ([11 7](11-vectors-and-swizzling.md#7-packed-arrays-as-values)) | Implemented |
 | `sizeof`, `__uuidof` | expression | Implemented (see [10-expressions](10-expressions.md)) |
 | `static_cast`, `dynamic_cast`, `reinterpret_cast`, `const_cast` | expression | Implemented: each allows what C++'s does (see [10-expressions](10-expressions.md#4-unary-expressions)) |

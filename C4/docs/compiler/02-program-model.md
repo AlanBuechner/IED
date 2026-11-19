@@ -109,7 +109,10 @@ declarations, then finalizes:
    reflection registers (`Model/ReflectedEntities`: types, their fields, enums, unions, globals, functions and their
    parameters), after the layouts so an argument may be a `sizeof`. An argument that is neither a constant nor a type is
    an error here, so an editor shows it; a template instance an argument names is made here, and when one was, steps
-   3 and 4 run again for it, so the model never makes a type while the reflection image reads it.
+   3 and 4 run again for it, so the model never makes a type while the reflection image reads it. The annotations the
+   program declares (`annotation Range(double min, double max) on field;`, each kept as a site when its namespace is
+   registered) are read first, every type known (`Model/DeclaredAnnotations`), and each use is matched against its
+   annotation's overloads (`Model/AnnotationOverloads`).
 
 Build-time type resolution is program-wide (unit 0). Errors (duplicate definitions, unresolved types) are
 reported through the builder's error tracker.

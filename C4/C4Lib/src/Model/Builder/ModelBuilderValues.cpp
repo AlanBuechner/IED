@@ -3,6 +3,7 @@
 #include "Model/Templates/MemberTemplates.h"
 #include "Model/Builder/ObjectIdentity.h"
 #include "Model/Builder/ModelResolver.h" // pass 2: fixed-point resolution + GAP A body scan
+#include "Parser/Nodes/Declarations/AnnotationDeclarationNode.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
 #include "Model/ConstEvaluator.h"
@@ -53,23 +54,15 @@ namespace Scripting
 		}
 	}
 
-	// `[annotation] void Range(double min, double max);` declares the annotation [Range] (docs/language/12 section 4). It is no
-	// function: it is kept apart from them, never called, emitted or reflected.
-	void ModelBuilder::RegisterAnnotation(Context& ctx, const FunctionDefinitionNode& fn)
+	// `annotation Range(double min, double max) on field;` declares the annotation [Range] (docs/language/12 section 4); the
+	// declarations are read once every type is known, since a parameter may be an enum declared after it.
+	void ModelBuilder::RegisterAnnotation(Context& ctx, const AnnotationDeclarationNode& declaration)
 	{
-		const Core::String name = fn.GetName()->GetSegments().Back().nameToken.GetText();
-		const Core::String declares = "[annotation] declares [" + name + "] by a function declaration at namespace scope (`[annotation] void " + name + "(...);`): ";
-		if (fn.GetName()->SegmentCount() > 1) return ErrorAt(ctx, &fn, declares + "write it in its namespace, by its own name");
-		if (fn.IsTemplated()) return ErrorAt(ctx, &fn, declares + "it is no template");
-		if (fn.IsExtensionMethod()) return ErrorAt(ctx, &fn, declares + "it is no extension method");
-		if (fn.GetBody()) return ErrorAt(ctx, &fn, declares + "it has no body");
-		if (!fn.GetReturnType() || fn.GetReturnType()->ToString() != "void") return ErrorAt(ctx, &fn, declares + "it returns void");
-		ctx.model->m_AnnotationSites.Push({ &fn, ctx.scope, ctx.unitId });
+		ctx.model->m_AnnotationSites.Push({ &declaration, ctx.scope, ctx.unitId });
 	}
 
 	void ModelBuilder::RegisterFunction(Context& ctx, const FunctionDefinitionNode& fn)
 	{
-		if (DeclaresAnnotation(&fn)) return RegisterAnnotation(ctx, fn);
 		const auto& nameNode = *fn.GetName();
 		const Core::String firstName = nameNode.GetSegments()[0].nameToken.GetText();
 

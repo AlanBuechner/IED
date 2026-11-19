@@ -9,7 +9,7 @@ namespace C4LSP::Server { class SemanticResolver; }
 namespace C4LSP::Features
 {
 	/// Completion of an annotation's name inside `[...]` (docs/language/12 section 4.4): the declared annotations that go
-	/// where the caret is, each with how it is written, and the compiler's own.
+	/// where the caret is, each with how it is written, and the compiler's own; and of the places after `on` in a declaration.
 	class AnnotationCompletion
 	{
 	public:
@@ -25,5 +25,11 @@ namespace C4LSP::Features
 
 		/// The annotations `site` may name, listed before code's names (a `[` may also start a lambda or a return list).
 		static void Add(const Server::SemanticResolver& resolver, const Site& site, Core::Vector<CompletionItem>& out);
+
+		/// Whether the caret at byte `caret` of `text` is on a place of an annotation declaration: after its `on`, or after a
+		/// `,` of the places (`annotation Range(double min, double max) on field, |`).
+		static bool InPlaces(const std::string& text, size_t caret);
+		/// Every place, in the order docs/language/12 section 4.1 lists them.
+		static void AddPlaces(Core::Vector<CompletionItem>& out);
 	};
 } // namespace C4LSP::Features

@@ -3,6 +3,7 @@
 #include "IncludeDeclarationNode.h"
 #include "ExternDeclarationNode.h"
 #include "AnnotationNode.h"
+#include "AnnotationDeclarationNode.h"
 #include "VariableDefinitionNode.h"
 #include "FunctionDefinitionNode.h"
 #include "ObjectDefinitionNode.h"
@@ -34,6 +35,7 @@ namespace Scripting
 				{ &Parse<IncludeDeclarationNode>, true },
 				{ &Parse<ExternDeclarationNode>, true },
 				{ &Parse<NamespaceNode>, false },
+				{ &Parse<AnnotationDeclarationNode>, false },
 				{ &Parse<ObjectDefinitionNode>, false },
 				{ &Parse<EnumDefinitionNode>, false },
 				{ &Parse<UnionDefinitionNode>, false },

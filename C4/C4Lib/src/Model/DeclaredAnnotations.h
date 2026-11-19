@@ -2,6 +2,7 @@
 #include "Model/AnnotationPlaces.h"
 #include "Model/ConstantValue.h"
 #include "Lexer/Token.h"
+#include "Parser/Nodes/Declarations/AnnotationDeclarationNode.h" // a signature's declaration is an AST node
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -12,12 +13,8 @@ namespace Scripting
 	class ProgramModel;
 	class Type;
 	struct AstNode;
-	struct FunctionDefinitionNode;
 	struct ParameterNode;
 	struct Scope;
-
-	/// Whether the declaration carries [annotation] (docs/language/12 section 4).
-	bool DeclaresAnnotation(const AstNode* declaration);
 
 	/// What an annotation parameter takes (docs/language/12 section 4.1).
 	enum class AnnotationParameterKind : uint8 { Bool, Integer, Float, String, Enum, Type };
@@ -44,10 +41,10 @@ namespace Scripting
 		Core::String ToString() const;
 	};
 
-	/// One declaration of an annotation: `[annotation("field")] void Range(double min, double max);`.
+	/// One declaration of an annotation: `annotation Range(double min, double max) on field;`.
 	struct AnnotationSignature
 	{
-		const FunctionDefinitionNode* declaration = nullptr;
+		const AnnotationDeclarationNode* declaration = nullptr;
 		Core::String name;          // its own name, `Range`
 		Core::String qualifiedName; // `Scene::Range`
 		AnnotationPlaces places = AnnotationPlaces::Everywhere();
@@ -64,10 +61,10 @@ namespace Scripting
 		Core::String ToString() const;
 	};
 
-	/// Where `[annotation]` declares one: its function declaration, the scope it is written in and its file.
+	/// Where an annotation is declared: its declaration, the scope it is written in and its file.
 	struct AnnotationDeclarationSite
 	{
-		const FunctionDefinitionNode* declaration = nullptr;
+		const AnnotationDeclarationNode* declaration = nullptr;
 		const Scope* scope = nullptr;
 		uint32 unitId = 0;
 	};
@@ -79,8 +76,8 @@ namespace Scripting
 		Core::String message;
 	};
 
-	/// The annotations a program declares, each by its own name with its overloads: `[annotation] void Range(double min,
-	/// double max);` declares `[Range]`, whatever namespace it is written in.
+	/// The annotations a program declares, each by its own name with its overloads: `annotation Range(double min, double max)
+	/// on field;` declares `[Range]`, whatever namespace it is written in.
 	class DeclaredAnnotations
 	{
 	public:
@@ -106,7 +103,7 @@ namespace Scripting
 
 	private:
 		void Declare(const ProgramModel& model, const AnnotationDeclarationSite& site);
-		bool ReadPlaces(const FunctionDefinitionNode& declaration, AnnotationSignature& signature);
+		bool ReadPlaces(const AnnotationDeclarationNode& declaration, AnnotationSignature& signature);
 		bool ReadParameters(const ProgramModel& model, const AnnotationDeclarationSite& site, AnnotationSignature& signature);
 		bool ReadParameter(const ProgramModel& model, const AnnotationDeclarationSite& site, const ParameterNode& written,
 			AnnotationParameter& parameter);

@@ -3,9 +3,11 @@
 #include "Features/Completion.h"
 #include "Features/Definition.h"
 #include "Features/Diagnostics.h"
+#include "Features/DocumentSymbols.h"
 #include "Features/Hover.h"
 #include "Features/References.h"
 #include "Features/Rename.h"
+#include "Features/SemanticTokens.h"
 #include "Features/SignatureHelp.h"
 #include <set>
 
@@ -22,11 +24,11 @@ namespace Testing
 			R"(namespace Lib
 {
 	/// The components a component cannot be without.
-	[annotation("type")] void Requires(typename component, typename... more);
+	annotation Requires(typename component, typename... more) on type;
 	/// The same, by name.
-	[annotation("type")] void Requires(const char* typeName, const char*... more);
-	[annotation("field", "parameter")] void Range(double min, double max);
-	[annotation("type")] void Component();
+	annotation Requires(const char* typeName, const char*... more) on type;
+	annotation Range(double min, double max) on field, parameter;
+	annotation Component on type;
 }
 
 struct Mover { public float speed; }
@@ -41,7 +43,7 @@ int32 main() { int32[4] values; return values[0]; }
 )";
 
 		const char* kTypo =
-			R"(namespace Lib { [annotation("type")] void Requires(typename component); }
+			R"(namespace Lib { annotation Requires(typename component) on type; }
 struct Mover { public float speed; }
 
 [Requiers(Mover)]
@@ -49,7 +51,7 @@ struct Player { public float speed; }
 )";
 
 		const char* kWrong =
-			R"(namespace Lib { [annotation("field")] void Range(double min, double max); }
+			R"(namespace Lib { annotation Range(double min, double max) on field; }
 struct Player { [Range(0, "far")] public float speed; }
 )";
 
@@ -118,6 +120,17 @@ struct Player { [Range(0, "far")] public float speed; }
 		TEST_PASSED();
 	}
 
+	void LspDeclaredAnnotationsTest::TestHoverOnADeclarationShowsTheAnnotation()
+	{
+		auto session = Testing::Lsp::MakeSession(kFile, kDeclared);
+		auto hover = Hover::At(session, Testing::Lsp::UriFor(kFile), Testing::Lsp::PositionOf(kDeclared, "Requires", 2));
+		TEST_ASSERT(hover.found);
+		TEST_ASSERT(Testing::Lsp::Contains(hover.contents, "annotation `Lib::Requires`, on a type"));
+		TEST_ASSERT(Testing::Lsp::Contains(hover.contents, "[Requires(typename component, typename... more)]"));
+		TEST_ASSERT(Testing::Lsp::Contains(hover.contents, "The same, by name.")); // this declaration's own doc comment
+		TEST_PASSED();
+	}
+
 	void LspDeclaredAnnotationsTest::TestItsUsesAreTheReferencesOfEveryOverload()
 	{
 		auto session = Testing::Lsp::MakeSession(kFile, kDeclared);
@@ -174,6 +187,64 @@ struct Player { [Range(0, "far")] public float speed; }
 		const std::string text = std::string(kDeclared) + "[Component, Re]\nstruct Fresh { public int32 v; }\n";
 		std::set<std::string> labels = Labels(CompleteAt(text, "[Component, Re"));
 		TEST_ASSERT(labels.count("Requires") && !labels.count("Range") && !labels.count("Component"));
+		TEST_PASSED();
+	}
+
+	void LspDeclaredAnnotationsTest::TestCompletionOfPlacesAfterOn()
+	{
+		const std::string afterOn = std::string(kDeclared) + "namespace Lib { annotation Tint(double r) on  }\n";
+		auto places = CompleteAt(afterOn, "Tint(double r) on ");
+		std::set<std::string> labels = Labels(places);
+		for (const char* place : { "type", "enum", "union", "field", "method", "function", "parameter", "variable" })
+			TEST_ASSERT(labels.count(place));
+		TEST_ASSERT_EQ(labels.size(), (size_t)8); // places only: no names from code
+		const CompletionItem* field = Item(places, "field");
+		TEST_ASSERT(field && field->detail == "the annotation goes on a field");
+		TEST_ASSERT(Item(places, "type")->sortText < Item(places, "variable")->sortText); // in the docs' order
+
+		const std::string afterComma = std::string(kDeclared) + "namespace Lib { annotation Tint on field, pa }\n";
+		std::set<std::string> second = Labels(CompleteAt(afterComma, "on field, pa"));
+		TEST_ASSERT(second.size() == 1 && second.count("parameter"));
+
+		const std::string noParentheses = std::string(kDeclared) + "namespace Lib { annotation Marked on  }\n";
+		TEST_ASSERT_EQ(Labels(CompleteAt(noParentheses, "Marked on ")).size(), (size_t)8);
+
+		const std::string notADeclaration = std::string(kDeclared) + "void Turn(int32 on) { int32 x = on ; }\n";
+		TEST_ASSERT(!Labels(CompleteAt(notADeclaration, "int32 x = on ")).count("field"));
+		TEST_PASSED();
+	}
+
+	void LspDeclaredAnnotationsTest::TestTheDeclarationIsHighlightedAndListed()
+	{
+		auto session = Testing::Lsp::MakeSession(kFile, kDeclared);
+		auto tokens = SemanticTokens::ForDocument(session, Testing::Lsp::UriFor(kFile));
+		auto kindAt = [&](const std::string& needle, int occurrence) -> int {
+			const auto at = Testing::Lsp::PositionOf(kDeclared, needle, occurrence);
+			for (const auto& token : tokens.tokens)
+				if (token.startLine == at.line && token.startCharacter == at.character) return static_cast<int>(token.kindId);
+			return -1;
+		};
+		TEST_ASSERT_EQ(kindAt("annotation Range", 1), (int)SemanticTokenKind::Keyword);
+		TEST_ASSERT_EQ(kindAt("Range(double", 1), (int)SemanticTokenKind::Macro); // as its uses read
+		TEST_ASSERT_EQ(kindAt("on field", 1), (int)SemanticTokenKind::Keyword);
+		TEST_ASSERT_EQ(kindAt("parameter;", 1), (int)SemanticTokenKind::Keyword);
+		TEST_ASSERT_EQ(kindAt("typename component", 1), (int)SemanticTokenKind::Keyword); // a parameter that takes a type
+		TEST_ASSERT_EQ(kindAt("char* typeName", 1), (int)SemanticTokenKind::Type); // any other parameter's type is a type
+
+		auto symbols = DocumentSymbols::ForDocument(session, Testing::Lsp::UriFor(kFile));
+		const DocumentSymbol* lib = nullptr;
+		for (const auto& symbol : symbols)
+			if (symbol.name == "Lib") lib = &symbol;
+		TEST_ASSERT(lib != nullptr);
+		int declarations = 0;
+		for (const auto& child : lib->children)
+			if (child.name == "Range")
+			{
+				++declarations;
+				TEST_ASSERT(child.detail == "annotation (double min, double max) on field, parameter");
+			}
+			else if (child.name == "Requires") ++declarations;
+		TEST_ASSERT_EQ(declarations, 3);
 		TEST_PASSED();
 	}
 

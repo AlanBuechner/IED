@@ -59,7 +59,8 @@ namespace Testing
 			"enum Color { Red, Green }\n"
 			"union Bits { int32 a; float b; }\n"
 			"alias Count = int64;\n"
-			"const int32 kLimit = 4;\n");
+			"const int32 kLimit = 4;\n"
+			"namespace Scene { annotation Range(double min, double max) on field; }\n");
 		TEST_ASSERT(outline.diagnostics.empty());
 		TEST_ASSERT(outline.declarations[Find(outline, "Point")].kind == OutlineKind::Struct);
 		TEST_ASSERT(outline.declarations[Find(outline, "x")].kind == OutlineKind::Variable);
@@ -72,6 +73,8 @@ namespace Testing
 		TEST_ASSERT(outline.declarations[Find(outline, "Bits")].kind == OutlineKind::Union);
 		TEST_ASSERT(outline.declarations[Find(outline, "Count")].kind == OutlineKind::Alias);
 		TEST_ASSERT(outline.declarations[Find(outline, "kLimit")].kind == OutlineKind::Variable);
+		TEST_ASSERT(outline.declarations[Find(outline, "Range")].kind == OutlineKind::Annotation);
+		TEST_ASSERT_EQ(outline.declarations[Find(outline, "Range")].parent, Find(outline, "Scene"));
 		TEST_PASSED();
 	}
 

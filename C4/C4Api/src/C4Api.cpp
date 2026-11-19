@@ -19,7 +19,7 @@ struct c4a_parse
 
 namespace
 {
-	const char* kKindNames[] = { "namespace", "class", "struct", "interface", "enum", "enum value", "function", "variable", "union", "alias" };
+	const char* kKindNames[] = { "namespace", "class", "struct", "interface", "enum", "enum value", "function", "variable", "union", "alias", "annotation" };
 	constexpr int32_t kKinds = static_cast<int32_t>(sizeof(kKindNames) / sizeof(kKindNames[0]));
 
 	std::string VersionText()
@@ -66,6 +66,7 @@ namespace
 		case OutlineKind::Variable: return C4A_VARIABLE;
 		case OutlineKind::Union: return C4A_UNION;
 		case OutlineKind::Alias: return C4A_ALIAS;
+		case OutlineKind::Annotation: return C4A_ANNOTATION;
 		}
 		return C4A_VARIABLE;
 	}

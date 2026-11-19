@@ -1,4 +1,4 @@
-namespace Scene { namespace Annotations { [annotation("type")] void Requires(typename component, typename... more); } }
+namespace Scene { namespace Annotations { annotation Requires(typename component, typename... more) on type; } }
 
 struct CharacterMover { public float speed; }
 

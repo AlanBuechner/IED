@@ -5,8 +5,9 @@
 namespace Testing
 {
 	// A declared annotation in the editor (docs/language/12 section 4.4): go-to-definition and hover on its name, its uses as the
-	// references and rename of its declarations, completion of its name inside `[...]` by where it goes, signature help with
-	// every overload inside its parentheses, and its errors as diagnostics.
+	// references and rename of its declarations, completion of its name inside `[...]` by where it goes and of the places after
+	// `on`, signature help with every overload inside its parentheses, its declaration highlighted and in the outline, and its
+	// errors as diagnostics.
 	CLASS(GROUP = Testing) LspDeclaredAnnotationsTest : public Test
 	{
 	public:
@@ -17,6 +18,15 @@ namespace Testing
 
 		TEST_FUNC(Lsp.Features.DeclaredAnnotations)
 		void TestHoverShowsEveryOverload();
+
+		TEST_FUNC(Lsp.Features.DeclaredAnnotations)
+		void TestHoverOnADeclarationShowsTheAnnotation();
+
+		TEST_FUNC(Lsp.Features.DeclaredAnnotations)
+		void TestCompletionOfPlacesAfterOn();
+
+		TEST_FUNC(Lsp.Features.DeclaredAnnotations)
+		void TestTheDeclarationIsHighlightedAndListed();
 
 		TEST_FUNC(Lsp.Features.DeclaredAnnotations)
 		void TestItsUsesAreTheReferencesOfEveryOverload();

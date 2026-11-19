@@ -30,7 +30,7 @@ typedef enum c4a_severity { C4A_WARNING = 0, C4A_ERROR = 1 } c4a_severity;
 typedef enum c4a_kind
 {
 	C4A_NAMESPACE = 0, C4A_CLASS = 1, C4A_STRUCT = 2, C4A_INTERFACE = 3, C4A_ENUM = 4, C4A_ENUM_VALUE = 5,
-	C4A_FUNCTION = 6, C4A_VARIABLE = 7, C4A_UNION = 8, C4A_ALIAS = 9
+	C4A_FUNCTION = 6, C4A_VARIABLE = 7, C4A_UNION = 8, C4A_ALIAS = 9, C4A_ANNOTATION = 10
 } c4a_kind;
 
 // A place in the source: a 1-based line, and a 1-based column in bytes.

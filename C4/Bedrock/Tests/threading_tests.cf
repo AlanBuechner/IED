@@ -160,16 +160,18 @@ class ThreadTests {
 		return clock_now_ns() - start;
 	}
 
-	// The fastest of three runs: a loaded machine only delays a run, while sleeps on the system tick are slow in every one.
+	// The fastest of up to ten runs, stopping at one near its time: a loaded machine only delays a run (a gate run beside a
+	// game's build took 180 ms a run), while sleeps on the system tick are slow in every one.
 	[test("sleep_is_precise")]
 	public static void TestSleepIsPrecise() {
+		const int64 nearItsTime = 80 * kMillisecond;
 		int64 fastest = TenShortSleeps();
-		for (int32 attempt = 1; attempt < 3; attempt++) {
+		for (int32 attempt = 1; attempt < 10 && fastest >= nearItsTime; attempt++) {
 			const int64 took = TenShortSleeps();
 			if (took < fastest) fastest = took;
 		}
 		assert_true(fastest >= 20 * kMillisecond, "a sleep lasts at least its time");
-		assert_true(fastest < 80 * kMillisecond, "and ends near it, not on the next system tick");
+		assert_true(fastest < nearItsTime, "and ends near it, not on the next system tick");
 	}
 }
 

@@ -75,6 +75,7 @@ namespace Scripting
 		UnionDefinition,
 		SwizzleView,
 		AliasDefinition,
+		AnnotationDeclaration,
 	FunPtrType,
 	// Statement nodes
 		IfStatement,

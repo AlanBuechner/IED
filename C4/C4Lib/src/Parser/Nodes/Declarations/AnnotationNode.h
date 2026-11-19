@@ -7,11 +7,7 @@
 
 namespace Scripting
 {
-	/// `[annotation("type")] void Requires(typename component, typename... more);` declares the annotation `[Requires]`
-	/// (docs/language/12 section 4).
-	constexpr const char* kAnnotationDeclaration = "annotation";
-
-	/// One of the compiler's own annotations (docs/language/12 section 2), which no [annotation] declares.
+	/// One of the compiler's own annotations (docs/language/12 section 2), which no declaration declares.
 	bool IsCompilerAnnotationName(const Core::String& name);
 	/// The compiler's own annotations' names: operator, test, test_setup, ...
 	std::span<const char* const> CompilerAnnotationNames();
@@ -44,7 +40,7 @@ namespace Scripting
 		/// null: a name is a constant or a type, which the model decides. An argument that reads only as a type is this node.
 		const Ref<QualTypeNode>& GetArgumentType(uint32 index) const { return m_ArgumentTypes[index]; }
 
-		/// One of the compiler's own annotations (operator, test, test_setup, test_teardown, group, link, uuid, target, annotation):
+		/// One of the compiler's own annotations (operator, test, test_setup, test_teardown, group, link, uuid, target):
 		/// its arguments are string literals and reflection does not keep it (D-42).
 		bool IsCompilerAnnotation() const;
 		/// The compiler annotation this unknown name is a near miss of (`operater`), or null.

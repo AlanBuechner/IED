@@ -86,12 +86,16 @@ namespace C4LSP::Features
 			CollectGlobalSymbols(resolver, candidates);
 
 		Core::Vector<CompletionItem> items;
-		if (const auto annotation = AnnotationCompletion::Find(text, offset, InTypeBody(located.path)))
+		const bool places = AnnotationCompletion::InPlaces(text, offset);
+		if (places)
+			AnnotationCompletion::AddPlaces(items);
+		else if (const auto annotation = AnnotationCompletion::Find(text, offset, InTypeBody(located.path)))
 			AnnotationCompletion::Add(resolver, *annotation, items);
 		Core::Vector<CompletionItem> named;
 		for (CompletionItem& item : items)
 			if (prefix.empty() || StartsWith(item.label, prefix)) named.Push(std::move(item));
-		for (CompletionItem& item : Filter(candidates, prefix)) named.Push(std::move(item));
+		if (!places) // a place is one of a few words, never a name from code
+			for (CompletionItem& item : Filter(candidates, prefix)) named.Push(std::move(item));
 		return named;
 	}
 

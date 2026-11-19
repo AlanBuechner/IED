@@ -34,6 +34,7 @@ namespace C4LSP::Features
 		case NodeType::EnumMember:
 		case NodeType::UnionDefinition:
 		case NodeType::AliasDefinition:
+		case NodeType::AnnotationDeclaration:
 		case NodeType::Parameter:
 			return true;
 		default:
@@ -106,7 +107,7 @@ namespace C4LSP::Features
 		if (const Scripting::AstNode* captured = Definition::CapturedAt(session, located, position))
 			return DeclarationMarkdown(session, *captured);
 		if (const Scripting::AstNode* named = Definition::DeclarationNamedAt(session, sourceId, located, position))
-			return DeclarationMarkdown(session, *named);
+			return named->Type() == NodeType::AnnotationDeclaration ? AnnotationMarkdown(session, *named) : DeclarationMarkdown(session, *named);
 
 		const Server::SemanticResolver& resolver = session.GetResolver();
 		// Prefer a reference node (identifier / member access / call callee) with a resolved type.

@@ -19,6 +19,7 @@
 #include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
 #include "Parser/Nodes/Declarations/EnumDefinitionNode.h"
 #include "Parser/Nodes/Declarations/AliasDefinitionNode.h"
+#include "Parser/Nodes/Declarations/AnnotationDeclarationNode.h"
 #include "Parser/Nodes/Declarations/UnionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/QualTypeNode.h" // HasTemplateArgs: body-scanning pass (GAP A)
 #include "Model/ConstEvaluator.h"
@@ -388,6 +389,7 @@ namespace Scripting
 		case NodeType::ObjectDefinition: RegisterObject(ctx, *static_cast<const ObjectDefinitionNode*>(node)); break;
 		case NodeType::EnumDefinition:   RegisterEnum(ctx, *static_cast<const EnumDefinitionNode*>(node)); break;
 		case NodeType::AliasDefinition:  RegisterAlias(ctx, *static_cast<const AliasDefinitionNode*>(node)); break;
+		case NodeType::AnnotationDeclaration: RegisterAnnotation(ctx, *static_cast<const AnnotationDeclarationNode*>(node)); break;
 		case NodeType::UnionDefinition:  RegisterUnion(ctx, *static_cast<const UnionDefinitionNode*>(node)); break;
 		case NodeType::VariableDefinition: RegisterVariable(ctx, *static_cast<const VariableDefinitionNode*>(node)); break;
 		case NodeType::FunctionDefinition: RegisterFunction(ctx, *static_cast<const FunctionDefinitionNode*>(node)); break;

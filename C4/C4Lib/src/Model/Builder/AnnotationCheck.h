@@ -18,9 +18,9 @@ namespace Scripting
 
 	/// The annotations reflection registers, checked while the model is built (D-42, D-87), each an error where it is written -
 	/// in an editor too: an argument that is neither a constant nor a type, a use no declaration of its annotation takes (the
-	/// wrong place, count or kind of arguments), a misspelt declared annotation, [annotation] where it declares nothing, and a
-	/// declaration that declares nothing as written. An undeclared annotation is a warning. A template instance an argument
-	/// names is made before any body is lowered. Each CheckNew checks what earlier ones did not: the instances made since.
+	/// wrong place, count or kind of arguments), a misspelt declared annotation, and a declaration that declares nothing as
+	/// written. An undeclared annotation is a warning. A template instance an argument names is made before any body is
+	/// lowered. Each CheckNew checks what earlier ones did not: the instances made since.
 	class AnnotationCheck
 	{
 	public:

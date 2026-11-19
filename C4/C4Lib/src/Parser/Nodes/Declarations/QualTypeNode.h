@@ -38,6 +38,8 @@ namespace Scripting
 		/// `new T[n]` allocates n elements of the rest.
 		Ref<QualTypeNode> WithoutOuterArray() const;
 		const Ref<NamespaceQualifiedNameNode>& BaseName() const { return m_BaseName; }
+		/// `typename` alone, as an annotation's parameter that takes a type is written (docs/language/12 section 4.1).
+		bool IsTypename() const;
 		const Ref<AstNode>& FuncPtrType() const { return m_DelegateType; } // FunPtrTypeNode when funcptr type
 		uint32 IndirectionCount() const { return m_Indirections.Count(); }
 		const Core::Vector<IndirectionLayer>& GetIndirections() const { return m_Indirections; }

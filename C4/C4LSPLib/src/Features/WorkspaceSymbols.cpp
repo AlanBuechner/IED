@@ -183,6 +183,7 @@ namespace C4LSP::Features
 		case NodeType::VariableDefinition:
 		case NodeType::UnionDefinition:
 		case NodeType::AliasDefinition:
+		case NodeType::AnnotationDeclaration:
 			Push(walk, node, container, member);
 			break;
 		default:

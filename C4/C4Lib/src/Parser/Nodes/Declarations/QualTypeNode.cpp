@@ -7,6 +7,13 @@
 
 namespace Scripting
 {
+	bool QualTypeNode::IsTypename() const
+	{
+		if (!m_BaseName || m_BaseName->SegmentCount() != 1 || !m_Indirections.Empty() || m_IsLeadingConst || m_DelegateType) return false;
+		const auto& segment = m_BaseName->GetSegments()[0];
+		return segment.nameToken.GetText() == "typename" && !segment.templateArgs;
+	}
+
 	// The array size in type position (int32[N]) is a full constant expression: a literal,
 	// a const var / enum member name, or an expression over them (W+10). Semantic folds it via
 	// EvaluateConstant; the parser must not restrict it to a single token.

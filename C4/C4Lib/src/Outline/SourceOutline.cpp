@@ -6,6 +6,7 @@
 #include "Macro/PredefinedMacros.h"
 #include "Parser/ParserState.h"
 #include "Parser/Nodes/Declarations/AliasDefinitionNode.h"
+#include "Parser/Nodes/Declarations/AnnotationDeclarationNode.h"
 #include "Parser/Nodes/Declarations/EnumDefinitionNode.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/NamespaceNode.h"
@@ -95,6 +96,11 @@ namespace Scripting
 				case NodeType::AliasDefinition: {
 					const auto& alias = static_cast<const AliasDefinitionNode&>(node);
 					Push(Declared(OutlineKind::Alias, alias.GetNameToken().GetText(), node, alias.GetNameToken(), parent));
+					break;
+				}
+				case NodeType::AnnotationDeclaration: {
+					const auto& annotation = static_cast<const AnnotationDeclarationNode&>(node);
+					Push(Declared(OutlineKind::Annotation, annotation.GetName(), node, annotation.GetNameToken(), parent));
 					break;
 				}
 				default:

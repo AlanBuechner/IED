@@ -5,6 +5,7 @@
 #include "Model/Types/EnumType.h"
 #include "Model/Types/ObjectType.h"
 #include "Model/Types/UnionType.h"
+#include "Parser/Nodes/Declarations/AnnotationDeclarationNode.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/ParameterNode.h"
 
@@ -100,18 +101,10 @@ namespace Scripting
 		}
 	}
 
-	// [annotation] that reaches here declares nothing: a declaration is kept apart from the functions, and a struct or class
-	// is said where it registers.
+	// [annotation] is the parser's error: an annotation is declared by `annotation Name(...) on places;`.
 	void AnnotationCheck::CheckItem(const AnnotationItem& item, AnnotationPlace place, const Scope* scope)
 	{
-		if (item.GetName() == kAnnotationDeclaration)
-		{
-			if (place != AnnotationPlace::Type)
-				Report(item.startLocation, "[annotation] declares an annotation by a function declaration at namespace scope (`[annotation] void Name(...);`): "
-					"on " + Core::String(AnnotationPlaceNoun(place)) + " it declares nothing");
-			return;
-		}
-		if (item.IsCompilerAnnotation()) return;
+		if (item.IsCompilerAnnotation() || item.GetName() == kAnnotationKeyword) return;
 		auto folded = FoldAnnotation(m_Model, item, place, scope);
 		if (!folded.Ok()) return Report(folded.loc, folded.message);
 		if (!folded.value.declaration) CheckUndeclared(item);
@@ -123,13 +116,13 @@ namespace Scripting
 		{
 			const AnnotationSignature& declared = *(*meant)[0];
 			return Report(item.startLocation, "unknown annotation '" + item.GetName() + "': did you mean '" + declared.name + "', which " +
-				declared.qualifiedName + " declares? (an annotation no [annotation] declares is kept for reflection, and nothing that reads '" +
+				declared.qualifiedName + " declares? (an annotation nothing declares is kept for reflection, and nothing that reads '" +
 				declared.name + "' sees it)");
 		}
 		if (item.NearCompilerAnnotation()) return; // the parser warned that it is probably a compiler annotation
 		const Core::String name = item.GetOwnName();
-		Report(item.startLocation, "annotation [" + name + "] is not declared: declare it, and what it takes, with `[annotation] void " + name +
-			"(...);` (docs/language/12 section 4) so its uses are checked", ErrorSeverity::Warning);
+		Report(item.startLocation, "annotation [" + name + "] is not declared: declare it, what it takes and where it goes, with `annotation " + name +
+			"(...) on ...;` (docs/language/12 section 4) so its uses are checked", ErrorSeverity::Warning);
 	}
 
 	void AnnotationCheck::Report(const SourceLocation& at, const Core::String& message, ErrorSeverity severity)

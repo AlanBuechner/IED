@@ -45,6 +45,7 @@ namespace Scripting
 		case NodeType::EnumMember:               return "EnumMember";
 		case NodeType::UnionDefinition:          return "UnionDefinition";
 		case NodeType::AliasDefinition:          return "AliasDefinition";
+		case NodeType::AnnotationDeclaration:    return "AnnotationDeclaration";
 		case NodeType::FunPtrType:               return "FunPtrType";
 		case NodeType::IfStatement:              return "IfStatement";
 		case NodeType::WhileLoop:                return "WhileLoop";

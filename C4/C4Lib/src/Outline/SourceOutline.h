@@ -11,7 +11,7 @@ namespace Scripting
 	// What one C4 source declares and what its syntax gets wrong, from the macro preprocessor and the parser alone: no
 	// include is read and no name is resolved. The C API's parse (C4Api, docs/tools/06-c4-api.md) is made of it.
 
-	enum class OutlineKind { Namespace, Class, Struct, Interface, Enum, EnumValue, Function, Variable, Union, Alias };
+	enum class OutlineKind { Namespace, Class, Struct, Interface, Enum, EnumValue, Function, Variable, Union, Alias, Annotation };
 	enum class OutlineSeverity { Warning, Error };
 
 	struct OutlinePosition

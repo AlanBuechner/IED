@@ -23,8 +23,14 @@ namespace Scripting
 			{ AnnotationPlace::Variable, "variable", "a variable" },
 		};
 
+		constexpr AnnotationPlace kAllPlaces[] = { AnnotationPlace::Type, AnnotationPlace::Enum, AnnotationPlace::Union, AnnotationPlace::Field,
+			AnnotationPlace::Method, AnnotationPlace::Function, AnnotationPlace::Parameter, AnnotationPlace::Variable };
+		static_assert(std::size(kAllPlaces) == std::size(kPlaces), "every place has its text");
+
 		const PlaceText& TextOf(AnnotationPlace place) { return kPlaces[uint8(place)]; }
 	}
+
+	std::span<const AnnotationPlace> AllAnnotationPlaces() { return kAllPlaces; }
 
 	const char* AnnotationPlaceName(AnnotationPlace place) { return TextOf(place).name; }
 	const char* AnnotationPlaceNoun(AnnotationPlace place) { return TextOf(place).noun; }

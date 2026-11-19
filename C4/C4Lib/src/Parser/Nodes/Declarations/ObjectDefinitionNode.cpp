@@ -8,6 +8,7 @@
 #include "UnionDefinitionNode.h"
 #include "SwizzleViewNode.h"
 #include "AliasDefinitionNode.h"
+#include "AnnotationDeclarationNode.h"
 #include "../Statements/CodeBlockNode.h"
 #include "Core/StringFormat.h"
 
@@ -478,6 +479,15 @@ namespace Scripting
 						":' section: its members are public", ErrorSeverity::Error);
 				lexer.NextCompoundToken(); // consume the keyword
 				lexer.NextCompoundToken(); // consume ':'
+				continue;
+			}
+
+			// An annotation is the program's, not a type's: its declaration is parsed for the error and dropped.
+			if (AnnotationDeclarationNode::StartsHere(lexer))
+			{
+				auto declaration = AnnotationDeclarationNode::TryParse(state);
+				errorTracker.AddError(t.GetStartLocation(), Core::StringFormat::Format("[{0}] is declared at namespace scope, not in a type "
+					"(docs/language/12 section 4)", declaration->GetName()), ErrorSeverity::Error);
 				continue;
 			}
 

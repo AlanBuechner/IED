@@ -6,35 +6,14 @@
 #include "Model/Types/PointerType.h"
 #include "Model/Types/QualifiedName.h"
 #include "Parser/NearNames.h"
-#include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
+#include "Parser/Nodes/Declarations/AnnotationDeclarationNode.h"
 #include "Parser/Nodes/Declarations/ParameterNode.h"
-#include "Parser/Nodes/Expressions/LiteralNode.h"
 
 namespace Scripting
 {
 	namespace
 	{
 		constexpr const char* kParameterRule = "an annotation parameter is a bool, an integer, a float or double, a const char*, an enum or typename";
-
-		const AnnotationItem* DeclarationItem(const AstNode* declaration)
-		{
-			const Core::Vector<Ref<AnnotationNode>>* annotations = DeclarationAnnotations(declaration);
-			if (!annotations) return nullptr;
-			for (const auto& node : *annotations)
-				if (node)
-					for (const auto& group : node->GetBracketGroups())
-						for (const auto& item : group.annotations)
-							if (item && item->GetName() == kAnnotationDeclaration) return item.Get();
-			return nullptr;
-		}
-
-		// `typename` alone, the way a type argument's parameter is written.
-		bool IsTypename(const QualTypeNode& type)
-		{
-			const auto& name = type.BaseName();
-			return name && name->SegmentCount() == 1 && name->GetSegments()[0].nameToken.GetText() == "typename" && !name->GetSegments()[0].templateArgs &&
-				type.IndirectionCount() == 0 && !type.IsLeadingConst();
-		}
 
 		Core::String Article(const Core::String& noun)
 		{
@@ -78,8 +57,6 @@ namespace Scripting
 		}
 	}
 
-	bool DeclaresAnnotation(const AstNode* declaration) { return DeclarationItem(declaration) != nullptr; }
-
 	// --- AnnotationParameter, AnnotationSignature ------------------------------------------------------------------------------
 
 	Core::String AnnotationParameter::ToString() const
@@ -116,14 +93,20 @@ namespace Scripting
 
 	void DeclaredAnnotations::Declare(const ProgramModel& model, const AnnotationDeclarationSite& site)
 	{
-		const FunctionDefinitionNode& declaration = *site.declaration;
+		const AnnotationDeclarationNode& declaration = *site.declaration;
+		const SourceLocation& at = declaration.GetNameToken().GetStartLocation();
 		auto signature = std::make_unique<AnnotationSignature>();
 		signature->declaration = &declaration;
-		signature->name = declaration.GetName()->GetSegments()[0].nameToken.GetText();
+		signature->name = declaration.GetName();
 		signature->qualifiedName = QualifiedNameOf(site.scope, signature->name);
+		if (signature->name == kAnnotationKeyword)
+		{
+			Problem(at, "'annotation' starts an annotation's declaration: it names none");
+			return;
+		}
 		if (IsCompilerAnnotationName(signature->name))
 		{
-			Problem(declaration.GetName()->startLocation, "'" + signature->name + "' is the compiler's own annotation (docs/language/12 section 2): it cannot be declared");
+			Problem(at, "'" + signature->name + "' is the compiler's own annotation (docs/language/12 section 2): it cannot be declared");
 			return;
 		}
 		if (!ReadPlaces(declaration, *signature) || !ReadParameters(model, site, *signature)) return;
@@ -132,7 +115,7 @@ namespace Scripting
 		for (const AnnotationSignature* earlier : overloads)
 			if (SameParameters(*earlier, *signature))
 			{
-				Problem(declaration.GetName()->startLocation, "[" + signature->name + "] is declared twice with the same parameters: " +
+				Problem(at, "[" + signature->name + "] is declared twice with the same parameters: " +
 					earlier->qualifiedName + " already declares " + earlier->ToString());
 				return;
 			}
@@ -140,21 +123,18 @@ namespace Scripting
 		m_Signatures.push_back(std::move(signature));
 	}
 
-	bool DeclaredAnnotations::ReadPlaces(const FunctionDefinitionNode& declaration, AnnotationSignature& signature)
+	bool DeclaredAnnotations::ReadPlaces(const AnnotationDeclarationNode& declaration, AnnotationSignature& signature)
 	{
-		const AnnotationItem* item = DeclarationItem(&declaration);
-		if (!item || item->GetArguments().Empty()) return true;
+		if (declaration.GetPlaceTokens().Empty()) return true;
 		signature.places = AnnotationPlaces::None();
-		for (const auto& argument : item->GetArguments())
+		for (const Token& written : declaration.GetPlaceTokens())
 		{
-			const auto* literal = dynamic_cast<const LiteralNode*>(argument.Get());
-			if (!literal) return false; // the parser said so: a compiler annotation takes string literals
 			AnnotationPlace place;
-			if (!ParseAnnotationPlace(literal->GetValue(), place))
-			{
-				Problem(argument->startLocation, "'" + Core::String(literal->GetValue()) + "' is no place an annotation goes: one of " + AnnotationPlaceNames());
-				return false;
-			}
+			if (!ParseAnnotationPlace(written.GetText().c_str(), place))
+				return Problem(written.GetStartLocation(), "'" + written.GetText() + "' is no place an annotation goes: one of " + AnnotationPlaceNames());
+			if (signature.places.Has(place))
+				return Problem(written.GetStartLocation(), "[" + signature.name + "] goes on " + AnnotationPlaceNoun(place) + " once: '" + written.GetText() +
+					"' is written twice");
 			signature.places.Add(place);
 		}
 		return true;
@@ -176,9 +156,6 @@ namespace Scripting
 			defaulted = defaulted || parameter.hasDefault;
 			signature.parameters.Push(std::move(parameter));
 		}
-		if (site.declaration->IsVariadic())
-			return Problem(site.declaration->GetCloseParenToken().GetStartLocation(),
-				"an annotation takes no C '...': name what it takes as a pack (`typename... more`, `const char*... names`)");
 		return true;
 	}
 
@@ -190,7 +167,7 @@ namespace Scripting
 		const QualTypeNode* type = written.GetType().Get();
 		if (!type) return false;
 		parameter.writtenType = type->ToString();
-		if (IsTypename(*type))
+		if (type->IsTypename())
 			parameter.kind = AnnotationParameterKind::Type;
 		else
 		{

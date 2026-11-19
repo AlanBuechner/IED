@@ -5,10 +5,10 @@
 
 namespace Testing
 {
-	// [annotation] declarations (docs/language/12 section 4, D-87): a function declaration marked [annotation] declares the
-	// annotation of its name, its parameters the arguments and its overloads the forms a use may take; a use is checked against
-	// them where it is written, an undeclared one is a warning, and reflection registers the arguments as the declaration
-	// takes them.
+	// Annotation declarations (docs/language/12 section 4, D-87): `annotation Range(double min, double max) on field;` declares
+	// [Range], its parameters the arguments, its places where it goes and its overloads the forms a use may take; a use is
+	// checked against them where it is written, an undeclared one is a warning, and reflection registers the arguments as the
+	// declaration takes them.
 	CLASS(GROUP = Testing) DeclaredAnnotationsTest : public Test
 	{
 	public:
@@ -57,7 +57,10 @@ namespace Testing
 		void ADeclarationThatDeclaresNothingIsAnError();
 
 		TEST_FUNC(Semantic.DeclaredAnnotations)
-		void OnlyAFunctionDeclarationAtNamespaceScopeDeclaresOne();
+		void ItsSyntaxErrorsAreSaidOnce();
+
+		TEST_FUNC(Semantic.DeclaredAnnotations)
+		void AnnotationIsStillAName();
 
 		TEST_FUNC(Semantic.DeclaredAnnotations)
 		void ADeclarationIsNoFunction();

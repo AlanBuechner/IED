@@ -1,6 +1,7 @@
 #include "Features/AnnotationCompletion.h"
 #include "Server/SemanticResolver.h"
 #include "Model/DeclaredAnnotations.h"
+#include "Parser/Nodes/Declarations/AnnotationDeclarationNode.h"
 #include "Parser/Nodes/Declarations/AnnotationNode.h"
 #include <cctype>
 
@@ -92,6 +93,31 @@ namespace C4LSP::Features
 			return std::string::npos;
 		}
 
+		size_t WordStart(const std::string& text, size_t at)
+		{
+			while (at > 0 && IsIdent(text[at - 1])) --at;
+			return at;
+		}
+
+		// Whether the word `word` ends just before `at`, starting a word of its own.
+		bool WordEndsAt(const std::string& text, size_t at, const std::string& word)
+		{
+			return at >= word.size() && text.compare(at - word.size(), word.size(), word) == 0 && WordStart(text, at) == at - word.size();
+		}
+
+		// The `(` the `)` before `at` closes; npos when there is none.
+		size_t OpeningParen(const std::string& text, size_t at)
+		{
+			int depth = 0;
+			for (size_t i = at; i-- > 0;)
+			{
+				if (text[i] == ')') ++depth;
+				else if (text[i] == '(' && --depth == 0) return i;
+				else if (text[i] == ';' || text[i] == '{' || text[i] == '}') return std::string::npos;
+			}
+			return std::string::npos;
+		}
+
 		size_t WordEnd(const std::string& text, size_t at)
 		{
 			while (at < text.size() && IsIdent(text[at])) ++at;
@@ -175,6 +201,42 @@ namespace C4LSP::Features
 		else if (const size_t past = PastGroup(text, bracket); past != std::string::npos) site.place = DeclarationAt(text, past, inType);
 		else site.place = DeclarationAt(text, WordEnd(text, caret), inType); // the group is still being typed: what follows the name
 		return site;
+	}
+
+	bool AnnotationCompletion::InPlaces(const std::string& text, size_t caret)
+	{
+		size_t at = SkipSpaceBack(text, WordStart(text, std::min(caret, text.size())));
+		while (at > 0 && text[at - 1] == ',') // the places written before this one
+		{
+			const size_t place = SkipSpaceBack(text, at - 1);
+			if (WordStart(text, place) == place) return false;
+			at = SkipSpaceBack(text, WordStart(text, place));
+		}
+		const std::string on = Scripting::kAnnotationPlacesKeyword;
+		if (!WordEndsAt(text, at, on)) return false;
+		at = SkipSpaceBack(text, at - on.size());
+		if (at > 0 && text[at - 1] == ')')
+		{
+			const size_t open = OpeningParen(text, at);
+			if (open == std::string::npos) return false;
+			at = SkipSpaceBack(text, open);
+		}
+		const size_t name = WordStart(text, at);
+		if (name == at) return false;
+		return WordEndsAt(text, SkipSpaceBack(text, name), Scripting::kAnnotationKeyword);
+	}
+
+	void AnnotationCompletion::AddPlaces(Core::Vector<CompletionItem>& out)
+	{
+		for (const Scripting::AnnotationPlace place : Scripting::AllAnnotationPlaces())
+		{
+			CompletionItem item;
+			item.label = Scripting::AnnotationPlaceName(place);
+			item.kind = Kind::Keyword;
+			item.detail = std::string("the annotation goes on ") + Scripting::AnnotationPlaceNoun(place);
+			item.sortText = std::to_string(static_cast<int>(place));
+			out.Push(item);
+		}
 	}
 
 	void AnnotationCompletion::Add(const Server::SemanticResolver& resolver, const Site& site, Core::Vector<CompletionItem>& out)

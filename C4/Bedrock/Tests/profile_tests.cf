@@ -618,10 +618,19 @@ class ProfileTests {
 		assert_eq(6, decompress, "each named job a task of its name");
 		assert_eq(1, unnamed, "a job without one is a Job");
 		assert_eq(7, CountOf(events, 0x31), "each ended");
-		bool workerNamed = false;
+		// Each job ran on a worker that keeps the name the job system gave it: a frame worker, or the background worker,
+		// which takes frame jobs when it has none of its own (and, on a busy machine, may take all of them).
+		Core::HashMap<uint64, Core::String> nameOf;
 		for (const TracedEvent& e : events)
-			if (e.type == 0x13 && strings.Find(e.fields[0])->View().StartsWith(Core::StringView("Job Worker"))) workerNamed = true;
-		assert_true(workerNamed, "the workers keep the names the job system gave them");
+			if (e.type == 0x13) nameOf.Insert(e.thread, *strings.Find(e.fields[0]));
+		bool workersNamed = true;
+		for (const TracedEvent& e : events) {
+			if (e.type != 0x30) continue;
+			const Core::String* name = nameOf.Find(e.thread);
+			workersNamed = workersNamed && name != null &&
+				(name->View().StartsWith(Core::StringView("Job Worker")) || name->View().StartsWith(Core::StringView("Background Worker")));
+		}
+		assert_true(workersNamed, "the workers keep the names the job system gave them");
 		FS::RemoveFile(path.CStr());
 	}
 

@@ -1,0 +1,7 @@
+struct Light
+{
+	annotation Tint(double r) on field;
+	public float intensity;
+}
+
+int32 main() { Light l; return (int32)l.intensity; }

@@ -1,4 +1,5 @@
 #include "AnnotationNode.h"
+#include "AnnotationDeclarationNode.h"
 #include "../Expressions/LiteralNode.h"
 #include "Parser/NearNames.h"
 #include "Parser/PrattParser.h"
@@ -21,8 +22,7 @@ namespace Scripting
 
 	namespace
 	{
-		const char* const kCompilerAnnotations[] = { "operator", "test", "test_setup", "test_teardown", "group", "link", "uuid", "target",
-			kAnnotationDeclaration };
+		const char* const kCompilerAnnotations[] = { "operator", "test", "test_setup", "test_teardown", "group", "link", "uuid", "target" };
 	}
 
 	std::span<const char* const> CompilerAnnotationNames() { return kCompilerAnnotations; }
@@ -211,7 +211,10 @@ namespace Scripting
 			}
 			if (item->IsCompilerAnnotation()) CheckCompilerArguments(state, *item);
 		}
-		if (const char* meant = item->NearCompilerAnnotation())
+		if (item->GetName() == kAnnotationKeyword)
+			errorTracker.AddError(item->startLocation, "[annotation] declares nothing: an annotation is declared by `annotation Name(parameters) on "
+				"places;` at namespace scope (docs/language/12 section 4)", ErrorSeverity::Error);
+		else if (const char* meant = item->NearCompilerAnnotation())
 			errorTracker.AddError(item->startLocation, Core::StringFormat::Format("unknown annotation '{0}': did you mean '{1}'? (an unknown "
 				"annotation is kept for reflection, the compiler does not act on it)", item->GetName(), meant), ErrorSeverity::Warning);
 
