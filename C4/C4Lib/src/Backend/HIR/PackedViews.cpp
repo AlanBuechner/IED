@@ -64,6 +64,15 @@ namespace Scripting
 		}
 	}
 
+	AccessModifier PackedViewAccess(const ObjectType* obj, const Core::String& name)
+	{
+		if (!obj) return AccessModifier::Public;
+		const Region* region = obj->FindPackedArrayAlias(name);
+		if (!region) region = RegionOf(obj, name);
+		const ObjectType::FieldInfo* storage = region ? obj->PackedStorage(*region) : nullptr;
+		return storage ? storage->m_Access : AccessModifier::Public;
+	}
+
 	const LValue* PackedViewLValue(LoweringContext& ctx, const ObjectType* obj, const LValue* base, const Core::String& name)
 	{
 		if (!obj) return nullptr;

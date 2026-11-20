@@ -884,6 +884,14 @@
         "expect": ["Cannot access private method 'Add' of type 'Money'"],
         "reason": "An operator is a method: using it outside the type needs it to be public (D-28)."
     },
+    "PackedLanePrivateOutside": {
+        "expect": ["main.cf (10:43) error: Cannot access private field 'x' of type 'Velocity'"],
+        "reason": "BUG-477: a packed view is no field the access check saw, so a private union's lanes were anyone's; its region takes its union's access (D-28)."
+    },
+    "PackedArrayViewPrivateOutside": {
+        "expect": ["Cannot access private field 'data' of type 'Velocity'"],
+        "reason": "BUG-477: the whole-vector array view is a view of the same private region."
+    },
     "SectionMissingModifier": {
         "expect": ["main.cf (3:2) error: member 'width' is under 'public:' but has no access modifier; write 'public'"],
         "reason": "A section label groups members; each member under it still writes its modifier (D-28)."
@@ -1627,6 +1635,22 @@
     "AnnotationDeclaredInType": {
         "expect": ["main.cf (3:2) error: [Tint] is declared at namespace scope, not in a type (docs/language/12 section 4)"],
         "reason": "An annotation is the program's, named by its own name wherever it is declared; a type's body holds none."
+    },
+    "SectionAnnotationOnNothing": {
+        "expect": ["main.cf (4:2) error: [Saved] on 'private:' goes on nothing: no field or method is under it"],
+        "reason": "A label's annotations are its fields' and methods' (docs/language/12 section 1): on an empty section nothing reads them."
+    },
+    "SectionAnnotationWrongPlace": {
+        "expect": ["main.cf (4:2) error: [Saved] on 'public:' goes on none of the fields and methods under it: [Saved] goes on a field, not on a method"],
+        "reason": "Each member takes a label's annotation where it goes (a field-only one skips the methods); one that goes on none of them is a mistake."
+    },
+    "SectionAnnotationArgumentKind": {
+        "expect": ["main.cf (4:8) error: [Limit] on 'public:' goes on none of the fields and methods under it: [Limit] argument 1 ('limit')"],
+        "reason": "A label's annotation is checked against its declaration once, where it is written, not at each member."
+    },
+    "SectionCompilerAnnotation": {
+        "expect": ["main.cf (2:2) error: [group] is the compiler's: it goes on a declaration, not on the 'public:' label, whose annotations are its fields' and methods' (docs/language/12 section 1)"],
+        "reason": "The compiler's annotations act on one declaration; a label passes on only the ones reflection keeps."
     },
     "CompilerAnnotationNotLiteral": {
         "expect": ["'group' takes string literal arguments"],

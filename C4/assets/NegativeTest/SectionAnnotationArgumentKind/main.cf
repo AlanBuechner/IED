@@ -1,0 +1,9 @@
+annotation Limit(int32 limit) on field;
+
+class Panel {
+[Limit("far")]
+public:
+	public int32 width;
+}
+
+int32 main() { Panel p; return p.width; }

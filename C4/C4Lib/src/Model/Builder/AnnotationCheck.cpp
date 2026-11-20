@@ -7,6 +7,7 @@
 #include "Model/Types/UnionType.h"
 #include "Parser/Nodes/Declarations/AnnotationDeclarationNode.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
+#include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
 #include "Parser/Nodes/Declarations/ParameterNode.h"
 
 namespace Scripting
@@ -49,6 +50,39 @@ namespace Scripting
 		Check(object.GetDeclNode(), AnnotationPlace::Type, scope);
 		for (const auto& field : object.GetFields())
 			if (!field.m_IsStatic) Check(field.m_DeclaringNode, AnnotationPlace::Field, scope);
+		if (const auto* written = dynamic_cast<const ObjectDefinitionNode*>(object.GetDeclNode()))
+			for (const AccessSection& section : written->GetSections()) CheckSection(section, scope);
+	}
+
+	void AnnotationCheck::CheckSection(const AccessSection& section, const Scope* scope)
+	{
+		for (const auto& node : section.m_Annotations)
+			if (node)
+				for (const auto& group : node->GetBracketGroups())
+					for (const auto& item : group.annotations)
+						if (item && !item->IsCompilerAnnotation()) CheckSectionItem(*item, section, scope);
+	}
+
+	// A label's annotation must go on one of its members at least - each takes it where it goes (ReflectedAnnotations).
+	void AnnotationCheck::CheckSectionItem(const AnnotationItem& item, const AccessSection& section, const Scope* scope)
+	{
+		const Core::String label = "'" + section.m_Label.GetText() + ":'";
+		if (section.m_Members.Empty())
+			return Report(item.startLocation, "[" + item.GetName() + "] on " + label + " goes on nothing: no field or method is under it");
+		QueryResult<ReflectedAnnotation> refused = QueryResult<ReflectedAnnotation>::Fail(QueryError::NotFound, "", item.startLocation);
+		for (const AstNode* member : section.m_Members)
+		{
+			const AnnotationPlace place = member->Type() == NodeType::FunctionDefinition ? AnnotationPlace::Method : AnnotationPlace::Field;
+			auto folded = FoldAnnotation(m_Model, item, place, scope);
+			if (!folded.Ok())
+			{
+				if (refused.message.empty()) refused = folded;
+				continue;
+			}
+			if (!folded.value.declaration) CheckUndeclared(item, AnnotationContext{ scope, item.startLocation.sourceId });
+			return;
+		}
+		Report(refused.loc, "[" + item.GetName() + "] on " + label + " goes on none of the fields and methods under it: " + refused.message);
 	}
 
 	// As reflection registers them: not a thread_local, which has no one address. A type's static is a field.

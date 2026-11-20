@@ -12,6 +12,9 @@ namespace Reflection
 	// What a registered entity is (the runtime's reflect_KIND_* values).
 	enum class EntityKind : uint32 { Object = 14, Enum = 15, Union = 16, Variable = 17, Function = 18 }
 
+	// Who may name a field (the runtime's reflect_ACCESS_* values): as its section and its modifier resolve it.
+	enum class Access : uint32 { Public = 0, Protected = 1, Private = 2 }
+
 	// A type's flags (the runtime's reflect_TYPE_* values).
 	const uint32 kTypeHoldsPointers = 1u;
 	const uint32 kTypeDefaultConstructible = 2u;
@@ -84,6 +87,10 @@ namespace Reflection
 		// A second view of bytes an earlier field already names: a union member after the first view, a lane's
 		// second name (`r` beside `x`) or a vector's whole-lane array (`data`). Serializers skip aliases.
 		public bool IsAlias() const { return reflect_field_handle_is_alias(handle) != 0; }
+		// Who may name it: `private float x;` is Private, a field under no label its kind's default (a class's private, a
+		// struct's public). Serializers and editors read it as what a type keeps to itself.
+		public Access AccessOf() const { return (Access)reflect_field_handle_access(handle); }
+		public bool IsPublic() const { return IsValid() && AccessOf() == Access::Public; }
 
 		// The field inside `object`, an instance of the type the field belongs to.
 		public void* AddressIn(void* object) const { return (void*)((char*)object + Offset()); }

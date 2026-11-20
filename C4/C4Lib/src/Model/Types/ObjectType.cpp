@@ -65,13 +65,14 @@ namespace Scripting
 		return nullptr;
 	}
 
-	void ObjectType::AddPackedRegion(const SwizzleType* region, const AstNode* declared)
+	void ObjectType::AddPackedRegion(const SwizzleType* region, const AstNode* declared, AccessModifier access)
 	{
 		Asking("a field");
 		FieldInfo storage;
 		storage.mName = "__packed" + std::to_string(m_PackedViews.Count());
 		storage.m_Type = region;
 		storage.m_IsPackedStorage = true;
+		storage.m_Access = DefaultAccess(access);
 		storage.m_DeclaringNode = declared;
 		uint32 index = 0;
 		for (uint32 i = 0; i < m_Fields.Count(); ++i)

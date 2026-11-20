@@ -46,5 +46,17 @@ namespace Testing
 
 		TEST_FUNC(Parser.ObjectDefinition)
 		void TestNoMatch();
+
+		TEST_FUNC(Parser.ObjectDefinition)
+		void TestSectionAnnotations();
+
+		TEST_FUNC(Parser.ObjectDefinition)
+		void TestSectionAnnotationsOnlyOnFieldsAndMethods();
+
+		TEST_FUNC(Parser.ObjectDefinition)
+		void TestCompilerAnnotationOnSection();
+
+		TEST_FUNC(Parser.ObjectDefinition)
+		void TestAnnotatedMemberIsNoLabel();
 	};
 }

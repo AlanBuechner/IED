@@ -30,6 +30,9 @@ namespace Scripting
 		// --- Getters ---
 
 		const Core::Vector<Ref<AnnotationNode>>& GetAnnotations() const { return m_Annotations; }
+		/// The annotations of the access label it is under (`[Command] public:`), which it takes after its own.
+		const Core::Vector<Ref<AnnotationNode>>& GetSectionAnnotations() const { return m_SectionAnnotations; }
+		void SetSectionAnnotations(const Core::Vector<Ref<AnnotationNode>>& annotations) { m_SectionAnnotations = annotations; }
 		AccessModifier GetAccessModifier() const { return m_AccessModifier; }
 		void SetAccessModifier(AccessModifier access) { m_AccessModifier = access; }
 		const Token& GetAccessModifierToken() const { return m_AccessModifierToken; }
@@ -101,6 +104,7 @@ namespace Scripting
 		void CheckAbstract(ErrorTracker& errorTracker) const;
 
 		Core::Vector<Ref<AnnotationNode>> m_Annotations;
+		Core::Vector<Ref<AnnotationNode>> m_SectionAnnotations; // its section's: not its children
 		AccessModifier m_AccessModifier = AccessModifier::None;
 		Token m_AccessModifierToken;
 

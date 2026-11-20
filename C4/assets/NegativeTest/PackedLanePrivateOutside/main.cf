@@ -1,0 +1,10 @@
+// BUG-477: a lane of a private packed union is the class's own, as any private field is.
+class Velocity {
+	public int32 id;
+private:
+	private union { packed float x, y; packed float[2] data; };
+public:
+	public float Sum() const { return x + y + this.data[0]; }
+}
+
+int32 main() { Velocity v; return (int32)(v.x + v.Sum()); }

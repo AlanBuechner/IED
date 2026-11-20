@@ -47,6 +47,16 @@ namespace Scripting
 			return inUnion && !UnionLayout::IsPrimary(UnionLayout::RegionMembers(fields, field.m_UnionRegionId), field);
 		}
 
+		uint64 ReflectedAccess(AccessModifier access)
+		{
+			switch (access)
+			{
+			case AccessModifier::Private: return reflect_ACCESS_PRIVATE;
+			case AccessModifier::Protected: return reflect_ACCESS_PROTECTED;
+			default: return reflect_ACCESS_PUBLIC;
+			}
+		}
+
 		// The rows of the image, described entity by entity (ImageDescription); each table a row points at becomes a
 		// private constant where the image is built.
 		class ImageWriter
@@ -299,12 +309,14 @@ namespace Scripting
 			{
 				const Table annotations = Annotations(field.m_DeclaringNode, AnnotationPlace::Field, scope);
 				return { Text(field.mName), TypeText(field.m_Type), U64(field.m_Type->GetSize()), U64(offset),
-					U32(field.m_IsConst ? 1 : 0), U32(alias ? 1 : 0), annotations.count, annotations.rows };
+					U32(field.m_IsConst ? 1 : 0), U32(alias ? 1 : 0), U32(ReflectedAccess(field.m_Access)), annotations.count, annotations.rows };
 			}
 
-			ImageRow LaneRow(const std::string& name, const std::string& typeName, uint64 size, uint64 offset, bool isConst, bool alias)
+			// A lane is named as its region's storage is declared: its access too.
+			ImageRow LaneRow(const std::string& name, const std::string& typeName, uint64 size, uint64 offset, const ObjectType::FieldInfo& storage, bool alias)
 			{
-				return { Text(name), Text(typeName), U64(size), U64(offset), U32(isConst ? 1 : 0), U32(alias ? 1 : 0), U32(0), Null() };
+				return { Text(name), Text(typeName), U64(size), U64(offset), U32(storage.m_IsConst ? 1 : 0), U32(alias ? 1 : 0),
+					U32(ReflectedAccess(storage.m_Access)), U32(0), Null() };
 			}
 
 			// A packed region is reflected through its lanes, each one element wide (BUG-193): the first name of each
@@ -320,12 +332,12 @@ namespace Scripting
 				for (const SwizzleType::LaneInfo& lane : region->GetLanes())
 				{
 					const bool alias = !named.insert(lane.m_Index).second;
-					rows.push_back(LaneRow(lane.m_Name.c_str(), elementName, width, storage.m_Offset + lane.m_Index * width, storage.m_IsConst, alias));
+					rows.push_back(LaneRow(lane.m_Name.c_str(), elementName, width, storage.m_Offset + lane.m_Index * width, storage, alias));
 				}
 				if (region->GetArrayAlias().empty()) return;
 				const uint32 lanes = region->GetLaneCount();
 				rows.push_back(LaneRow(region->GetArrayAlias().c_str(), elementName + "[" + std::to_string(lanes) + "]", width * lanes,
-					storage.m_Offset, storage.m_IsConst, !named.empty()));
+					storage.m_Offset, storage, !named.empty()));
 			}
 
 			Table Fields(const ObjectType& object)

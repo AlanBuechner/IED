@@ -24,6 +24,16 @@ namespace Scripting
 		Ref<QualTypeNode> m_Type;
 	};
 
+	/// One `public:` / `private:` / `protected:` label and what is under it, up to the next label. Its annotations
+	/// (`[Property] private:`) are those of every field and method under it too (docs/language/12 section 1).
+	struct AccessSection
+	{
+		Token m_Label;
+		AccessModifier m_Access = AccessModifier::None;
+		Core::Vector<Ref<AnnotationNode>> m_Annotations;
+		Core::Vector<const AstNode*> m_Members; // the fields and methods that take m_Annotations
+	};
+
 	/// Represents a class, struct, or interface definition including optional annotations,
 	/// access modifiers, template definition, name, inheritance list, and body members.
 	struct ObjectDefinitionNode : public AstNode
@@ -61,6 +71,8 @@ namespace Scripting
 
 		const Core::Vector<Ref<AstNode>>& GetBodyMembers() const { return m_BodyMembers; }
 		uint32 MemberCount() const { return m_BodyMembers.Count(); }
+		/// Its access labels in source order, each with its annotations and the members under it.
+		const Core::Vector<AccessSection>& GetSections() const { return m_Sections; }
 
 		std::span<const Ref<AstNode>> Children() const override;
 		Core::String ToString() const override;
@@ -73,6 +85,10 @@ namespace Scripting
 	private:
 		void ParseClassModifiers(ParserState& state);
 		void CheckClassModifiers(ErrorTracker& errorTracker) const;
+		// `[Property] private:` or `private:` at the lexer: its annotations and label parsed, a section opened.
+		void OpenSection(ParserState& state);
+		// A member just parsed, under the open section: its access checked against it, and its annotations given.
+		void PlaceInSection(Ref<AstNode> node, ErrorTracker& errorTracker);
 
 		Core::Vector<Ref<AnnotationNode>> m_Annotations;
 		AccessModifier m_AccessModifier = AccessModifier::None;
@@ -100,9 +116,10 @@ namespace Scripting
 		// must not be treated as an anonymous definition (HasBody) nor as a full type definition.
 		bool m_IsDeclaration = false;
 	Core::Vector<Ref<AstNode>> m_BodyMembers;
+	Core::Vector<AccessSection> m_Sections;
 	Token m_CloseBraceToken;
 	Token m_SemicolonToken; // trailing semicolon after class body
 
-	Core::Vector<Ref<AstNode>> m_Children; // annotations + templateDef + baseTypes + bodyMembers
+	Core::Vector<Ref<AstNode>> m_Children; // annotations + templateDef + baseTypes + bodyMembers + the sections' annotations
 	};
 }

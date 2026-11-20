@@ -24,6 +24,10 @@ namespace Scripting
 	/// null for any other node.
 	const Core::Vector<Ref<AnnotationNode>>* DeclarationAnnotations(const AstNode* declaration);
 
+	/// The annotations of the access label a field or a method is declared under (`[Property] private:`); null for any
+	/// other node.
+	const Core::Vector<Ref<AnnotationNode>>* SectionAnnotations(const AstNode* declaration);
+
 	/// What is written as an annotation argument, or as a parameter's default, folded in `scope`: a string literal is a
 	/// string, any other expression a constant, else the type `asType` names (the same tokens read as a type, when they do).
 	QueryResult<ReflectedArgument> FoldAnnotationArgument(const ProgramModel& model, const AstNode& written, const QualTypeNode* asType,
@@ -35,7 +39,9 @@ namespace Scripting
 		const Scope* scope);
 
 	/// The reflected annotations of `declarations`, in order (a function declared and defined apart carries both lists),
-	/// written on `place` and folded in `scope`. A failure is the first annotation's that fails.
+	/// written on `place` and folded in `scope`. A failure is the first annotation's that fails. Then those of the access
+	/// label a declaration is under that go on `place` and that it does not write itself: a section's annotation that fits
+	/// no member, or whose arguments do not fold, is said once where the label is (AnnotationCheck), not at each member.
 	QueryResult<Core::Vector<ReflectedAnnotation>> ReflectedAnnotations(const ProgramModel& model,
 		const Core::Vector<const AstNode*>& declarations, AnnotationPlace place, const Scope* scope);
 } // namespace Scripting

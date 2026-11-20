@@ -135,7 +135,7 @@ missing name or index gives an invalid handle, so check `IsValid()`.
 | Class | Accessors |
 |---|---|
 | `Type` | `IsValid, Name, Tag, Kind, SizeOf, AlignOf, IsVirtualType, BaseName, FieldCount, FindField(name), FieldAt(i), MethodCount, FindMethod(name), MethodAt(i), EnumCount, EnumAt(i), FindByName(name)`; range-for over fields; `Methods()` and `Enums()` views for range-for; `HoldsPointers, IsDefaultConstructible, IsCopyable, IsAbstract, IsTriviallyDestructible, IsTriviallyCopyable`, `Construct(object)` (the storage zeroed, then the type's start; false when it is not default constructible), `Destroy(object)`, `CopyTo(to, from)` (false when it cannot be copied) |
-| `Field` | `IsValid, Name, Offset, SizeOf, TypeName, TypeOf, IsConst, IsAlias, AddressIn(object), Get(object, out), Set(object, value)` |
+| `Field` | `IsValid, Name, Offset, SizeOf, TypeName, TypeOf, IsConst, IsAlias, AccessOf` (a `Reflection::Access`: `Public`, `Protected`, `Private`, as its label and modifier resolve it; a lane takes its union's)`, IsPublic` (false for an invalid field)`, AddressIn(object), Get(object, out), Set(object, value)` |
 | `Annotation` | `IsValid, Name, ArgCount, ArgKind(i)` (an `AnnotationArg`: `Int`, `Float`, `Bool`, `String`, `Type`)`, IntArg(i), FloatArg(i), BoolArg(i), StringArg(i)` (a `Type`'s qualified name too)`, TypeArg(i)` (the type a `Type` argument names; invalid for another kind)` |
 | `Method` | `IsValid, Name, ParamCount, IsVirtual, IsStatic, IsConst, ParamAt(i), ReturnTypeName, ReturnType, OperatorRole, HasOperatorRole(role), IsInvokable, Invoke(object, result, arguments), Call(object, result, args...)` |
 | `Param` | `IsValid, Name, TypeName, TypeOf` |
@@ -278,6 +278,19 @@ Reflection::Type hull = ship.FindAnnotation("Requires").TypeArg(0); // Geo::Hull
 ```
 
 A function declared and defined apart lists the declaration's annotations, then the definition's.
+
+A field or method under an annotated access label (`[Saved] private:`, [12 section 1](../language/12-annotations.md#1-syntax))
+lists its own annotations, then those of its label that go where it is (a field skips a method-only one), leaving out
+any of a name it writes itself: its own `[Range(0, 9)]` is the one it keeps under `[Range(0, 1)] public:`.
+
+A field's access says what a type keeps to itself, which a serializer or an editor reads as its default - a public field
+saved and shown, a private one neither - and an annotation overrides:
+
+```c4
+[Serialize]
+private:
+	private float m_Timer;         // AccessOf() is Private; FindAnnotation("Serialize") is valid
+```
 
 The wrappers sit on about 85 low-level `reflect_*` builtins (`reflect_type`, `reflect_field`,
 `reflect_method_param`, `reflect_variable_address`, `reflect_group`, ...). Use those only when writing

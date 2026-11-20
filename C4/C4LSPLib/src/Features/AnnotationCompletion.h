@@ -18,6 +18,7 @@ namespace C4LSP::Features
 		struct Site
 		{
 			std::optional<Scripting::AnnotationPlace> place; // what the annotations are written on, when the text says
+			bool onLabel = false;                            // on an access label (`[Property] private:`): its fields' and methods'
 			std::string qualifier;                           // what is written before the name: `Scene::` of `[Scene::Ra`
 		};
 
@@ -25,7 +26,8 @@ namespace C4LSP::Features
 		/// a type's body, so a function there is a method and a variable a field.
 		static std::optional<Site> Find(const std::string& text, size_t caret, bool inType);
 
-		/// The annotations `site` may name, listed before code's names (a `[` may also start a lambda or a return list).
+		/// The annotations `site` may name, listed before code's names (a `[` may also start a lambda or a return list); on a label,
+		/// those that go on a field or a method, and none of the compiler's own.
 		static void Add(const Server::SemanticResolver& resolver, const Site& site, const Scripting::AnnotationContext& at, Core::Vector<CompletionItem>& out);
 
 		/// Whether the caret at byte `caret` of `text` is on a place of an annotation declaration: after its `on`, or after a

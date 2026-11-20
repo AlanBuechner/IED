@@ -41,6 +41,9 @@ namespace Testing
 		void TestCompletionOffersWhatGoesThere();
 
 		TEST_FUNC(Lsp.Features.DeclaredAnnotations)
+		void TestCompletionOnAnAccessLabel();
+
+		TEST_FUNC(Lsp.Features.DeclaredAnnotations)
 		void TestCompletionAfterAComma();
 
 		TEST_FUNC(Lsp.Features.DeclaredAnnotations)

@@ -162,9 +162,75 @@ namespace Scripting
 		SetMemberAccess(node, EffectiveAccess(kind, written, currentSection));
 	}
 
+	/// Gives a field or a method its section's annotations; false for any other member, which takes none.
+	static bool GiveSectionAnnotations(Ref<AstNode> node, const Core::Vector<Ref<AnnotationNode>>& annotations)
+	{
+		switch (node->Type()) {
+			case NodeType::VariableDefinition: static_cast<VariableDefinitionNode&>(*node).SetSectionAnnotations(annotations); return true;
+			case NodeType::FunctionDefinition: static_cast<FunctionDefinitionNode&>(*node).SetSectionAnnotations(annotations); return true;
+			default: return false;
+		}
+	}
+
+	/// `private:`, or `[Property] private:` - annotations an access label takes for its section; the lexer stays.
+	static bool StartsAccessLabel(ParserState& state)
+	{
+		Lexer& lexer = state.GetLexer();
+		if (IsAccessModifier(lexer.PeekCompound().GetType())) return lexer.PeekCompound(1).GetType() == TokenType::Colon;
+		if (lexer.PeekCompound().GetType() != TokenType::OpenBracket) return false;
+		auto peek = LexerUndoScope(lexer);
+		state.GetErrorTracker().SuppressErrors();
+		while (lexer.PeekCompound().GetType() == TokenType::OpenBracket && !state.GetErrorTracker().SpeculationFailed())
+			CreateRef<AnnotationNode>()->ParseBody(state);
+		const bool label = !state.GetErrorTracker().SpeculationFailed() && IsAccessModifier(lexer.PeekCompound().GetType()) &&
+			lexer.PeekCompound(1).GetType() == TokenType::Colon;
+		state.GetErrorTracker().DiscardSuppressedErrors();
+		return label;
+	}
+
+	/// The compiler's own annotations act on one declaration: a section passes on only what reflection keeps.
+	static void CheckSectionAnnotation(const AnnotationNode& annotation, const Token& label, ErrorTracker& errorTracker)
+	{
+		for (const auto& group : annotation.GetBracketGroups())
+			for (const auto& item : group.annotations)
+				if (item && item->IsCompilerAnnotation())
+					errorTracker.AddError(item->startLocation, "[" + item->GetName() + "] is the compiler's: it goes on a declaration, not on the '" +
+						label.GetText() + ":' label, whose annotations are its fields' and methods' (docs/language/12 section 1)", ErrorSeverity::Error);
+	}
+
 	std::span<const Ref<AstNode>> ObjectDefinitionNode::Children() const
 	{
 		return m_Children;
+	}
+
+	void ObjectDefinitionNode::OpenSection(ParserState& state)
+	{
+		Lexer& lexer = state.GetLexer();
+		ErrorTracker& errorTracker = state.GetErrorTracker();
+		AccessSection section;
+		while (lexer.PeekCompound().GetType() == TokenType::OpenBracket)
+		{
+			auto annotation = CreateRef<AnnotationNode>();
+			annotation->ParseBody(state);
+			section.m_Annotations.Push(annotation);
+		}
+		section.m_Label = lexer.PeekCompound();
+		section.m_Access = AccessModifierOf(section.m_Label.GetType());
+		for (const auto& annotation : section.m_Annotations) CheckSectionAnnotation(*annotation, section.m_Label, errorTracker);
+		if (m_Kind == ObjectKind::Interface && IsHidden(section.m_Access))
+			errorTracker.AddError(section.m_Label.GetStartLocation(), Core::String("an interface cannot have a '") + SectionName(section.m_Access) +
+				":' section: its members are public", ErrorSeverity::Error);
+		lexer.NextCompoundToken(); // the keyword
+		lexer.NextCompoundToken(); // ':'
+		m_Sections.Push(std::move(section));
+	}
+
+	void ObjectDefinitionNode::PlaceInSection(Ref<AstNode> node, ErrorTracker& errorTracker)
+	{
+		AccessSection* section = m_Sections.Empty() ? nullptr : &m_Sections.Back();
+		ApplyAccessSection(node, m_Kind, section ? section->m_Access : AccessModifier::None, errorTracker);
+		m_BodyMembers.Push(node);
+		if (section && GiveSectionAnnotations(node, section->m_Annotations)) section->m_Members.Push(node.Get());
 	}
 
 	Core::String ObjectDefinitionNode::ToString() const
@@ -286,6 +352,7 @@ namespace Scripting
 		m_HasInheritanceList = false;
 		m_BaseClasses.Clear();
 		m_BodyMembers.Clear();
+		m_Sections.Clear();
 
 		// 1. Parse annotations
 		while (true)
@@ -372,17 +439,17 @@ namespace Scripting
 			return;
 		}
 
-	// 6. Name (optional: anonymous definitions `struct { ... };` are allowed, e.g. swizzle views)
-	Token nameToken = lexer.PeekCompound();
-	if (nameToken.GetType() == TokenType::Identifier)
-	{
-		m_NameToken = nameToken;
-		lexer.NextCompoundToken();
-	}
+		// 6. Name (optional: anonymous definitions `struct { ... };` are allowed, e.g. swizzle views)
+		Token nameToken = lexer.PeekCompound();
+		if (nameToken.GetType() == TokenType::Identifier)
+		{
+			m_NameToken = nameToken;
+			lexer.NextCompoundToken();
+		}
 
-	// A specialization names the arguments it is for: `template<> struct Box<bool>`, `template<T> struct Box<T*>`.
-	if (m_TemplateDefinition && lexer.PeekCompound().GetType() == TokenType::Less)
-		m_SpecializationArguments = NamespaceQualifiedNameNode().ParseTemplateArguments(state);
+		// A specialization names the arguments it is for: `template<> struct Box<bool>`, `template<T> struct Box<T*>`.
+		if (m_TemplateDefinition && lexer.PeekCompound().GetType() == TokenType::Less)
+			m_SpecializationArguments = NamespaceQualifiedNameNode().ParseTemplateArguments(state);
 
 		// 7. Optional inheritance list
 		Token maybeColon = lexer.PeekCompound();
@@ -427,23 +494,23 @@ namespace Scripting
 			}
 		}
 
-	// 8. Opening brace OR a forward declaration (`class Window;`). A `;` right after a NAMED type
-	// with no inheritance list is a declaration-only forward declaration - it introduces the name
-	// as an incomplete type so pointers/references and later definitions can use it (C++ fwd-decl).
-	Token openBrace = lexer.PeekCompound();
-	if (openBrace.GetType() == TokenType::OpenCurl)
-	{
-		m_OpenBraceToken = openBrace;
-		m_HasOpenBrace = true;
-		lexer.NextCompoundToken();
-	}
-	else if (openBrace.GetType() == TokenType::SemiColon && !m_NameToken.GetText().empty() && !m_HasInheritanceList)
-	{
-		m_IsDeclaration = true;
-		m_SemicolonToken = openBrace;
-		lexer.NextCompoundToken();
-		return; // no body to parse
-	}
+		// 8. Opening brace OR a forward declaration (`class Window;`). A `;` right after a NAMED type
+		// with no inheritance list is a declaration-only forward declaration - it introduces the name
+		// as an incomplete type so pointers/references and later definitions can use it (C++ fwd-decl).
+		Token openBrace = lexer.PeekCompound();
+		if (openBrace.GetType() == TokenType::OpenCurl)
+		{
+			m_OpenBraceToken = openBrace;
+			m_HasOpenBrace = true;
+			lexer.NextCompoundToken();
+		}
+		else if (openBrace.GetType() == TokenType::SemiColon && !m_NameToken.GetText().empty() && !m_HasInheritanceList)
+		{
+			m_IsDeclaration = true;
+			m_SemicolonToken = openBrace;
+			lexer.NextCompoundToken();
+			return; // no body to parse
+		}
 		else
 		{
 			errorTracker.AddError(
@@ -460,9 +527,8 @@ namespace Scripting
 		// label groups members (so you can see the region at a glance) but never grants default
 		// visibility on its own - each member still states its own access, and it must agree with
 		// the section. Members before any label use the type's default (class -> private,
-		// struct/interface -> public). Nested types are sub-scopes and are exempt.
-		AccessModifier currentSection = AccessModifier::None; // None = no active section label
-
+		// struct/interface -> public). Nested types are sub-scopes and are exempt. Annotations
+		// written on a label (`[Property] private:`) are its fields' and methods' (PlaceInSection).
 		while (true)
 		{
 			Token t = lexer.PeekCompound();
@@ -470,15 +536,9 @@ namespace Scripting
 			if (t.GetType() == TokenType::EndOfFile || t.GetType() == TokenType::CloseCurl)
 				break;
 
-			// Access section label: `public:` / `private:` / `protected:`
-			if (IsAccessModifier(t.GetType()) && lexer.PeekCompound(1).GetType() == TokenType::Colon)
+			if (StartsAccessLabel(state))
 			{
-				currentSection = AccessModifierOf(t.GetType());
-				if (m_Kind == ObjectKind::Interface && IsHidden(currentSection))
-					errorTracker.AddError(t.GetStartLocation(), Core::String("an interface cannot have a '") + SectionName(currentSection) +
-						":' section: its members are public", ErrorSeverity::Error);
-				lexer.NextCompoundToken(); // consume the keyword
-				lexer.NextCompoundToken(); // consume ':'
+				OpenSection(state);
 				continue;
 			}
 
@@ -493,11 +553,11 @@ namespace Scripting
 
 #define TRY_PARSE_MEMBER(type) \
 			{ auto node = type::TryParse(state); \
-			if (node != nullptr) { ApplyAccessSection(node, m_Kind, currentSection, errorTracker); m_BodyMembers.Push(node); continue; } }
+			if (node != nullptr) { PlaceInSection(node, errorTracker); continue; } }
 
-	TRY_PARSE_MEMBER(FunctionDefinitionNode);
-	TRY_PARSE_MEMBER(VariableDefinitionNode);
-	TRY_PARSE_MEMBER(SwizzleViewNode);
+			TRY_PARSE_MEMBER(FunctionDefinitionNode);
+			TRY_PARSE_MEMBER(VariableDefinitionNode);
+			TRY_PARSE_MEMBER(SwizzleViewNode);
 			TRY_PARSE_MEMBER(ObjectDefinitionNode);
 			TRY_PARSE_MEMBER(EnumDefinitionNode);
 			TRY_PARSE_MEMBER(UnionDefinitionNode);
@@ -518,62 +578,65 @@ namespace Scripting
 			lexer.NextCompoundToken();
 		}
 
-	// Methods must be processed after every field/type so a member declared after its type's
-	// methods (C++-style trailing `private:` data section) is still visible to method bodies and
-	// laid out. Stable-partition body members: all non-function declarations first, in their
-	// original relative order, then the function (method) definitions in original order. Keeping
-	// the declarative group in source-relative order preserves layout (a union interleaved with
-	// plain fields keeps its declared position, so CalculateLayout offsets match source order).
-	if (m_BodyMembers.Count() > 1)
-	{
-		Core::Vector<Ref<AstNode>> reordered;
-		for (const auto& member : m_BodyMembers)
-			if (member && member->Type() != NodeType::FunctionDefinition)
-				reordered.Push(member);
-		for (const auto& member : m_BodyMembers)
-			if (member && member->Type() == NodeType::FunctionDefinition)
-				reordered.Push(member);
-		m_BodyMembers = reordered;
-	}
+		// Methods must be processed after every field/type so a member declared after its type's
+		// methods (C++-style trailing `private:` data section) is still visible to method bodies and
+		// laid out. Stable-partition body members: all non-function declarations first, in their
+		// original relative order, then the function (method) definitions in original order. Keeping
+		// the declarative group in source-relative order preserves layout (a union interleaved with
+		// plain fields keeps its declared position, so CalculateLayout offsets match source order).
+		if (m_BodyMembers.Count() > 1)
+		{
+			Core::Vector<Ref<AstNode>> reordered;
+			for (const auto& member : m_BodyMembers)
+				if (member && member->Type() != NodeType::FunctionDefinition)
+					reordered.Push(member);
+			for (const auto& member : m_BodyMembers)
+				if (member && member->Type() == NodeType::FunctionDefinition)
+					reordered.Push(member);
+			m_BodyMembers = reordered;
+		}
 
-	// 10. Closing brace
-	Token closeBrace = lexer.PeekCompound();
-	if (closeBrace.GetType() == TokenType::CloseCurl)
-	{
-		m_CloseBraceToken = closeBrace;
-		endLocation = closeBrace.GetEndLocation();
-		lexer.NextCompoundToken();
-	}
-	else if (closeBrace.GetType() != TokenType::EndOfFile)
-	{
-		errorTracker.AddError(
-			closeBrace.GetStartLocation(),
-			Core::StringFormat::Format("Expected '}}' to close type body, got '{0}'", closeBrace.GetText()),
-			ErrorSeverity::Error);
-		endLocation = startLocation;
-	}
+		// 10. Closing brace
+		Token closeBrace = lexer.PeekCompound();
+		if (closeBrace.GetType() == TokenType::CloseCurl)
+		{
+			m_CloseBraceToken = closeBrace;
+			endLocation = closeBrace.GetEndLocation();
+			lexer.NextCompoundToken();
+		}
+		else if (closeBrace.GetType() != TokenType::EndOfFile)
+		{
+			errorTracker.AddError(
+				closeBrace.GetStartLocation(),
+				Core::StringFormat::Format("Expected '}}' to close type body, got '{0}'", closeBrace.GetText()),
+				ErrorSeverity::Error);
+			endLocation = startLocation;
+		}
 
-	// 11. Optional trailing semicolon
-	Token semi = lexer.PeekCompound();
-	if (semi.GetType() == TokenType::SemiColon)
-	{
-		m_SemicolonToken = semi;
-		endLocation = semi.GetEndLocation();
-		lexer.NextCompoundToken();
-	}
+		// 11. Optional trailing semicolon
+		Token semi = lexer.PeekCompound();
+		if (semi.GetType() == TokenType::SemiColon)
+		{
+			m_SemicolonToken = semi;
+			endLocation = semi.GetEndLocation();
+			lexer.NextCompoundToken();
+		}
 
-	if (endLocation.line == 0)
-		endLocation = startLocation;
+		if (endLocation.line == 0)
+			endLocation = startLocation;
 
 		m_Children.Clear();
-			for (uint32 i = 0; i < m_Annotations.Count(); ++i)
-				m_Children.Push(m_Annotations[i]);
-			if (m_TemplateDefinition)
-				m_Children.Push(m_TemplateDefinition);
-			if (m_SpecializationArguments)
-				m_Children.Push(m_SpecializationArguments);
-			for (uint32 i = 0; i < m_BodyMembers.Count(); ++i)
-				m_Children.Push(m_BodyMembers[i]);
+		for (uint32 i = 0; i < m_Annotations.Count(); ++i)
+			m_Children.Push(m_Annotations[i]);
+		if (m_TemplateDefinition)
+			m_Children.Push(m_TemplateDefinition);
+		if (m_SpecializationArguments)
+			m_Children.Push(m_SpecializationArguments);
+		for (uint32 i = 0; i < m_BodyMembers.Count(); ++i)
+			m_Children.Push(m_BodyMembers[i]);
+		for (const AccessSection& section : m_Sections)
+			for (const auto& annotation : section.m_Annotations)
+				m_Children.Push(annotation);
 	}
 
 

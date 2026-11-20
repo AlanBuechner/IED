@@ -81,7 +81,7 @@ private:
 		struct PendingField { const ObjectType* obj; const VariableDefinitionNode* var; uint32 unitId; int unionRegionId = -1; int unionViewId = -1; };
 	// A `packed`/`unpacked` swizzle view inside an object body: becomes a PackedViewRegion (SIMD
 	// <N x T>) once its element type resolves in pass 2. Lanes are accessed via FindPackedLane.
-	struct PendingSwizzle { const ObjectType* obj; const SwizzleViewNode* node; uint32 unitId; };
+	struct PendingSwizzle { const ObjectType* obj; const SwizzleViewNode* node; uint32 unitId; AccessModifier access; }; // access: its union's
 		struct PendingMethodDecl { const ObjectType* obj; const FunctionDefinitionNode* fn; uint32 unitId; };
 		struct PendingMethodDef
 		{

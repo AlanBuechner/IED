@@ -163,7 +163,7 @@ void TestPackedVectorAggregateInit() {
 // The user's exact generic vector design: a template class whose storage is packed SIMD
 // views (named lanes + an array view) with an [operator] overload using bare lane names.
 template<T> class TVector2 {
-	union { packed T x, y; packed T r, g; packed T[2] data; };
+	public union { packed T x, y; packed T r, g; packed T[2] data; };
 
 	// Explicit `this.` lane access: the lane must resolve through the CURRENT containing type
 	// (pointer-to-this), never the shared symbol table's stale `this` entry - under a template
@@ -249,7 +249,7 @@ void TestPackedVectorAliasLanes() {
 // a broken variadic stub.
 namespace EngineMath {
 	template<T> class CVec2 {
-		union{ packed T x, y; };
+		public union{ packed T x, y; };
 		[operator("add")] public CVec2<T>& Add(CVec2<T> other) { this.xy += other.xy; return *this; }
 		public CVec2<T> Dup(CVec2<T> other) { return *this; }
 	}

@@ -190,7 +190,12 @@ namespace Scripting
 			if (const auto* obj = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(baseType)))
 			{
 				const Core::String& name = n->GetMemberNameToken().GetText();
-				if (const LValue* view = PackedViewLValue(m_Ctx, obj, baseLoc, name)) return Value::L(view);
+				if (const LValue* view = PackedViewLValue(m_Ctx, obj, baseLoc, name))
+				{
+					if (auto allowed = AccessCheck::Check(m_Ctx, { obj, PackedViewAccess(obj, name), AccessCheck::MemberKind::Field, name }); !allowed.Ok())
+						return m_Ctx.Fail(n, QueryResult<Value>::Fail(allowed.error, allowed.message));
+					return Value::L(view);
+				}
 				// A STATIC data member (Tally.total): one global registered in its declaring type's class scope.
 				ClassHierarchy::FieldHit sf = ClassHierarchy::FindField(obj, name);
 				if (sf.field && sf.field->m_IsStatic)

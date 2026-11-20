@@ -58,6 +58,29 @@ qualified_name: identifier ('::' identifier)*
 - Placement: before objects (`class`/`struct`/`interface`), functions and methods (including
   extension methods and out-of-line definitions), variables and fields, parameters, enums, unions
   and aliases. For templates the annotations go before `template<...>`.
+- **On an access label** (`public:`, `private:`, `protected:`, [05 section 5.7](05-objects.md#57-visibility)): every
+  field and method under the label, up to the next one, takes its annotations - after its own, and only where each goes
+  (a field-only annotation skips the methods). A member's own annotation of the same name is the one it keeps. Nested
+  types, enums, unions and aliases under the label take none. Written above the label or beside it, at the label's
+  indentation:
+
+  ```c4
+  class Mover {
+  [Property]
+  private:
+  	private float m_Speed;                 // [Property]
+  	[Range(0, 10)] private float m_Limit;  // [Range(0, 10)], then [Property]
+  [Serialize] protected:
+  	protected int32 m_Hits;                // [Serialize]
+  public:
+  	public int32 m_Id;                     // none: a label's annotations end at the next label
+  }
+  ```
+
+  A label passes on only what reflection keeps: a compiler annotation on one is an error (`[group] is the compiler's: it
+  goes on a declaration, not on the 'public:' label, ...`). A label's annotation is checked once, where it is written: one
+  that no field or method under it takes is an error (`[Saved] on 'public:' goes on none of the fields and methods under
+  it: [Saved] goes on a field, not on a method`, or `... goes on nothing: no field or method is under it`).
 
 ---
 
@@ -246,7 +269,9 @@ Reflection registers the arguments as the chosen overload's parameters take them
 ### 4.4 In the editor
 
 C4LSP knows a declared annotation as code: completion inside `[...]` offers the declared annotations the caret sees
-that go where it is (and the compiler's own), after `[Scene::` those of namespace `Scene`, and after `on` the places; signature help inside its parentheses shows every overload
+that go where it is (and the compiler's own) - on an access label, those that go on a field or a method and none of the
+compiler's -, after `[Scene::` those of namespace `Scene`, and after `on` the places; the formatter keeps a label's
+annotations at the label's indentation; signature help inside its parentheses shows every overload
 with the current argument; hover on a use or a declaration shows its declarations and doc comment; go-to-definition
 leads to the overload whose parameters the use's written arguments fit; find-references and rename of any of its
 declarations reach every declaration and use; and its declarations are in the outline and workspace symbols, `annotation`,

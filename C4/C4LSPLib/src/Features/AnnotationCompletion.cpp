@@ -169,6 +169,22 @@ namespace C4LSP::Features
 			return std::nullopt;
 		}
 
+		// Whether what follows the annotation groups from `at` is an access label (`private:`, not a member's `private int32 x;`).
+		bool AccessLabelAt(const std::string& text, size_t at)
+		{
+			at = SkipSpace(text, at);
+			while (at < text.size() && text[at] == '[')
+			{
+				at = PastGroup(text, at);
+				if (at == std::string::npos) return false;
+				at = SkipSpace(text, at);
+			}
+			const std::string word = WordAt(text, at);
+			if (word != "public" && word != "private" && word != "protected") return false;
+			const size_t colon = SkipSpace(text, at + word.size());
+			return colon < text.size() && text[colon] == ':' && (colon + 1 >= text.size() || text[colon + 1] != ':');
+		}
+
 		std::string Detail(const Scripting::DeclaredAnnotations::Overloads& overloads)
 		{
 			std::string detail;
@@ -177,11 +193,15 @@ namespace C4LSP::Features
 			return detail;
 		}
 
-		bool GoesThere(const Scripting::DeclaredAnnotations::Overloads& overloads, const std::optional<Scripting::AnnotationPlace>& place)
+		bool GoesThere(const Scripting::DeclaredAnnotations::Overloads& overloads, const AnnotationCompletion::Site& site)
 		{
-			if (!place) return true;
+			using Scripting::AnnotationPlace;
+			if (!site.onLabel && !site.place) return true;
 			for (const Scripting::AnnotationSignature* overload : overloads)
-				if (overload->places.Has(*place)) return true;
+			{
+				if (site.onLabel && (overload->places.Has(AnnotationPlace::Field) || overload->places.Has(AnnotationPlace::Method))) return true;
+				if (!site.onLabel && overload->places.Has(*site.place)) return true;
+			}
 			return false;
 		}
 	}
@@ -200,8 +220,13 @@ namespace C4LSP::Features
 		const size_t nameStart = NameStart(text, caret);
 		site.qualifier = text.substr(nameStart, WordStart(text, caret) - nameStart);
 		if (InParameters(text, bracket)) site.place = Scripting::AnnotationPlace::Parameter;
-		else if (const size_t past = PastGroup(text, bracket); past != std::string::npos) site.place = DeclarationAt(text, past, inType);
-		else site.place = DeclarationAt(text, WordEnd(text, caret), inType); // the group is still being typed: what follows the name
+		else
+		{
+			const size_t past = PastGroup(text, bracket);
+			const size_t after = past != std::string::npos ? past : WordEnd(text, caret); // the group is still being typed: what follows the name
+			site.onLabel = inType && AccessLabelAt(text, after);
+			if (!site.onLabel) site.place = DeclarationAt(text, after, inType);
+		}
 		return site;
 	}
 
@@ -251,7 +276,7 @@ namespace C4LSP::Features
 		{
 			const std::string name = overloads[0]->name.c_str();
 			const Scripting::DeclaredAnnotations::Overloads named = declared.Find(site.qualifier + name, at);
-			if (named.Empty() || named[0]->qualifiedName != overloads[0]->qualifiedName || !GoesThere(named, site.place)) continue;
+			if (named.Empty() || named[0]->qualifiedName != overloads[0]->qualifiedName || !GoesThere(named, site)) continue;
 			CompletionItem item;
 			item.label = name;
 			item.kind = Kind::Function;
@@ -259,7 +284,7 @@ namespace C4LSP::Features
 			item.sortText = "0" + name;
 			out.Push(item);
 		}
-		if (!site.qualifier.empty()) return; // the compiler's own are named alone
+		if (!site.qualifier.empty() || site.onLabel) return; // the compiler's own are named alone, and go on one declaration
 		for (const char* name : Scripting::CompilerAnnotationNames())
 		{
 			CompletionItem item;

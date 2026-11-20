@@ -204,6 +204,7 @@
 [link("reflect_function_handle_param_count")] uint32 reflect_function_handle_param_count(void* handle) noexcept;
 [link("reflect_field_handle_is_const")] uint32 reflect_field_handle_is_const(void* handle) noexcept;
 [link("reflect_field_handle_is_alias")] uint32 reflect_field_handle_is_alias(void* handle) noexcept;
+[link("reflect_field_handle_access")] uint32 reflect_field_handle_access(void* handle) noexcept;
 [link("reflect_method_handle_is_static")] uint32 reflect_method_handle_is_static(void* handle) noexcept;
 [link("reflect_method_handle_is_const")] uint32 reflect_method_handle_is_const(void* handle) noexcept;
 [link("reflect_method_handle_return_type_name")] const char* reflect_method_handle_return_type_name(void* handle) noexcept;

@@ -1,0 +1,9 @@
+annotation Saved on field;
+
+class Panel {
+[Saved]
+public:
+	public void Run() {}
+}
+
+int32 main() { Panel p; p.Run(); return 0; }

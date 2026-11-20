@@ -189,7 +189,7 @@ namespace Scripting
 			return Fail(why);
 		}
 		const SwizzleType* owned = m_Model.m_Types->Own<SwizzleType>(region);
-		m_Instance.AddPackedRegion(owned, &un);
+		m_Instance.AddPackedRegion(owned, &un, un.GetAccessModifier());
 		return Result::Success();
 	}
 

@@ -1,0 +1,10 @@
+annotation Saved on field;
+
+class Panel {
+[Saved]
+private:
+public:
+	public int32 width;
+}
+
+int32 main() { Panel p; return p.width; }

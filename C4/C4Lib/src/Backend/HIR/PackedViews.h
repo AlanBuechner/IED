@@ -7,4 +7,7 @@ namespace Scripting
 	/// vector as a `packed T[N]`), one lane (`x`) or a run of lanes (`xz`), as an lvalue at `base`. Null when the
 	/// name is not a view of `obj`. Member access (`v.xy`) and a bare name in a method (`xy`) both read views here.
 	const LValue* PackedViewLValue(LoweringContext& ctx, const ObjectType* obj, const LValue* base, const Core::String& name);
+	/// Who may name `name`, a packed view of `obj`: the access written on the union that declares its region (BUG-477), as
+	/// reflection says it; public when the union writes none, as an anonymous union's plain fields are.
+	AccessModifier PackedViewAccess(const ObjectType* obj, const Core::String& name);
 } // namespace Scripting

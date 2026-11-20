@@ -1,0 +1,70 @@
+// A field's access in reflection: as its section and its modifier resolve it, so a serializer or an editor tells what a
+// type keeps to itself from what it shows.
+
+include "bedrock.ch"
+
+class RxSections {
+public:
+	public int32 shown;
+protected:
+	protected int32 kept;
+private:
+	private int32 hidden;
+	private union { packed float x, y; };
+}
+
+class RxDefaults {
+	int32 classDefault;
+	public int32 written;
+}
+
+struct RxStruct {
+	int32 structDefault;
+	private int32 secret;
+}
+
+class RxBase {
+	private int32 baseSecret;
+	public int32 baseShown;
+}
+
+class RxDerived : RxBase {
+	public int32 own;
+}
+
+Reflection::Access RxAccessOf(const char* typeName, const char* fieldName) {
+	return Reflection::FindType(typeName).FindField(fieldName).AccessOf();
+}
+
+[test("reflect.access")]
+class ReflectionAccessTests {
+	[test("sections")]
+	public static void TestSections() {
+		assert_true(RxAccessOf("RxSections", "shown") == Reflection::Access::Public, "public");
+		assert_true(RxAccessOf("RxSections", "kept") == Reflection::Access::Protected, "protected");
+		assert_true(RxAccessOf("RxSections", "hidden") == Reflection::Access::Private, "private");
+		assert_true(Reflection::FindType("RxSections").FindField("shown").IsPublic(), "IsPublic");
+		assert_true(!Reflection::FindType("RxSections").FindField("kept").IsPublic(), "protected is not public");
+	}
+
+	[test("lanes_take_their_regions")]
+	public static void TestLanes() {
+		assert_true(RxAccessOf("RxSections", "x") == Reflection::Access::Private, "a lane of a private region");
+		assert_true(RxAccessOf("RxSections", "y") == Reflection::Access::Private, "every lane");
+	}
+
+	[test("kind_defaults")]
+	public static void TestKindDefaults() {
+		assert_true(RxAccessOf("RxDefaults", "classDefault") == Reflection::Access::Private, "a class's field under no label: private");
+		assert_true(RxAccessOf("RxDefaults", "written") == Reflection::Access::Public, "a modifier says");
+		assert_true(RxAccessOf("RxStruct", "structDefault") == Reflection::Access::Public, "a struct's: public");
+		assert_true(RxAccessOf("RxStruct", "secret") == Reflection::Access::Private, "unless it says");
+	}
+
+	[test("bases_keep_their_own")]
+	public static void TestBases() {
+		assert_true(RxAccessOf("RxBase", "baseSecret") == Reflection::Access::Private, "the base's own");
+		assert_true(RxAccessOf("RxDerived", "own") == Reflection::Access::Public, "the derived type's own");
+		assert_true(!Reflection::FindType("RxDerived").FindField("missing").IsPublic(), "a missing field is no public one");
+	}
+}

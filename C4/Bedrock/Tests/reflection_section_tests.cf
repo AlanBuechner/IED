@@ -1,0 +1,87 @@
+// Annotations on an access label (`[Saved] private:`): every field and method under it takes them, after its own, where
+// they go - a field-only one skips the methods - and a member's own annotation of the same name is the one it keeps.
+
+include "bedrock.ch"
+
+annotation RsSaved on field;
+annotation RsShown on field, method;
+annotation RsLimit(int32 limit) on field, variable;
+annotation RsCommand on method;
+
+class RsPanel {
+	public int32 before;
+[RsSaved] [RsShown]
+private:
+	private int32 a;
+	[RsLimit(3)] private int32 b;
+	private void Helper() {}
+[RsCommand]
+public:
+	public void Run() {}
+	public int32 c;
+[RsLimit(1)]
+protected:
+	[RsLimit(9)] protected int32 own;
+	protected int32 inherits;
+	protected static int32 s_Count;
+public:
+	public int32 plain;
+}
+
+template<T> class RsBox {
+[RsSaved]
+private:
+	private T value;
+}
+
+int32 RsFieldAnnotations(const char* typeName, const char* fieldName) {
+	return (int32)Reflection::FindType(typeName).FindField(fieldName).AnnotationCount();
+}
+
+[test("reflect.sections")]
+class ReflectionSectionTests {
+	[test("fields_take_their_labels")]
+	public static void TestFields() {
+		Reflection::Type panel = Reflection::FindType("RsPanel");
+		assert_eq(2, RsFieldAnnotations("RsPanel", "a"), "both of its label's");
+		assert_true(panel.FindField("a").FindAnnotation("RsSaved").IsValid(), "RsSaved");
+		assert_true(panel.FindField("a").FindAnnotation("RsShown").IsValid(), "RsShown");
+		assert_eq(0, RsFieldAnnotations("RsPanel", "before"), "a field before any label takes none");
+		assert_eq(0, RsFieldAnnotations("RsPanel", "plain"), "a later label without annotations gives none");
+	}
+
+	[test("its_own_first")]
+	public static void TestOwnFirst() {
+		Reflection::Field b = Reflection::FindType("RsPanel").FindField("b");
+		assert_eq(3, (int32)b.AnnotationCount(), "its own and its label's");
+		assert_se("RsLimit", b.AnnotationAt(0).Name(), "its own first");
+		assert_se("RsSaved", b.AnnotationAt(1).Name(), "then its label's, in order");
+	}
+
+	[test("only_where_they_go")]
+	public static void TestPlaces() {
+		Reflection::Type panel = Reflection::FindType("RsPanel");
+		Reflection::Method helper = panel.FindMethod("Helper");
+		assert_true(helper.FindAnnotation("RsShown").IsValid(), "a method takes what goes on methods");
+		assert_true(!helper.FindAnnotation("RsSaved").IsValid(), "and skips a field's");
+		assert_true(panel.FindMethod("Run").FindAnnotation("RsCommand").IsValid(), "a method's label");
+		assert_eq(0, RsFieldAnnotations("RsPanel", "c"), "a field skips a method's");
+	}
+
+	[test("its_own_of_a_name_wins")]
+	public static void TestOwnWins() {
+		Reflection::Field own = Reflection::FindType("RsPanel").FindField("own");
+		assert_eq(1, (int32)own.AnnotationCount(), "one RsLimit");
+		assert_eq(9, (int32)own.FindAnnotation("RsLimit").IntArg(0), "its own");
+		assert_eq(1, (int32)Reflection::FindType("RsPanel").FindField("inherits").FindAnnotation("RsLimit").IntArg(0), "the label's");
+	}
+
+	[test("statics_and_templates")]
+	public static void TestStaticsAndTemplates() {
+		Reflection::Variable count = Reflection::FindVariable("RsPanel::s_Count");
+		assert_true(count.IsValid(), "the static is registered");
+		assert_eq(1, (int32)count.FindAnnotation("RsLimit").IntArg(0), "and takes its label's");
+		RsBox<int32> box;
+		assert_true(Reflection::FindType("RsBox<int32>").FindField("value").FindAnnotation("RsSaved").IsValid(), "a template instance's field");
+	}
+}

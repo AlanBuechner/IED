@@ -185,6 +185,24 @@ struct Player { [Range(0, "far")] public float speed; }
 		TEST_PASSED();
 	}
 
+	// A label's annotations are its fields' and methods' (docs/language/12 section 1): what goes on either, none of the compiler's.
+	void LspDeclaredAnnotationsTest::TestCompletionOnAnAccessLabel()
+	{
+		const std::string above = std::string(kDeclared) + "namespace Lib { struct Fresh {\n[]\nprivate:\n\tprivate float v;\n} }\n";
+		std::set<std::string> labels = Labels(CompleteAt(above, "Fresh {\n["));
+		TEST_ASSERT(labels.count("Range") && !labels.count("Requires") && !labels.count("Component"));
+		TEST_ASSERT(!labels.count("test") && !labels.count("group"));
+
+		const std::string beside = std::string(kDeclared) + "namespace Lib { struct Fresh {\n[] public:\n\tpublic float v;\n} }\n";
+		std::set<std::string> besideLabels = Labels(CompleteAt(beside, "Fresh {\n["));
+		TEST_ASSERT(besideLabels.count("Range") && !besideLabels.count("group"));
+
+		const std::string member = std::string(kDeclared) + "namespace Lib { struct Fresh {\npublic:\n\t[] public float v;\n} }\n";
+		std::set<std::string> own = Labels(CompleteAt(member, "public:\n\t["));
+		TEST_ASSERT(own.count("Range") && !own.count("Component") && own.count("group")); // a member's own: the compiler's too
+		TEST_PASSED();
+	}
+
 	void LspDeclaredAnnotationsTest::TestCompletionAfterAComma()
 	{
 		const std::string text = std::string(kDeclared) + "namespace Lib { [Component, Re]\nstruct Fresh { public int32 v; } }\n";

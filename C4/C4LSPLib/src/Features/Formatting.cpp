@@ -268,7 +268,7 @@ namespace C4LSP::Features
 						uint32 target = static_cast<uint32>(bonus) + (continues ? 1u : 0u);
 						for (const Level& level : after)
 							target += 1 + static_cast<uint32>(level.bonus);
-						if (target > 0 && IsAccessLabel(firstIdx, lastIdx))
+						if (target > 0 && (IsAccessLabel(firstIdx, lastIdx) || AnnotatesAccessLabel(firstIdx)))
 							--target;
 						std::string want = IndentString(target);
 						if (text.substr(ls, first.start - ls) != want)
@@ -345,6 +345,34 @@ namespace C4LSP::Features
 				TokenType type = tokens[firstIdx].type;
 				bool access = type == TokenType::Public || type == TokenType::Private || type == TokenType::Protected;
 				return access && firstIdx < lastIdx && tokens[firstIdx + 1].type == TokenType::Colon;
+			}
+
+			// A line of annotations a label takes (`[Property]` above `private:`, or `[Saved] private:`): at the label's
+			// indentation, since they are its section's, not the next member's.
+			bool AnnotatesAccessLabel(size_t firstIdx) const
+			{
+				size_t at = firstIdx;
+				while (at < tokens.size() && (tokens[at].type == TokenType::OpenBracket || IsComment(tokens[at].type)))
+				{
+					if (IsComment(tokens[at].type)) { ++at; continue; }
+					at = PastBrackets(at);
+				}
+				if (at == firstIdx || at + 1 >= tokens.size()) return false;
+				TokenType type = tokens[at].type;
+				return (type == TokenType::Public || type == TokenType::Private || type == TokenType::Protected) &&
+					tokens[at + 1].type == TokenType::Colon;
+			}
+
+			// The token after the `]` that closes the `[` at `openIdx`.
+			size_t PastBrackets(size_t openIdx) const
+			{
+				int depth = 0;
+				for (size_t i = openIdx; i < tokens.size(); ++i)
+				{
+					if (tokens[i].type == TokenType::OpenBracket) ++depth;
+					else if (tokens[i].type == TokenType::CloseBracket && --depth == 0) return i + 1;
+				}
+				return tokens.size();
 			}
 
 			void FixSpacing()

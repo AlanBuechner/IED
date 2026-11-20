@@ -105,7 +105,7 @@ namespace Scripting
 			else if (const auto* sv = dynamic_cast<const SwizzleViewNode*>(child))
 			{
 				const_cast<ObjectType*>(obj)->AwaitPart();
-				m_PendingSwizzles.Push({ obj, sv, ctx.unitId });                    // packed/unpacked lane view -> SIMD region
+				m_PendingSwizzles.Push({ obj, sv, ctx.unitId, un.GetAccessModifier() }); // packed/unpacked lane view -> SIMD region
 			}
 		}
 	}

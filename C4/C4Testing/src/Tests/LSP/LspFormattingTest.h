@@ -99,6 +99,9 @@ namespace Testing
 		void TestAccessLabelsSitAtTheirClassIndentation();
 
 		TEST_FUNC(Lsp.Features.Formatting)
+		void TestLabelAnnotationsSitWithTheirLabel();
+
+		TEST_FUNC(Lsp.Features.Formatting)
 		void TestAccessLabelOutsideAnyBlockStaysAtColumnZero();
 
 		// `#define X (y)` is a constant and `#define X(y)` takes a parameter: the gap after the name is never closed.

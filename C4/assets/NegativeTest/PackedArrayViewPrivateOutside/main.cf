@@ -1,0 +1,8 @@
+// BUG-477: the array view of a private packed union is as private as its lanes.
+class Velocity {
+	public int32 id;
+private:
+	private union { packed float x, y; packed float[2] data; };
+}
+
+int32 main() { Velocity v; return (int32)v.data[1]; }

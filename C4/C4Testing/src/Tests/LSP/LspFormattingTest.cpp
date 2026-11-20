@@ -461,6 +461,25 @@ namespace Testing
 		TEST_PASSED();
 	}
 
+	// A label's annotations are its section's: at the label's indentation, above it or beside it; a member's stay with it.
+	void LspFormattingTest::TestLabelAnnotationsSitWithTheirLabel()
+	{
+		std::string text = "class Panel\n{\n";
+		text += "\t[Property]\n";                 // above its label: one tab out
+		text += "\t[Saved] // kept\n";            // a comment between does not hide the label
+		text += "private:\n";
+		text += "\t[Range(0, a[1])] private float x;\n"; // a member's own, with brackets inside
+		text += "\t\t[Serialize] protected:\n";  // beside its label
+		text += "\tprotected int32 y;\n";
+		text += "};\n";
+
+		std::string want = "class Panel\n{\n[Property]\n[Saved] // kept\nprivate:\n\t[Range(0, a[1])] private float x;\n";
+		want += "[Serialize] protected:\n\tprotected int32 y;\n};\n";
+		TEST_ASSERT(Apply(text, Features::Formatting::Format(text, { 4, false })) == want);
+		TEST_ASSERT(Features::Formatting::Format(want, { 4, false }).empty());
+		TEST_PASSED();
+	}
+
 	void LspFormattingTest::TestDefineKeepsTheGapAfterItsName()
 	{
 		std::string constant = "#define NAME ((int32)1)\n#define OTHER (2)\n";

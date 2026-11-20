@@ -91,6 +91,7 @@ uint64_t reflect_field_handle_size(const c4_field_info* f) { return f ? f->size 
 const char* reflect_field_handle_type_name(const c4_field_info* f) { return f ? f->typeName : 0; }
 uint32_t reflect_field_handle_is_const(const c4_field_info* f) { return f ? f->isConst : 0; }
 uint32_t reflect_field_handle_is_alias(const c4_field_info* f) { return f ? f->isAlias : 0; }
+uint32_t reflect_field_handle_access(const c4_field_info* f) { return f ? f->access : reflect_ACCESS_PUBLIC; }
 const c4_type_info* reflect_field_type_handle(const c4_field_info* f) { return f ? reflect_type(f->typeName) : 0; }
 
 const char* reflect_method_handle_name(const c4_method_info* m) { return m ? m->name : 0; }

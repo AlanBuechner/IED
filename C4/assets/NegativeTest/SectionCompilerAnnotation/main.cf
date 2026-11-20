@@ -1,0 +1,7 @@
+class Panel {
+[group("ui")]
+public:
+	public int32 width;
+}
+
+int32 main() { Panel p; return p.width; }

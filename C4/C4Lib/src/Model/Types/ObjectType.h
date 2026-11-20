@@ -119,8 +119,9 @@ namespace Scripting
 
 		void AddField(const FieldInfo& field) { Asking("a field"); m_Fields.Push(field); m_LaidOut = false; }
 		// A packed lane region (`union { packed float x, y; }` at `declared`) and the field that stores it, placed
-		// after the fields written before it (fields resolve in any order, so it goes in by source position).
-		void AddPackedRegion(const SwizzleType* region, const AstNode* declared);
+		// after the fields written before it (fields resolve in any order, so it goes in by source position); `access` is the
+		// one written on its union, which its lanes take (public when it writes none).
+		void AddPackedRegion(const SwizzleType* region, const AstNode* declared, AccessModifier access);
 		// The storage field of a packed region (null for a region without one).
 		const FieldInfo* PackedStorage(const PackedViewRegion& region) const;
 		void AddMethod(const MethodInfo& method)

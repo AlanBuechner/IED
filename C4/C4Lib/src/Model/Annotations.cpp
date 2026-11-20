@@ -89,6 +89,26 @@ namespace Scripting
 				}
 			return QueryResult<void>::Success();
 		}
+
+		bool Holds(const Core::Vector<ReflectedAnnotation>& annotations, const Core::String& name)
+		{
+			for (const ReflectedAnnotation& annotation : annotations)
+				if (annotation.name == name) return true;
+			return false;
+		}
+
+		// A section's annotations a member takes: those that go on its place, unless it writes one of the name itself.
+		void CollectInherited(const ProgramModel& model, const AnnotationNode& node, AnnotationPlace place, const Scope* scope,
+			Core::Vector<ReflectedAnnotation>& out)
+		{
+			for (const auto& group : node.GetBracketGroups())
+				for (const auto& item : group.annotations)
+				{
+					if (!item || item->IsCompilerAnnotation()) continue;
+					auto annotation = FoldAnnotation(model, *item, place, scope);
+					if (annotation.Ok() && !Holds(out, annotation.value.name)) out.Push(std::move(annotation.value));
+				}
+		}
 	}
 
 	QueryResult<ReflectedArgument> FoldAnnotationArgument(const ProgramModel& model, const AstNode& written, const QualTypeNode* asType,
@@ -143,6 +163,17 @@ namespace Scripting
 		}
 	}
 
+	const Core::Vector<Ref<AnnotationNode>>* SectionAnnotations(const AstNode* declaration)
+	{
+		if (!declaration) return nullptr;
+		switch (declaration->Type())
+		{
+		case NodeType::FunctionDefinition: return &static_cast<const FunctionDefinitionNode*>(declaration)->GetSectionAnnotations();
+		case NodeType::VariableDefinition: return &static_cast<const VariableDefinitionNode*>(declaration)->GetSectionAnnotations();
+		default: return nullptr;
+		}
+	}
+
 	QueryResult<Core::Vector<ReflectedAnnotation>> ReflectedAnnotations(const ProgramModel& model,
 		const Core::Vector<const AstNode*>& declarations, AnnotationPlace place, const Scope* scope)
 	{
@@ -154,6 +185,10 @@ namespace Scripting
 					if (node)
 						if (auto collected = Collect(model, *node, place, scope, out); !collected.Ok())
 							return Result::Fail(collected.error, collected.message, collected.loc);
+		for (const AstNode* declaration : declarations)
+			if (const auto* inherited = SectionAnnotations(declaration))
+				for (const auto& node : *inherited)
+					if (node) CollectInherited(model, *node, place, scope, out);
 		return Result::Success(std::move(out));
 	}
 } // namespace Scripting

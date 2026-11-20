@@ -197,6 +197,11 @@ where a new member belongs. Outside any label, a member without a modifier gets 
 - Nested type declarations are exempt from section checking.
 - Interface members are public: `private` / `protected` on one, or a `private:` / `protected:` label in
   an interface, is an error.
+- A label may carry annotations (`[Property] private:`), which every field and method under it takes
+  ([12 section 1](12-annotations.md#1-syntax)). Reflection says each field's resolved access
+  (`Reflection::Field::AccessOf`, [runtime/02](../runtime/02-reflection.md)). An anonymous union is exempt from labels like a
+  nested type: its plain fields keep their own modifiers, and a packed union's lanes take the one written on the union
+  (public when it writes none) and are checked like fields: a `private union { packed float x, y; }`'s `v.x` is private.
 
 Access is checked wherever a member is used: field and static-member reads and writes, method and static
 method calls, operators (including `[]`, `[]=`, casts, the range-for protocol and a callable's call

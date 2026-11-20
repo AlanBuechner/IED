@@ -333,7 +333,7 @@ namespace Scripting
 					builder.ErrorAt(ctx, sw.node, why);
 			const SwizzleType* owned = ctx.model->m_Types->Own<SwizzleType>(raw);
 			ObjectType* object = const_cast<ObjectType*>(sw.obj);
-			if (raw->IsPacked()) object->AddPackedRegion(owned, sw.node);
+			if (raw->IsPacked()) object->AddPackedRegion(owned, sw.node, sw.access);
 			else object->AddPackedView(owned, owned->GetName());
 			// An UNPACKED view is a struct-of-fields (doc: extractvalue/insertvalue per lane), not a SIMD
 			// vector. Its lanes are NOT ordinary fields (FlattenSwizzle queued them as a region, not pending

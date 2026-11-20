@@ -28,6 +28,11 @@
 #define reflect_TYPE_COPYABLE              4u  // `new (to) T(*from)` is valid: `to` zero, then `copy`, or the bytes when it has none
 #define reflect_TYPE_ABSTRACT              8u  // no object of it can exist on its own: an abstract class or an interface
 
+// A field's access (c4_field_info.access): zero is public, so a record written without it reads as one.
+#define reflect_ACCESS_PUBLIC    0u
+#define reflect_ACCESS_PROTECTED 1u
+#define reflect_ACCESS_PRIVATE   2u
+
 #define reflect_ARG_INT    1
 #define reflect_ARG_FLOAT  2
 #define reflect_ARG_BOOL   3
@@ -77,6 +82,7 @@ typedef struct c4_field_info {
     uint64_t offset;               // from the object's start, inherited fields included
     uint32_t isConst;
     uint32_t isAlias;              // names bytes an earlier field of the same union already names
+    uint32_t access;               // reflect_ACCESS_*, as its section and modifier resolve it
     uint32_t annotationCount;      // the annotations the compiler does not act on (D-42)
     const c4_annotation_info* annotations;
 } c4_field_info;
@@ -248,6 +254,7 @@ uint64_t     reflect_field_handle_size(const c4_field_info* f);
 const char*  reflect_field_handle_type_name(const c4_field_info* f);
 uint32_t     reflect_field_handle_is_const(const c4_field_info* f);
 uint32_t     reflect_field_handle_is_alias(const c4_field_info* f);
+uint32_t     reflect_field_handle_access(const c4_field_info* f);   // reflect_ACCESS_*
 const c4_type_info* reflect_field_type_handle(const c4_field_info* f);
 
 const char*  reflect_method_handle_name(const c4_method_info* m);
