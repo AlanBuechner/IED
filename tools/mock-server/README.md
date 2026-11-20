@@ -71,6 +71,7 @@ Params are objects; ids such as `w1`, `c1`, `d1`, `r1`, `t1` come from the fixtu
 | `doc.open` | `wsId, path` -> `docId, version, holder` (the first opener gets the lease) |
 | `doc.edit` | `docId, baseVersion, changes [{range: {start: {line, col}, end}, text}]` + frame `opId` -> `version, changes, rebased` |
 | `doc.takeLease`, `doc.save` | `docId` -> `holder` / `version, revision` |
+| `doc.unsaved`, `doc.saveAll` | `wsId` -> `documents: [{docId, path}]` / `saved` |
 | `layout.set` | `wsId, deviceClass, layout (object or null), expectedRevision` -> `revision`; `conflict {revision}` when stale; at most 256 KB; in memory only |
 | `plugins.list`, `plugins.contributions` | `wsId?` -> the topic's summaries / `{plugins: [{id, source, contributes, ui?}]}` of the loaded ones |
 | `plugins.setEnabled`, `plugins.reload`, `plugins.approve` | `id, enabled` / - / `id` (always `not_found`: the mock has no app plugins) |

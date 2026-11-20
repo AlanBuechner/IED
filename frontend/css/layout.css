@@ -403,6 +403,14 @@ a { color: var(--link); text-decoration: none; }
 .app.phone .sp-row .ib { visibility: visible; }
 .app.phone .sp-row:not(.gone) .sp-when { display: none; }
 
+/* Close Workspace's question (closeworkspace.js): the unsaved files, what still runs, what stays. */
+.close-message { display: flex; flex-direction: column; gap: var(--space-3); max-width: 460px; }
+.close-message p { margin: 0; }
+.close-files { margin: 0; padding: var(--space-2) var(--space-3); list-style: none; max-height: 160px; overflow-y: auto; background: var(--bg-0); border: var(--border-width) solid var(--border-0); border-radius: var(--radius-1); }
+.close-files li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: calc(var(--font-size-code) - 1px); line-height: 1.6; }
+.close-files li.more { font-family: inherit; color: var(--text-2); }
+.close-running { color: var(--accent-warn); }
+
 /* ---------- status bar ---------- */
 .statusbar {
 	display: flex;

@@ -42,7 +42,7 @@ A **workspace** is what one browser tab views. It is one of:
 |---|---|---|---|---|
 | F-WSP-20 | Switcher shows open workspaces with live badges (running chats/builds, errors), recent ones below, then "Open...", "New project...", "New federation..." | P0 | US-SHL-8 | frontend |
 | F-WSP-21 | Switching keeps the other workspace running on the server; per-workspace layout is restored | P0 | US-SRV-7 | frontend, src/host |
-| F-WSP-22 | Close workspace: stops its LSPs/terminals after confirming running work; chats persist | P0 | - | src/host |
+| F-WSP-22 | Close workspace: stops its LSPs/terminals after confirming running work; chats persist - **built** (2026-11-20) from the start page's X, the switcher, File, the status bar and Workspace Servers; asks about unsaved documents (Save, Don't Save, Cancel) and running builds, not yet running chats (`docs/15` "Close Workspace") | P0 | - | src/host, frontend (`closeworkspace.js`) |
 
 ## Federations
 

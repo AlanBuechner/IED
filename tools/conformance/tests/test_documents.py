@@ -69,6 +69,19 @@ class DocumentTests(ProtocolTest):
 		self.assertFalse(event["dirty"], "the text is the file's again")
 		self.assertFalse((await self.text_of(await self.client(), doc["docId"]))["dirty"])
 
+	async def test_unsaved_names_the_dirty_documents_and_save_all_writes_them(self):
+		"""What Close Workspace asks about before its server stops (docs/10 "Workspaces")."""
+		owner = await self.client()
+		scratch, doc = await self.open_scratch(owner)
+		listed = lambda answer: [(d["docId"], d["path"]) for d in answer["documents"]]
+		self.assertNotIn((doc["docId"], scratch["path"]), listed(await owner.request("doc.unsaved", {"wsId": scratch["wsId"]})), "opened, not changed")
+		await owner.request("doc.edit", {"docId": doc["docId"], "baseVersion": doc["version"], "changes": [change(0, 0, 0, 0, "x")]})
+		self.assertIn((doc["docId"], scratch["path"]), listed(await owner.request("doc.unsaved", {"wsId": scratch["wsId"]})))
+		self.assertGreaterEqual((await owner.request("doc.saveAll", {"wsId": scratch["wsId"]}))["saved"], 1)
+		self.assertNotIn((doc["docId"], scratch["path"]), listed(await owner.request("doc.unsaved", {"wsId": scratch["wsId"]})))
+		state = await self.text_of(owner, doc["docId"])
+		self.assertEqual((False, "xline 0\n"), (state["dirty"], state["text"][:8]))
+
 	async def test_baseline_has_the_opened_and_the_saved_text(self):
 		owner = await self.client()
 		_, doc = await self.open_scratch(owner, lines=2)

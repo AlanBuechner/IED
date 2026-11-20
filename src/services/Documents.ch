@@ -60,7 +60,9 @@ namespace Ied
 		public bool IsOpen(Workspace* ws, Core::StringView path) const;
 		// Writes the document's text to its file: doc.saved, and its language servers' didSave. The file's revision.
 		public int64 Save(Document* doc);
-		// Saves every dirty document of `ws` (a task's saveBefore, docs/06); how many.
+		// The dirty documents of `ws` that can be saved (not read-only).
+		public Core::Array<Document*> Unsaved(Workspace* ws) const;
+		// Saves every dirty document of `ws` (a task's saveBefore, docs/06; Close Workspace's Save); how many.
 		public int64 SaveAll(Workspace* ws);
 		// The read-only folders of `ws` changed: each open document whose state changed is told (doc.readOnly {docId,
 		// readOnly, reason}), and one that became read-only loses its lease.
@@ -87,6 +89,8 @@ namespace Ied
 		private Core::String EditMethod(Call& call, const Params& params);
 		private Core::String TakeLeaseMethod(Call& call, const Params& params);
 		private Core::String SaveMethod(Call& call, const Params& params);
+		private Core::String UnsavedMethod(Call& call, const Params& params);
+		private Core::String SaveAllMethod(Call& call, const Params& params);
 		private Core::String BaselineMethod(Call& call, const Params& params);
 
 		private Server* m_Server;

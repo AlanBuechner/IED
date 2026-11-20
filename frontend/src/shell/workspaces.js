@@ -50,7 +50,18 @@ export function showWorkspaceSwitcher(shell, at) {
 	if (groups.favorites.length) rows.push({ kind: "separator" }, ...groups.favorites.map((p) => closedRow(p, "$(star-full)")));
 	if (groups.recent.length) rows.push({ kind: "separator" }, ...groups.recent.slice(0, SWITCHER_RECENT).map((p) => closedRow(p, kindIcon(p.kind))));
 	rows.push({ kind: "separator" }, ...shellRows(shell, groups));
-	shell.menuHost.show({ rows, at: at || document.querySelector(".sb-ws") || { x: 48, y: 8 }, label: "Workspaces", minWidth: 320, pick: (row) => pickRow(shell, row) });
+	if (groups.open.length) rows.push({ kind: "separator" }, closeRow(shell, groups));
+	shell.menuHost.show({
+		rows, at: at || document.querySelector(".sb-ws") || { x: 48, y: 8 }, label: "Workspaces", minWidth: 320, pick: (row) => pickRow(shell, row),
+		submenu: (menuId) => menuId === "close" ? groups.open.map(({ ws }) => ({ kind: "item", label: ws.name + (ws.wsId === shell.wsId ? "  (shown)" : ""), icon: kindIcon(ws.kind), base: "/", enabled: true, keys: ws.root, close: ws.wsId })) : [],
+	});
+}
+
+// Close Workspace: the one open workspace, or a submenu of them all - closing one that is not shown is how the owner
+// frees what it holds without switching to it first.
+function closeRow(shell, groups) {
+	if (groups.open.length === 1) return { kind: "item", label: "Close Workspace", icon: "$(close)", base: "/", enabled: true, close: groups.open[0].ws.wsId };
+	return { kind: "submenu", label: "Close Workspace", icon: "$(close)", base: "/", enabled: true, menuId: "close" };
 }
 
 // The shown workspace's star, the start page and the ways to open a new project.
@@ -67,6 +78,7 @@ function shellRows(shell, groups) {
 
 function pickRow(shell, row) {
 	if (row.command) return shell.commands.run(row.command, row.args);
+	if (row.close) return shell.closeWorkspace(row.close);
 	if (row.favorite) return shell.setFavorite(row.favorite.path, row.favorite.value);
 	if (row.path) return shell.openProject(row.path);
 	return shell.showWorkspace(row.wsId);
@@ -97,7 +109,8 @@ function section(title, rows) {
 	return rows.length ? h("div.sp-section", null, h("h3", null, title), ...rows) : null;
 }
 
-// One project: open workspaces show; the others open again (unless gone). Its star and, when not open, its removal.
+// One project: open workspaces show; the others open again (unless gone). Its star, and its X: an open workspace
+// closes (its server, language servers and terminals stop; closeworkspace.js asks first), another leaves the list.
 function projectRow(shell, project, ws, now) {
 	const gone = !ws && project.exists === false;
 	const open = () => ws ? shell.showWorkspace(ws.wsId) : gone ? null : shell.openProject(project.path);
@@ -105,10 +118,12 @@ function projectRow(shell, project, ws, now) {
 		title: project.favorite ? "Remove from Favorites" : "Add to Favorites", "aria-label": project.favorite ? "Remove from Favorites" : "Add to Favorites",
 		on: { click: (event) => { event.stopPropagation(); shell.setFavorite(project.path, !project.favorite); } },
 	}, icon(project.favorite ? "star-full" : "star-empty")) : h("span.sp-slot");
-	// An open workspace stays listed while it is open; the slot keeps the columns in line.
-	const forget = !ws ? h("button.ib", {
+	const forget = ws ? h("button.ib", {
+		title: "Close Workspace: its server, language servers and terminals stop", "aria-label": "Close Workspace",
+		on: { click: (event) => { event.stopPropagation(); shell.closeWorkspace(ws.wsId); } },
+	}, icon("close")) : h("button.ib", {
 		title: "Remove from the list", "aria-label": "Remove from the list", on: { click: (event) => { event.stopPropagation(); shell.forgetProject(project.path); } },
-	}, icon("close")) : h("span.sp-slot");
+	}, icon("close"));
 	const name = ws ? ws.name : project.name;
 	const path = ws ? ws.root : project.path;
 	const when = ws ? openState(ws, shell.wsId) : gone ? "not found" : whenOpened(project.opened, now || Date.now());

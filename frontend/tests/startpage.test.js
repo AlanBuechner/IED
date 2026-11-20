@@ -24,6 +24,7 @@ function fakeShell(wsId) {
 		openProject: (path) => calls.push(["open", path]),
 		setFavorite: (path, value) => calls.push(["favorite", path, value]),
 		forgetProject: (path) => calls.push(["forget", path]),
+		closeWorkspace: (id) => calls.push(["close", id]),
 		menuHost: { show: (options) => { shell.menu = options; } },
 	};
 	return shell;
@@ -71,6 +72,15 @@ test("start page: rows open, star and forget; a gone one only says so", () => {
 	assertEqual(startPageView(Object.assign(fakeShell(null), { server: { workspaces: [], recent: [] } }), NOW).querySelector(".sp-none").textContent, "The folders and solutions you open show up here.");
 });
 
+test("start page: an open workspace's X closes it, and opens nothing", () => {
+	const shell = fakeShell("w1");
+	const view = startPageView(shell, NOW);
+	rowOf(view, "C:/work/Tools").querySelector("button[aria-label='Close Workspace']").click();
+	rowOf(view, "c:\\work\\game\\").querySelector("button[aria-label='Close Workspace']").click();
+	assertEqual(shell.calls, [["close", "w2"], ["close", "w1"]], "any open workspace, shown or not");
+	assertTrue(!rowOf(view, "C:/work/Shooter").querySelector("button[aria-label='Close Workspace']"), "a project that is not open has nothing to close");
+});
+
 test("start page: Settings is there without a project", () => {
 	const shell = fakeShell(null);
 	startPageView(shell, NOW).querySelector(".sp-settings").click();
@@ -81,11 +91,31 @@ test("start page: the switcher lists the same projects, the shown one's star and
 	const shell = fakeShell("w1");
 	showWorkspaceSwitcher(shell, { x: 0, y: 0 });
 	const rows = shell.menu.rows;
-	assertEqual(rows.map((r) => r.kind === "separator" ? "-" : r.label), ["Game  (shown)", "Tools", "-", "Shooter", "-", "Prototype", "-", "Add to Favorites", "Start Page"]);
+	assertEqual(rows.map((r) => r.kind === "separator" ? "-" : r.label), ["Game  (shown)", "Tools", "-", "Shooter", "-", "Prototype", "-", "Add to Favorites", "Start Page", "-", "Close Workspace"]);
 	assertTrue(rows.find((r) => r.label === "Prototype").enabled === false, "a gone one is there, disabled");
 	shell.menu.pick(rows.find((r) => r.label === "Shooter"));
 	shell.menu.pick(rows.find((r) => r.label === "Tools"));
 	shell.menu.pick(rows.find((r) => r.label === "Add to Favorites"));
 	shell.menu.pick(rows.find((r) => r.label === "Start Page"));
 	assertEqual(shell.calls, [["open", "C:/work/Shooter"], ["show", "w2"], ["favorite", "C:/work/Game", true], ["run", "shell.startPage"]]);
+});
+
+test("start page: the switcher closes any open workspace - a submenu of them when several are open", () => {
+	const shell = fakeShell("w1");
+	showWorkspaceSwitcher(shell, { x: 0, y: 0 });
+	const close = shell.menu.rows.find((r) => r.label === "Close Workspace");
+	assertEqual([close.kind, close.menuId], ["submenu", "close"]);
+	const each = shell.menu.submenu("close");
+	assertEqual(each.map((r) => r.label), ["Game  (shown)", "Tools"]);
+	shell.menu.pick(each[1]);
+	assertEqual(shell.calls, [["close", "w2"]], "closes Tools without showing it");
+	const one = Object.assign(fakeShell("w1"), { server: { workspaces: [OPEN[0]], recent: RECENT } });
+	showWorkspaceSwitcher(one, { x: 0, y: 0 });
+	const only = one.menu.rows.find((r) => r.label === "Close Workspace");
+	assertEqual(only.kind, "item", "one open workspace: no submenu");
+	one.menu.pick(only);
+	assertEqual(one.calls, [["close", "w1"]]);
+	const none = Object.assign(fakeShell(null), { server: { workspaces: [], recent: RECENT } });
+	showWorkspaceSwitcher(none, { x: 0, y: 0 });
+	assertTrue(!none.menu.rows.some((r) => r.label === "Close Workspace"), "nothing open, nothing to close");
 });

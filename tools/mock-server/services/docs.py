@@ -35,7 +35,7 @@ class Documents:
 		self.by_id = {}
 		self.by_path = {}
 		self.external = {}  # (wsId, file URI) -> text: the files outside the workspace a language server named
-		for name in ("doc.open", "doc.edit", "doc.takeLease", "doc.save", "doc.baseline"):
+		for name in ("doc.open", "doc.edit", "doc.takeLease", "doc.save", "doc.baseline", "doc.unsaved", "doc.saveAll"):
 			server.rpc.register(name, getattr(self, "m_" + name.replace(".", "_")))
 
 	def snapshot(self, doc):
@@ -199,9 +199,27 @@ class Documents:
 	async def m_doc_save(self, call, p):
 		doc = self.get(p.str("docId"))
 		self._refuse_external(doc)
+		return {"version": doc.version, "revision": self._save(doc)}
+
+	def _save(self, doc):
 		ws = self.server.workspace.get(doc.ws_id)
 		revision = self.server.workspace.write(ws, doc.path, doc.text)
 		doc.saved = doc.text
 		doc.dirty = False
 		self.server.hub.publish(doc.topic, "doc.saved", {"docId": doc.doc_id, "version": doc.version, "revision": revision})
-		return {"version": doc.version, "revision": revision}
+		return revision
+
+	def _unsaved(self, ws_id):
+		return [doc for doc in self.by_id.values() if doc.ws_id == ws_id and doc.dirty and not doc.external]
+
+	async def m_doc_unsaved(self, call, p):
+		"""The workspace's dirty documents: what Close Workspace asks about before it closes (docs/10 "Workspaces")."""
+		ws_id = self.server.workspace.get(p.str("wsId")).ws_id
+		return {"documents": [{"docId": doc.doc_id, "path": doc.path} for doc in self._unsaved(ws_id)]}
+
+	async def m_doc_saveAll(self, call, p):
+		ws_id = self.server.workspace.get(p.str("wsId")).ws_id
+		dirty = self._unsaved(ws_id)
+		for doc in dirty:
+			self._save(doc)
+		return {"saved": len(dirty)}

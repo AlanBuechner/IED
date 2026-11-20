@@ -4329,3 +4329,64 @@ def two_workspace_servers(run):
 	run.shot("servers")
 	run.request("ws.close", {"wsId": second})
 	page.wait_for_function("(id) => !ied_shell.server.workspaces.some(w => w.wsId === id)", arg=second, timeout=30000)
+
+
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def close_workspace_from_start_page(run):
+	"""Close a project that is open, to free what its server holds (owner, 2026-11-20: "a way to close a project that is
+	open so it is not taking up resources on things like the LSP"; docs/15 "Start page"): an open workspace's X on the
+	start page asks first - its unsaved file listed, Save writes it - then its server stops and the project moves from
+	Open to Recent; a clean one asks Close or Cancel; on the desktop the workspace switcher's Close Workspace submenu
+	closes one that is not shown."""
+	page = run.open()
+	name = "close-" + run.viewport
+	edited = run.target.open_folder(name)
+	ready = "(id) => ied_shell.server.workspaces.some(w => w.wsId === id && w.server && w.server.state === 'ready')"
+	gone = "(id) => !ied_shell.server.workspaces.some(w => w.wsId === id)"
+	page.wait_for_function(ready, arg=edited, timeout=60000)
+	page.evaluate("(id) => ied_shell.showWorkspace(id)", edited)
+	page.wait_for_function("(id) => ied_shell.workspace.wsId === id && ied_shell.layout && ied_shell.client.state === 'live'", arg=edited, timeout=30000)
+	doc = run.request("doc.open", {"wsId": edited, "path": "README.md"})["docId"]
+	run.request("doc.edit", {"docId": doc, "baseVersion": 1, "changes": [{"range": {"start": {"line": 0, "col": 0}, "end": {"line": 0, "col": 0}}, "text": "Saved on close. "}]})
+	page.evaluate("ied_shell.showStartPage()")
+	row = ".sp-row:has(.sp-name:text-is('%s'))"
+	page.wait_for_selector(row % name, timeout=20000)
+	if not run.phone:
+		page.hover(row % name)
+	page.click((row % name) + " button[aria-label='Close Workspace']")
+	page.wait_for_selector(".popup.dialog .close-files li:has-text('README.md')", timeout=10000)
+	check(page.is_visible(".popup.dialog button:text-is('Don\\'t Save')"), "Save, Don't Save or Cancel")
+	run.shot("unsaved")
+	page.click(".popup.dialog button:text-is('Save')")
+	page.wait_for_function(gone, arg=edited, timeout=30000)
+	with open(os.path.join(run.target.root, name, "README.md"), encoding="utf-8") as f:
+		check(f.read().startswith("Saved on close. # " + name), "Save wrote the edit before the server stopped")
+	page.wait_for_function("(name) => [...document.querySelectorAll('.sp-section')].some(s => s.querySelector('h3').textContent === 'Recent' && [...s.querySelectorAll('.sp-name')].some(n => n.textContent === name))", arg=name, timeout=10000)
+	run.shot("closed")
+	clean = run.target.open_folder(name + "-clean")
+	page.wait_for_function(ready, arg=clean, timeout=60000)
+	page.wait_for_selector(row % (name + "-clean"), timeout=20000)
+	if not run.phone:
+		page.hover(row % (name + "-clean"))
+		page.wait_for_selector((row % (name + "-clean")) + " button[aria-label='Close Workspace']", state="visible")
+		run.shot("row")
+	page.click((row % (name + "-clean")) + " button[aria-label='Close Workspace']")
+	page.wait_for_selector(".popup.dialog button:text-is('Close')", timeout=10000)
+	check(not page.is_visible(".popup.dialog .close-files"), "nothing unsaved, no list")
+	run.shot("confirm")
+	page.click(".popup.dialog button:text-is('Cancel')")
+	page.wait_for_selector(".popup.dialog", state="detached")
+	check(page.evaluate(ready, clean), "Cancel keeps it open")
+	if run.phone:
+		page.click((row % (name + "-clean")) + " button[aria-label='Close Workspace']")
+	else:
+		page.evaluate("ied_shell.showWorkspace('w1')")
+		page.wait_for_function("ied_shell.workspace.wsId === 'w1' && ied_shell.layout && ied_shell.client.state === 'live'", timeout=30000)
+		page.click(".sb-ws")
+		page.click(".popup.menu .menu-item:has-text('Close Workspace')")
+		page.wait_for_selector(".popup.menu .menu-item:has-text('%s-clean')" % name, timeout=10000)
+		run.shot("switcher")
+		page.locator(".popup.menu").last.locator(".menu-item:has-text('%s-clean')" % name).click()
+	page.click(".popup.dialog button:text-is('Close')")
+	page.wait_for_function(gone, arg=clean, timeout=30000)
+	check(page.evaluate("ied_shell.server.workspaces.some(w => w.wsId === 'w1')"), "the other workspace stays open")

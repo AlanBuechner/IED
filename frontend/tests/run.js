@@ -70,6 +70,7 @@ import "./packages.test.js";
 import "./sandbox.test.js";
 import "./desktop.test.js";
 import "./startpage.test.js";
+import "./closeworkspace.test.js";
 import "./profiler.test.js";
 import "./gpu.test.js";
 import "./developer.test.js";

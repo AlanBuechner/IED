@@ -56,6 +56,9 @@ namespace Ied
 		server->m_Rpc.Register("doc.takeLease", [self](Call& call, const Params& params) -> Core::String { return self->TakeLeaseMethod(call, params); });
 		server->m_Rpc.Register("doc.save", [self](Call& call, const Params& params) -> Core::String { return self->SaveMethod(call, params); });
 		server->m_Rpc.Register("doc.baseline", [self](Call& call, const Params& params) -> Core::String { return self->BaselineMethod(call, params); });
+		// What closing a workspace would lose, and keeping it (docs/10 "Workspaces": Close Workspace asks first).
+		server->m_Rpc.Register("doc.unsaved", [self](Call& call, const Params& params) -> Core::String { return self->UnsavedMethod(call, params); });
+		server->m_Rpc.Register("doc.saveAll", [self](Call& call, const Params& params) -> Core::String { return self->SaveAllMethod(call, params); });
 	}
 
 	Document* Documents::Get(Core::StringView docId) const {
@@ -408,12 +411,44 @@ namespace Ied
 		return revision;
 	}
 
-	int64 Documents::SaveAll(Workspace* ws) {
+	Core::Array<Document*> Documents::Unsaved(Workspace* ws) const {
 		Core::Array<Document*> dirty;
 		for (const Core::KeyValue<Core::String, Document*>& entry : m_ByPath)
 			if (entry.value->m_Ws == ws && entry.value->m_Dirty && !entry.value->IsReadOnly()) dirty.Push(entry.value);
+		return dirty;
+	}
+
+	int64 Documents::SaveAll(Workspace* ws) {
+		Core::Array<Document*> dirty = Unsaved(ws);
 		for (Document* doc : dirty) Save(doc);
 		return dirty.Count();
+	}
+
+	Core::String Documents::UnsavedMethod(Call& call, const Params& params) {
+		Workspace* ws = m_Server->m_Workspaces->Get(params.Str("wsId").View());
+		Core::Array<Document*> dirty = Unsaved(ws);
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("documents"));
+		json.BeginArray();
+		for (Document* doc : dirty) {
+			json.BeginObject();
+			json.Field("docId", doc->m_DocId.View());
+			json.Field("path", doc->m_Path.View());
+			json.EndObject();
+		}
+		json.EndArray();
+		json.EndObject();
+		return json.ToString();
+	}
+
+	Core::String Documents::SaveAllMethod(Call& call, const Params& params) {
+		Workspace* ws = m_Server->m_Workspaces->Get(params.Str("wsId").View());
+		JsonWriter json;
+		json.BeginObject();
+		json.IntField("saved", SaveAll(ws));
+		json.EndObject();
+		return json.ToString();
 	}
 
 	Core::String Documents::SaveMethod(Call& call, const Params& params) {

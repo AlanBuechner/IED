@@ -279,6 +279,38 @@ class TwoWorkspaceTests(ServerTestCase):
 		finally:
 			master.abort()
 
+	async def test_closing_asks_its_server_what_it_would_lose(self):
+		"""Close Workspace asks first (frontend/src/shell/closeworkspace.js): doc.unsaved names the workspace's dirty
+		documents - not another workspace's - and doc.saveAll writes them before ws.close stops its server."""
+		await_servers(self.server, 2)
+		alpha = await self.socket("w1")
+		beta = await self.socket("w2")
+		master = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
+		try:
+			self.assertEqual({"documents": []}, await beta.request("doc.unsaved", {"wsId": "w2"}), "nothing open, nothing to lose")
+			doc = (await beta.request("doc.open", {"wsId": "w2", "path": "b.txt"}))["docId"]
+			await beta.sub(["doc:" + doc])
+			await beta.next_frame("doc:" + doc)
+			await beta.request("doc.edit", {"docId": doc, "baseVersion": 1, "changes": [{"range": {"start": {"line": 0, "col": 0}, "end": {"line": 0, "col": 0}}, "text": "kept "}]})
+			self.assertEqual({"documents": [{"docId": doc, "path": "b.txt"}]}, await beta.request("doc.unsaved", {"wsId": "w2"}))
+			other = (await alpha.request("doc.open", {"wsId": "w1", "path": "a.txt"}))["docId"]
+			await alpha.request("doc.edit", {"docId": other, "baseVersion": 1, "changes": [{"range": {"start": {"line": 0, "col": 0}, "end": {"line": 0, "col": 0}}, "text": "x"}]})
+			self.assertEqual(["a.txt"], [d["path"] for d in (await alpha.request("doc.unsaved", {"wsId": "w1"}))["documents"]], "each workspace its own")
+			self.assertEqual({"saved": 1}, await beta.request("doc.saveAll", {"wsId": "w2"}))
+			with open(os.path.join(self.beta, "b.txt"), newline="") as f:
+				self.assertEqual("kept beta\n", f.read(), "saved to its file")
+			self.assertEqual({"documents": []}, await beta.request("doc.unsaved", {"wsId": "w2"}), "nothing left to lose")
+			self.assertEqual({"saved": 0}, await beta.request("doc.saveAll", {"wsId": "w2"}))
+			await master.sub(["server"])
+			await master.next_frame("server")
+			await master.request("ws.close", {"wsId": "w2"})
+			await master.wait_for("server", lambda f: f.get("kind") == "workspace.closed" and f["data"]["wsId"] == "w2", timeout=30)
+			self.assertEqual(["a.txt"], [d["path"] for d in (await alpha.request("doc.unsaved", {"wsId": "w1"}))["documents"]], "the other workspace keeps its edit")
+		finally:
+			alpha.abort()
+			beta.abort()
+			master.abort()
+
 	def test_stop_ends_every_workspace_server(self):
 		listed = await_servers(self.server, 2)
 		pids = [w["server"]["pid"] for w in listed]

@@ -24,6 +24,7 @@ import { tabKindOf, dockFor } from "./dockplace.js";
 import * as T from "./layouttree.js";
 import { Toasts } from "./toasts.js";
 import { registerShellCommands } from "./hostcommands.js";
+import { closeWorkspace } from "./closeworkspace.js";
 import { registerShellViews } from "./hostviews.js";
 import { SettingsOverlay } from "./settingsoverlay.js";
 import { DesktopChrome } from "./desktop.js";
@@ -229,10 +230,9 @@ export class Shell {
 		return this.client.request("ws.restart", { wsId: target }).catch((e) => this.report("The workspace server did not restart: " + e.message, e));
 	}
 
+	// Asks first - its unsaved files, what still runs - then closes it (closeworkspace.js).
 	closeWorkspace(wsId) {
-		const target = wsId || this.wsId;
-		if (!target) return null;
-		return this.client.request("ws.close", { wsId: target }).catch((e) => this.report("The workspace did not close: " + e.message, e));
+		return closeWorkspace(this, wsId);
 	}
 
 	serverChanged() {
