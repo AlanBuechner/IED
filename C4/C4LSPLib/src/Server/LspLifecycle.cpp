@@ -17,6 +17,7 @@
 #include "Features/FoldingRanges.h"
 #include "Features/Formatting.h"
 #include "Features/Tidy.h"
+#include "Features/MissingDefinitions.h"
 
 namespace C4LSP::Server
 {
@@ -43,6 +44,12 @@ namespace C4LSP::Server
 				Features::Tidy::SetEnabled(tidy.GetBool());
 				tidyChanged = true;
 			}
+			const Json::Value missingDefinitions = settings.Member("missingDefinitions");
+			if (missingDefinitions.IsBool() && Features::MissingDefinitions::IsEnabled() != missingDefinitions.GetBool())
+			{
+				Features::MissingDefinitions::SetEnabled(missingDefinitions.GetBool());
+				tidyChanged = true;
+			}
 			// Code-action features are request-driven (the lightbulb queries on demand), so a live
 			// toggle needs no republish - the next textDocument/codeAction simply sees the new flags.
 			const Json::Value quickfixes = settings.Member("quickfixes");
@@ -55,7 +62,7 @@ namespace C4LSP::Server
 
 		if (!tidyChanged)
 			return;
-		// Every open document's diagnostics again, with the new tidy state, from the analyses as they are (a pass analyzes
+		// Every open document's diagnostics again, with the new tidy and missing-definition state, from the analyses as they are (a pass analyzes
 		// only what changed): on the worker, so a publish of the old state never lands after the new one.
 		{
 			std::lock_guard<std::mutex> lock(m_WorkMutex);
@@ -95,7 +102,13 @@ namespace C4LSP::Server
 			const Json::Value createDefinition = options.Member("createDefinition");
 			if (createDefinition.IsBool())
 				Features::CodeActions::SetCreateDefinitionEnabled(createDefinition.GetBool());
+			// The "Function definition for 'X' not found" warning: on unless the client says otherwise.
+			const Json::Value missingDefinitions = options.Member("missingDefinitions");
+			if (missingDefinitions.IsBool())
+				Features::MissingDefinitions::SetEnabled(missingDefinitions.GetBool());
 		}
+		// A code action that places the cursor sends a snippet edit (LSP 3.18) to a client that takes one.
+		m_SnippetEdits = params.Member("capabilities").Member("workspace").Member("workspaceEdit").Member("snippetEditSupport").GetBool(false);
 
 		// Columns are UTF-8 bytes in the compiler: a client that takes utf-8 gets them as they are; another gets UTF-16 (L1).
 		m_Encoding = Protocol::NegotiatePositionEncoding(params);

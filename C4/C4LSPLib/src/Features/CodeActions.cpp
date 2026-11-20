@@ -3,11 +3,19 @@
 #include "Server/CompilationSession.h"
 #include "Server/NodeLocator.h" // LocatedNode.path = root->node ancestor chain (innermost last)
 #include "Features/Diagnostics.h" // public ForDocument: this file's LSP diagnostics, widened + deduped
+#include "Features/DefinitionSites.h"
+#include "Features/DefinitionWriter.h"
+#include "Features/MissingDefinitions.h"
+#include "Features/DeclarationText.h"
 #include "SourceManager/Source.h"
 #include "Parser/AstNode.h"
 #include "Lexer/Token.h"
+#include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Expressions/MemberAccessNode.h"
+#include <algorithm>
 #include <cctype>
+#include <map>
+#include <optional>
 
 namespace C4LSP::Features
 {
@@ -105,7 +113,12 @@ namespace C4LSP::Features
 
 	// ------------------------------------------------------------- quickfix --
 
-	static void AddPointerQuickfix(Server::CompilationSession& session, uint32 sourceId,
+	static FixedDiagnostic Fixing(const Protocol::Diagnostic& diag)
+	{
+		return FixedDiagnostic{ diag.range, static_cast<int>(diag.severity), diag.message };
+	}
+
+	static void AddPointerQuickfix(Server::CompilationSession& session, uint32 sourceId, const std::string& uri,
 		const Protocol::Diagnostic& diag, Core::Vector<CodeAction>& out)
 	{
 		std::string member;
@@ -131,13 +144,8 @@ namespace C4LSP::Features
 		CodeAction action;
 		action.title = "Use '->' (pointer dereference)";
 		action.kind = "quickfix";
-		action.quickfix = true;
-		action.diagnosticSeverity = static_cast<int>(diag.severity);
-		action.diagnosticMessage = diag.message;
-		action.hasDiagnosticRange = true;
-		action.diagnosticRange = diag.range; // the squiggle itself is where the edit lands
-		action.editStartEnd = session.ToEditorRange(sourceId, dot.GetStartLocation(), dot.GetEndLocation());
-		action.newText = "->";
+		action.diagnostics.Push(Fixing(diag)); // the squiggle itself is where the edit lands
+		action.edits.Push({ uri, session.ToEditorRange(sourceId, dot.GetStartLocation(), dot.GetEndLocation()), "->" });
 		out.Push(std::move(action));
 	}
 
@@ -223,39 +231,152 @@ namespace C4LSP::Features
 		return true;
 	}
 
-	static void AddCreateDefinitionActions(Server::CompilationSession& session, uint32 sourceId,
+	static void AddCreateDefinitionActions(Server::CompilationSession& session, uint32 sourceId, const std::string& uri,
 		const Ref<Scripting::AstNode>& rootAst, const std::string& editorText,
 		const Core::Vector<Protocol::Diagnostic>& diagnostics, Core::Vector<CodeAction>& out)
 	{
-	// One action per undefined-call diagnostic occurrence: each error line's lightbulb offers the fix for ITS OWN marker
-	// (Monaco scopes quickfixes to their squiggle), exactly like VS2022.
-	for (const auto& diag : diagnostics)
-	{
-		if (diag.severity != Protocol::DiagnosticSeverity::Error) continue;
-		std::string name;
-		if (!CodeActions::IsUndefinedIdentifierMessage(diag.message, name)) continue;
+		// One action per undefined-call diagnostic occurrence: each error line's lightbulb offers the fix for ITS OWN marker
+		// (Monaco scopes quickfixes to their squiggle), exactly like VS2022.
+		for (const auto& diag : diagnostics)
+		{
+			if (diag.severity != Protocol::DiagnosticSeverity::Error) continue;
+			std::string name;
+			if (!CodeActions::IsUndefinedIdentifierMessage(diag.message, name)) continue;
 
-		const Protocol::Position& anchor = diag.range.start; // 0-based LSP position of the identifier
-		if (!IsFreeFunctionCallAt(editorText, anchor.line, anchor.character))
-			continue; // not a free-function call: no stub can fix this use
+			const Protocol::Position& anchor = diag.range.start; // 0-based LSP position of the identifier
+			if (!IsFreeFunctionCallAt(editorText, anchor.line, anchor.character))
+				continue; // not a free-function call: no stub can fix this use
 
-		Protocol::Range insertAt;
-		if (!InsertionPointFor(session, sourceId, rootAst, anchor, insertAt))
-			continue; // cannot find a safe file-scope insertion point
+			Protocol::Range insertAt;
+			if (!InsertionPointFor(session, sourceId, rootAst, anchor, insertAt))
+				continue; // cannot find a safe file-scope insertion point
 
-		CodeAction action;
-		action.title = "Create definition of '" + name + "'";
-		action.kind = "quickfix"; // marker-scoped: the inline lightbulb filters out source.* actions
-		action.quickfix = true;
-		action.diagnosticSeverity = static_cast<int>(diag.severity);
-		action.diagnosticMessage = diag.message;
-		action.hasDiagnosticRange = true;
-		action.diagnosticRange = diag.range; // squiggle on the undefined identifier (where the error reads)
-		action.editStartEnd = insertAt;     // zero-width: pure insertion at file scope, a different range
-		// A minimal, always-compilable C4 signature (variadic body verified to link); user refines it.
-		action.newText = "void " + name + "(...) {\n}\n\n";
-		out.Push(std::move(action));
+			CodeAction action;
+			action.title = "Create definition of '" + name + "'";
+			action.kind = "quickfix"; // marker-scoped: the inline lightbulb filters out source.* actions
+			action.diagnostics.Push(Fixing(diag)); // squiggle on the undefined identifier (where the error reads)
+			// Zero-width: pure insertion at file scope. A minimal, always-compilable C4 signature (variadic body verified
+			// to link); the user refines it.
+			action.edits.Push({ uri, insertAt, "void " + name + "(...) {\n}\n\n" });
+			out.Push(std::move(action));
 		}
+	}
+
+	// ---------------------------------------------------------------- missing definitions --
+
+	// A function declared without a body, with the warning on it and where its definition goes in its source file.
+	struct Undefined
+	{
+		const MissingDefinition* missing = nullptr;
+		FixedDiagnostic warning;
+		std::optional<DefinitionSite> site;
+		WrittenDefinition written; // as it reads at the site; no text when it cannot be named from there
+	};
+
+	static CodeActionEdit InsertionAt(const DefinitionSite& site, const std::vector<WrittenDefinition>& definitions)
+	{
+		CodeActionEdit edit;
+		edit.uri = site.uri;
+		edit.range = Protocol::Range{ site.at, site.at };
+		edit.newText = DefinitionSites::Joined(site, definitions, edit.caret);
+		return edit;
+	}
+
+	static CodeAction DefinitionFix(const std::string& title, const FixedDiagnostic& warning)
+	{
+		CodeAction action;
+		action.title = title;
+		action.kind = "quickfix";
+		action.diagnostics.Push(warning);
+		return action;
+	}
+
+	static CodeActionEdit InPlaceEdit(Server::CompilationSession& session, uint32 sourceId, const std::string& uri, const MissingDefinition& missing)
+	{
+		const Scripting::Token& semicolon = missing.declaration->GetSemicolonToken();
+		const WrittenDefinition body = DefinitionWriter::InPlaceBody(session, missing, DefinitionSites::InPlaceStyle(session, *missing.declaration));
+		CodeActionEdit edit;
+		edit.uri = uri;
+		edit.range = session.ToEditorRange(sourceId, semicolon.GetStartLocation(), semicolon.GetEndLocation());
+		edit.newText = body.text;
+		edit.caret = body.caret;
+		return edit;
+	}
+
+	// Several missing in one file: one action defines them all there, each where its own action puts it, those put at one
+	// point in the order they are declared. The cursor lands in the first.
+	static void AddAllInFileActions(const std::vector<Undefined>& undefined, Core::Vector<CodeAction>& out)
+	{
+		std::map<uint32, std::vector<const Undefined*>> byFile;
+		for (const Undefined& u : undefined)
+			if (u.site && !u.written.text.empty())
+				byFile[u.site->sourceId].push_back(&u);
+		for (const auto& [file, group] : byFile)
+		{
+			if (group.size() < 2)
+				continue;
+			CodeAction all;
+			all.title = "Create the " + std::to_string(group.size()) + " missing definitions in " + DefinitionSites::FileName(group[0]->site->uri);
+			all.kind = "quickfix";
+			std::vector<std::vector<const Undefined*>> points;
+			for (const Undefined* u : group)
+			{
+				all.diagnostics.Push(u->warning);
+				auto same = std::find_if(points.begin(), points.end(), [&](const std::vector<const Undefined*>& point) {
+					return point[0]->site->at.line == u->site->at.line && point[0]->site->at.character == u->site->at.character;
+				});
+				if (same == points.end())
+					points.push_back({ u });
+				else
+					same->push_back(u);
+			}
+			for (const auto& together : points)
+			{
+				std::vector<WrittenDefinition> written;
+				for (const Undefined* u : together)
+					written.push_back(u->written);
+				CodeActionEdit edit = InsertionAt(*together[0]->site, written);
+				if (all.edits.Count() > 0)
+					edit.caret = CodeActionEdit::c_NoCaret;
+				all.edits.Push(std::move(edit));
+			}
+			out.Push(std::move(all));
+		}
+	}
+
+	// For each function the document declares that nothing defines: its definition in its source file (preferred), in
+	// place of its `;`, and all of them at once.
+	static void AddMissingDefinitionActions(Server::CompilationSession& session, uint32 sourceId, const std::string& uri, Core::Vector<CodeAction>& out)
+	{
+		const Core::Vector<MissingDefinition> missing = MissingDefinitions::InDocument(session, sourceId);
+		std::vector<Undefined> undefined;
+		for (const MissingDefinition& m : missing)
+		{
+			Undefined u;
+			u.missing = &m;
+			u.warning = FixedDiagnostic{ MissingDefinitions::NameRange(session, *m.declaration),
+				static_cast<int>(Protocol::DiagnosticSeverity::Warning), MissingDefinitions::MessageFor(*m.declaration) };
+			u.site = DefinitionSites::InSourceFile(session, *m.declaration);
+			if (u.site)
+				u.written = DefinitionWriter::OutOfLine(session, m, u.site->namespaces, u.site->style);
+			undefined.push_back(std::move(u));
+		}
+
+		for (const Undefined& u : undefined)
+		{
+			const std::string name = DeclarationText::NameOf(*u.missing->declaration);
+			if (u.site && !u.written.text.empty())
+			{
+				CodeAction inFile = DefinitionFix("Create definition of '" + name + "' in " + DefinitionSites::FileName(u.site->uri), u.warning);
+				inFile.preferred = true;
+				inFile.edits.Push(InsertionAt(*u.site, { u.written }));
+				out.Push(std::move(inFile));
+			}
+			CodeAction inPlace = DefinitionFix("Create definition of '" + name + "' in place", u.warning);
+			inPlace.edits.Push(InPlaceEdit(session, sourceId, uri, *u.missing));
+			out.Push(std::move(inPlace));
+		}
+		AddAllInFileActions(undefined, out);
 	}
 
 	// ------------------------------------------------------------------ entry --
@@ -281,13 +402,15 @@ namespace C4LSP::Features
 		{
 			for (const auto& diag : docDiags)
 				if (IsPointerDotMessage(diag.message))
-					AddPointerQuickfix(session, sourceId, diag, result);
+					AddPointerQuickfix(session, sourceId, uri, diag, result);
 		}
 
 		if (s_CreateDefinitionEnabled)
 		{
 			std::string editorText = session.GetEditorText(uri);
-			AddCreateDefinitionActions(session, sourceId, rootAst, editorText, docDiags, result);
+			AddCreateDefinitionActions(session, sourceId, uri, rootAst, editorText, docDiags, result);
+			if (MissingDefinitions::IsEnabled()) // the fixes of its warning: none without the squiggle they belong to
+				AddMissingDefinitionActions(session, sourceId, uri, result);
 		}
 
 		return result;

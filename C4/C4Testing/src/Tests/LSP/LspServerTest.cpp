@@ -2,6 +2,7 @@
 #include "LspTestSupport.h"
 #include "Features/Tidy.h" // server-side tidy on/off flag (driven by initializationOptions / didChangeConfiguration)
 #include "Features/CodeActions.h" // server-side code-action flags (same mechanism)
+#include "Features/MissingDefinitions.h" // its on/off flag, driven the same way
 #include "Compiler/Toolchain.h"
 #include "Tests/Script/TestHosts.h"
 #include <algorithm>
@@ -1548,6 +1549,89 @@ int32 main() {
 
 		C4LSP::Features::CodeActions::SetQuickfixesEnabled(true); // restore defaults for other tests
 		C4LSP::Features::CodeActions::SetCreateDefinitionEnabled(true);
+		TEST_PASSED();
+	}
+
+	void LspServerTest::TestMissingDefinitionOverTheWire()
+	{
+		const std::string header = "namespace Game\n{\n\tstruct Thing\n\t{\n\tpublic:\n\t\tpublic void OnLoaded();\n\t\tpublic void OnUpdate();\n\t}\n}\n";
+		const std::string source = "include \"Thing.ch\"\n\nnamespace Game\n{\n\tvoid Thing::OnUpdate() {\n\t}\n}\n";
+		// A root as a client names one, with a drive: the edit names the source file as the client opened it.
+		const std::string root = "file:///C:/MissingDefinitionsRoot";
+		const std::string headerUri = root + "/Thing.ch";
+		const std::string sourceUri = root + "/Thing.cf";
+		// The diagnostics last published for `uri`.
+		auto lastPublished = [this](const std::string& uri) {
+			size_t checked = 0;
+			Value diagnostics = Value::Null();
+			while (const Value* pub = NotificationByMethod("textDocument/publishDiagnostics", &checked))
+				if (std::string(pub->Member("params").Member("uri").GetString()) == uri)
+					diagnostics = pub->Member("params").Member("diagnostics");
+			return diagnostics;
+		};
+		auto warnings = [](const Value& diagnostics) {
+			int count = 0;
+			for (uint32 i = 0; diagnostics.IsArray() && i < diagnostics.Size(); ++i)
+				if (Contains(diagnostics.At(i).Member("message").GetString(), "Function definition for"))
+					++count;
+			return count;
+		};
+
+		Reset(root);
+		Value init = Value::MakeObject();
+		init.SetMember("rootUri", Value::String(Core::String(root)));
+		Value workspaceEdit = Value::MakeObject();
+		workspaceEdit.SetMember("snippetEditSupport", Value::Bool(true));
+		Value workspace = Value::MakeObject();
+		workspace.SetMember("workspaceEdit", workspaceEdit);
+		Value capabilities = Value::MakeObject();
+		capabilities.SetMember("workspace", workspace);
+		init.SetMember("capabilities", capabilities);
+		FeedRequest("initialize", 1, init);
+		FeedNotification("initialized", Value::Null());
+		FeedNotification("textDocument/didOpen", MakeTextDocParams(sourceUri, source));
+		FeedNotification("textDocument/didOpen", MakeTextDocParams(headerUri, header));
+		m_Server->WaitForCurrentWork();
+
+		const Value published = lastPublished(headerUri);
+		TEST_ASSERT_EQ(warnings(published), 1); // OnLoaded only: OnUpdate's body is in the other document
+		TEST_ASSERT_EQ(std::string(published.At(0).Member("message").GetString()), std::string("Function definition for 'OnLoaded' not found"));
+		TEST_ASSERT_EQ((int64)published.At(0).Member("severity").GetInt(), (int64)2);
+
+		Value params = Value::MakeObject();
+		Value doc = Value::MakeObject();
+		doc.SetMember("uri", Value::String(Core::String(headerUri)));
+		params.SetMember("textDocument", doc);
+		FeedRequest("textDocument/codeAction", 30, params);
+		const Value* resp = ResponseForId(30);
+		TEST_ASSERT_NOT_NULL(resp);
+		const Value actions = resp->Member("result");
+		int preferredAt = -1;
+		for (uint32 i = 0; i < actions.Size(); ++i)
+			if (actions.At(i).Member("isPreferred").GetBool(false))
+				preferredAt = static_cast<int>(i);
+		TEST_ASSERT(preferredAt >= 0);
+		const Value preferred = actions.At(static_cast<uint32>(preferredAt));
+		TEST_ASSERT_EQ(std::string(preferred.Member("title").GetString()), std::string("Create definition of 'OnLoaded' in Thing.cf"));
+		const Value change = preferred.Member("edit").Member("documentChanges").At(0);
+		TEST_ASSERT_EQ(std::string(change.Member("textDocument").Member("uri").GetString()), sourceUri);
+		TEST_ASSERT_EQ(std::string(change.Member("edits").At(0).Member("snippet").Member("value").GetString()),
+			std::string("\tvoid Thing::OnLoaded() {\n\t\t$0\n\t\\}\n\n"));
+
+		// Turned off: every open document again, without it; and no fix for a squiggle that is not there.
+		Value settings = Value::MakeObject();
+		settings.SetMember("missingDefinitions", Value::Bool(false));
+		Value config = Value::MakeObject();
+		config.SetMember("settings", settings);
+		FeedNotification("workspace/didChangeConfiguration", config);
+		m_Server->WaitForCurrentWork();
+		const bool off = warnings(lastPublished(headerUri)) == 0;
+		FeedRequest("textDocument/codeAction", 31, params);
+		const Value* none = ResponseForId(31);
+		const bool noFixes = none && none->Member("result").Size() == 0;
+		C4LSP::Features::MissingDefinitions::SetEnabled(true); // restore the default for other tests
+		TEST_ASSERT(off);
+		TEST_ASSERT(noFixes);
 		TEST_PASSED();
 	}
 

@@ -343,46 +343,102 @@ namespace C4LSP::Protocol
 		return obj;
 	}
 
-	Json::Value LspJson::CodeActions(const Core::Vector<Features::CodeAction>& actions, const std::string& uri)
+	std::string LspJson::SnippetOf(const std::string& text, size_t caret)
+	{
+		std::string out;
+		for (size_t i = 0; i <= text.size(); ++i)
+		{
+			if (i == caret)
+				out += "$0";
+			if (i == text.size())
+				break;
+			if (text[i] == '$' || text[i] == '}' || text[i] == '\\')
+				out += '\\'; // what snippet syntax reads as its own
+			out += text[i];
+		}
+		return out;
+	}
+
+	// The documents an action changes, in the order its edits first name them: {changes: {uri: [textEdits]}}, applied by
+	// the client through the path rename uses; documentChanges when a snippet edit places the cursor.
+	Json::Value LspJson::WorkspaceEditOf(const Features::CodeAction& action, bool snippetEdits)
+	{
+		std::vector<std::string> documents;
+		std::map<std::string, Json::Value> editsOf;
+		bool snippets = false;
+		for (const Features::CodeActionEdit& edit : action.edits)
+		{
+			if (!editsOf.count(edit.uri))
+			{
+				documents.push_back(edit.uri);
+				editsOf.emplace(edit.uri, Json::Value::MakeArray());
+			}
+			Json::Value text = Json::Value::MakeObject();
+			text.SetMember("range", RangeObject(edit.range));
+			if (snippetEdits && edit.caret != Features::CodeActionEdit::c_NoCaret)
+			{
+				Json::Value snippet = Json::Value::MakeObject();
+				snippet.SetMember("kind", Json::Value::String(Core::String("snippet")));
+				snippet.SetMember("value", Json::Value::String(Core::String(SnippetOf(edit.newText, edit.caret))));
+				text.SetMember("snippet", snippet);
+				snippets = true;
+			}
+			else
+				text.SetMember("newText", Json::Value::String(Core::String(edit.newText)));
+			editsOf[edit.uri].Append(text);
+		}
+
+		Json::Value workspaceEdit = Json::Value::MakeObject();
+		if (!snippets)
+		{
+			Json::Value changes = Json::Value::MakeObject();
+			for (const std::string& document : documents)
+				changes.SetMember(document, editsOf[document]);
+			workspaceEdit.SetMember("changes", changes);
+			return workspaceEdit;
+		}
+		Json::Value changes = Json::Value::MakeArray();
+		for (const std::string& document : documents)
+		{
+			Json::Value identifier = Json::Value::MakeObject();
+			identifier.SetMember("uri", Json::Value::String(Core::String(document)));
+			identifier.SetMember("version", Json::Value::Null());
+			Json::Value change = Json::Value::MakeObject();
+			change.SetMember("textDocument", identifier);
+			change.SetMember("edits", editsOf[document]);
+			changes.Append(change);
+		}
+		workspaceEdit.SetMember("documentChanges", changes);
+		return workspaceEdit;
+	}
+
+	Json::Value LspJson::CodeActions(const Core::Vector<Features::CodeAction>& actions, bool snippetEdits)
 	{
 		Json::Value array = Json::Value::MakeArray(); // empty array is the valid "no actions" response
 		for (const auto& action : actions)
 		{
-			// One single-document WorkspaceEdit per action ({changes:{uri:[textEdits]}}), applied by the
-			// client through the same prepareWorkspaceEdit path rename uses. Zero-width ranges insert.
-			Json::Value edit = Json::Value::MakeObject();
-			edit.SetMember("range", RangeObject(action.editStartEnd));
-			edit.SetMember("newText", Json::Value::String(Core::String(action.newText)));
-
-			Json::Value edits = Json::Value::MakeArray();
-			edits.Append(edit);
-
-			Json::Value changes = Json::Value::MakeObject();
-			changes.SetMember(uri, edits);
-
-			Json::Value workspaceEdit = Json::Value::MakeObject();
-			workspaceEdit.SetMember("changes", changes);
-
 			Json::Value obj = Json::Value::MakeObject();
 			obj.SetMember("title", Json::Value::String(Core::String(action.title)));
 			obj.SetMember("kind", Json::Value::String(Core::String(action.kind)));
-		if (action.quickfix)
-		{
-			// Scope the quickfix to its squiggle so clients can underline exactly that range. The
-			// diagnostic's range is where the error reads (the published marker), which differs from
-			// the edit's range for insertion-style fixes; fall back to the edit range when unset.
-			const Protocol::Range& diagRange = action.hasDiagnosticRange ? action.diagnosticRange : action.editStartEnd;
-			Json::Value diag = Json::Value::MakeObject();
-			diag.SetMember("range", RangeObject(diagRange));
-				diag.SetMember("message", Json::Value::String(Core::String(action.diagnosticMessage)));
-				if (action.diagnosticSeverity > 0)
-					diag.SetMember("severity", Json::Value::Int(action.diagnosticSeverity));
-
+			if (action.preferred)
+				obj.SetMember("isPreferred", Json::Value::Bool(true));
+			if (action.diagnostics.Count() > 0)
+			{
+				// Scope the quickfix to its squiggles so clients show it on exactly those markers: where the problem reads
+				// (the published marker), which differs from the edit's range for insertion-style fixes.
 				Json::Value diagnostics = Json::Value::MakeArray();
-				diagnostics.Append(diag);
+				for (const Features::FixedDiagnostic& fixed : action.diagnostics)
+				{
+					Json::Value diag = Json::Value::MakeObject();
+					diag.SetMember("range", RangeObject(fixed.range));
+					diag.SetMember("message", Json::Value::String(Core::String(fixed.message)));
+					if (fixed.severity > 0)
+						diag.SetMember("severity", Json::Value::Int(fixed.severity));
+					diagnostics.Append(diag);
+				}
 				obj.SetMember("diagnostics", diagnostics);
 			}
-			obj.SetMember("edit", workspaceEdit);
+			obj.SetMember("edit", WorkspaceEditOf(action, snippetEdits));
 			array.Append(obj);
 		}
 		return array;

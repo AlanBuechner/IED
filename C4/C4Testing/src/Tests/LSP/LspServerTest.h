@@ -111,6 +111,11 @@ namespace Testing
 		TEST_FUNC(Lsp.Server)
 		void TestCodeActionsToggleOffViaDidChangeConfiguration();
 
+		// "Function definition for 'X' not found" goes out with the compiler's diagnostics; its fix is a snippet edit of the
+		// source file for a client that takes them; `missingDefinitions: false` publishes again without it.
+		TEST_FUNC(Lsp.Server)
+		void TestMissingDefinitionOverTheWire();
+
 		// textDocument/foldingRange items must use the LSP-spec field names `start`/`end`. Monaco's
 		// folding model reads only those keys; non-standard names (e.g. startLine/endLine) parse as a
 		// valid array but produce ZERO folds in the editor with no error anywhere - exactly the bug

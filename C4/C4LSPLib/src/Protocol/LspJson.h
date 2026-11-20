@@ -34,7 +34,10 @@ namespace C4LSP::Protocol
 		static Json::Value Rename(const Features::RenameResult& result, const std::string& newName); // WorkspaceEdit or null
 	static Json::Value PrepareRename(const Features::PrepareResult& result);                    // {range, placeholder} or null
 		static Json::Value TextEdits(const std::vector<Protocol::TextEdit>& edits);                 // array of LSP textEdits (empty = [])
-		static Json::Value CodeActions(const Core::Vector<Features::CodeAction>& actions, const std::string& uri); // array (empty = [])
+		// Array (empty = []). With `snippetEdits` (the client's workspace.workspaceEdit.snippetEditSupport, LSP 3.18) an
+		// edit with a caret is a SnippetTextEdit whose $0 is the caret, in documentChanges.
+		static Json::Value CodeActions(const Core::Vector<Features::CodeAction>& actions, bool snippetEdits);
+		static std::string SnippetOf(const std::string& text, size_t caret); // `text` as snippet syntax, $0 at `caret`
 		static Json::Value FoldingRanges(const Core::Vector<Features::FoldingRange>& ranges);         // array of LSP foldingRanges (empty = [])
 		static Json::Value HierarchyItems(const Core::Vector<Features::HierarchyItem>& items);       // array or null (prepare*Hierarchy, supertypes, subtypes)
 		static Json::Value HierarchyCalls(const Core::Vector<Features::HierarchyCall>& calls, const char* itemKey); // [{from|to, fromRanges}]
@@ -50,5 +53,6 @@ namespace C4LSP::Protocol
 		static Json::Value DocumentSymbolObject(const Features::DocumentSymbol& symbol);
 		static Json::Value HierarchyItemObject(const Features::HierarchyItem& item);
 		static Json::Value DocumentHighlightObject(const DocumentHighlight& highlight);
+		static Json::Value WorkspaceEditOf(const Features::CodeAction& action, bool snippetEdits);
 	};
 } // namespace C4LSP::Protocol

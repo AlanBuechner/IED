@@ -312,7 +312,7 @@ namespace C4LSP::Server
 		if (session && session->IsCompiled())
 			actions = Features::CodeActions::ForDocument(*session, uri);
 
-		SendResponse(id, Protocol::LspJson::CodeActions(actions, uri));
+		SendResponse(id, Protocol::LspJson::CodeActions(actions, m_SnippetEdits));
 	}
 
 	void LspServer::HandleFoldingRanges(const Json::Value& id, const Json::Value& params)

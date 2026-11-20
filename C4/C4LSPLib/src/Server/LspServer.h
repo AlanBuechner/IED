@@ -254,6 +254,7 @@ namespace C4LSP::Server
 		std::vector<std::map<std::string, size_t>> m_ScriptInputs;         // per scope, the documents its session took (the worker's)
 		std::vector<std::shared_ptr<const LoadedInterface>> m_ScriptHosts; // per scope, the interface its session took (the worker's)
 		Protocol::PositionEncoding m_Encoding = Protocol::PositionEncoding::Utf16; // negotiated in initialize
+		bool m_SnippetEdits = false;                   // the client takes snippet edits in a WorkspaceEdit (initialize)
 		std::string m_RequestUri;                      // the document of the request being answered
 		Json::Value m_RequestId;                       // the request being answered
 		bool m_RequestOutlivesEdits = false;           // it answers from the last analysis: an edit after it does not drop it

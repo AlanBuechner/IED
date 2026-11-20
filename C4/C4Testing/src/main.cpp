@@ -78,6 +78,7 @@ LINK_REFLECTION_DATA
 #include "Tests/LSP/LspFeaturesTest.h"
 #include "Tests/LSP/LspFormattingTest.h"
 #include "Tests/LSP/LspNewFeaturesTest.h"
+#include "Tests/LSP/LspMissingDefinitionsTest.h"
 #include "Tests/LSP/LspNavigationTest.h"
 #include "Tests/LSP/LspSemanticTokensTest.h"
 #include "Tests/LSP/LspServerTest.h"

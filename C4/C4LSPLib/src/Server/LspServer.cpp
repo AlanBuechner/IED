@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include "Features/Diagnostics.h"
 #include "Features/Tidy.h"
+#include "Features/MissingDefinitions.h"
 #include <malloc.h> // _heapmin on Windows, malloc_trim on Linux (glibc)
 
 namespace C4LSP::Server
@@ -834,6 +835,8 @@ namespace C4LSP::Server
 			// compiler errors and tidy warnings together (VS2022-style). With the feature disabled this returns empty.
 			for (const auto& tidyDiag : Features::Tidy::ForDocument(*analyzed, uri))
 				diagnostics.Push(tidyDiag);
+			for (const auto& missing : Features::MissingDefinitions::ForDocument(*analyzed, uri))
+				diagnostics.Push(missing);
 			Json::Value params = Json::Value::MakeObject();
 			params.SetMember("uri", Json::Value::String(Core::String(uri)));
 			params.SetMember("diagnostics", Protocol::LspJson::DiagnosticsArray(diagnostics));

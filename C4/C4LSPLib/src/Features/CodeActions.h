@@ -8,21 +8,34 @@ namespace C4LSP::Server { class CompilationSession; }
 
 namespace C4LSP::Features
 {
-	/// One LSP code action: a title plus the edits that apply it. Quickfixes carry the squiggle they
-	/// fix so clients can scope lightbulb entries to their marker (the diagnostic range is where the
-	/// error sits, which for insertions differs from the edit's zero-width insertion point).
+	/// One text edit of a code action, in the document `uri` names (the asking document's or another's).
+	struct CodeActionEdit
+	{
+		static constexpr size_t c_NoCaret = static_cast<size_t>(-1);
+
+		std::string uri;
+		Protocol::Range range{}; // zero-width for pure insertions
+		std::string newText;
+		size_t caret = c_NoCaret; // where in newText the cursor goes once it is in: a snippet's $0, for a client that takes them
+	};
+
+	/// The squiggle a quickfix fixes, as published in textDocument/publishDiagnostics: clients scope the lightbulb entry to
+	/// its marker (where the problem reads, which for an insertion differs from the edit's point).
+	struct FixedDiagnostic
+	{
+		Protocol::Range range{};
+		int severity = 0; // LSP severity (1 = Error ..)
+		std::string message;
+	};
+
+	/// One LSP code action: a title plus the edits that apply it.
 	struct CodeAction
 	{
 		std::string title;
-		std::string kind;      // "quickfix" or "source.refactor"
-		bool quickfix = false; // true when a diagnostic is attached (client filters by marker)
-		int diagnosticSeverity = 0;   // LSP severity of the squiggle this fixes (1=Error..)
-		std::string diagnosticMessage;
-		bool hasDiagnosticRange = false; // set when diagnosticRange is meaningful (otherwise fall back to editStartEnd)
-		Protocol::Range diagnosticRange{}; // squiggle range as published in textDocument/publishDiagnostics
-
-		Protocol::Range editStartEnd{}; // zero-width for pure insertions
-		std::string newText;
+		std::string kind;       // "quickfix" or "source.refactor"
+		bool preferred = false; // the fix a client applies by itself ("auto fix") among those for one squiggle
+		Core::Vector<FixedDiagnostic> diagnostics; // a quickfix's squiggles (the client filters by marker); empty otherwise
+		Core::Vector<CodeActionEdit> edits;
 	};
 
 	/// textDocument/codeAction support - the VS2022 lightbulb. The editor's frontend registers a
@@ -38,10 +51,13 @@ namespace C4LSP::Features
 	///               emitted as a diagnostic-scoped `quickfix` (not source.*): Monaco's inline lightbulb
 	///               only surfaces marker-scoped quickfixes and filters out source-kind actions, which is
 	///               also how VS2022/Visual Assist X show "create method" directly on the error.
-	/// Both are independently toggleable; the client drives them live through workspace/didChangeConfiguration
-	/// from plugin settings ("feature-code-action-quickfixes" / "feature-create-definition"), so a user
-	/// can revert to the editor's plain behavior per feature. With both off, ForDocument returns empty and the
-	/// server behaves exactly as if this feature never existed (override-only).
+	///   * quickfix  "Create definition of 'Name' in File.cf" / "... in place" / "Create the N missing definitions
+	///               in File.cf" - for a function declared without a body that nothing defines (MissingDefinitions):
+	///               the body goes beside its neighbours' definitions, as Visual Assist's Create Implementation
+	///               places it, or replaces the declaration's `;` (DefinitionSites, DefinitionWriter).
+	/// The families are independently toggleable; the client drives them live through workspace/didChangeConfiguration
+	/// ("quickfixes" / "createDefinition"), so a user can revert to the editor's plain behavior per feature. With both
+	/// off, ForDocument returns empty and the server behaves exactly as if this feature never existed (override-only).
 	class CodeActions
 	{
 	public:

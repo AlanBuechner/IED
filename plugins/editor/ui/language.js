@@ -283,8 +283,8 @@ export class LanguageFeatures {
 		return this.ask(model, "textDocument/codeAction", { range: lspRange, context: lspContext }, token);
 	}
 
-	// Each action as Monaco's: an edit of this document is applied as it is; one that reaches other files runs as a
-	// command that opens them first; a bare command runs on the server.
+	// Each action as Monaco's: an edit of this document is applied as it is; one that reaches other files, or places the
+	// cursor (a snippet edit's $0), runs as a command that opens them first; a bare command runs on the server.
 	codeActions(model, result) {
 		const editor = this.editorOf(model);
 		const docId = editor ? editor.sync.docId : null;
@@ -295,7 +295,7 @@ export class LanguageFeatures {
 			if (action.diagnostics) out.diagnostics = C.markersOf(this.monaco, action.diagnostics);
 			if (action.edit) {
 				const edit = C.workspaceEditOf(action.edit);
-				const local = edit.unsupported === 0 && [...edit.byUri.keys()].every((uri) => this.monaco.editor.getModel(this.monaco.Uri.parse(uri)));
+				const local = edit.unsupported === 0 && !C.placesCaret(edit) && [...edit.byUri.keys()].every((uri) => this.monaco.editor.getModel(this.monaco.Uri.parse(uri)));
 				if (local) out.edit = this.monacoEdit(edit);
 				else out.command = { id: APPLY, title: action.title, arguments: [action.edit] };
 			}
@@ -334,12 +334,25 @@ export class LanguageFeatures {
 		return { edits };
 	}
 
+	// The edit made in each document; a snippet edit's caret then shows its document with the cursor there, as Visual
+	// Studio shows a definition it creates in another file.
 	async applyEdit(lspEdit) {
 		const edit = await this.openFor(lspEdit);
+		let cursor = null;
 		for (const [uri, textEdits] of edit.byUri) {
 			const model = this.monaco.editor.getModel(this.monaco.Uri.parse(uri));
-			if (model) model.pushEditOperations([], textEdits.map((e) => ({ range: e.range, text: e.text })), () => null);
+			if (!model) continue;
+			model.pushEditOperations([], textEdits.map((e) => ({ range: e.range, text: e.text })), (inverse) => {
+				// The inverse operations come in the edits' order, each over the text it put in.
+				const at = textEdits.findIndex((e) => e.caret !== undefined && e.caret !== null);
+				if (!cursor && at >= 0 && inverse[at]) {
+					const start = { lineNumber: inverse[at].range.startLineNumber, column: inverse[at].range.startColumn };
+					cursor = { resource: model.uri, position: C.caretPosition(start, textEdits[at].text, textEdits[at].caret) };
+				}
+				return null;
+			});
 		}
+		if (cursor) this.open(cursor.resource, cursor.position);
 	}
 
 	openTab(path, background) {

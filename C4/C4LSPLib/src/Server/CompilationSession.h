@@ -134,6 +134,8 @@ namespace C4LSP::Server
 		// their numbers; a location inside the bindings maps to the directive that produced them.
 		Protocol::Range ToEditorRange(uint32 sourceId, const Scripting::SourceLocation& start, const Scripting::SourceLocation& end) const;
 		Protocol::Location ToEditorLocation(const Scripting::SourceLocation& start, const Scripting::SourceLocation& end) const;
+		// Whether a location is in those appended bindings, which no editor line holds.
+		bool InBindings(const Scripting::SourceLocation& location) const;
 
 	private:
 		// Display name a document URI maps to (root-relative, or just the file name).

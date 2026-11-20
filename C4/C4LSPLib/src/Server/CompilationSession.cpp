@@ -579,6 +579,12 @@ void CompilationSession::RunPreprocessPhase()
 		return Protocol::Location{ UriForSourceId(declSourceId), ToEditorRange(declSourceId, start, end) };
 	}
 
+	bool CompilationSession::InBindings(const Scripting::SourceLocation& location) const
+	{
+		auto bindings = m_BindingStartLine.find(location.sourceId);
+		return bindings != m_BindingStartLine.end() && location.line >= bindings->second;
+	}
+
 	std::string CompilationSession::UriForSourceId(uint32 sourceId) const
 	{
 		// A file on disk is where it is (a project's, an -I folder's or Bedrock's); an in-memory source has only a name.

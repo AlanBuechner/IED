@@ -132,8 +132,94 @@ export function foldingRangesOf(monaco, result) {
 	});
 }
 
+// Text edits as Monaco's. A snippet edit (LSP 3.18 SnippetTextEdit) goes in as its text, `caret` saying where in that text
+// the cursor lands (its $0).
 export function textEditsOf(edits) {
-	return (edits || []).map((e) => ({ range: fromLspRange(e.range), text: e.newText }));
+	return (edits || []).map((e) => {
+		if (!e.snippet) return { range: fromLspRange(e.range), text: e.newText };
+		const { text, caret } = snippetText(e.snippet.value);
+		return { range: fromLspRange(e.range), text, caret };
+	});
+}
+
+// A snippet's text as it goes in, and where its final tab stop ($0) is in it (null without one). A placeholder keeps its
+// text (`${1:name}` is `name`), a choice its first option, a variable its default; `\` takes the next character as it is.
+export function snippetText(snippet) {
+	let text = "";
+	let caret = null;
+	let i = 0;
+	const digits = () => {
+		const start = i;
+		while (i < snippet.length && snippet[i] >= "0" && snippet[i] <= "9") i += 1;
+		return snippet.slice(start, i);
+	};
+	const name = () => {
+		const start = i;
+		while (i < snippet.length && /[A-Za-z0-9_]/.test(snippet[i])) i += 1;
+		return snippet.slice(start, i);
+	};
+	// Up to the `}` that closes what is open (none at the top), placeholders inside included.
+	const body = (nested) => {
+		while (i < snippet.length) {
+			const c = snippet[i];
+			if (c === "\\" && i + 1 < snippet.length) {
+				text += snippet[i + 1];
+				i += 2;
+			}
+			else if (nested && c === "}") {
+				i += 1;
+				return;
+			}
+			else if (c === "$") {
+				i += 1;
+				stop();
+			}
+			else {
+				text += c;
+				i += 1;
+			}
+		}
+	};
+	const stop = () => {
+		if (snippet[i] !== "{") {
+			const number = digits();
+			if (number === "0" && caret === null) caret = text.length;
+			else if (!number && !name()) text += "$";
+			return;
+		}
+		i += 1;
+		const number = digits();
+		const label = number || name();
+		if (number === "0" && caret === null) caret = text.length;
+		if (snippet[i] === ":") {
+			i += 1;
+			body(true);
+		}
+		else if (snippet[i] === "|") {
+			const end = snippet.indexOf("|", i + 1);
+			const options = end < 0 ? "" : snippet.slice(i + 1, end);
+			text += options.split(",")[0];
+			i = end < 0 ? snippet.length : end + 2; // past `|}`
+		}
+		else if (snippet[i] === "}") i += 1;
+		else if (!label) text += "${";
+	};
+	body(false);
+	return { text, caret };
+}
+
+// Whether a converted WorkspaceEdit places the cursor (a snippet edit with a $0).
+export function placesCaret(edit) {
+	for (const edits of edit.byUri.values()) if (edits.some((e) => e.caret !== undefined && e.caret !== null)) return true;
+	return false;
+}
+
+// Where a snippet's caret is once its text is in: `start` is where the text begins.
+export function caretPosition(start, text, caret) {
+	const before = text.slice(0, caret).replace(/\r/g, "");
+	const lines = before.split("\n");
+	if (lines.length === 1) return { lineNumber: start.lineNumber, column: start.column + before.length };
+	return { lineNumber: start.lineNumber + lines.length - 1, column: lines[lines.length - 1].length + 1 };
 }
 
 // A WorkspaceEdit's text edits by URI (its `changes`, or the text edits of its `documentChanges`); `unsupported` counts

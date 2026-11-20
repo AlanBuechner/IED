@@ -49,6 +49,16 @@ Positions are found wherever LSP puts them: any object with numeric `line` and `
 | topic `lsp:<wsId>` | snapshot `{servers}`; events `lsp.state {profile, project, state, problem}`, `lsp.refresh {path, kinds}` (`path` null: every document, after a server's `workspace/<kind>/refresh`) |
 | topic `diag:<wsId>` | as above |
 
+**Code actions in the editor** (`plugins/editor/ui/language.js`). An action whose edit changes only documents the editor
+shows is applied as Monaco applies one. One whose edit reaches a file not open, or places the cursor, runs as a command:
+its documents open as tabs first, the edit is made in each (one undo step per document), and when it places the cursor
+the document opens there with the cursor set - Visual Studio's "create definition" in a source file shows that file with
+the cursor in the new body. A server places the cursor with an LSP 3.18 snippet edit (`SnippetTextEdit` in
+`documentChanges`, its `$0`): the host's `capabilities` say `workspace.workspaceEdit.snippetEditSupport` (and
+`documentChanges`), and the client puts a snippet in as its text (a placeholder keeps its text, a choice its first
+option) with the cursor at its `$0` (`lspconvert.js` `snippetText`). C4LSP's fixes for a missing definition are the
+first to use it (C4 `docs/tools/03`).
+
 Server-initiated requests are answered by the host: `workspace/configuration` with a null per item (until `settingsBindings` are bound), `workspace/workspaceFolders` with the workspace folder, `workspace/<kind>/refresh` by publishing `lsp.refresh`, `workspace/applyEdit` refused (`applied: false`) for now, and anything else (registrations, `window/workDoneProgress/create`) with null. `window/logMessage`, `window/showMessage` and the beginning and end of `$/progress` go to the workspace's IED output.
 
 ## Plugin code asks language servers (2026-10-21)

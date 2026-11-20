@@ -85,6 +85,34 @@ test("lspconvert: workspace edits by URI, file operations counted", () => {
 		{ textDocument: { uri: "ied://w1/a.c", version: 3 }, edits: [{ range: range(1, 0, 1, 0), newText: "2" }] },
 	] });
 	assertEqual([fromDocuments.byUri.get("ied://w1/a.c").length, fromDocuments.unsupported], [2, 1]);
+	assertTrue(!C.placesCaret(fromDocuments), "plain text edits place no cursor");
+});
+
+test("lspconvert: snippet edits go in as text with the cursor at their $0", () => {
+	const edit = C.workspaceEditOf({ documentChanges: [
+		{ textDocument: { uri: "ied://w1/Thing.cf", version: null }, edits: [
+			{ range: range(4, 0, 4, 0), snippet: { kind: "snippet", value: "\tvoid Thing::OnLoaded() {\n\t\t$0\n\t\\}\n\n" } },
+			{ range: range(9, 0, 9, 0), newText: "x" },
+		] },
+	] });
+	const [first, second] = edit.byUri.get("ied://w1/Thing.cf");
+	assertEqual(first.text, "\tvoid Thing::OnLoaded() {\n\t\t\n\t}\n\n");
+	assertEqual(first.caret, 28, "the cursor sits on the body's line, after its indentation");
+	assertEqual([second.text, second.caret], ["x", undefined]);
+	assertTrue(C.placesCaret(edit));
+	assertEqual(C.caretPosition({ lineNumber: 5, column: 1 }, first.text, first.caret), { lineNumber: 6, column: 3 });
+	assertEqual(C.caretPosition({ lineNumber: 5, column: 7 }, "abc", 2), { lineNumber: 5, column: 9 }, "on the line it starts");
+});
+
+test("lspconvert: snippet syntax as text", () => {
+	assertEqual(C.snippetText("a$0b"), { text: "ab", caret: 1 });
+	assertEqual(C.snippetText("${1:name} = ${0:value};"), { text: "name = value;", caret: 7 });
+	assertEqual(C.snippetText("${0}x"), { text: "x", caret: 0 });
+	assertEqual(C.snippetText("$1 and $2"), { text: " and ", caret: null }, "tab stops other than $0 leave nothing");
+	assertEqual(C.snippetText("${1|left,right|}!"), { text: "left!", caret: null }, "a choice is its first option");
+	assertEqual(C.snippetText("\\$5 \\} \\\\"), { text: "$5 } \\", caret: null }, "escapes are what follows them");
+	assertEqual(C.snippetText("cost: $ 5"), { text: "cost: $ 5", caret: null }, "a $ that starts nothing is itself");
+	assertEqual(C.snippetText("${1:outer ${2:inner}}$0"), { text: "outer inner", caret: 11 }, "placeholders nest");
 });
 
 test("lspconvert: diagnostics as markers", () => {

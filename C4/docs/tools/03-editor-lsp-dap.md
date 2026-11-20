@@ -30,6 +30,14 @@ pipeline as C4.exe, and answers every request from the compiler's own data:
   the body errors the last analysis that lowered found for it: a typo in one file does not make every other file look
   fixed (BUG-450). A diagnostic's column is the file's own, also after a macro use on its line (BUG-446: the compiler
   reported the expanded text's columns, C4.exe too).
+- **Missing definitions** (`Features/MissingDefinitions`): Visual Studio's warning "Function definition for 'X' not
+  found", on the name of each function or method a document declares without a body when nothing in its program
+  defines it. A build reports nothing until such a function is called, so this is the editor's own warning, but what
+  counts as defined is the compiler's answer (`HasCode` of its function: a body in any file, a body the compiler writes,
+  a `[link]` or bound foreign function, a script host's). A pure method (`abstract`, `= 0`, an interface's) needs none.
+  A template's function is its instances', and the record of a member template has no body whatever is written for it,
+  so a template's body is found by name, owner and parameter count (Claymore's `Entity::GetComponent<T>`, defined in
+  another file). Its fixes are code actions (below).
 - **Semantic queries** go through `Server/SemanticResolver`, which drives the ProgramModel's own query
   verbs (qualified lookup, type resolution in a unit's context, variable and member queries) using
   scope context derived from the AST path.
@@ -65,7 +73,7 @@ C4LSP/src/main.cpp            the executable: the stdio loop
 | Symbols | `documentSymbol` (kinds Namespace, Class, Struct, Interface, Enum, EnumMember, Method, Constructor - an `[operator("create")]` method - Field, Function, Variable, Constant - a `const` global; `detail` is the declaration without its annotations, access and name, `static int64 (const Span& text) const`; an annotation's declaration is a Function with detail `annotation (double min, double max) on field`; an out-of-line definition is named with its owner, `ToolRegistry::Add`, as clangd names one; a range covers the doc comment above and the annotations; each `#define` is a symbol of kind Function with detail `macro`), `workspace/symbol` (names containing the query, any case, inside namespaces and types too; `containerName` is the `::`-joined owner, `Ai::ToolRegistry`, and an out-of-line method's is its type; every `#define`, kind Function, where it is defined) |
 | Presentation | `semanticTokens/full` (21 token types: the 19 standard ones plus the C4 `controlFlow` kind and `preprocessor` for directive keywords - `#define`, `#if`, ... and `include`; modifiers include `builtin`, used for primitives, also behind a pointer or an array (`char` of `const char*`), never for an alias of one; an alias is a `type`, qualified (`Math::Vector2`) or not, its namespace a `namespace`; a type named in an expression (a constructor call) keeps its own kind, and a method called through an implicit `this` is a `method`; a token never crosses a line - a block comment is one token per line), `foldingRange` |
 | Edits | `rename` (a function's declaration, its out-of-line definition and every use), `prepareRename`, `formatting`, `rangeFormatting` |
-| Code actions | quick fixes, create-definition, tidy |
+| Code actions | quick fixes (`->` for a `.` on a pointer), create-definition for a call of an undefined function, and for a missing definition (Visual Assist's Create Implementation): "Create definition of 'X' in File.cf" (preferred) - in the file the functions declared beside it are defined in, else the source beside its header (`X.ch` -> `X.cf`), right after the nearest one declared before it, else right before the nearest one declared after it (above its comment), else at the end of the file's block of its namespaces, else at the file's end in a block of its own; written as that file writes its definitions (`public static`, the brace on its own line, its indentation), its name qualified from where it goes, its parameters without their defaults, its template headers, and a body that compiles (`return 0;`, `false`, `nullptr`, `{}`, `(Mode)0` for an enum; nothing for void or a reference) - "Create definition of 'X' in place" (its `;` becomes the body), and "Create the N missing definitions in File.cf" for all of a document's at once. Each edit that places the cursor (in the new body) is an LSP 3.18 `SnippetTextEdit`, its `$0` the cursor, for a client whose `workspace.workspaceEdit.snippetEditSupport` says it takes them, else plain text |
 
 Every feature that names a declaration (definition, hover, references, highlights, rename, call hierarchy, semantic
 tokens) resolves a name where it is written, as the compiler does: inside a lambda (its parameters, its init captures,
@@ -134,8 +142,9 @@ drawn as a string), so typing in it asks for completion as typing a name does.
   ([02-nuke.md](02-nuke.md#5-toolchains)).
 - Options a client can change live (`initializationOptions` at startup, then
   `workspace/didChangeConfiguration` with `{settings: {...}}`): `tidy` (C4 Tidy diagnostics, off in a bare
-  session), `quickfixes` and `createDefinition` (the code-action families, on by default). Unknown keys are
-  ignored.
+  session), `quickfixes` and `createDefinition` (the code-action families, on by default), `missingDefinitions`
+  (the missing-definition warning and with it its fixes, on by default; a change publishes every open document again).
+  Unknown keys are ignored.
 - Built as part of the normal compiler build (`C4Protocol`, `C4LSPLib` and `C4LSP` are in the root `Build.py`
   module list).
 - Tests: `C4Testing/src/Tests/Protocol/` (JSON values and the framing: partial frames, several frames in one
