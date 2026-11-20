@@ -61,6 +61,12 @@ namespace C4LSP::Server
 		void SetOpenDocument(const std::string& uri, const std::string& text);
 		void RemoveOpenDocument(const std::string& uri);
 
+		// The parses of the program's analysis before this one: each file whose text is the same takes its tree from there
+		// instead of being parsed again (Scripting::PriorParses). They outlive the next Recompile.
+		void UsePriorParses(std::shared_ptr<const Scripting::PriorParses> prior) { m_PriorParses = std::move(prior); }
+		// This analysis's parses, for the next analysis of the program; null for a script session.
+		std::shared_ptr<const Scripting::PriorParses> Parses() const;
+
 		bool Recompile();
 
 		Scripting::SourceManager& GetSourceManager() { return m_Compiler->GetSourceManager(); }
@@ -103,6 +109,7 @@ namespace C4LSP::Server
 		struct Timings
 		{
 			uint32 files = 0;
+			uint32 reusedParses = 0; // files whose tree came from the analysis before
 			double read = 0, preprocess = 0, parse = 0, model = 0, bodies = 0;
 			double Total() const { return read + preprocess + parse + model + bodies; }
 		};
@@ -168,6 +175,7 @@ namespace C4LSP::Server
 			Scripting::FileStamp stamp;
 		};
 
+		std::shared_ptr<const Scripting::PriorParses> m_PriorParses; // UsePriorParses; dropped once the compile took them
 		std::unique_ptr<Scripting::CompilerInstance> m_Compiler;
 		std::unique_ptr<SemanticResolver> m_Resolver; // rebuilt on Recompile() to track the current model
 		Core::Vector<Scripting::CompilationError> m_LoweringErrors; // body-level (HIR) diagnostics, see GetLoweringDiagnostics

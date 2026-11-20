@@ -695,10 +695,11 @@ namespace C4LSP::Server
 		walk(m_Model.Symbols()->GetRoot(), chain);
 	}
 
-	void SemanticResolver::CollectGlobalSymbols(std::vector<GlobalSymbol>& out) const
+	void SemanticResolver::ForEachGlobalSymbol(const std::function<void(const Core::String&, const Scripting::SymbolInfo&)>& visit) const
 	{
 		if (!m_Model.IsValid())
 			return;
+		Core::Vector<std::pair<Core::String, Scripting::SymbolInfo*>> entries;
 		std::function<void(const Scripting::Scope*)> walk = [&](const Scripting::Scope* scope) {
 			for (const auto& child : scope->GetChildren())
 				walk(child.get());
@@ -707,18 +708,11 @@ namespace C4LSP::Server
 				return; // Class scopes hold fields/methods - reachable only via member access, never as globals.
 						// Function/block layers hold locals, never project symbols. Emitting Class-scope symbols here
 						// leaked every class's members into EVERY completion list (the wrong-object bug).
-			Core::Vector<std::pair<Core::String, Scripting::SymbolInfo*>> entries;
+			entries.Clear();
 			scope->Enumerate(entries);
 			for (const auto& [name, info] : entries)
-			{
-				if (Scripting::IsExtensionMethodKey(name)) continue; // a member of the type it extends, not a global
-				GlobalSymbol gs;
-				gs.name = name;
-				gs.kind = info->kind;
-				gs.type = info->type;
-				gs.fn = info->functions.Empty() ? nullptr : info->functions[0];
-				out.push_back(std::move(gs));
-			}
+				if (!Scripting::IsExtensionMethodKey(name)) // a member of the type it extends, not a global
+					visit(name, *info);
 		};
 		walk(m_Model.Symbols()->GetRoot());
 	}

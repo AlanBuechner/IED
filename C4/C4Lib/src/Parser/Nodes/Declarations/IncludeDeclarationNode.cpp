@@ -59,13 +59,18 @@ namespace Scripting
 			CompilerResponse response = messageQueue->SendMessageAndAwaitResponse(
 				sourceId, MessageType::RequestFileInclude, m_FilePathToken.GetText());
 
+			IncludeAsked asked{ m_FilePathToken.GetText(), pathToken.GetStartLocation() };
+			const Core::Vector<CompilationError>& reported = errorTracker.GetErrors();
+			asked.afterErrorHere = !reported.Empty() && reported.Back().severity != ErrorSeverity::Warning && reported.Back().location == asked.at;
 			if (response.type == ResponseType::Error)
 			{
+				asked.error = response.data;
 				errorTracker.AddError(
 					pathToken.GetStartLocation(),
 					response.data,
 					ErrorSeverity::Error);
 			}
+			state.NoteInclude(std::move(asked));
 		}
 
 		endLocation = lexer.PeekCompound().GetEndLocation();

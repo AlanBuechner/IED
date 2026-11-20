@@ -61,7 +61,7 @@ C4LSP/src/main.cpp            the executable: the stdio loop
 | Lifecycle | `initialize` (answers `positionEncoding`: `utf-8` when the client offers it, else `utf-16`; request ids, numbers or strings, come back as sent), `initialized`, `shutdown`, `exit`, `workspace/didChangeConfiguration`, `$/cancelRequest` (see "Requests while it analyzes") |
 | Sync | `didOpen`, `didChange` (the whole text, which the server asks for, or ranged changes applied in order, their columns in the agreed encoding's units), `didClose`, `publishDiagnostics` |
 | Navigation | `definition` (a function's body: its out-of-line definition when it has one; at a declaration's own name, a function's other declarations - its declaration in its type or header from its definition, its definition from a declaration - else the declaration itself, and the type qualifying an out-of-line definition, `FileWalk` of `FileWalk::Folder`, is that type; a type written as a template argument, `Ring` of `Ref<Ring>` or of `Get<Ring>()`, is that type, not the template or the call around it), `declaration`, `typeDefinition` (the named type of a value: a variable's or a parameter's at its declaration or a use, through references, pointers and aliases), `implementation` (from a type, the types deriving from it; from a method, the methods of derived types that override it), `references` and `documentHighlight` (asked at a use, at a declaration's own name or at a type written in a declaration - `Push` of `void Ring::Push()` is the method, its `Ring` the type, `Ring` of `Ring* ring` the type; every file, the declarations first with `context.includeDeclaration`; a type's references include where it is written as a type, `Ring&` of a parameter, a field's type in another header, `new Ring(...)`, the `Ring::` of each out-of-line definition, each base list naming it, `class Square : IShape`, and each template argument, `Ref<Ring>`, `Get<Ring>()`, at any depth; a template's references include its uses by a template's own parameter, `Ref<T>` inside `template<T>`, which name the template; a create operator's references are the constructions that call it, `new Ring(args)`, `Ring r(args)`, `Ring r;` and `Ring(args)`, by its count of arguments; a member reached with `->` through a pointer resolves like one reached with `.`; a name outside any function, a field's type in `namespace N { class C { ... } }`, resolves from its type's and namespace's scope); `rename` renames a type's qualifiers too but leaves a constructor's constructions, which spell the type's name; `prepareCallHierarchy`, `callHierarchy/incomingCalls` and `outgoingCalls` (the function named or called at a position; its callers, each with its calls; the functions its body calls; a function's declaration in its type and its out-of-line definition are one function; a construction is a call of the create operator it fits); `prepareTypeHierarchy`, `typeHierarchy/supertypes` and `subtypes` (direct bases and direct derived types) |
-| Information | `hover` (markdown `MarkupContent`: a `c4` block with the declaration as written - annotations, access, modifiers, return type, parameters with their defaults, trailing qualifiers - its name qualified with its owner, `public int64 Ai::ToolRegistry::Find(const Span& text, int64 start = 0) const`, then the comment above it, or after it on a field's line; a method's out-of-line definition hovers as its declaration in the type; a parameter or a local is labeled as one; a type written in a declaration shows that type; on a macro use, the `#define` and what the use expands to), `signatureHelp` (inside a declared annotation's parentheses, every overload, the one its argument count fits active), `completion` (triggered by `.` and the `>` of `->`; after an accessor only the base's members; in an include's path, the folders and headers it can name - triggered by its `"` and each `/`, see "Completing an include's path" below; on an annotation's name inside `[...]`, the declared annotations that go on the declaration after it, each with its forms, and the compiler's own, listed before code's names; after `on` in an annotation's declaration, the places alone - D-87), `c4/expandMacro` (`TextDocumentPositionParams` -> `{name, expansion}`, null off a macro use; `experimental.expandMacro` in the capabilities, as rust-analyzer's `rust-analyzer/expandMacro`) |
+| Information | `hover` (markdown `MarkupContent`: a `c4` block with the declaration as written - annotations, access, modifiers, return type, parameters with their defaults, trailing qualifiers - its name qualified with its owner, `public int64 Ai::ToolRegistry::Find(const Span& text, int64 start = 0) const`, then the comment above it, or after it on a field's line; a method's out-of-line definition hovers as its declaration in the type; a parameter or a local is labeled as one; a type written in a declaration shows that type; on a macro use, the `#define` and what the use expands to), `signatureHelp` (inside a declared annotation's parentheses, every overload, the one its argument count fits active), `completion` (triggered by `.` and the `>` of `->`; answered at once from the last analysis, "Requests while it analyzes"; after an accessor only the members of what it is made on, through calls, indexes, members and an object's `->` operator - `GetTransform()->`, `m_Body.Parts[0].`; in a method's body, defined in its type or out of it, what an implicit `this` reaches, a base's members too; in an include's path, the folders and headers it can name - triggered by its `"` and each `/`, see "Completing an include's path" below; on an annotation's name inside `[...]`, the declared annotations that go on the declaration after it, each with its forms, and the compiler's own, listed before code's names; after `on` in an annotation's declaration, the places alone - D-87), `c4/expandMacro` (`TextDocumentPositionParams` -> `{name, expansion}`, null off a macro use; `experimental.expandMacro` in the capabilities, as rust-analyzer's `rust-analyzer/expandMacro`) |
 | Symbols | `documentSymbol` (kinds Namespace, Class, Struct, Interface, Enum, EnumMember, Method, Constructor - an `[operator("create")]` method - Field, Function, Variable, Constant - a `const` global; `detail` is the declaration without its annotations, access and name, `static int64 (const Span& text) const`; an annotation's declaration is a Function with detail `annotation (double min, double max) on field`; an out-of-line definition is named with its owner, `ToolRegistry::Add`, as clangd names one; a range covers the doc comment above and the annotations; each `#define` is a symbol of kind Function with detail `macro`), `workspace/symbol` (names containing the query, any case, inside namespaces and types too; `containerName` is the `::`-joined owner, `Ai::ToolRegistry`, and an out-of-line method's is its type; every `#define`, kind Function, where it is defined) |
 | Presentation | `semanticTokens/full` (21 token types: the 19 standard ones plus the C4 `controlFlow` kind and `preprocessor` for directive keywords - `#define`, `#if`, ... and `include`; modifiers include `builtin`, used for primitives, also behind a pointer or an array (`char` of `const char*`), never for an alias of one; an alias is a `type`, qualified (`Math::Vector2`) or not, its namespace a `namespace`; a type named in an expression (a constructor call) keeps its own kind, and a method called through an implicit `this` is a `method`; a token never crosses a line - a block comment is one token per line), `foldingRange` |
 | Edits | `rename` (a function's declaration, its out-of-line definition and every use), `prepareRename`, `formatting`, `rangeFormatting` |
@@ -203,6 +203,13 @@ analyzed every program (25 s, the request's whole budget). Now:
   header, `docs/language/13-interop.md` 2.1); and every unit's tree had its whole include closure spliced in (1.2 s, and
   every walk then skipped it): a unit's tree is now its own file's, and the semantic tokens take what the included
   headers declare (type names, fields) from the headers' units.
+- **An edit parses what it changed.** An analysis takes, for each file whose text (as written and as its macros expand
+  it) is the same as the last analysis of the program compiled, that analysis's tree, and asks for the file's includes
+  again as its parse did - so its include closure and its include errors are what a parse would give now
+  (`Scripting::PriorParses`, `CompilerInstance::UsePriorParses`; trees are never changed once parsed, so two analyses
+  share them). On LS's client program (2595 files) an edit's analysis went from 4.7 s (parse 2.5 s) to 2.4 s (parse
+  0.4 s, `parse 402 (2594 kept)` in the log line); what is left is made for the whole program: the macros 0.5 s,
+  reading 0.3 s, the model 1 s ("Open items").
 
 ### Requests while it analyzes
 
@@ -215,17 +222,32 @@ the last ones unanswered after 5 minutes; IED gave up on each at 30 s ("took lon
 and the colors stayed half-done. Now (`Server/MessageInbox`, `LspServer::Serve`):
 
 - **Messages are read as they arrive**, by a thread of their own, and handled in order.
+- **A request that waits for an analysis waits parked**, aside: the messages after it are handled meanwhile, and it is
+  handled again once an analysis comes in, its wait (10 s) is over, or it is cancelled or its document edited
+  (`LspServer::ResumeParked`). Until 2026-11-19 it waited on the handling thread, so each keystroke's highlight and
+  code actions, waiting for the analysis of their text, held back the semantic tokens and completion asked after them:
+  while one typed nothing answered, and the colors and the list came 5.8 and 7.2 s after the last keystroke on LS's
+  client program.
 - **A cancelled request answers `RequestCancelled` (-32800) at once**: when it is taken, or while it waits for an
-  analysis - a `$/cancelRequest` wakes it.
+  analysis - a `$/cancelRequest` answers it.
 - **A request with an edit of its document behind it answers `ContentModified` (-32801) at once**: its positions and
   its answer are for text that is gone, and the client asks again about the new text. An edit of another document
-  leaves it waiting. Semantic tokens and folding ranges are the exception: they never wait (they answer from the last
-  analysis), the editor maps their answer over the edits since and asks again after each publish, and an error would
-  clear Monaco's semantic colors until then.
+  leaves it waiting.
+- **Semantic tokens, folding ranges and completion never wait**: they answer from the last analysis whatever edits
+  follow them. The editor maps tokens and folding over the edits since and asks again after each publish (an error
+  would clear Monaco's semantic colors until then); it filters a completion list by what is typed after it (an error
+  closes the list). Completion reads the words around the caret - the member access being typed
+  (`Features/MemberChain`), the qualifier, the prefix - from the editor's text, and the scopes around it from the
+  analysis at the place the edits since leave the caret in its text (`Server/PlaceInAnalysis`): the unchanged text
+  before the first change and after the last is the same place; inside the changed text, where the change starts. A
+  document no analysis has compiled yet waits for its first.
 - **A request's budget (25 s) counts from when it arrived**, not from when it is taken: one that waited behind others
   waits no longer for an analysis and answers from the one there is, inside IED's 30 s.
-- The same 20 s of typing: 5 analyses, every cancelled request answered within 0.6 s, the last ones 8.6 s after the
-  last keystroke (the analysis then running and the one of the final text), semantic tokens within 0.2 s.
+- Typing a line into a script of LS's client program (2595 files, 33 keys at 8 a second, IED's requests for each:
+  highlight, code actions, semantic tokens, completion): every completion answered in 0 - 20 ms with the members of
+  what was typed (`GetTransform()->` 60), every semantic tokens request at once; before, every completion answered
+  `ContentModified` and no semantic tokens request was answered while typing. The colors of the final text came with
+  its analysis, 2.4 - 4.8 s after the last key (the analysis then running and the one of the final text).
 
 ### Workspace symbols
 
@@ -291,13 +313,14 @@ and 4.9 GB, growing with every edit; one server for the workspace 0.26 and 1.1 G
   are released when its parse ends (`Lexer::ReleaseTokens`), in C4.exe too.
 - **No include splice.** A unit's tree holds its own file's declarations alone; the include closure is no longer
   spliced into every includer's tree (`CompilationUnit::MergeIncludes`, which C4.exe calls only to pretty-print).
-- An analysis is double-buffered while it is redone: requests answer from the last one meanwhile.
+- An analysis is double-buffered while it is redone: requests answer from the last one meanwhile. The trees of the
+  files an edit did not change are one copy, the two analyses' ("An edit parses what it changed").
 
 ### Open items
 
 | Item | Status |
 |---|---|
-| Incremental re-analysis (today each change recompiles the program). | **Planned** |
+| Incremental re-analysis: an edit parses only the files it changed; the macro pass (0.5 s on LS's client program), reading the files (0.3 s) and the model (1 s) are still made for the whole program. | **Partly done** |
 | One parse of a module several analyzed programs share (each program parses Bedrock and its modules today; plan B76). | **Planned** |
 
 ---

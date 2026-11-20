@@ -89,6 +89,14 @@ namespace Scripting
 		/// parallel. Does not build the model - call AnalyzeProgram() for that.
 		void CompileAll();
 
+		/// The parses of the compile before: a file registered with the same id and the same text takes its tree from there
+		/// instead of parsing (a language server's compile after an edit). Set before CompileAll; they outlive it.
+		void UsePriorParses(std::shared_ptr<const PriorParses> prior) { m_PriorParses = std::move(prior); }
+		/// This compile's parses, for the next compile to take.
+		std::shared_ptr<PriorParses> Parses() const;
+		/// How many files took their tree from the prior parses.
+		uint32 ReusedParses() const { return m_ReusedParses; }
+
 		/// Parse `roots` and the files they include, transitively, as they ask for them: a registered file nothing
 		/// reaches is never parsed and has no unit. A script compile reads only what its project reaches of its host's
 		/// interface (docs/runtime/04 section 4, step 3). Does not build the model either.
@@ -158,6 +166,8 @@ namespace Scripting
 		bool ReleaseDeadlockedUnits();
 		void PromoteDependencyInQueue(uint32 sourceId);
 		void RespondToRequester(uint32 requesterId, ResponseType type, const Core::String& message);
+		/// The prior parse `sourceId` takes (UsePriorParses); null when none is of its text.
+		const PriorParse* PriorParseOf(uint32 sourceId) const;
 
 		// --- Diagnostics formatting (PrintAllErrors) ----------------------------
 		static const char* SeverityText(ErrorSeverity severity);
@@ -183,6 +193,9 @@ namespace Scripting
 
 		// include dependency tracking: targetId -> list of requesterIds blocked on it
 		std::unordered_map<uint32, Core::Vector<uint32>> m_BlockedUnits;
+
+		std::shared_ptr<const PriorParses> m_PriorParses; // UsePriorParses: what a file with the same text takes
+		uint32 m_ReusedParses = 0;
 
 		// session-level stats
 		uint32 m_FilesCompleted = 0;

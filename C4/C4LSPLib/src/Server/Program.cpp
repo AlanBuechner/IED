@@ -194,7 +194,8 @@ namespace C4LSP::Server
 		return true;
 	}
 
-	std::shared_ptr<CompilationSession> Program::Analyze(const std::string& rootFolder, const EditorDocuments& documents) const
+	std::shared_ptr<CompilationSession> Program::Analyze(const std::string& rootFolder, const EditorDocuments& documents,
+		std::shared_ptr<const Scripting::PriorParses> prior) const
 	{
 		auto session = std::make_shared<CompilationSession>();
 		if (!rootFolder.empty()) session->SetRootFolder(rootFolder);
@@ -204,6 +205,7 @@ namespace C4LSP::Server
 		if (!m_Options.libraryFolder.empty()) session->SetLibraryFolder(m_Options.libraryFolder);
 		session->SetProjectsFile(m_Options.projectsFile);
 		for (const auto& [uri, text] : documents) session->SetOpenDocument(uri, text);
+		session->UsePriorParses(std::move(prior));
 		session->Recompile();
 		return session;
 	}

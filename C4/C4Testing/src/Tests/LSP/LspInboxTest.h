@@ -44,6 +44,19 @@ namespace Testing
 		TEST_FUNC(Lsp.Inbox)
 		void TestABurstOfTypingCostsOneAnalysis();
 
+		// A request waiting for its analysis waits parked: the tokens, folding and completion asked after it answer at once.
+		TEST_FUNC(Lsp.Inbox)
+		void TestAWaitingRequestHoldsNoOtherBack();
+
+		// Completion answers from the last analysis while the one of the text typed since is still to come, for the editor's
+		// text now, and keeps its answer when another edit follows it.
+		TEST_FUNC(Lsp.Inbox)
+		void TestCompletionAnswersWhileTyping();
+
+		// A parked request the client cancels answers RequestCancelled once, when the cancellation is handled.
+		TEST_FUNC(Lsp.Inbox)
+		void TestAParkedRequestsCancellationAnswersIt();
+
 		TEST_FUNC(Lsp.Inbox)
 		void TestServingEndsAtExit();
 	};

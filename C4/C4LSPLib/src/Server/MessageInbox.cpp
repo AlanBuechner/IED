@@ -63,6 +63,32 @@ namespace C4LSP::Server
 		return next;
 	}
 
+	std::optional<MessageInbox::Arrived> MessageInbox::NextBefore(std::chrono::steady_clock::time_point until)
+	{
+		std::unique_lock<std::mutex> lock(m_Lock);
+		m_Arrived.wait_until(lock, until, [this] { return !m_Waiting.empty() || m_Closed || m_Poked; });
+		m_Poked = false;
+		if (m_Waiting.empty()) return std::nullopt;
+		Arrived next = std::move(m_Waiting.front());
+		m_Waiting.pop_front();
+		return next;
+	}
+
+	void MessageInbox::Poke()
+	{
+		{
+			std::lock_guard<std::mutex> lock(m_Lock);
+			m_Poked = true;
+		}
+		m_Arrived.notify_one();
+	}
+
+	bool MessageInbox::Drained() const
+	{
+		std::lock_guard<std::mutex> lock(m_Lock);
+		return m_Closed && m_Waiting.empty();
+	}
+
 	bool MessageInbox::IsCancelled(const Json::Value& id) const
 	{
 		const std::string key = IdKey(id);

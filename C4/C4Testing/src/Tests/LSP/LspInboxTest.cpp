@@ -368,6 +368,80 @@ namespace Testing
 		TEST_PASSED();
 	}
 
+	void LspInboxTest::TestAWaitingRequestHoldsNoOtherBack()
+	{
+		const Scratch scratch("c4lsp_inbox_parked");
+		ServerHarness server(FileUri(scratch.root));
+		OpenAndEditHeld(server, scratch);
+		MessageInbox inbox;
+		const Value hover = server.RequestMessage("textDocument/hover", ServerHarness::At(scratch.main, kMain, "Value();"));
+		const Value tokens = server.RequestMessage("textDocument/semanticTokens/full", DocumentParams(scratch.main));
+		const Value folding = server.RequestMessage("textDocument/foldingRange", DocumentParams(scratch.main));
+		const Value completion = server.RequestMessage("textDocument/completion", ServerHarness::At(scratch.main, kMain, "Value();"));
+		{
+			Serving serving(server, inbox);
+			for (const Value* request : { &hover, &tokens, &folding, &completion }) inbox.Push(*request);
+			for (const Value* request : { &tokens, &folding, &completion })
+				TEST_ASSERT(AnsweredWithin(server, IdOf(*request), kAtOnce)); // with the analysis held, behind the hover
+			TEST_ASSERT(server.Response(IdOf(tokens)).Member("result").Member("data").IsArray());
+			TEST_ASSERT(server.Response(IdOf(hover)).IsNull()); // still waiting for the edit's analysis
+			server.Server().HoldAnalysis(false);
+			TEST_ASSERT(AnsweredWithin(server, IdOf(hover), kAnalyzed));
+			TEST_ASSERT(server.Response(IdOf(hover)).Member("result").IsObject());
+		}
+		TEST_PASSED();
+	}
+
+	void LspInboxTest::TestCompletionAnswersWhileTyping()
+	{
+		const Scratch scratch("c4lsp_inbox_completion");
+		ServerHarness server(FileUri(scratch.root));
+		server.Initialize(Options());
+		server.Open(scratch.main, kMain);
+		server.Server().HoldAnalysis(true);
+		// A line typed in main since its analysis: `Val` on the line before its return.
+		const std::string typed = "int32 Value() { return 7; }\n\nint32 main()\n{\n\tVal\n\treturn Value();\n}\n";
+		server.Change(scratch.main, typed);
+		MessageInbox inbox;
+		const Value completion = server.RequestMessage("textDocument/completion", ServerHarness::At(scratch.main, typed, "\n\treturn"));
+		{
+			Serving serving(server, inbox);
+			inbox.Push(completion);
+			inbox.Push(ChangeOf(scratch.main, "int32 Value() { return 7; }\n\nint32 main()\n{\n\tValu\n\treturn Value();\n}\n", 3));
+			TEST_ASSERT(AnsweredWithin(server, IdOf(completion), kAtOnce));
+			const Value result = server.Response(IdOf(completion)).Member("result");
+			TEST_ASSERT(result.IsArray());
+			bool offered = false;
+			for (uint32 i = 0; i < result.Size(); ++i)
+				offered = offered || std::string(result.At(i).Member("label").GetString()) == "Value";
+			TEST_ASSERT(offered);
+		}
+		server.Server().HoldAnalysis(false);
+		TEST_PASSED();
+	}
+
+	void LspInboxTest::TestAParkedRequestsCancellationAnswersIt()
+	{
+		const Scratch scratch("c4lsp_inbox_parked_cancel");
+		ServerHarness server(FileUri(scratch.root));
+		OpenAndEditHeld(server, scratch);
+		MessageInbox inbox;
+		const Value hover = server.RequestMessage("textDocument/hover", ServerHarness::At(scratch.main, kMain, "Value();"));
+		{
+			Serving serving(server, inbox);
+			inbox.Push(hover);
+			std::this_thread::sleep_for(kTaken); // parked
+			inbox.Push(CancelOf(IdOf(hover)));
+			TEST_ASSERT(AnsweredWithin(server, IdOf(hover), kAtOnce));
+			TEST_ASSERT_EQ(ErrorCodeOf(server.Response(IdOf(hover))), kRequestCancelled);
+			server.Server().HoldAnalysis(false);
+			server.Server().WaitForCurrentWork();
+			std::this_thread::sleep_for(kTaken);
+			TEST_ASSERT_EQ(server.ResponseCount(IdOf(hover)), size_t(1)); // not answered again once its analysis came
+		}
+		TEST_PASSED();
+	}
+
 	void LspInboxTest::TestServingEndsAtExit()
 	{
 		const Scratch scratch("c4lsp_inbox_exit");

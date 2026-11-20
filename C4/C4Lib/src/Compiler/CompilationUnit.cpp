@@ -11,6 +11,7 @@ namespace Scripting
 		m_Lexer(*sourceManager.GetInfo(sourceId).source.Get(), sourceId)
 	{
 		SourceInfo& info = sourceManager.GetInfo(sourceId);
+		m_Source = info.source;
 		if (!info.source)
 		{
 			m_ErrorTracker.AddError(
@@ -20,10 +21,49 @@ namespace Scripting
 		}
 	}
 
+	void CompilationUnit::StartReplay(const PriorParse& prior)
+	{
+		m_ProcessingThread = std::thread([this, &prior]() {
+			m_RootASTNode = prior.root;
+			m_OriginalChildren = prior.originalChildren;
+			m_ErrorTracker.GetErrorsMutable() = prior.errors;
+			for (const IncludeAsked& include : prior.includes)
+				AskAgain(include);
+			m_MessageQueue->SendMessage(m_SourceId, MessageType::FinishedParsing, "");
+		});
+	}
+
+	void CompilationUnit::AskAgain(const IncludeAsked& include)
+	{
+		const CompilerResponse response = m_MessageQueue->SendMessageAndAwaitResponse(m_SourceId, MessageType::RequestFileInclude, include.path);
+		IncludeAsked asked = include;
+		asked.error = response.type == ResponseType::Error ? response.data : Core::String();
+		// The parse reported it with AddError, which drops an error at the place of the error just before it.
+		if (!asked.error.empty() && !asked.afterErrorHere)
+			m_ErrorTracker.GetErrorsMutable().Push({ asked.at, ErrorSeverity::Error, asked.error });
+		m_IncludesAsked.Push(std::move(asked));
+	}
+
+	bool CompilationUnit::AnswersAnInclude(const CompilationError& error) const
+	{
+		for (const IncludeAsked& include : m_IncludesAsked)
+			if (!include.error.empty() && include.at == error.location && include.error == error.message) return true;
+		return false;
+	}
+
+	PriorParse CompilationUnit::ToPriorParse() const
+	{
+		PriorParse parse{ m_Source, m_RootASTNode, m_OriginalChildren, {}, m_IncludesAsked };
+		for (const CompilationError& error : m_ErrorTracker.GetErrors())
+			if (!AnswersAnInclude(error)) parse.errors.Push(error);
+		return parse;
+	}
+
 	void CompilationUnit::StartParse()
 	{
 		m_ProcessingThread = std::thread([this]() {
 			ParserState parserState(m_Lexer, m_ErrorTracker, m_MessageQueue);
+			parserState.RecordIncludesIn(&m_IncludesAsked);
 
 			m_RootASTNode = CreateRef<NamespaceNode>();
 			m_RootASTNode->SetIsRoot(true);

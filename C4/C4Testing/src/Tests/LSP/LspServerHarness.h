@@ -30,6 +30,8 @@ namespace Testing::Lsp
 		Json::Value RequestMessage(const std::string& method, const Json::Value& params);
 		// The server's response to the request `id`, its result or its error; null while it has not answered.
 		Json::Value Response(int64 id);
+		// How many responses the server sent to the request `id` (one, once answered: never two).
+		size_t ResponseCount(int64 id);
 		// A notification of `method`.
 		static Json::Value NotificationMessage(const std::string& method, const Json::Value& params);
 		// The last diagnostics published for `uri`, one message per line; empty when there were none.

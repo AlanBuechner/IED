@@ -102,6 +102,15 @@ namespace Testing::Lsp
 		return Value::Null();
 	}
 
+	size_t ServerHarness::ResponseCount(int64 id)
+	{
+		size_t count = 0;
+		for (const Value& answer : Messages())
+			if (answer.HasMember("id") && !answer.HasMember("method") && answer.Member("id").GetInt() == id)
+				++count;
+		return count;
+	}
+
 	Value ServerHarness::NotificationMessage(const std::string& method, const Value& params) { return Message(method, params); }
 
 	std::string ServerHarness::MessagesFor(const std::string& uri)

@@ -124,32 +124,29 @@ namespace C4LSP::Server
 	{
 		const std::string uri = ExtractUri(params);
 		const auto position = ExtractPosition(params);
-		std::optional<Features::IncludeCompletion::Site> include;
+		std::optional<std::string> text;
 		{
 			std::lock_guard<std::mutex> lock(m_DocMutex);
-			if (const std::string* text = m_Documents.GetText(uri))
-				include = Features::IncludeCompletion::Find(*text, position);
-		}
-		if (include)
-		{
-			// An include's path: the folders it searches are the program's, whatever the text says, so the last analysis
-			// answers without waiting for one of this text; a file no analysis has compiled yet waits for its first.
-			std::shared_ptr<CompilationSession> session = GetSnapshot(uri);
-			if (!session->FindSourceIdByUri(uri))
-				session = SnapshotForRequest(uri, Freshness::Document);
-			SendResponse(id, Protocol::LspJson::CompletionItems(Features::IncludeCompletion::Items(*session, uri, *include)));
-			return;
+			if (const std::string* open = m_Documents.GetText(uri)) text = *open;
 		}
 		// `"` and `/` ask for an include's path; anywhere else they start a string, a division or a comment, never a name.
+		const std::optional<Features::IncludeCompletion::Site> include = text ? Features::IncludeCompletion::Find(*text, position) : std::nullopt;
 		const std::string trigger = params.Member("context").Member("triggerCharacter").GetString();
-		if (trigger == "\"" || trigger == "/")
+		if (!include && (trigger == "\"" || trigger == "/"))
 		{
 			SendResponse(id, Json::Value::Null());
 			return;
 		}
-		auto session = SnapshotForRequest(uri);
-		auto items = Features::Completion::At(*session, uri, position);
-		SendResponse(id, Protocol::LspJson::CompletionItems(items));
+		// The last analysis answers, without waiting for one of each keystroke: an include's folders are the program's
+		// whatever the text says, and names are read from the editor's text at the place the edits since leave the caret in
+		// the analyzed one (Completion::At). A file no analysis has compiled yet waits for its first.
+		std::shared_ptr<CompilationSession> session = GetSnapshot(uri);
+		if (!session->FindSourceIdByUri(uri))
+			session = SnapshotForRequest(uri, Freshness::Document);
+		if (include)
+			SendResponse(id, Protocol::LspJson::CompletionItems(Features::IncludeCompletion::Items(*session, uri, *include)));
+		else
+			SendResponse(id, Protocol::LspJson::CompletionItems(text ? Features::Completion::At(*session, uri, *text, position) : Features::Completion::At(*session, uri, position)));
 	}
 
 	void LspServer::HandleDocumentSymbol(const Json::Value& id, const Json::Value& params)

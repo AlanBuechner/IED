@@ -1,6 +1,9 @@
 #include "Features/Completion.h"
 #include "Features/AnnotationCompletion.h"
+#include "Features/CompletionCandidates.h"
+#include "Features/MemberChain.h"
 #include "Server/CompilationSession.h"
+#include "Server/PlaceInAnalysis.h"
 #include "Server/SemanticResolver.h"
 #include "SourceManager/Source.h"
 #include "Features/TypeText.h" // FunctionSignature, TypeText
@@ -12,11 +15,10 @@
 #include "Parser/Nodes/Declarations/ParameterNode.h"
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
 #include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
-#include "Parser/Nodes/Expressions/IdentifierExpressionNode.h"
-#include "Parser/Nodes/Expressions/MemberAccessNode.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
 #include <cctype>
 #include <algorithm>
+#include <set>
 
 namespace C4LSP::Features
 {
@@ -29,7 +31,15 @@ namespace C4LSP::Features
 
 	Core::Vector<CompletionItem> Completion::At(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position)
 	{
-		uint32 sourceId = session.FindSourceIdByUri(uri);
+		const uint32 sourceId = session.FindSourceIdByUri(uri);
+		if (sourceId == 0)
+			return {};
+		return At(session, uri, std::string(session.RawTextOf(sourceId)), position);
+	}
+
+	Core::Vector<CompletionItem> Completion::At(Server::CompilationSession& session, const std::string& uri, const std::string& text, const Protocol::Position& position)
+	{
+		const uint32 sourceId = session.FindSourceIdByUri(uri);
 		if (sourceId == 0)
 			return {};
 
@@ -38,11 +48,12 @@ namespace C4LSP::Features
 			return {};
 
 		const Scripting::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
-		std::string text(source.Data(), source.Size());
-		Server::LocatedNode located = Server::NodeLocator::Locate(source, sourceId, unit->GetRootAST(), position);
-		std::string prefix = WordPrefix(text, position);
+		const Server::PlaceInAnalysis place = Server::PlaceInAnalyzedText(session.RawTextOf(sourceId), text, position);
+		const Server::LocatedNode located = Server::NodeLocator::Locate(source, sourceId, unit->GetRootAST(), place.position);
+		const size_t offset = OffsetAt(text, position);
+		const std::string prefix = WordBefore(text, offset);
+		CompletionCandidates candidates(prefix);
 
-		size_t offset = OffsetAt(text, position);
 		const Server::SemanticResolver& resolver = session.GetResolver();
 		const std::optional<AnnotationCompletion::Site> annotation = AnnotationCompletion::Find(text, offset, InTypeBody(located.path));
 		const Scripting::AnnotationContext annotationAt = resolver.AnnotationContextAt(located.path, sourceId);
@@ -52,49 +63,20 @@ namespace C4LSP::Features
 			AnnotationCompletion::Add(resolver, *annotation, annotationAt, named);
 			Core::Vector<CompletionItem> matching;
 			for (CompletionItem& item : named)
-				if (prefix.empty() || StartsWith(item.label, prefix)) matching.Push(std::move(item));
+				if (CompletionCandidates::StartsWith(item.label, prefix)) matching.Push(std::move(item));
 			return matching;
 		}
 		if (const std::string qualifier = QualifierBefore(text, offset); !qualifier.empty())
-		{
-			Core::Vector<Candidate> members;
-			if (CollectQualified(resolver, sourceId, located.path, qualifier, members))
-				return Filter(members, prefix);
-		}
-		size_t baseEnd = FindMemberAccessBaseEnd(text, offset); // member access in progress? (a. / a->)
+			if (CollectQualified(resolver, sourceId, located.path, qualifier, candidates))
+				return candidates.Items();
 
-		Core::Vector<Candidate> candidates;
-		if (located.Found())
+		// After an accessor only the members of what it is made on fit - through calls, indexes and other members
+		// (`GetTransform()->`, `m_Body.Shape.`), read from the text, so a chain typed since the analysis resolves too.
+		if (const std::optional<MemberChain> chain = MemberChain::Before(text, offset))
 		{
-			if (baseEnd != std::string::npos)
-			{
-				// `a.` / `a->` (+ optional typed prefix): offer the base object's members. Resolve the base type
-				// from its OWN enclosing scope chain first (position-aware - never another function's same-named
-				// local), then by name when that finds no members: a dangling accessor inside brackets
-				// (`Take(b->)`) locates the enclosing call, whose type has none.
-				CollectMembersOf(ResolveBaseType(session, sourceId, unit->GetRootAST(), baseEnd), candidates);
-				if (candidates.Count() == 0)
-					CollectMembersOf(ResolveBaseTypeByName(resolver, located.path, BaseIdentifierAt(text, offset)), candidates);
-			}
-			else
-			{
-				CollectEnclosingContext(located.path, candidates);
-				CollectClassMembers(located.path, candidates);
-			}
+			CollectMembersOf(chain->TypeIn(resolver, sourceId, located.path), candidates);
+			return candidates.Items();
 		}
-		else if (baseEnd != std::string::npos)
-		{
-			// The member access has not parsed into the AST yet - a bare `a.` / `a->` is a syntax error, so
-			// Locate finds no node at the caret. Resolve the base by name through its own enclosing scope chain
-			// instead of a flat name scan: this is what an editor needs for the first keystroke after '.'.
-			const Scripting::Type* baseType = ResolveBaseTypeByName(resolver, located.path, BaseIdentifierAt(text, offset));
-			if (baseType)
-				CollectMembersOf(baseType, candidates);
-		}
-
-		// After an accessor only the base's members fit; anywhere else the globals do too.
-		if (baseEnd == std::string::npos)
-			CollectGlobalSymbols(resolver, candidates);
 
 		Core::Vector<CompletionItem> items;
 		const bool places = AnnotationCompletion::InPlaces(text, offset);
@@ -104,9 +86,18 @@ namespace C4LSP::Features
 			AnnotationCompletion::Add(resolver, *annotation, annotationAt, items);
 		Core::Vector<CompletionItem> named;
 		for (CompletionItem& item : items)
-			if (prefix.empty() || StartsWith(item.label, prefix)) named.Push(std::move(item));
-		if (!places) // a place is one of a few words, never a name from code
-			for (CompletionItem& item : Filter(candidates, prefix)) named.Push(std::move(item));
+			if (CompletionCandidates::StartsWith(item.label, prefix)) named.Push(std::move(item));
+		if (places) // a place is one of a few words, never a name from code
+			return named;
+
+		if (located.Found())
+		{
+			CollectEnclosingContext(located.path, candidates);
+			CollectClassMembers(located.path, candidates);
+			CollectMembersOf(resolver.ImplicitThis(located.path), candidates); // an implicit `this`, inherited members too
+		}
+		CollectGlobalSymbols(resolver, candidates);
+		for (CompletionItem& item : candidates.Items()) named.Push(std::move(item));
 		return named;
 	}
 
@@ -121,189 +112,76 @@ namespace C4LSP::Features
 		return false;
 	}
 
-	std::string Completion::WordPrefix(const std::string& text, const Protocol::Position& position)
+	std::string Completion::WordBefore(const std::string& text, size_t offset)
 	{
-		size_t offset = 0;
-		uint32 currentLine = 0;
-		while (currentLine < position.line && offset < text.size())
-		{
-			size_t newline = text.find('\n', offset);
-			if (newline == std::string::npos)
-				break;
-			offset = newline + 1;
-			++currentLine;
-		}
-		offset += position.character;
-
-		std::string word;
-		while (offset > 0 && IsIdentChar(text[offset - 1]))
-			word.insert(word.begin(), text[--offset]);
-		return word;
+		size_t start = std::min(offset, text.size());
+		const size_t end = start;
+		while (start > 0 && IsIdentChar(text[start - 1])) --start;
+		return text.substr(start, end - start);
 	}
 
 	size_t Completion::OffsetAt(const std::string& text, const Protocol::Position& position)
 	{
-		if (position.line == 0)
-			return std::min<size_t>(position.character, text.size());
 		size_t offset = 0;
-		uint32 line = 0;
-		while (line < position.line && offset < text.size())
+		for (uint32 line = 0; line < position.line && offset < text.size(); ++line)
 		{
-			size_t newline = text.find('\n', offset);
+			const size_t newline = text.find('\n', offset);
 			if (newline == std::string::npos)
-				break;
+				return text.size();
 			offset = newline + 1;
-			++line;
 		}
 		return std::min(offset + position.character, text.size());
 	}
 
-	// Whether the identifier starting at `start` is itself reached through an accessor (`a.b`, `a->b`, `N::b`): such a
-	// base needs the whole chain's type, which these text-level lookups do not have.
-	static bool IsChainedBase(const std::string& text, size_t start)
+	void Completion::CollectMembersOf(const Scripting::Type* type, CompletionCandidates& out)
 	{
-		if (start == 0)
-			return false;
-		const char before = text[start - 1];
-		return before == '.' || before == ':' || (before == '>' && start >= 2 && text[start - 2] == '-');
-	}
-
-	size_t Completion::FindMemberAccessBaseEnd(const std::string& text, size_t offset)
-	{
-		if (offset == 0 || offset > text.size())
-			return std::string::npos;
-
-		size_t i = offset - 1;
-		while (i > 0 && IsIdentChar(text[i])) --i; // member name being typed (`a.In|it`) -> back to the accessor
-		while (i > 0 && std::isspace(static_cast<unsigned char>(text[i]))) --i; // `a . x` / `a ->x`
-
-		bool arrow = i >= 2 && text[i] == '>' && text[i - 1] == '-';
-		bool dot = !arrow && i > 0 && text[i] == '.';
-		if (!arrow && !dot)
-			return std::string::npos; // a lone `-` is subtraction, or `a-` not yet completed to `->`
-
-		size_t k = i - (arrow ? 2 : 1); // last char of the base expression (may be whitespace)
-		while (k > 0 && std::isspace(static_cast<unsigned char>(text[k]))) --k;
-		if (!IsIdentChar(text[k])) // base must end in an identifier (`a.`, `(x + y).` unsupported)
-			return std::string::npos;
-		size_t baseEnd = k; // byte index of the base's last character
-		while (k > 0 && IsIdentChar(text[k - 1])) --k; // walk to the start of that identifier
-		if (IsChainedBase(text, k))
-			return std::string::npos;
-		return baseEnd;
-	}
-
-	std::string Completion::BaseIdentifierAt(const std::string& text, size_t offset)
-	{
-		if (offset == 0 || offset > text.size())
-			return {};
-
-		size_t i = offset - 1;
-		while (i > 0 && IsIdentChar(text[i])) --i; // member name being typed (`a.In|it`) -> back to the accessor
-		while (i > 0 && std::isspace(static_cast<unsigned char>(text[i]))) --i;
-
-		bool arrow = i >= 2 && text[i] == '>' && text[i - 1] == '-';
-		if (!arrow)
-		{
-			if (!(i > 0 && text[i] == '.'))
-				return {}; // not a member access at all
-		}
-
-		size_t k = i - (arrow ? 2 : 1); // last char of the base expression (may be whitespace)
-		while (k > 0 && std::isspace(static_cast<unsigned char>(text[k]))) --k;
-		if (!IsIdentChar(text[k]))
-			return {}; // base must end in an identifier (`(x + y).` unsupported by this fallback)
-		size_t baseEnd = k;
-		while (k > 0 && IsIdentChar(text[k - 1])) --k;
-		if (IsChainedBase(text, k))
-			return {};
-		return text.substr(k, baseEnd - k + 1);
-	}
-
-	const Scripting::Type* Completion::ResolveBaseType(Server::CompilationSession& session, uint32 sourceId,
-		const Ref<Scripting::AstNode>& root, size_t baseEndIdx)
-	{
-		const Scripting::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
-		if (baseEndIdx >= source.Size())
-			baseEndIdx = source.Size();
-
-		uint32 line1 = 0, column1 = 0; // 1-based
-		source.ByteOffsetToLineColumn(baseEndIdx, line1, column1);
-		Server::LocatedNode located = Server::NodeLocator::Locate(source, sourceId, root,
-			Protocol::Position{ line1 - 1, column1 - 1 });
-		const Scripting::AstNode* node = located.node;
-		if (!node)
-			return nullptr;
-
-		// The caret sits right after the dot/arrow, so Locate may return the MemberAccess wrapper whose base
-		// child ends BEFORE the offset. Drill into that base identifier: a valid member access resolves through
-		// it, and even for a dangling one the base is in `located.path`, which feeds the resolver's context.
-		if (node->Type() == Scripting::NodeType::MemberAccess)
-		{
-			const auto& member = static_cast<const Scripting::MemberAccessNode&>(*node);
-			if (member.GetBaseObject())
-				node = member.GetBaseObject().Get();
-		}
-
-		// Resolve through the shared resolver - the compiler's own resolution (locals, fields via implicit this,
-		// globals, functions). A dangling base (`a.` with no member) still resolves its base identifier here.
-		const Server::NodeResolution res = session.GetResolver().ResolveReference(*node, located.path);
-		return res.type ? Deref(res.type) : nullptr;
-	}
-
-	const Scripting::Type* Completion::ResolveBaseTypeByName(const Server::SemanticResolver& resolver,
-		const Core::Vector<const Scripting::AstNode*>& lexicalPath, const std::string& baseName)
-	{
-		if (baseName.empty())
-			return nullptr;
-		// Position-aware: the enclosing scope chain of THIS caret position decides which same-named local wins;
-		// a flat name scan is only a fallback for names with no enclosing declaration at all (globals, fields).
-		const Server::NodeResolution res = resolver.ResolveIdentifier(baseName, lexicalPath);
-		return res.type ? Deref(res.type) : nullptr;
-	}
-
-	void Completion::CollectMembersOf(const Scripting::Type* type, Core::Vector<Candidate>& out)
-	{
+		type = Deref(type);
 		if (!type)
 			return;
 		switch (type->GetKind())
 		{
 		case Scripting::TypeKind::Object: {
-			const auto& obj = *static_cast<const Scripting::ObjectType*>(type);
-			AddMembersOf(&obj, out); // derived first so derived members win over inherited ones
-			for (const Scripting::ObjectType* base : obj.GetBaseTypes())
-				if (base)
-					AddMembersOf(base, out);
+			// Derived first, so a member it declares wins over a base's of the same name.
+			std::set<const Scripting::ObjectType*> seen;
+			Core::Vector<const Scripting::ObjectType*> pending;
+			pending.Push(static_cast<const Scripting::ObjectType*>(type));
+			for (uint32 i = 0; i < pending.Count(); ++i)
+			{
+				if (!seen.insert(pending[i]).second)
+					continue;
+				AddMembersOf(pending[i], out);
+				for (const Scripting::ObjectType* base : pending[i]->GetBaseTypes())
+					if (base)
+						pending.Push(base);
+			}
 			break;
 		}
 		case Scripting::TypeKind::Union: {
-			const auto& fields = static_cast<const Scripting::UnionType*>(type)->GetFields();
-			for (const auto& field : fields)
-				AddCandidate(out, field.mName, Kind::Field, TypeText(field.m_Type));
+			for (const auto& field : static_cast<const Scripting::UnionType*>(type)->GetFields())
+				out.Add(field.mName, Kind::Field, [&] { return TypeText(field.m_Type); });
 			break;
 		}
 		case Scripting::TypeKind::Enum: {
-			const auto& members = static_cast<const Scripting::EnumType*>(type)->GetMembers();
-			for (const auto& member : members)
-				AddCandidate(out, member.mName, Kind::Enum, type->ToString());
+			for (const auto& member : static_cast<const Scripting::EnumType*>(type)->GetMembers())
+				out.Add(member.mName, Kind::Enum, [&] { return type->ToString(); });
 			break;
 		}
 		case Scripting::TypeKind::Pointer:
 			// `p->`: the pointee's members.
-			CollectMembersOf(Deref(static_cast<const Scripting::PointerType*>(type)->GetPointeeType()), out);
+			CollectMembersOf(static_cast<const Scripting::PointerType*>(type)->GetPointeeType(), out);
 			break;
 		default:
 			break; // scalars have no members
 		}
 	}
 
-	void Completion::AddMembersOf(const Scripting::ObjectType* obj, Core::Vector<Candidate>& out)
+	void Completion::AddMembersOf(const Scripting::ObjectType* obj, CompletionCandidates& out)
 	{
 		for (const auto& field : obj->GetFields())
-			AddCandidate(out, field.mName, Kind::Field, TypeText(field.m_Type));
+			out.Add(field.mName, Kind::Field, [&] { return TypeText(field.m_Type); });
 		auto addMethods = [&out](const Core::Vector<Scripting::ObjectType::MethodInfo>& methods) {
 			for (const auto& method : methods)
-				AddCandidate(out, method.mName, Kind::Method, MethodSignature(method));
+				out.Add(method.mName, Kind::Method, [&] { return MethodSignature(method); });
 		};
 		addMethods(obj->GetMethods());
 		addMethods(obj->GetExtensionMethods()); // operators + CBind foreign members are extensions
@@ -329,7 +207,7 @@ namespace C4LSP::Features
 		return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_';
 	}
 
-	void Completion::CollectEnclosingContext(const Core::Vector<const Scripting::AstNode*>& path, Core::Vector<Candidate>& out)
+	void Completion::CollectEnclosingContext(const Core::Vector<const Scripting::AstNode*>& path, CompletionCandidates& out)
 	{
 		for (int i = static_cast<int>(path.Count()) - 1; i >= 0; --i)
 		{
@@ -339,8 +217,8 @@ namespace C4LSP::Features
 			case Scripting::NodeType::FunctionDefinition: {
 				const auto& func = static_cast<const Scripting::FunctionDefinitionNode&>(*node);
 				for (const auto& param : func.GetParameters())
-					AddCandidate(out, param->GetNameToken().GetText(), Kind::Variable,
-						param->GetType() ? param->GetType()->ToString() : "");
+					out.Add(param->GetNameToken().GetText(), Kind::Variable,
+						[&] { return param->GetType() ? param->GetType()->ToString() : std::string(); });
 				break;
 			}
 			case Scripting::NodeType::CodeBlock: {
@@ -349,8 +227,8 @@ namespace C4LSP::Features
 					if (stmt && stmt->Type() == Scripting::NodeType::VariableDefinition)
 					{
 						const auto& var = static_cast<const Scripting::VariableDefinitionNode&>(*stmt.Get());
-						AddCandidate(out, var.GetNameToken().GetText(), Kind::Variable,
-							var.GetType() ? var.GetType()->ToString() : "");
+						out.Add(var.GetNameToken().GetText(), Kind::Variable,
+							[&] { return var.GetType() ? var.GetType()->ToString() : std::string(); });
 					}
 				break;
 			}
@@ -360,7 +238,7 @@ namespace C4LSP::Features
 		}
 	}
 
-	void Completion::CollectClassMembers(const Core::Vector<const Scripting::AstNode*>& path, Core::Vector<Candidate>& out)
+	void Completion::CollectClassMembers(const Core::Vector<const Scripting::AstNode*>& path, CompletionCandidates& out)
 	{
 		for (int i = static_cast<int>(path.Count()) - 1; i >= 0; --i)
 		{
@@ -377,15 +255,15 @@ namespace C4LSP::Features
 				{
 				case Scripting::NodeType::VariableDefinition: {
 					const auto& field = static_cast<const Scripting::VariableDefinitionNode&>(*member.Get());
-					AddCandidate(out, field.GetNameToken().GetText(), Kind::Field,
-						field.GetType() ? field.GetType()->ToString() : "");
+					out.Add(field.GetNameToken().GetText(), Kind::Field,
+						[&] { return field.GetType() ? field.GetType()->ToString() : std::string(); });
 					break;
 				}
 				case Scripting::NodeType::FunctionDefinition: {
 					const auto& method = static_cast<const Scripting::FunctionDefinitionNode&>(*member.Get());
 					if (method.GetName())
-						AddCandidate(out, method.GetName()->GetFirstIdentifierToken().GetText(), Kind::Method,
-							method.GetReturnType().Get() ? method.GetReturnType()->ToString() + "()" : "()");
+						out.Add(method.GetName()->GetFirstIdentifierToken().GetText(), Kind::Method,
+							[&] { return method.GetReturnType().Get() ? method.GetReturnType()->ToString() + "()" : std::string("()"); });
 					break;
 				}
 				default:
@@ -396,16 +274,16 @@ namespace C4LSP::Features
 		}
 	}
 
-	void Completion::CollectGlobalSymbols(const Server::SemanticResolver& resolver, Core::Vector<Candidate>& out)
+	void Completion::CollectGlobalSymbols(const Server::SemanticResolver& resolver, CompletionCandidates& out)
 	{
-		std::vector<Server::SemanticResolver::GlobalSymbol> symbols;
-		resolver.CollectGlobalSymbols(symbols);
-		for (const auto& gs : symbols)
-		{
-			std::string detail = gs.fn ? FunctionSignature(gs.fn->type)
-				: (gs.type ? gs.type->ToString() : "");
-			AddCandidate(out, gs.name, SymbolKindToLsp(gs.kind), detail);
-		}
+		resolver.ForEachGlobalSymbol([&out](const Core::String& name, const Scripting::SymbolInfo& info) {
+			if (!out.Wants(name))
+				return;
+			out.Add(name, SymbolKindToLsp(info.kind), [&] {
+				if (!info.functions.Empty()) return FunctionSignature(info.functions[0]->type);
+				return info.type ? info.type->ToString() : std::string();
+			});
+		});
 	}
 
 	std::string Completion::QualifierBefore(const std::string& text, size_t offset)
@@ -428,7 +306,7 @@ namespace C4LSP::Features
 	}
 
 	bool Completion::CollectQualified(const Server::SemanticResolver& resolver, uint32 unitId, const Core::Vector<const Scripting::AstNode*>& path,
-		const std::string& qualifier, Core::Vector<Candidate>& out)
+		const std::string& qualifier, CompletionCandidates& out)
 	{
 		const Scripting::SymbolInfo* named = resolver.Lookup(qualifier, unitId, &path);
 		if (!named)
@@ -440,54 +318,24 @@ namespace C4LSP::Features
 		}
 		if (named->kind == Scripting::SymbolKind::Type && named->type)
 		{
-			CollectMembersOf(Deref(named->type), out);
+			CollectMembersOf(named->type, out);
 			return true;
 		}
 		return false;
 	}
 
-	void Completion::AddScopeSymbols(const Scripting::Scope& scope, Core::Vector<Candidate>& out)
+	void Completion::AddScopeSymbols(const Scripting::Scope& scope, CompletionCandidates& out)
 	{
 		Core::Vector<std::pair<Core::String, Scripting::SymbolInfo*>> entries;
 		scope.Enumerate(entries);
 		for (const auto& [name, info] : entries)
 		{
 			if (Scripting::IsExtensionMethodKey(name)) continue; // a member of the type it extends
-			const std::string detail = !info->functions.Empty() ? FunctionSignature(info->functions[0]->type) : (info->type ? info->type->ToString() : "");
-			AddCandidate(out, name, SymbolKindToLsp(info->kind), detail);
+			out.Add(name, SymbolKindToLsp(info->kind), [&] {
+				if (!info->functions.Empty()) return FunctionSignature(info->functions[0]->type);
+				return info->type ? info->type->ToString() : std::string();
+			});
 		}
-	}
-
-	void Completion::AddCandidate(Core::Vector<Candidate>& out, const std::string& name, int kind, const std::string& detail)
-	{
-		if (name.empty())
-			return;
-		for (const auto& existing : out)
-			if (existing.name == name)
-				return; // innermost scope wins
-		out.Push(Candidate{ name, kind, detail });
-	}
-
-	Core::Vector<CompletionItem> Completion::Filter(const Core::Vector<Candidate>& candidates, const std::string& prefix)
-	{
-		Core::Vector<CompletionItem> result;
-		for (const auto& candidate : candidates)
-		{
-			if (!prefix.empty() && !StartsWith(candidate.name, prefix))
-				continue;
-			result.Push(CompletionItem{ candidate.name, candidate.kind, candidate.detail });
-		}
-		return result;
-	}
-
-	bool Completion::StartsWith(const std::string& name, const std::string& prefix)
-	{
-		if (prefix.size() > name.size())
-			return false;
-		for (size_t i = 0; i < prefix.size(); ++i)
-			if (std::tolower(static_cast<unsigned char>(name[i])) != std::tolower(static_cast<unsigned char>(prefix[i])))
-				return false;
-		return true;
 	}
 
 	int Completion::SymbolKindToLsp(Scripting::SymbolKind kind)

@@ -79,8 +79,31 @@ namespace C4LSP::Server
 		// The analysis that answers about `uri`: its script scope's (initializationOptions.scripts), else its program's.
 		std::shared_ptr<CompilationSession> GetSnapshot(const std::string& uri) const;
 		// The analysis answering about `uri` once it is as current as `freshness` asks; analyses of other programs are not
-		// waited for. Bounded: on a program too large to analyze in time, the last analysis answers.
+		// waited for. Bounded: on a program too large to analyze in time, the last analysis answers. While Serve runs, a
+		// request whose analysis is not current yet is parked instead of waited for (it throws, HandleRequest parks it).
 		std::shared_ptr<CompilationSession> SnapshotForRequest(const std::string& uri, Freshness freshness = Freshness::Program);
+
+		// --- Parked requests (docs/tools/03 "Requests while it analyzes") ------------------------------------------------
+		// A request that waits for an analysis waits aside, so the messages after it are handled meanwhile: an edit, a
+		// cancellation, and the requests that answer at once (semantic tokens, folding, completion).
+		struct ParkedRequest
+		{
+			Json::Value message;
+			std::chrono::steady_clock::time_point arrived;
+			std::string uri;            // its document
+			std::optional<size_t> text; // the hash of its document's text when it came: its positions are in that text
+		};
+		// Whether the worker is analyzing or has a pass queued.
+		bool WorkPending();
+		// Each parked request handled again, in the order they came: answered when its analysis is current, its wait is
+		// over, or it was cancelled or its document changed since; parked again otherwise.
+		void ResumeParked();
+		// When the parked request waiting longest stops waiting; a time far off when none waits.
+		std::chrono::steady_clock::time_point NextParkedDeadline() const;
+		// The hash of `uri`'s text in the editor now; none when it is not open.
+		std::optional<size_t> DocumentHash(const std::string& uri);
+		// Wakes the parked requests: an analysis came in, or the worker finished a pass.
+		void WakeParkedRequests();
 		// Whether the analysis answering `uri` compiled what `freshness` asks of `open` (uri -> hash of each open document's
 		// text); the session lock held.
 		bool IsCurrentLocked(const std::string& uri, const std::map<std::string, size_t>& open, Freshness freshness) const;
@@ -158,6 +181,8 @@ namespace C4LSP::Server
 		void NoticeDiskChanges();
 
 		void HandleRequest(const Json::Value& message, std::chrono::steady_clock::time_point arrived);
+		// The feature `method` names answers `id` (its positions the compiler's, the request's state set).
+		void DispatchRequest(const std::string& method, const Json::Value& id, const Json::Value& params);
 		void HandleNotification(const Json::Value& message);
 		void UnknownMethod(const Json::Value& id, const std::string& method);
 
@@ -233,6 +258,8 @@ namespace C4LSP::Server
 		Json::Value m_RequestId;                       // the request being answered
 		bool m_RequestOutlivesEdits = false;           // it answers from the last analysis: an edit after it does not drop it
 		MessageInbox* m_Inbox = nullptr;               // while Serve runs: what arrived and is not handled yet
+		std::mutex m_InboxMutex;                       // guards m_Inbox for the worker (WakeParkedRequests); Serve alone sets it
+		std::vector<ParkedRequest> m_Parked;           // the handling thread's: requests waiting for their analysis
 		bool m_Initialized = false;
 		bool m_ShutdownRequested = false;
 		bool m_ShouldExit = false;

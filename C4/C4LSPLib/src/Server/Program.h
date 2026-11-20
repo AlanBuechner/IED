@@ -12,6 +12,8 @@
 #include <utility>
 #include <vector>
 
+namespace Scripting { class PriorParses; }
+
 namespace C4LSP::Server
 {
 	class CompilationSession;
@@ -78,8 +80,10 @@ namespace C4LSP::Server
 		// Whether `path` is a file of the default library the program builds with.
 		bool InLibrary(const std::string& path) const;
 
-		// A fresh analysis of the program, with the editor's text of `documents` over their files.
-		std::shared_ptr<CompilationSession> Analyze(const std::string& rootFolder, const EditorDocuments& documents) const;
+		// A fresh analysis of the program, with the editor's text of `documents` over their files; each file whose text is
+		// as `prior` (the parses of the analysis before, or null) parsed it takes its tree from there.
+		std::shared_ptr<CompilationSession> Analyze(const std::string& rootFolder, const EditorDocuments& documents,
+			std::shared_ptr<const Scripting::PriorParses> prior = nullptr) const;
 
 		// Whether the last analysis is of `taken` (uri -> hash of the editor's text of each open document it takes now): it
 		// compiled their text as it is, and each document it took that is closed now as its file is on disk. An editor that

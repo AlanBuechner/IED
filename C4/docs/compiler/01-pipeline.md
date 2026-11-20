@@ -125,6 +125,13 @@ path. Diagnostics still report original file names.
   The requester is parked until `x.ch` finishes; then `x.ch`'s transitive include set is folded into the
   requester's `m_IncludesIDS`. The result is a per-unit **transitive include closure**, which is the
   visibility domain used by every later name lookup. Include cycles are detected and recovered.
+- A compile given the parses of the one before (`UsePriorParses`, `Compiler/PriorParses`; the language server's
+  analysis after an edit, never C4.exe) takes the tree and the lexer's and parser's errors of a file registered with the
+  same id and the same text (as written and as expanded) instead of parsing it, and asks for the file's includes again
+  in the order its parse did (`CompilationUnit::StartReplay`): the include closure and the include errors are what a
+  parse would give now, so a file that appeared answers an include, and an error at the place of the parse's error
+  just before is dropped as `ErrorTracker::ReportOncePerLocation` drops it. Trees are never changed once parsed, so two
+  compiles share them; a compile that takes prior parses never merges includes into its trees (`MergeIncludes`).
 - Include path resolution (`SourceManager::ResolveIncludePath`): first as a root-relative name, then relative
   to the including file's directory (handles `..`). MacroPass resolves the other way round (relative first,
   then root fallback); both reach the same file for well-formed projects.

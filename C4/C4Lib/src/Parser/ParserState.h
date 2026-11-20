@@ -2,6 +2,7 @@
 #include "Core/Core.h"
 #include "Lexer/Lexer.h"
 #include "Compiler/ErrorTracker.h"
+#include "Parser/IncludeAsked.h"
 #include <algorithm>
 #include <mutex>
 #include <vector>
@@ -64,11 +65,19 @@ namespace Scripting
 			return std::find(m_TypeParameters.begin(), m_TypeParameters.end(), name) != m_TypeParameters.end();
 		}
 
+		/// Where the includes the parse asks for are written down, in order (a unit keeps them for a later compile).
+		void RecordIncludesIn(Core::Vector<IncludeAsked>* includes) { m_Includes = includes; }
+		void NoteInclude(IncludeAsked asked)
+		{
+			if (m_Includes) m_Includes->Push(std::move(asked));
+		}
+
 	private:
 		friend class TypeParameterScope;
 		Lexer& m_Lexer;
 		ErrorTracker& m_ErrorTracker;
 		CompilerMessageQueue* m_MessageQueue;
+		Core::Vector<IncludeAsked>* m_Includes = nullptr; // RecordIncludesIn
 		bool m_IsTypeContext = false; // controls whether we're parsing type names
 		uint32 m_ParseDepth = 0;      // current expression nesting depth (recursive descent)
 		uint32 m_BlockDepth = 0;      // current block nesting depth (recursive descent)

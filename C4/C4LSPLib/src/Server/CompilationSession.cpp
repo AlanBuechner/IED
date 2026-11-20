@@ -92,14 +92,17 @@ namespace C4LSP::Server
 	bool CompilationSession::Recompile()
 	{
 		if (m_ScriptHost) return RecompileScript();
-		// A fresh instance per compile: the previous ASTs, model and types are discarded together, so no feature can
-		// observe a stale tree after an edit.
+		// A fresh instance per compile: the previous model and types are discarded together, so no feature can observe a
+		// stale fact after an edit. A file whose text did not change takes its tree from the analysis before (trees are
+		// never changed once parsed): an edit parses the edited file, not the program.
 		m_Compiler = NewCompiler();
 		m_Compiler->SetTarget(m_Target);
+		m_Compiler->UsePriorParses(std::move(m_PriorParses));
 		m_Timings = Timings{};
 		m_Timings.read = Timed([this] { RegisterSources(); });
 		m_Timings.preprocess = Timed([this] { RunPreprocessPhase(); });
 		m_Timings.parse = Timed([this] { m_Compiler->CompileAll(); });
+		m_Timings.reusedParses = m_Compiler->ReusedParses();
 		// Semantic analysis is a single program-wide pass: ONE analyzer over all units' own declarations, the same source
 		// of truth the compiler uses, so the LSP can never report errors the build does not produce. Each unit's tree
 		// stays its own file's: a feature that needs what an included header declares asks the model, or walks that
@@ -117,6 +120,11 @@ namespace C4LSP::Server
 
 		m_Compiled = true;
 		return true;
+	}
+
+	std::shared_ptr<const Scripting::PriorParses> CompilationSession::Parses() const
+	{
+		return m_ScriptHost || !m_Compiled ? nullptr : m_Compiler->Parses();
 	}
 
 	void CompilationSession::RegisterSources()

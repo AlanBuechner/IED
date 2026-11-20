@@ -77,6 +77,7 @@ namespace Scripting
 	{
 		EnqueueAllSources();
 		ParseScheduled();
+		m_PriorParses.reset(); // every unit has parsed: what one took, its unit holds now
 	}
 
 	void CompilerInstance::CompileReachable(const std::vector<uint32>& roots)
@@ -133,9 +134,30 @@ namespace Scripting
 			m_ActiveThreads++;
 			if (unit->IsWorking())
 				m_MessageQueue.FlushPendingResponse(sourceId); // a response may already be pending - wake the thread
+			else if (const PriorParse* prior = PriorParseOf(sourceId))
+			{
+				++m_ReusedParses;
+				unit->StartReplay(*prior);                     // the same text parsed by the compile before
+			}
 			else
 				unit->StartParse();                            // first dispatch: start the parse thread
 		}
+	}
+
+	const PriorParse* CompilerInstance::PriorParseOf(uint32 sourceId) const
+	{
+		if (!m_PriorParses) return nullptr;
+		const SourceInfo& info = m_SourceManager.GetInfo(sourceId);
+		return info.source ? m_PriorParses->Find(sourceId, *info.source) : nullptr;
+	}
+
+	std::shared_ptr<PriorParses> CompilerInstance::Parses() const
+	{
+		auto parses = std::make_shared<PriorParses>();
+		for (const auto& [id, unit] : m_CompilationUnits)
+			if (unit && unit->GetRootAST() && m_CompletedUnits.count(id))
+				parses->Keep(id, unit->ToPriorParse());
+		return parses;
 	}
 
 	bool CompilerInstance::NoProgressPossible() const

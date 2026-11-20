@@ -2,6 +2,7 @@
 #include "SourceManager/SourceManager.h"
 #include "Lexer/Lexer.h"
 #include "Compiler/ErrorTracker.h"
+#include "Compiler/PriorParses.h"
 #include "Parser/AstNode.h"
 #include "Parser/Nodes/Declarations/IncludeDeclarationNode.h"
 #include "Parser/Nodes/Declarations/NamespaceNode.h"
@@ -21,7 +22,12 @@ namespace Scripting
 		CompilationUnit(uint32 sourceId, SourceManager& sourceManager, CompilerInstance* compilerInstance = nullptr);
 
 		void StartParse();
+		/// Takes `prior`'s tree and errors instead of parsing - its text is this unit's - and asks for its includes again,
+		/// as a parse would. `prior` outlives the parse.
+		void StartReplay(const PriorParse& prior);
 		void Join() { m_ProcessingThread.join(); }
+		/// This unit's parse, for the next compile of the program to take (Compiler/PriorParses); the unit has parsed.
+		PriorParse ToPriorParse() const;
 		bool IsWorking() { return m_ProcessingThread.joinable(); }
 
 		ErrorTracker& GetErrorTracker() { return m_ErrorTracker; }
@@ -56,6 +62,9 @@ namespace Scripting
 
 	private:
 		void ReportLexicalErrors();
+		/// Asks for `include` as its parse did, and reports its answer's error as the parse would have.
+		void AskAgain(const IncludeAsked& include);
+		bool AnswersAnInclude(const CompilationError& error) const;
 		void MergeIncludedASTs(std::unordered_set<uint32>& mergedIds);
 		void CollectFromOriginalAST(Ref<CompilationUnit> targetUnit, std::unordered_set<uint32>& mergedIds, Core::Vector<Ref<AstNode>>& out);
 		uint32 m_SourceId;
@@ -73,5 +82,8 @@ namespace Scripting
 
 		// Snapshot of original parsed children (before any merge) - used for include collection
 		Core::Vector<Ref<AstNode>> m_OriginalChildren;
+
+		Ref<Source> m_Source;                      // the text parsed
+		Core::Vector<IncludeAsked> m_IncludesAsked; // the includes the parse asked for, in order
 	};
 }

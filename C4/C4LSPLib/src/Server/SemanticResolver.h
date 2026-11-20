@@ -4,6 +4,7 @@
 #include "Model/DeclaredAnnotations.h"
 #include "Model/ProgramModel.h"
 #include "Model/SymbolTable.h"
+#include <functional>
 #include <memory>
 #include "Model/Types.h"
 #include "Parser/AstNode.h"
@@ -75,9 +76,9 @@ namespace C4LSP::Server
 		/// Every namespace path in the program ("Win", "Win::Test"), outermost-first joined with "::".
 		void CollectNamespacePaths(std::unordered_set<std::string>& out) const;
 
-		struct GlobalSymbol { std::string name; Scripting::SymbolKind kind = Scripting::SymbolKind::Type; const Scripting::Type* type = nullptr; const Scripting::FunctionRecord* fn = nullptr; };
-		/// Every symbol in File/Namespace/Class scopes (globals + static members, never function/block locals).
-		void CollectGlobalSymbols(std::vector<GlobalSymbol>& out) const;
+		/// Visits every symbol of the file and namespace scopes, with its name (never a class's members nor a function's
+		/// locals).
+		void ForEachGlobalSymbol(const std::function<void(const Core::String&, const Scripting::SymbolInfo&)>& visit) const;
 
 		struct ObjectDecl { const Scripting::ObjectType* object = nullptr; const Scripting::AstNode* decl = nullptr; };
 		/// Every user-defined object type in the program with its declaring node (implementation / completion).
@@ -92,6 +93,10 @@ namespace C4LSP::Server
 
 		/// The object type a path is inside - a member function's own type, what an implicit `this` names; null outside one.
 		const Scripting::ObjectType* EnclosingObject(const Core::Vector<const Scripting::AstNode*>& path) const;
+		/// The type whose members a path reaches without naming an object, as the compiler resolves its names there: the
+		/// method's own type in its body, defined in the type or out of it (`void Player::OnUpdate() { ... }`); else the
+		/// type the path is inside. Null outside any.
+		const Scripting::ObjectType* ImplicitThis(const Core::Vector<const Scripting::AstNode*>& path) const { return ContextFor(path).enclosingType; }
 
 	private:
 		struct Ctx { const Scripting::ObjectType* enclosingType = nullptr; const Scripting::Scope* scope = nullptr; uint32 unitId = 0; };

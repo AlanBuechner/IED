@@ -152,6 +152,30 @@ request, waited for a whole analysis. Left: parsing 1.4 s (one file at a time, "
 0.55 s, the bodies 0.55 s. Each analysis is one line in the server log (`C4LSP: ClaymoreEngine analyzed in 3019 ms
 (1624 files: read 135, macros and bindings 355, parse 1442, model 554, bodies 533, symbols 96)`).
 
+## C4LSP while typing, measured (2026-11-19)
+
+The owner: "the LSP is unusably slow with suggestions when i am typing out code as well as with the coloring". A scratch
+stdio client typed a line into a script of LS's client program (`Game/Content/Scripts/PlayerControler.cf`, 2595
+files) at 8 keys a second, sending for each key what IED's editor sends: the change, highlights, code actions, semantic
+tokens (the one before cancelled) and completion (on a word's first character and after `.`, `->`, `::`).
+
+| LS's client program | Before | After |
+|---|---|---|
+| Completion while typing | every request answered `ContentModified` (no list) | 0 - 20 ms, the members of what is typed (`GetTransform()->`: 60) |
+| Completion after the last key | 7.2 s | at once |
+| Semantic tokens while typing | none answered (each waited behind the highlight before it) | at once, from the last analysis |
+| The final text's colors and diagnostics | 5.8 s after the last key | 2.4 - 4.8 s (the analysis then running, then the final text's) |
+| An edit's analysis | 4.7 s (parse 2.5 s) | 2.4 s (parse 0.4 s: 2594 of 2595 trees kept) |
+
+What changed (C4 `docs/tools/03` "When a program is analyzed", "Requests while it analyzes"): a request waiting for an
+analysis waits parked instead of holding back the requests behind it; completion answers from the last analysis, reading
+the member access being typed from the editor's text (through calls, indexes and `->` operators, which it did not
+follow before) and the scopes from the analysis; a method defined out of its type offers what its implicit `this`
+reaches; completion's list is made in linear time, a global's detail only for the names the typed prefix keeps (the
+list took 1.5 s on this program, now under 20 ms);
+an edit's analysis takes the trees of the files it did not change. Left for each edit: the macro pass (0.5 s), reading
+(0.3 s), the model (1 s).
+
 ## Open items
 
 - Incremental `didChange` for servers that ask for it (C4LSP takes full text).

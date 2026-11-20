@@ -30,6 +30,13 @@ namespace C4LSP::Server
 		void Close();
 		// The next message in the order they came, waiting for one; nullopt once closed and empty.
 		std::optional<Arrived> Next();
+		// The same, but nullopt too once `until` passes or Poke is called first: the server then looks at its parked requests.
+		std::optional<Arrived> NextBefore(std::chrono::steady_clock::time_point until);
+		// Wakes a NextBefore waiting now, or makes the next one return at once (an analysis came in: a parked request may
+		// answer now).
+		void Poke();
+		// Whether the channel ended and every message it brought has been taken.
+		bool Drained() const;
 
 		// Whether the client cancelled the request `id` (a $/cancelRequest for it arrived).
 		bool IsCancelled(const Json::Value& id) const;
@@ -50,6 +57,7 @@ namespace C4LSP::Server
 		std::deque<Arrived> m_Waiting;
 		std::set<std::string> m_Cancelled; // the cancelled requests' ids, as IdKey writes them
 		bool m_Closed = false;
+		bool m_Poked = false;
 		std::mutex m_WakeLock;             // held while m_Wake runs, so a server that stops listening is never called after
 		std::function<void()> m_Wake;
 	};

@@ -58,6 +58,9 @@ namespace Scripting
 		/// The line as the file has it, before its macro uses were expanded: what a diagnostic shows.
 		Core::String GetWrittenLineText(uint32 line) const;
 
+		/// Whether `other` holds the same text, as written and as expanded: a parse of one is a parse of the other.
+		bool SameTextAs(const Source& other) const { return m_Data == other.m_Data && m_Written == other.m_Written; }
+
 	private:
 		explicit Source(const std::string& content);
 

@@ -36,12 +36,19 @@ namespace C4LSP::Server
 			return code == kRequestCancelled ? "the request was cancelled" : "the document changed after the request";
 		}
 
+		// Thrown by SnapshotForRequest while serving when the request's analysis is not current yet: HandleRequest parks it.
+		struct AnalysisPending {};
+
+		// How long the serving loop waits for a message when no parked request has a deadline sooner.
+		constexpr auto kIdleWait = std::chrono::hours(1);
+
 		// The requests that answer from the last analysis without waiting for one: an edit after them is no reason to drop
-		// the answer - the editor maps it over the edits since and asks again after each publish, and an error would clear
-		// the colors it shows (Monaco's semantic tokens) until then.
+		// the answer - the editor maps semantic tokens and folding over the edits since and asks again after each publish
+		// (an error would clear the colors Monaco shows until then), and filters a completion list by what is typed after
+		// it (an error closes the list: no suggestion while typing).
 		bool AnswersFromTheLastAnalysis(const std::string& method)
 		{
-			return method == "textDocument/semanticTokens/full" || method == "textDocument/foldingRange";
+			return method == "textDocument/semanticTokens/full" || method == "textDocument/foldingRange" || method == "textDocument/completion";
 		}
 
 		// The workspace symbols of `analysis`, with the files they were read from; a file's the copy `shared` has already.
@@ -79,8 +86,8 @@ namespace C4LSP::Server
 		void LogAnalysis(const ProgramOptions& options, const CompilationSession::Timings& t, double symbols)
 		{
 			const std::string name = options.library ? "the default library" : options.name.empty() ? "the workspace" : options.name;
-			std::fprintf(stderr, "C4LSP: %s analyzed in %.0f ms (%u files: read %.0f, macros and bindings %.0f, parse %.0f, model %.0f, bodies %.0f, symbols %.0f)\n",
-				name.c_str(), t.Total() + symbols, t.files, t.read, t.preprocess, t.parse, t.model, t.bodies, symbols);
+			std::fprintf(stderr, "C4LSP: %s analyzed in %.0f ms (%u files: read %.0f, macros and bindings %.0f, parse %.0f (%u kept), model %.0f, bodies %.0f, symbols %.0f)\n",
+				name.c_str(), t.Total() + symbols, t.files, t.read, t.preprocess, t.parse, t.reusedParses, t.model, t.bodies, symbols);
 		}
 
 		double MillisecondsSince(std::chrono::steady_clock::time_point start)
@@ -186,6 +193,12 @@ namespace C4LSP::Server
 		};
 		if (!current() && InterruptionOfRequest() == 0)
 		{
+			if (m_Inbox)
+			{
+				// Serving: the request waits parked, and the messages after it are handled meanwhile (ResumeParked).
+				if (WorkPending() && std::chrono::steady_clock::now() - m_RequestStart < kFreshWait) throw AnalysisPending{};
+				return GetSnapshot(uri);
+			}
 			const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(kRequestBudget - (std::chrono::steady_clock::now() - m_RequestStart));
 			QueryReleased waiting(m_QueryMutex);
 			std::unique_lock<std::mutex> lock(m_WorkMutex);
@@ -235,6 +248,47 @@ namespace C4LSP::Server
 			std::lock_guard<std::mutex> lock(m_WorkMutex); // a request between its check and its wait sees the swap or the wake
 		}
 		m_WorkCv.notify_all();
+	}
+
+	bool LspServer::WorkPending()
+	{
+		std::lock_guard<std::mutex> lock(m_WorkMutex);
+		return m_Working || m_Dirty;
+	}
+
+	void LspServer::WakeParkedRequests()
+	{
+		std::lock_guard<std::mutex> lock(m_InboxMutex);
+		if (m_Inbox) m_Inbox->Poke();
+	}
+
+	std::optional<size_t> LspServer::DocumentHash(const std::string& uri)
+	{
+		std::lock_guard<std::mutex> lock(m_DocMutex);
+		const std::string* text = m_Documents.GetText(uri);
+		return text ? std::optional<size_t>(std::hash<std::string>{}(*text)) : std::nullopt;
+	}
+
+	std::chrono::steady_clock::time_point LspServer::NextParkedDeadline() const
+	{
+		auto deadline = std::chrono::steady_clock::now() + kIdleWait;
+		for (const ParkedRequest& request : m_Parked) deadline = std::min(deadline, request.arrived + kFreshWait);
+		return deadline;
+	}
+
+	void LspServer::ResumeParked()
+	{
+		std::vector<ParkedRequest> parked;
+		parked.swap(m_Parked);
+		for (ParkedRequest& request : parked)
+		{
+			if (!request.uri.empty() && DocumentHash(request.uri) != request.text)
+			{
+				SendError(request.message.Member("id"), kContentModified, InterruptionMessage(kContentModified));
+				continue;
+			}
+			HandleRequest(request.message, request.arrived); // parked again while its analysis is still to come
+		}
 	}
 
 	int LspServer::InterruptionOfRequest() const
@@ -457,7 +511,15 @@ namespace C4LSP::Server
 				return false;
 			}
 		}
-		std::shared_ptr<CompilationSession> fresh = program.Analyze(m_RootUri.empty() ? "" : PathOfUri(m_RootUri), taken);
+		// A file whose text is the same takes its tree from the last analysis: an edit parses the files it changed, not the
+		// program. Its parses are read while no request reads it (a request may make a unit it lacks).
+		std::shared_ptr<const Scripting::PriorParses> prior;
+		if (program.session)
+		{
+			std::lock_guard<std::mutex> querying(m_QueryMutex);
+			prior = program.session->Parses();
+		}
+		std::shared_ptr<CompilationSession> fresh = program.Analyze(m_RootUri.empty() ? "" : PathOfUri(m_RootUri), taken, std::move(prior));
 		++m_AnalysesMade;
 		// The worker alone swaps analyses: reading the last one here (what requests never change of it) needs no lock.
 		if (program.session) fresh->KeepBodyDiagnosticsOf(*program.session);
@@ -473,6 +535,7 @@ namespace C4LSP::Server
 			program.symbols = std::move(symbols);
 		}
 		WakeWaitingRequests();
+		WakeParkedRequests();
 		return true;
 	}
 
@@ -709,6 +772,7 @@ namespace C4LSP::Server
 					return;
 			}
 			m_WorkCv.notify_all();
+			WakeParkedRequests();
 		}
 	}
 
@@ -797,15 +861,20 @@ namespace C4LSP::Server
 
 	void LspServer::Serve(MessageInbox& inbox)
 	{
-		m_Inbox = &inbox;
+		{
+			std::lock_guard<std::mutex> lock(m_InboxMutex);
+			m_Inbox = &inbox;
+		}
 		inbox.OnArrival([this] { WakeWaitingRequests(); });
 		while (!ShouldExit())
 		{
-			std::optional<MessageInbox::Arrived> next = inbox.Next();
-			if (!next) break;
-			HandleMessage(next->message, next->at);
+			ResumeParked();
+			std::optional<MessageInbox::Arrived> next = inbox.NextBefore(NextParkedDeadline());
+			if (next) HandleMessage(next->message, next->at);
+			else if (inbox.Drained()) break;
 		}
 		inbox.OnArrival({});
+		std::lock_guard<std::mutex> lock(m_InboxMutex);
 		m_Inbox = nullptr;
 	}
 
@@ -832,7 +901,18 @@ namespace C4LSP::Server
 		}
 		if (m_Encoding == Protocol::PositionEncoding::Utf16 && method != "initialize")
 			params = Codec().FromClient(params, m_RequestUri);
+		try
+		{
+			DispatchRequest(method, id, params);
+		}
+		catch (const AnalysisPending&)
+		{
+			m_Parked.push_back({ message, arrived, m_RequestUri, DocumentHash(m_RequestUri) });
+		}
+	}
 
+	void LspServer::DispatchRequest(const std::string& method, const Json::Value& id, const Json::Value& params)
+	{
 		if (method == "initialize")
 			HandleInitialize(id, params);
 		else if (method == "shutdown")
@@ -894,7 +974,15 @@ namespace C4LSP::Server
 
 		if (method == "$/cancelRequest")
 		{
-			// It comes after its request, which is answered by now (with RequestCancelled if it was still being answered).
+			// It comes after its request, which is answered by now (with RequestCancelled if it was still being answered) -
+			// or parked, waiting for its analysis: then it answers RequestCancelled now.
+			const std::string key = IdKey(params.Member("id"));
+			const auto parked = std::find_if(m_Parked.begin(), m_Parked.end(), [&key](const ParkedRequest& request) { return IdKey(request.message.Member("id")) == key; });
+			if (parked != m_Parked.end())
+			{
+				SendError(parked->message.Member("id"), kRequestCancelled, InterruptionMessage(kRequestCancelled));
+				m_Parked.erase(parked);
+			}
 			if (m_Inbox) m_Inbox->Forget(params.Member("id"));
 			return;
 		}
