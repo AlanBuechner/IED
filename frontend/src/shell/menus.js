@@ -82,3 +82,14 @@ export class Menus {
 		return this.resolve(menuId).some((row) => row.kind !== "separator");
 	}
 }
+
+// The rows a plugin gives for one showing of a menu (`menus.show(menuId, at, args, {rows})`, docs/02): what only it knows
+// at the place the menu opens - a language server's fixes where the editor was right-clicked - ahead of the menu's
+// contributed rows, a line between. A row is {label, run, icon?, keys?, enabled?}; one without a label or a run is left out.
+export function withOwnRows(own, rows) {
+	const mine = (own || []).filter((row) => row && row.label && typeof row.run === "function").map((row) => ({
+		kind: "item", label: row.label, run: row.run, icon: row.icon || null, base: null, keys: row.keys || "", enabled: row.enabled !== false, order: 0,
+	}));
+	if (!mine.length) return rows;
+	return rows.length ? [...mine, { kind: "separator" }, ...rows] : mine;
+}

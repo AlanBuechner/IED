@@ -235,15 +235,19 @@ def tab_context_menu(run):
 
 @scenario(viewports=("desktop",))
 def editor_context_menu(run):
-	"""The editor's own context menu (Monaco draws it in a shadow root) has the theme's background, not bare text over
-	the code: the theme's colors reach the shadow root's host."""
+	"""The editor's right-click menu is IED's, Visual Studio's rows (docs/15 "Editor as built": Quick Actions, Rename, Go To,
+	the clipboard) with the theme's background - not Monaco's own menu, which its shadow root would hold."""
 	page = run.open()
 	page.dblclick(".tree-row:has-text('README.md')")
 	page.wait_for_selector(".dock-host:not([hidden]) .dock-body .monaco-editor .view-lines", timeout=30000)
 	page.click(".dock-host:not([hidden]) .dock-body .monaco-editor .view-lines", button="right")
-	menu = "document.querySelector('.shadow-root-host') && document.querySelector('.shadow-root-host').shadowRoot.querySelector('.monaco-menu-container .monaco-scrollable-element')"
-	page.wait_for_function("!!(" + menu + ")", timeout=10000)
-	background = page.evaluate("getComputedStyle(" + menu + ").backgroundColor")
+	page.wait_for_selector(".popup.menu", timeout=10000)
+	rows = page.evaluate("[...document.querySelectorAll('.popup.menu .menu-item .label')].map((l) => l.textContent)")
+	for wanted in ("Quick Actions and Refactorings...", "Rename...", "Go To Definition", "Find All References", "Cut", "Copy", "Paste"):
+		check(wanted in rows, "the menu has %s: %s" % (wanted, rows))
+	monaco_menu = "(() => { const host = document.querySelector('.shadow-root-host'); return !!(host && host.shadowRoot && host.shadowRoot.querySelector('.monaco-menu-container')); })()"
+	check(not page.evaluate(monaco_menu), "Monaco's own menu is not shown")
+	background = page.evaluate("getComputedStyle(document.querySelector('.popup.menu')).backgroundColor")
 	check(background not in ("", "transparent", "rgba(0, 0, 0, 0)"), "the menu has a background: %s" % background)
 	run.shot("menu")
 	page.keyboard.press("Escape")

@@ -27,6 +27,7 @@ import { BreakpointMargin } from "./breakpointmargin.js";
 import { CallStack as CallStackView, Locals as LocalsView, Watch as WatchView, Threads as ThreadsView, BreakpointsWindow } from "./debugviews.js";
 import { DiagnosticTools as DiagnosticToolsView } from "./diagtools.js";
 import { InlineChats } from "./inlinechat.js";
+import { attachEditorMenu } from "./editormenu.js";
 
 const explorers = new Set();
 const outputs = new Set();
@@ -71,6 +72,7 @@ export function activate(ied) {
 	});
 	const inline = new InlineChats(ied, editors);
 	editors.attach((editor) => inline.attach(editor));
+	editors.attach((editor) => attachEditorMenu(ied, editor));
 	ied.commands.handle("ied.editor.inlineChat", () => inline.start(currentEditor(ied)));
 	ied.commands.handle("ied.editor.inlineChatAccept", () => inline.accept());
 	ied.contributions.on(() => relabel(ied));
@@ -249,7 +251,11 @@ const EDITOR_ACTIONS = [
 	["ied.editor.quickActions", "editor.action.quickFix"],
 	["ied.editor.rename", "editor.action.rename"],
 	["ied.editor.goToDefinition", "editor.action.revealDefinition"],
+	["ied.editor.goToDeclaration", "editor.action.revealDeclaration"],
 	["ied.editor.peekDefinition", "editor.action.peekDefinition"],
+	["ied.editor.cut", "editor.action.clipboardCutAction"],
+	["ied.editor.copy", "editor.action.clipboardCopyAction"],
+	["ied.editor.paste", "editor.action.clipboardPasteAction"],
 	["ied.editor.goToImplementation", "editor.action.goToImplementation"],
 	["ied.editor.findAllReferences", "editor.action.goToReferences"],
 	["ied.editor.toggleOutlining", "editor.toggleFold"],

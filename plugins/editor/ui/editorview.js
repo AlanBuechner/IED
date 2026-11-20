@@ -359,7 +359,7 @@ export function editorEnvironment() {
 }
 
 // VS defaults (docs/15, F-EDT-30): tabs, indentation guides; the editor settings' defaults until the workspace's arrive
-// (editorsettings.js); fonts from the theme tokens.
+// (editorsettings.js); fonts from the theme tokens. The right-click menu is IED's (editormenu.js), not Monaco's.
 function editorOptions(monaco) {
 	const style = getComputedStyle(document.documentElement);
 	return Object.assign({
@@ -376,5 +376,6 @@ function editorOptions(monaco) {
 		readOnly: true,
 		"semanticHighlighting.enabled": true,
 		mouseMiddleClickAction: "openLink",
+		contextmenu: false,
 	}, optionsOf(null, editorEnvironment()));
 }

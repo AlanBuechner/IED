@@ -175,7 +175,9 @@ select.input-field { padding-right: var(--space-2); cursor: pointer; }
 	border-radius: var(--radius-3) var(--radius-3) 0 0;
 	padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
 }
-.popup.sheet .menu-item { height: var(--row-h-touch); font-size: var(--font-size-lg); }
+.popup.sheet .menu-item { height: auto; min-height: var(--row-h-touch); font-size: var(--font-size-lg); }
+/* A phone's sheet is as wide as the screen: a long row (a fix naming its file) wraps rather than losing its end. */
+.popup.sheet .menu-item .label { white-space: normal; overflow-wrap: anywhere; padding: var(--space-2) 0; }
 
 /* ---------- dialogs (dialog.js) ---------- */
 .dialog-veil { position: fixed; inset: 0; background: var(--scrim); z-index: 50; }

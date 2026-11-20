@@ -57,7 +57,9 @@ the cursor in the new body. A server places the cursor with an LSP 3.18 snippet 
 `documentChanges`, its `$0`): the host's `capabilities` say `workspace.workspaceEdit.snippetEditSupport` (and
 `documentChanges`), and the client puts a snippet in as its text (a placeholder keeps its text, a choice its first
 option) with the cursor at its `$0` (`lspconvert.js` `snippetText`). C4LSP's fixes for a missing definition are the
-first to use it (C4 `docs/tools/03`).
+first to use it (C4 `docs/tools/03`). The actions are also on the editor's right-click menu, by name and first, as
+Visual Assist lists its refactorings: those at the cursor and the fixes of the problems elsewhere on its line, asked when
+the menu opens (at most 600 ms; `docs/15` "Editor as built").
 
 Server-initiated requests are answered by the host: `workspace/configuration` with a null per item (until `settingsBindings` are bound), `workspace/workspaceFolders` with the workspace folder, `workspace/<kind>/refresh` by publishing `lsp.refresh`, `workspace/applyEdit` refused (`applied: false`) for now, and anything else (registrations, `window/workDoneProgress/create`) with null. `window/logMessage`, `window/showMessage` and the beginning and end of `$/progress` go to the workspace's IED output.
 

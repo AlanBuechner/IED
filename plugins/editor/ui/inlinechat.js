@@ -82,8 +82,6 @@ export class InlineChats {
 				id: "ied.editor.inlineChat",
 				label: "Inline Chat",
 				keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyI],
-				contextMenuGroupId: "1_modification",
-				contextMenuOrder: 0,
 				run: () => this.start(focused()),
 			}),
 			ed.addAction({

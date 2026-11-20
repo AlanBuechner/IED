@@ -138,12 +138,16 @@
 			{ "id": "ied.editor.completeWord", "title": "Complete Word", "category": "Edit" },
 			{ "id": "ied.editor.parameterInfo", "title": "Parameter Info", "category": "Edit" },
 			{ "id": "ied.editor.quickInfo", "title": "Quick Info", "category": "Edit" },
-			{ "id": "ied.editor.quickActions", "title": "Quick Actions and Refactorings", "category": "Edit", "icon": "$(lightbulb)" },
-			{ "id": "ied.editor.rename", "title": "Rename", "category": "Edit" },
+			{ "id": "ied.editor.quickActions", "title": "Quick Actions and Refactorings...", "category": "Edit", "icon": "$(lightbulb)" },
+			{ "id": "ied.editor.rename", "title": "Rename...", "category": "Edit" },
 			{ "id": "ied.editor.inlineChat", "title": "Inline Chat", "category": "Edit", "icon": "$(sparkle)" },
 			{ "id": "ied.editor.inlineChatAccept", "title": "Accept Inline Chat Change", "category": "Edit" },
 			{ "id": "ied.editor.goToDefinition", "title": "Go To Definition", "category": "Edit" },
+			{ "id": "ied.editor.goToDeclaration", "title": "Go To Declaration", "category": "Edit" },
 			{ "id": "ied.editor.peekDefinition", "title": "Peek Definition", "category": "Edit" },
+			{ "id": "ied.editor.cut", "title": "Cut", "category": "Edit" },
+			{ "id": "ied.editor.copy", "title": "Copy", "category": "Edit", "icon": "$(copy)" },
+			{ "id": "ied.editor.paste", "title": "Paste", "category": "Edit" },
 			{ "id": "ied.editor.goToImplementation", "title": "Go To Implementation", "category": "Edit" },
 			{ "id": "ied.editor.findAllReferences", "title": "Find All References", "category": "Edit", "icon": "$(references)" },
 			{ "id": "ied.editor.toggleOutlining", "title": "Toggle Outlining Expansion", "category": "Edit" },
@@ -234,6 +238,28 @@
 				{ "command": "ied.editor.save", "group": "1_file" },
 				{ "command": "ied.editor.saveAll", "group": "1_file", "order": 1 }
 			],
+			// Visual Studio's editor menu (docs/15 "Context menus"; editormenu.js puts the language server's fixes for the place
+			// clicked above it): Quick Actions and Rename, going to and finding, the breakpoint, AI, the clipboard, then
+			// commenting and formatting. Other plugins add groups of their own.
+			"editor/context": [
+				{ "command": "ied.editor.quickActions", "group": "1_actions" },
+				{ "command": "ied.editor.rename", "group": "1_actions", "order": 1 },
+				{ "command": "ied.editor.peekDefinition", "group": "2_navigate" },
+				{ "command": "ied.editor.goToDefinition", "group": "2_navigate", "order": 1 },
+				{ "command": "ied.editor.goToDeclaration", "group": "2_navigate", "order": 2 },
+				{ "command": "ied.editor.goToImplementation", "group": "2_navigate", "order": 3 },
+				{ "command": "ied.editor.findAllReferences", "group": "2_navigate", "order": 4 },
+				{ "command": "ied.editor.toggleHeader", "group": "2_navigate", "order": 5 },
+				{ "command": "ied.debug.toggleBreakpoint", "group": "3_debug" },
+				{ "command": "ied.editor.inlineChat", "group": "4_ai" },
+				{ "command": "ied.editor.cut", "group": "5_clipboard" },
+				{ "command": "ied.editor.copy", "group": "5_clipboard", "order": 1 },
+				{ "command": "ied.editor.paste", "group": "5_clipboard", "order": 2 },
+				{ "command": "ied.editor.commentSelection", "group": "6_edit" },
+				{ "command": "ied.editor.uncommentSelection", "group": "6_edit", "order": 1 },
+				{ "command": "ied.editor.formatSelection", "group": "6_edit", "order": 2 },
+				{ "command": "ied.editor.formatDocument", "group": "6_edit", "order": 3 }
+			],
 			// Visual Studio's Solution Explorer menus (docs/15 "Context menus"): build first, then adding, opening, editing,
 			// paths, the places outside IED (File Explorer, a terminal: the terminal plugin's row joins 6_terminal), the
 			// settings of what the row is, and Refresh.
@@ -321,8 +347,10 @@
 			{ "command": "ied.editor.quickInfo", "key": "ctrl+k ctrl+i", "when": "activeTabKind == 'doc' && !inlineChatFocus" },
 			{ "command": "ied.editor.inlineChat", "key": "ctrl+i", "when": "activeTabKind == 'doc'" },
 			{ "command": "ied.editor.inlineChatAccept", "key": "ctrl+enter", "when": "activeTabKind == 'doc' && inlineChatProposal" },
-			{ "command": "ied.editor.quickActions", "key": "ctrl+.", "when": "activeTabKind == 'doc' && !inlineChatFocus" },
+			// Visual Assist's Shift+Alt+Q too; Ctrl+. comes last, so menus show it (a command's last binding is its label).
+			{ "command": "ied.editor.quickActions", "key": "shift+alt+q", "when": "activeTabKind == 'doc' && !inlineChatFocus" },
 			{ "command": "ied.editor.quickActions", "key": "alt+enter", "when": "activeTabKind == 'doc' && !inlineChatFocus" },
+			{ "command": "ied.editor.quickActions", "key": "ctrl+.", "when": "activeTabKind == 'doc' && !inlineChatFocus" },
 			{ "command": "ied.editor.rename", "key": "ctrl+r ctrl+r", "when": "activeTabKind == 'doc' && !inlineChatFocus" },
 			{ "command": "ied.editor.goToDefinition", "key": "f12", "when": "activeTabKind == 'doc' && !inlineChatFocus" },
 			{ "command": "ied.editor.peekDefinition", "key": "alt+f12", "when": "activeTabKind == 'doc' && !inlineChatFocus" },

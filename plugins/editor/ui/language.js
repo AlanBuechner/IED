@@ -269,18 +269,69 @@ export class LanguageFeatures {
 	// Code actions
 
 	askCodeActions(model, range, context, token) {
-		const editor = this.editorOf(model);
 		const lspRange = C.toLspRange(range);
-		const diagnostics = [];
-		if (editor) {
-			for (const items of this.diagnostics.of(editor.ctx.wsId, editor.path).values()) {
-				for (const item of items) if (C.rangesMeet(item.range, lspRange)) diagnostics.push(item);
-			}
+		return this.askCodeActionsIn(model, lspRange, this.diagnosticsMeeting(model, lspRange), context.trigger, context.only, token);
+	}
+
+	diagnosticsMeeting(model, lspRange) {
+		const editor = this.editorOf(model);
+		const out = [];
+		if (!editor) return out;
+		for (const items of this.diagnostics.of(editor.ctx.wsId, editor.path).values()) {
+			for (const item of items) if (C.rangesMeet(item.range, lspRange)) out.push(item);
 		}
-		// Monaco's trigger types are LSP's: invoked 1, automatic 2.
-		const lspContext = { diagnostics, triggerKind: context.trigger };
-		if (context.only) lspContext.only = [context.only];
+		return out;
+	}
+
+	// Monaco's trigger types are LSP's: invoked 1, automatic 2.
+	askCodeActionsIn(model, lspRange, diagnostics, trigger, only, token) {
+		const lspContext = { diagnostics, triggerKind: trigger };
+		if (only) lspContext.only = [only];
 		return this.ask(model, "textDocument/codeAction", { range: lspRange, context: lspContext }, token);
+	}
+
+	// The fixes and refactorings for the editor's right-click menu (editormenu.js), as the server's code actions: those at
+	// the cursor (or the selection), and the fixes of the problems elsewhere on its line - a right-click on a declaration's
+	// return type still offers to create its definition, as Visual Assist does (lspconvert.js `menuActionsOf`). [] when no
+	// server serves the document, it is read-only, or no answer comes in `waitMs`: the menu does not wait longer.
+	menuActions(editor, waitMs, most) {
+		const source = new this.monaco.CancellationTokenSource();
+		let timer = 0;
+		const late = new Promise((resolve) => {
+			timer = setTimeout(() => {
+				source.cancel();
+				resolve([]);
+			}, waitMs);
+		});
+		return Promise.race([this.askMenuActions(editor, most, source.token), late]).finally(() => {
+			clearTimeout(timer);
+			source.dispose();
+		});
+	}
+
+	async askMenuActions(editor, most, token) {
+		const model = editor.model;
+		if (!model || !editor.sync.docId || editor.editor.getOption(this.monaco.editor.EditorOption.readOnly)) return [];
+		const info = await this.info(editor);
+		if (!info || !info.capabilities || !info.capabilities.codeActionProvider || token.isCancellationRequested) return [];
+		const selection = C.toLspRange(editor.editor.getSelection());
+		const line = selection.end.line;
+		const lineRange = { start: { line, character: 0 }, end: { line, character: model.getLineMaxColumn(line + 1) - 1 } };
+		const elsewhere = this.diagnosticsMeeting(model, lineRange).filter((item) => !C.rangesMeet(item.range, selection));
+		const [atCursor, onLine] = await Promise.all([
+			this.askCodeActionsIn(model, selection, this.diagnosticsMeeting(model, selection), 1, undefined, token),
+			elsewhere.length ? this.askCodeActionsIn(model, lineRange, elsewhere, 1, undefined, token) : null,
+		]);
+		return C.menuActionsOf(atCursor, onLine, most);
+	}
+
+	// One of menuActions' actions done: its edit (opening the files it changes, the cursor where it puts it), then its command.
+	async runAction(editor, action) {
+		const docId = editor.sync.docId;
+		if (typeof action.command === "string") return this.execute(docId, action);
+		if (action.edit) await this.applyEdit(action.edit);
+		if (action.command) await this.execute(docId, action.command);
+		return undefined;
 	}
 
 	// Each action as Monaco's: an edit of this document is applied as it is; one that reaches other files, or places the

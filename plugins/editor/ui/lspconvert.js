@@ -253,6 +253,26 @@ export function markersOf(monaco, items) {
 	});
 }
 
+// The code actions the editor's right-click menu lists (editormenu.js), of the server's answers: those at the cursor, then the
+// fixes of the problems elsewhere on its line (an action with diagnostics; a refactoring asked of the whole line is left
+// out), each title once, the preferred first, at most `most`. Source actions (organize imports) and disabled ones stay
+// with Quick Actions.
+export function menuActionsOf(atCursor, onLine, most) {
+	const seen = new Set();
+	const out = [];
+	const take = (action, fixesOnly) => {
+		if (!action || !action.title || action.disabled || seen.has(action.title)) return;
+		if (typeof action.kind === "string" && (action.kind === "source" || action.kind.startsWith("source."))) return;
+		if (fixesOnly && !(Array.isArray(action.diagnostics) && action.diagnostics.length)) return;
+		seen.add(action.title);
+		out.push(action);
+	};
+	for (const action of atCursor || []) take(action, false);
+	for (const action of onLine || []) take(action, true);
+	const preferred = out.filter((action) => action.isPreferred);
+	return [...preferred, ...out.filter((action) => !action.isPreferred)].slice(0, most);
+}
+
 // Whether two LSP ranges share a position (touching counts).
 export function rangesMeet(a, b) {
 	const before = (p, q) => p.line < q.line || (p.line === q.line && p.character < q.character);

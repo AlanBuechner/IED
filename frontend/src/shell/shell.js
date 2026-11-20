@@ -12,7 +12,7 @@ import { ContextKeys } from "./context.js";
 import { Commands } from "./commands.js";
 import { Bindings } from "./bindings.js";
 import { Keybindings } from "./keybindings.js";
-import { Menus } from "./menus.js";
+import { Menus, withOwnRows } from "./menus.js";
 import { ViewHost } from "./views.js";
 import { Contributions } from "./contributions.js";
 import { LayoutStore } from "./layoutstore.js";
@@ -1024,16 +1024,26 @@ export class Shell {
 		return this.showMenu("shell/activity", at);
 	}
 
-	showMenu(menuId, at, args, keys) {
+	// `options.rows`: a plugin's own rows for this showing, ahead of the contributed ones (menus.js `withOwnRows`).
+	showMenu(menuId, at, args, keys, options) {
 		if (args && args.ref) this.tabKeys(args.ref);
-		const rows = this.menus.resolve(menuId, keys);
+		const rows = withOwnRows(options && options.rows, this.menus.resolve(menuId, keys));
 		return this.menuHost.show({
 			rows, at, label: menuId,
-			pick: (row) => this.commands.run(row.command, row.args !== undefined ? row.args : args),
+			pick: (row) => (row.run ? this.runOwnRow(row) : this.commands.run(row.command, row.args !== undefined ? row.args : args)),
 			submenu: (id) => this.menus.resolve(id),
 			// The keys go back to the focused tab's once the pick (which runs after the close) has been checked.
 			onClose: args && args.ref ? () => setTimeout(() => this.tabKeys(this.focus ? this.focus.ref : null), 0) : undefined,
 		});
+	}
+
+	async runOwnRow(row) {
+		try {
+			await row.run();
+		}
+		catch (e) {
+			this.report("'" + row.label + "' failed: " + (e && e.message ? e.message : e), e);
+		}
 	}
 
 	report(message, error) {
@@ -1121,7 +1131,7 @@ export class Shell {
 				needsMarkers: (project) => shell.contributions.icons.needsMarkers(project),
 				solution: (extraClass) => shell.contributions.icons.solution(extraClass),
 			},
-			menus: { show: (menuId, at, args) => shell.showMenu(menuId, at, args) },
+			menus: { show: (menuId, at, args, options) => shell.showMenu(menuId, at, args, undefined, options) },
 			get workspace() {
 				return shell.workspace;
 			},
