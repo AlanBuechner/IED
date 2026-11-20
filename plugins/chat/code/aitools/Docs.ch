@@ -43,6 +43,10 @@ namespace Ai
 	// docs_read's answer for a path no docs folder holds (`index`: the docs names there are); a Markdown or text path
 	// is told that fs_read reads the workspace's own files.
 	Core::String UnknownDocProblem(Core::StringView path, Core::StringView index);
+	// docs_read's answer for a file a docs folder (`id`) does not have: what the folder holds at its top (`holds`), and the
+	// workspace file whose path ends the same (`elsewhere`, as fs_read takes it; "" when none) - a design doc of the
+	// workspace (ied:/C4/docs/compiler/...) is no reference doc.
+	Core::String MissingDocProblem(Core::StringView path, Core::StringView id, const Core::Array<Core::String>& holds, Core::StringView elsewhere);
 	// The docs path of a file the file tools name in a docs folder ("plugins:/c4/docs/library/x.md": "c4/library/x.md");
 	// any other path as it is.
 	Core::String DocsPathOf(const Core::Array<DocsFolder*>& folders, Core::StringView path);

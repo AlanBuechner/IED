@@ -37,8 +37,8 @@ class DocsTests {
 		Core::Array<Core::String> headings = { Core::String("Math::Mat3"), Core::String("Math::Mat4"), Core::String("Math::Quat"), Core::String("Core::HashMap") };
 		assert_eq((int64)1, Ai::ClosestHeading(headings, Core::StringView("Math::TMat4")), "a letter too many");
 		assert_eq((int64)3, Ai::ClosestHeading(headings, Core::StringView("core::hashmapp")), "case and a typo");
-		assert_eq((int64) - 1, Ai::ClosestHeading(headings, Core::StringView("Math::Mat")), "Mat3 and Mat4 as close: no guess");
-		assert_eq((int64) - 1, Ai::ClosestHeading(headings, Core::StringView("Threading::JobSystem")), "nothing near");
+		assert_eq((int64)-1, Ai::ClosestHeading(headings, Core::StringView("Math::Mat")), "Mat3 and Mat4 as close: no guess");
+		assert_eq((int64)-1, Ai::ClosestHeading(headings, Core::StringView("Threading::JobSystem")), "nothing near");
 	}
 
 	[test("a_workspace_page_is_sent_to_fs_read")]
@@ -48,6 +48,16 @@ class DocsTests {
 		assert_true(page.View().Contains(Core::StringView("- c4: C4")), "with the docs names there are");
 		Core::String other = Ai::UnknownDocProblem(Core::StringView("nope/x"), Core::StringView("- c4: C4"));
 		assert_true(!other.View().Contains(Core::StringView("fs_read")), "another wrong path: only the docs names");
+	}
+
+	[test("a_missing_file_says_what_the_docs_hold")]
+	public static void TestMissingFile() {
+		Core::Array<Core::String> holds = { Core::String("language/"), Core::String("library/"), Core::String("README.md") };
+		Core::String found = Ai::MissingDocProblem(Core::StringView("c4/compiler/04-codegen-and-abi.md"), Core::StringView("c4"), holds, Core::StringView("ied:/C4/docs/compiler/04-codegen-and-abi.md"));
+		assert_true(found.View().Contains(Core::StringView("the c4 reference docs hold language/, library/, README.md")), found.CStr());
+		assert_true(found.View().Contains(Core::StringView("ied:/C4/docs/compiler/04-codegen-and-abi.md is a file of the workspace, not a reference doc: read it with fs_read")), "the file it most likely meant, for fs_read");
+		Core::String none = Ai::MissingDocProblem(Core::StringView("c4/nope.md"), Core::StringView("c4"), holds, Core::StringView(""));
+		assert_true(none.View().Contains(Core::StringView("are read with fs_read")) && !none.View().Contains(Core::StringView("is a file of the workspace")), "none of that name: where design docs are read");
 	}
 
 	[test("a_docs_file_by_its_plugin_path")]

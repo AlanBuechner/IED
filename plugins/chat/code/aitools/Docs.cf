@@ -1,5 +1,7 @@
 include "Docs.ch"
+include "Files.ch"
 include "LineDiff.ch"
+include "chats/Roots.ch"
 
 namespace Ai
 {
@@ -269,8 +271,57 @@ namespace Ai
 		return Core::String(path);
 	}
 
+	Core::String MissingDocProblem(Core::StringView path, Core::StringView id, const Core::Array<Core::String>& holds, Core::StringView elsewhere) {
+		Core::StringBuilder out;
+		out.Append("docs_read: there is no file ");
+		out.Append(path);
+		out.Append("; the ");
+		out.Append(id);
+		out.Append(" reference docs hold");
+		for (int64 i = 0; i < holds.Count(); ++i) {
+			out.Append(i == 0 ? " " : ", ");
+			out.Append(holds[i].View());
+		}
+		if (holds.IsEmpty()) out.Append(" no folders");
+		out.Append(" (docs_search finds their sections)");
+		if (!elsewhere.IsEmpty()) {
+			out.Append(". ");
+			out.Append(elsewhere);
+			out.Append(" is a file of the workspace, not a reference doc: read it with fs_read");
+		}
+		else out.Append(". A workspace's own docs (a compiler's design docs, docs/...) are read with fs_read");
+		return out.ToString();
+	}
+
+	// What a docs folder holds at its top, as docs_read's error lists it: "language/", ..., then its Markdown files.
+	static Core::Array<Core::String> DocsFolderTop(const FS::Path& folder) {
+		Core::Array<Core::String> folders;
+		Core::Array<Core::String> files;
+		for (FS::DirectoryEntry& entry : FS::Directory(folder.CStr())) {
+			if (entry.kind == FS::EntryKind::Directory) folders.Push(entry.name + "/");
+			else if (entry.kind == FS::EntryKind::File && entry.name.View().EndsWith(Core::StringView(".md"))) files.Push(entry.name);
+		}
+		folders.Sort();
+		files.Sort();
+		for (const Core::String& file : files) folders.Push(file);
+		return folders;
+	}
+
+	// The one source file of the workspace, else of IED's checkout (ied:/), whose path ends in `inside`
+	// ("compiler/04-codegen-and-abi.md" finds C4/docs/compiler/04-codegen-and-abi.md), as fs_read takes it; "" when none or several.
+	static Core::String WorkspaceFileEndingIn(const ToolInvocation& call, Core::StringView inside) {
+		Core::String glob = Core::String("**/") + inside;
+		Core::String own = OnlySourceFile(IED::ExpandGlob(call.m_Ws.m_Root.View(), glob.View()));
+		if (!own.IsEmpty()) return own;
+		RootTarget root;
+		Core::String problem;
+		if (!OpenRoot(call.m_Ws.m_Id.View(), Core::StringView("ied"), root, problem)) return Core::String();
+		Core::String checkout = OnlySourceFile(IED::ExpandGlob(root.m_Ws.m_Root.View(), glob.View()));
+		return checkout.IsEmpty() ? checkout : root.m_Shown + checkout.View();
+	}
+
 	// The file `path` ("<id>/<path in the folder>") names; null with `problem` when it names none.
-	static DocFile* DocAt(const Core::Array<DocsFolder*>& folders, Core::StringView path, Core::String& problem) {
+	static DocFile* DocAt(const ToolInvocation& call, const Core::Array<DocsFolder*>& folders, Core::StringView path, Core::String& problem) {
 		const int64 slash = path.IndexOf('/', 0);
 		DocsFolder* docs = slash > 0 ? FolderNamed(folders, path.Substring(0, slash)) : nullptr;
 		Core::StringView inside = slash > 0 ? path.Substring(slash + 1, path.ByteLength() - slash - 1) : Core::StringView("");
@@ -279,7 +330,7 @@ namespace Ai
 			return nullptr;
 		}
 		DocFile* doc = ReadDocFile(docs->m_Folder / inside, path);
-		if (!doc) problem = Core::String("docs_read: there is no file ") + path + "; docs_search finds the sections";
+		if (!doc) problem = MissingDocProblem(path, docs->m_Id.View(), DocsFolderTop(docs->m_Folder), WorkspaceFileEndingIn(call, inside).View());
 		else if (!docs->m_Shown.IsEmpty()) {
 			doc->m_Shown = (docs->m_Shown + "/") + inside;
 			doc->m_ReadOnly = docs->m_ReadOnly;
@@ -410,7 +461,7 @@ namespace Ai
 
 	static ToolOutcome DocsReadRun(const ToolInvocation& call, const Core::Array<DocsFolder*>& folders) {
 		Core::String problem;
-		DocFile* doc = DocAt(folders, DocsPathOf(folders, call.m_Args.Member("path").AsView()).View(), problem);
+		DocFile* doc = DocAt(call, folders, DocsPathOf(folders, call.m_Args.Member("path").AsView()).View(), problem);
 		if (!doc) return ToolError(problem.View());
 		if (!call.m_Args.Member("heading").IsValid() && !call.m_Args.Member("line").IsValid()) return ToolResult(HeadingList(doc).View(), doc->m_Path.View());
 		DocSection section;
@@ -440,7 +491,7 @@ namespace Ai
 			"{\"type\": \"object\", \"properties\": {\"query\": {\"type\": \"string\", \"minLength\": 1}}, \"required\": [\"query\"], \"additionalProperties\": false}");
 		search->m_Run = [folders](const ToolInvocation& call) -> ToolOutcome { return DocsSearchRun(call, folders(call)); };
 		registry.Add(search);
-		ToolSpec* read = DocsSpec("docs_read", "Read a section of the reference docs by its path and heading (or a line), as docs_search gives them (a docs file's plugins:/ path works too); a path alone lists the file's headings. Only the languages' and libraries' docs: a workspace's own docs (docs/...) and a source of these in IED's checkout (ied:/C4/docs/...) are read with fs_read. Example: docs_read({\"path\": \"c4/library/bedrock.md\", \"heading\": \"Core::HashMap\"})",
+		ToolSpec* read = DocsSpec("docs_read", "Read a section of the reference docs by its path and heading (or a line), as docs_search gives them (a docs file's plugins:/ path works too); a path alone lists the file's headings. Only the languages' and libraries' docs (for c4: language/, library/, runtime/, tools/): a workspace's own docs (docs/..., a compiler's design docs such as C4/docs/compiler/ and C4/docs/status/) and a source of these in IED's checkout (ied:/C4/docs/...) are read with fs_read; a path it does not hold is answered with what it holds and the workspace file of that name. Example: docs_read({\"path\": \"c4/library/bedrock.md\", \"heading\": \"Core::HashMap\"})",
 			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"minLength\": 1}, \"heading\": {\"type\": \"string\"}, \"line\": {\"type\": \"integer\", \"minimum\": 1}}, \"required\": [\"path\"], \"additionalProperties\": false}");
 		read->m_Run = [folders](const ToolInvocation& call) -> ToolOutcome { return DocsReadRun(call, folders(call)); };
 		registry.Add(read);
