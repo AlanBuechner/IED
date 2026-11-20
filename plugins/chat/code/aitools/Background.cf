@@ -434,7 +434,7 @@ namespace Ai
 			"{\"type\": \"object\", \"properties\": {\"id\": {\"type\": \"string\"}}, \"additionalProperties\": false}", ToolClass::Read, "background.read");
 		status->m_Run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return StatusRun(chats, chat, call); };
 		registry.Add(status);
-		ToolSpec* wait = BackgroundTool("background_wait", "Wait for a background task to end (id), or for any of this chat's; returns how it ended with the end of its output. seconds: at most 600, 120 by default. You are told when a task ends anyway: wait only when you cannot go on without it, and to wait long, suspend instead. A message for this turn stops the wait at once. Example: background_wait({\"id\": \"bg-3\", \"seconds\": 300})",
+		ToolSpec* wait = BackgroundTool("background_wait", "Wait for a background task to end (id), or for any of this chat's; returns how it ended with the end of its output. seconds: at most 600, 120 by default. You are told when a task ends anyway: wait only when you cannot go on without it, and to wait long, suspend instead. It is no pause: with no task of this chat running it fails at once. A message for this turn stops the wait at once. Example: background_wait({\"id\": \"bg-3\", \"seconds\": 300})",
 			"{\"type\": \"object\", \"properties\": {\"id\": {\"type\": \"string\"}, \"seconds\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 600}}, \"additionalProperties\": false}", ToolClass::Read, "background.read");
 		wait->m_ParallelSafe = false;
 		wait->m_Run = [chats, chat](const ToolInvocation& call) -> ToolOutcome { return WaitRun(chats, chat, call); };
