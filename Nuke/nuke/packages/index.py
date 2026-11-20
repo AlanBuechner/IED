@@ -68,19 +68,30 @@ def _skipped(relative):
 
 def build(manifest_texts, label):
 	"""The index from {repository-relative manifest path: bytes}; `label` names the repository and commit in errors."""
-	raw = {}
+	raw, unreadable = {}, {}
 	for path, data in manifest_texts.items():
 		try:
 			raw[path] = tomllib.loads(data.decode("utf-8"))
 		except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
-			raise NukeError(f"{label}: {path}: {error}") from None
+			unreadable[path] = error
 	index = RepoIndex()
-	# A workspace inside the repository (a sample game) is its own: nothing in it belongs to the repository's packages.
+	# A workspace inside the repository (a sample game, a template a tool fills in) is its own: nothing in it belongs to the
+	# repository's packages, and a manifest in it need not even be TOML yet (`{{Module}}Scripts = ...`), as in_folder never
+	# reads one.
 	nested = [_parent(p) for p, d in raw.items() if p != MANIFEST_NAME and isinstance(d.get("workspace"), dict)]
+
+	def folder_of(path):
+		return _parent(path) if path != MANIFEST_NAME else ""
+
+	def ours(folder):
+		return not _skipped(folder) and not any(folder == n or folder.startswith(n + "/") for n in nested)
+	for path, error in sorted(unreadable.items()):
+		if ours(folder_of(path)):
+			raise NukeError(f"{label}: {path}: {error}")
 	folders = {}
 	for path, data in raw.items():
-		folder = _parent(path) if path != MANIFEST_NAME else ""
-		if not _skipped(folder) and not any(folder == n or folder.startswith(n + "/") for n in nested):
+		folder = folder_of(path)
+		if ours(folder):
 			folders[folder] = (path, data)
 	index.digest = _digest({path: manifest_texts[path] for path, _ in folders.values()})
 	parsed = {}

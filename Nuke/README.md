@@ -627,7 +627,9 @@ by themselves (no `depends` entry); the entry's name is yours (messages and `nuk
   package together); a workspace inside the repository - a sample game, a test engine - builds the packages it names
   from the checkout's folders, uncommitted changes and all, as if the repository were developed at the checkout
   (`nuke package status` says "builds from this checkout"). Change a package, build the sample: nothing is committed,
-  pushed or pulled. A package that states a version in its `nuke.toml` is that version there, released or not.
+  pushed or pulled. A package that states a version in its `nuke.toml` is that version there, released or not. Nothing in
+  such a workspace is the repository's, so its manifests are never read as the repository's packages - not even at a commit
+  a release reads: a template a tool fills in may hold placeholders (`{{Module}}Scripts = ...`) that are no TOML yet.
 
 **Locked or writable.** A package is installed **locked** - read-only on disk, at the lock's commit - unless its
 dependency says `writable = true`: then the build clones its repository into `packages/<repository>/` (where the clone

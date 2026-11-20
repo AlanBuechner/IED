@@ -424,6 +424,29 @@ class ProjectDependencyTests(PackageTest):
 		with open(self.path("packages", "nuke-packages.json"), encoding="utf-8") as f:
 			self.assertEqual({}, json.load(f)["develop"])
 
+	def test_a_template_workspace_in_the_repository_need_not_be_toml(self):
+		"""A release reads every manifest of the commit; one inside a workspace of its own (a template a tool fills in) is not
+		the repository's and may hold placeholders, as the walk of a checkout never reads it. One of the repository's own must
+		still be TOML."""
+		self.engine_with_dependencies()
+		self.root = self.engine.work
+		write_files(self.engine.work, {
+			"Hub/Templates/Game/nuke.toml": "[workspace]\nname = \"{{Name}}\"\ntoolchain = \"1.0.0\"\n",
+			"Hub/Templates/Game/Client/nuke.toml": "[project]\nname = \"{{Module}}Client\"\nkind = \"executable\"\n[dependencies]\n{{Module}}Scripts = { source = \"Game\" }\n",
+		})
+		git("add", "-A", cwd=self.engine.work)
+		git("commit", "--quiet", "-m", "A template", cwd=self.engine.work)
+		code, out = self.nuke("package", "release", "Windowing/Win32", "--patch")
+		self.assertEqual(code, 0, out)
+		self.assertIn("tagged Windowing/Win32/v", out)
+
+		write_files(self.engine.work, {"Broken/nuke.toml": "[project]\nname = Broken\n"})
+		git("add", "-A", cwd=self.engine.work)
+		git("commit", "--quiet", "-m", "A broken manifest of its own", cwd=self.engine.work)
+		code, out = self.nuke("package", "release", "Windowing/Win32", "--patch")
+		self.assertNotEqual(code, 0)
+		self.assertIn(os.path.join("Broken", "nuke.toml"), out.replace("/", os.sep), "the repository's own manifest is read, and said when it is no TOML")
+
 	def test_a_version_written_by_hand_is_released_as_it_is(self):
 		self.engine_with_dependencies()
 		self.root = self.engine.work
