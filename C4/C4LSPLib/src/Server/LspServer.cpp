@@ -512,13 +512,9 @@ namespace C4LSP::Server
 			}
 		}
 		// A file whose text is the same takes its tree from the last analysis: an edit parses the files it changed, not the
-		// program. Its parses are read while no request reads it (a request may make a unit it lacks).
-		std::shared_ptr<const Scripting::PriorParses> prior;
-		if (program.session)
-		{
-			std::lock_guard<std::mutex> querying(m_QueryMutex);
-			prior = program.session->Parses();
-		}
+		// program. Read while requests read it too, without the query lock (a request waiting for it would wait for the
+		// copy): a program's analysis made a unit for every file it registered, so nothing a request does changes them.
+		std::shared_ptr<const Scripting::PriorParses> prior = program.session ? program.session->Parses() : nullptr;
 		std::shared_ptr<CompilationSession> fresh = program.Analyze(m_RootUri.empty() ? "" : PathOfUri(m_RootUri), taken, std::move(prior));
 		++m_AnalysesMade;
 		// The worker alone swaps analyses: reading the last one here (what requests never change of it) needs no lock.

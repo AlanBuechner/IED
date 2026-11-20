@@ -208,8 +208,8 @@ analyzed every program (25 s, the request's whole budget). Now:
   again as its parse did - so its include closure and its include errors are what a parse would give now
   (`Scripting::PriorParses`, `CompilerInstance::UsePriorParses`; trees are never changed once parsed, so two analyses
   share them). On LS's client program (2595 files) an edit's analysis went from 4.7 s (parse 2.5 s) to 2.4 s (parse
-  0.4 s, `parse 402 (2594 kept)` in the log line); what is left is made for the whole program: the macros 0.5 s,
-  reading 0.3 s, the model 1 s ("Open items").
+  0.4 s, `parse 364 (2594 kept)` in the log line); with its bodies checked (BUG-475) it is 3.3 s. What is left is made
+  for the whole program: the macros 0.6 s, reading 0.3 s, the model 0.9 s, the bodies 1 s ("Open items").
 
 ### Requests while it analyzes
 
@@ -245,9 +245,10 @@ and the colors stayed half-done. Now (`Server/MessageInbox`, `LspServer::Serve`)
   waits no longer for an analysis and answers from the one there is, inside IED's 30 s.
 - Typing a line into a script of LS's client program (2595 files, 33 keys at 8 a second, IED's requests for each:
   highlight, code actions, semantic tokens, completion): every completion answered in 0 - 20 ms with the members of
-  what was typed (`GetTransform()->` 60), every semantic tokens request at once; before, every completion answered
-  `ContentModified` and no semantic tokens request was answered while typing. The colors of the final text came with
-  its analysis, 2.4 - 4.8 s after the last key (the analysis then running and the one of the final text).
+  what was typed (`GetTransform()->` 60), every semantic tokens request at once (one in each analysis's publish
+  waits for it, 0.1 s); before, every completion answered `ContentModified` and no semantic tokens request was
+  answered while typing. The colors of the final text came with its analysis, 1.4 - 4.8 s after the last key (the
+  analysis then running and the one of the final text, its bodies checked).
 
 ### Workspace symbols
 
@@ -320,7 +321,7 @@ and 4.9 GB, growing with every edit; one server for the workspace 0.26 and 1.1 G
 
 | Item | Status |
 |---|---|
-| Incremental re-analysis: an edit parses only the files it changed; the macro pass (0.5 s on LS's client program), reading the files (0.3 s) and the model (1 s) are still made for the whole program. | **Partly done** |
+| Incremental re-analysis: an edit parses only the files it changed; the macro pass (0.6 s on LS's client program), reading the files (0.3 s), the model (0.9 s) and the bodies (1 s) are still made for the whole program. | **Partly done** |
 | One parse of a module several analyzed programs share (each program parses Bedrock and its modules today; plan B76). | **Planned** |
 
 ---

@@ -164,17 +164,18 @@ tokens (the one before cancelled) and completion (on a word's first character an
 | Completion while typing | every request answered `ContentModified` (no list) | 0 - 20 ms, the members of what is typed (`GetTransform()->`: 60) |
 | Completion after the last key | 7.2 s | at once |
 | Semantic tokens while typing | none answered (each waited behind the highlight before it) | at once, from the last analysis |
-| The final text's colors and diagnostics | 5.8 s after the last key | 2.4 - 4.8 s (the analysis then running, then the final text's) |
-| An edit's analysis | 4.7 s (parse 2.5 s) | 2.4 s (parse 0.4 s: 2594 of 2595 trees kept) |
+| The final text's colors and diagnostics | 5.8 s after the last key | 1.4 - 4.8 s (the analysis then running, then the final text's) |
+| An edit's analysis | 4.7 s (parse 2.5 s, bodies not checked: BUG-475) | 2.4 s (parse 0.4 s: 2594 of 2595 trees kept); 3.3 s with the bodies checked since BUG-475 |
 
 What changed (C4 `docs/tools/03` "When a program is analyzed", "Requests while it analyzes"): a request waiting for an
 analysis waits parked instead of holding back the requests behind it; completion answers from the last analysis, reading
 the member access being typed from the editor's text (through calls, indexes and `->` operators, which it did not
 follow before) and the scopes from the analysis; a method defined out of its type offers what its implicit `this`
 reaches; completion's list is made in linear time, a global's detail only for the names the typed prefix keeps (the
-list took 1.5 s on this program, now under 20 ms);
-an edit's analysis takes the trees of the files it did not change. Left for each edit: the macro pass (0.5 s), reading
-(0.3 s), the model (1 s).
+list took 1.5 s on this program, now under 20 ms); an edit's analysis takes the trees of the files it did not change.
+Left for each edit: the macro pass (0.6 s), reading (0.3 s), the model (0.9 s), the bodies (1 s). Also checked in an
+IED editor (a private server on a copy of the script): `GetTransform()->Ro` typed at full speed listed `Rotate` within
+the second, and the new line had its colors and its body error 5 s later.
 
 ## Open items
 
