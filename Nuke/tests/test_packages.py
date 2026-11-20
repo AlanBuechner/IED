@@ -447,6 +447,31 @@ class ProjectDependencyTests(PackageTest):
 		self.assertNotEqual(code, 0)
 		self.assertIn(os.path.join("Broken", "nuke.toml"), out.replace("/", os.sep), "the repository's own manifest is read, and said when it is no TOML")
 
+	def test_a_release_keeps_a_manifests_line_breaks_and_writes_nothing_it_need_not(self):
+		"""A Windows checkout's manifests have CRLF: a release whose version is the one written leaves the file as it is (no
+		commit, which git would refuse as empty), and one that bumps it keeps its CRLF."""
+		self.engine_with_dependencies()
+		self.root = self.engine.work
+		win32 = os.path.join(self.engine.work, "Windowing", "Win32", "nuke.toml")
+		text = read(win32).replace('version = "0.2.0"', 'version = "0.2.5"')
+		with open(win32, "w", encoding="utf-8", newline="\r\n") as f:
+			f.write(text)
+		git("commit", "--quiet", "-am", "Win32 0.2.5", cwd=self.engine.work)
+		with open(win32, "w", encoding="utf-8", newline="\r\n") as f:
+			f.write(text)     # as a Windows checkout has it, whatever git stored
+		written = os.stat(win32).st_mtime_ns
+		head = git("rev-parse", "HEAD", cwd=self.engine.work)
+		code, out = self.nuke("package", "release", "Windowing/Win32")
+		self.assertEqual(code, 0, out)
+		self.assertEqual(head, git("rev-parse", "HEAD", cwd=self.engine.work), "the version was written: no commit")
+		self.assertEqual(written, os.stat(win32).st_mtime_ns, "and the file was not written again")
+		code, out = self.nuke("package", "release", "Windowing/Win32", "--patch")
+		self.assertEqual(code, 0, out)
+		with open(win32, "rb") as f:
+			bumped = f.read()
+		self.assertIn(b'version = "0.2.6"\r\n', bumped, "bumped, its CRLF kept")
+		self.assertNotIn(b"\n", bumped.replace(b"\r\n", b""), "every line break CRLF")
+
 	def test_a_version_written_by_hand_is_released_as_it_is(self):
 		self.engine_with_dependencies()
 		self.root = self.engine.work

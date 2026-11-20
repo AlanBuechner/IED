@@ -81,8 +81,7 @@ def _root_text(workspace_dir):
 
 
 def _save(path, text):
-	with open(path, "w", encoding="utf-8", newline="\n") as f:
-		f.write(text)
+	fsutil.save_text(path, text)
 
 
 def _finds(root, entries, folder):

@@ -149,8 +149,7 @@ class _Context:
 			return path, f.read()
 
 	def write_manifest(self, path, text):
-		with open(path, "w", encoding="utf-8", newline="\n") as f:
-			f.write(text)
+		fsutil.save_text(path, text)
 
 
 # --- status ----------------------------------------------------------------------------------------
@@ -637,8 +636,7 @@ def _write_versions(folder, found, versions, moved):
 		text = tomledit.set_key(text, "package", "version", str(version))
 		for name, (dependency, requirement) in moved.get(path, {}).items():
 			text = tomledit.set_key(text, "dependencies", name, _dependency_value(dependency, requirement))
-		with open(file, "w", encoding="utf-8", newline="\n") as f:
-			f.write(text)
+		fsutil.save_text(file, text)   # a version already written leaves the file as it is: nothing to commit
 
 
 def _dependency_value(requirement, version):

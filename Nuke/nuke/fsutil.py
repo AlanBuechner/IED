@@ -146,6 +146,27 @@ def read_text(path):
 		return None
 
 
+def newline_of(path):
+	"""The line break a text file uses: "\r\n" when it has any (a Windows checkout's), else "\n" - for a new file too."""
+	try:
+		with open(path, "rb") as f:
+			return "\r\n" if b"\r\n" in f.read() else "\n"
+	except OSError:
+		return "\n"
+
+
+def save_text(path, text):
+	"""A file a person edits (a manifest) given `text` as read_text reads it: written only when its text changes, in the line
+	breaks it already has, so an edit that changes nothing leaves no change for git to see and a CRLF checkout stays CRLF.
+	True if written."""
+	if read_text(path) == text:
+		return False
+	newline = newline_of(path)
+	with open(path, "w", encoding="utf-8", newline=newline) as f:
+		f.write(text)
+	return True
+
+
 def _make_writable(path):
 	os.chmod(path, stat.S_IREAD | stat.S_IWRITE)
 
