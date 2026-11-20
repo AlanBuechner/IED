@@ -39,6 +39,12 @@ namespace Ai
 	SearchScope ScopeOfSearch(Core::StringView path, Core::StringView glob, bool isFile);
 	// search_text's error for a failed search; a broken regex says how to match its special characters as text.
 	Core::String SearchProblem(Core::StringView problem, bool regex);
+	// search_text's error for a `path` (from `root`, shown after `shown`) that names no file or folder, with the folders it most
+	// likely meant; "" when it names one, or nothing.
+	Core::String MissingSearchPath(const FS::Path& root, Core::StringView path, Core::StringView shown);
+	// The file a search_text `path` that names none most likely meant, which it searches instead (as fs_read reads it): the only
+	// file of its name under `root` outside build output; "" for a folder's name (no extension), or when none or several have it.
+	Core::String SameNamedSearchFile(const FS::Path& root, Core::StringView path);
 	// Whether a search failed only because its pattern is no valid regex: search_text then searches it as text.
 	bool IsBrokenRegex(Core::StringView problem);
 	// What search_text says above the matches of a broken regex searched as text: why it was not one.

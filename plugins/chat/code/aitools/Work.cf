@@ -154,12 +154,35 @@ namespace Ai
 		return said + "; to match ( ) [ ] { } . * + ? | ^ $ or \\ as text put a backslash before it (\\(), or leave regex false";
 	}
 
+	Core::String MissingSearchPath(const FS::Path& root, Core::StringView path, Core::StringView shown) {
+		if (path.IsEmpty()) return Core::String();
+		Core::String full = Core::String((root / path).View());
+		if (FS::IsDirectory(full.CStr()) || FS::FileExists(full.CStr())) return Core::String();
+		return (((Core::String("search_text: no folder or file ") + shown) + path) + NearestFoldersHint(root, path, shown).View()) + MovedFoldersHint(root, path, shown).View();
+	}
+
+	Core::String SameNamedSearchFile(const FS::Path& root, Core::StringView path) {
+		Core::String glob = SameNamedGlob(path);
+		if (glob.View().IndexOf('.') < 0) return Core::String();   // a folder's name: the folders hint says where it is
+		return OnlySourceFile(IED::ExpandGlob(root.View(), glob.View()));
+	}
+
 	static ToolOutcome SearchRun(const ToolInvocation& call) {
 		IED::SearchQuery query;
 		query.m_Text = Core::String(call.m_Args.Member("pattern").AsView());
 		query.m_Regex = call.m_Args.Member("regex").AsBool();
 		query.m_CaseSensitive = call.m_Args.Member("case_sensitive").AsBool();
+		FS::Path root = FS::Path(call.m_Ws.m_Root.View());
+		Core::String path = ToolPath(call.m_Args.Member("path").AsView());
 		SearchScope scope = ScopeOfCall(call);
+		Core::String redirect;
+		Core::String missing = MissingSearchPath(root, path.View(), call.m_Shown.View());
+		if (!missing.IsEmpty()) {
+			Core::String only = SameNamedSearchFile(root, path.View());
+			if (only.IsEmpty()) return ToolError(missing.View());
+			scope = ScopeOfSearch(only.View(), Core::StringView(), true);
+			redirect = (((((Core::String("[no file ") + call.m_Shown.View()) + path.View()) + "; searched ") + call.m_Shown.View()) + only.View()) + ", the only file of that name outside build output]\n";
+		}
 		ApplyScope(scope, query);
 		query.m_MaxResults = c_SearchToolMatches;
 		Threading::Atomic<bool> never;
@@ -186,6 +209,7 @@ namespace Ai
 		for (int64 i = 0; i < result.m_Matches.Count(); ++i) result.m_Matches[i].m_Path = shown + result.m_Matches[i].m_Path.View();
 		for (int64 i = 0; i < result.m_TooLarge.Count(); ++i) result.m_TooLarge[i] = shown + result.m_TooLarge[i].View();
 		Core::StringBuilder out;
+		out.Append(redirect.View());
 		out.Append(note.View());
 		out.Append(SearchListing(result).View());
 		Core::StringBuilder preview;
@@ -649,7 +673,7 @@ namespace Ai
 
 	void AddWorkTools(ToolRegistry& registry) {
 		ToolSpec* search = WorkSpec("search_text", "Search the workspace's files for exact text - messages, setting keys, comments - skipping build output (build, bin, vendor...) and ignored files - a folder a .gitignore '!' rule re-includes, such as a source folder named Build, is searched - unless path names a folder of them (build/...) or one file (searched whatever the ignore rules say); the pattern is literal unless regex is true (a regex that does not compile is searched as text, and the answer says so). Where code is defined or used: code_symbols, code_references. Returns path:line: text. Example: search_text({\"pattern\": \"no language server serves\", \"glob\": \"**/*.cf\"}), or in a plugin's folder: search_text({\"pattern\": \"nuke build\", \"path\": \"plugins:/ied.nuke/skills\"})",
-			"{\"type\": \"object\", \"properties\": {\"pattern\": {\"type\": \"string\"}, \"regex\": {\"type\": \"boolean\", \"description\": \"the pattern is a regular expression, matched in linear time (RE2's kind): classes, groups, alternation, repeats, (?i) - no lookahead, lookbehind or backreferences; a literal ( ) [ ] . * + ? | in it takes a backslash (Foo\\\\( for Foo()\"}, \"glob\": {\"type\": \"string\", \"description\": \"only paths matching this glob (under path when given): '*' within a folder, '**' across folders, {a,b} either, [ch] one character of\"}, \"path\": {\"type\": \"string\", \"description\": \"a folder to search under, or one file to search, workspace-relative (no ..), build output too; plugins:/<plugin id>/ for a plugin's files; ied:/ for IED's checkout in developer mode; a full path inside the workspace or a root, as the code tools print a file's, is taken as that; a file elsewhere on disk (another checkout, a worktree) is not searched: findstr or grep in shell_run\"}, \"case_sensitive\": {\"type\": \"boolean\"}}, \"required\": [\"pattern\"], \"additionalProperties\": false}",
+			"{\"type\": \"object\", \"properties\": {\"pattern\": {\"type\": \"string\"}, \"regex\": {\"type\": \"boolean\", \"description\": \"the pattern is a regular expression, matched in linear time (RE2's kind): classes, groups, alternation, repeats, (?i) - no lookahead, lookbehind or backreferences; a literal ( ) [ ] . * + ? | in it takes a backslash (Foo\\\\( for Foo()\"}, \"glob\": {\"type\": \"string\", \"description\": \"only paths matching this glob (under path when given): '*' within a folder, '**' across folders, {a,b} either, [ch] one character of\"}, \"path\": {\"type\": \"string\", \"description\": \"a folder to search under, or one file to search, workspace-relative (no ..), build output too; plugins:/<plugin id>/ for a plugin's files; ied:/ for IED's checkout in developer mode; a full path inside the workspace or a root, as the code tools print a file's, is taken as that; a file's path that misses searches the one file of its name outside build output, and says so; a file elsewhere on disk (another checkout, a worktree) is not searched: findstr or grep in shell_run\"}, \"case_sensitive\": {\"type\": \"boolean\"}}, \"required\": [\"pattern\"], \"additionalProperties\": false}",
 			ToolClass::Read, true);
 		search->m_Plan = SearchPlan;
 		search->m_Run = SearchRun;

@@ -287,7 +287,9 @@ namespace Ai
 			Serialization::DomNode node = answer.At(i);
 			symbols->Push(node.Member("selectionRange").IsValid() ? ReadDocumentSymbol(node, path, Core::StringView("")) : ReadSymbolInformation(*this, node));
 		}
-		m_Outlines.Insert(Core::String(path), symbols);
+		// An empty outline is not kept: a server still reading the file (just opened, or re-indexing after edits) answers nothing
+		// at first, and a second ask must reach it again.
+		if (!symbols->IsEmpty()) m_Outlines.Insert(Core::String(path), symbols);
 		return *symbols;
 	}
 
@@ -778,6 +780,8 @@ namespace Ai
 		if (target.m_Symbols.IsEmpty() && path.IsEmpty()) {
 			for (const Core::String& file : FilesWritingName(query.m_Ws, name, c_FilesWritingNameMost)) {
 				target.m_Symbols = OwnFirst(WithoutMembersOfFound(query.Find(name, file.View())));
+				// The file writes the name: an outline without it is a server still reading the file - ask once more.
+				if (target.m_Symbols.IsEmpty()) target.m_Symbols = OwnFirst(WithoutMembersOfFound(query.Find(name, file.View())));
 				if (!target.m_Symbols.IsEmpty()) break;
 			}
 		}

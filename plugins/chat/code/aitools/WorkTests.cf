@@ -119,4 +119,42 @@ class WorkToolsTests {
 		assert_true(Ai::IsBrokenRegex(Core::StringView("the pattern is not a valid regex: a '(' that is never closed")) && !Ai::IsBrokenRegex(Core::StringView("no folder x")), "a broken regex, searched as text instead; another problem is an error");
 		assert_se("[the pattern is not a valid regex: a '(' that is never closed - so it was searched as text]\n", Ai::SearchedAsTextNote(Core::StringView("the pattern is not a valid regex: a '(' that is never closed")).CStr(), "the answer says why it was searched as text");
 	}
+
+	[test("missing_search_path")]
+	public static void TestMissingSearchPath() {
+		Core::StringBuilder folder;
+		folder.Append("ied-search-");
+		folder.AppendInt(Platform::UnixTimeNs());
+		FS::Path root = FS::TempDirectory() / folder.View();
+		FS::MakeDirectories((root / "Nuke/nuke/commands").CStr());
+		FS::WriteFileAtomically((root / "Nuke/readme.md").CStr(), (const void*)"x", 1);
+		Core::String said = Ai::MissingSearchPath(root, Core::StringView("Nuke/nuke/build"), Core::StringView("ied:/"));
+		assert_true(said.View().StartsWith(Core::StringView("search_text: no folder or file ied:/Nuke/nuke/build")), said.CStr());
+		assert_true(said.View().Contains(Core::StringView("ied:/Nuke/nuke holds the folders: commands/")), "the folders it most likely meant");
+		assert_true(Ai::MissingSearchPath(root, Core::StringView("Nuke/nuke"), Core::StringView("ied:/")).IsEmpty(), "a folder that is there is searched");
+		assert_true(Ai::MissingSearchPath(root, Core::StringView("Nuke/readme.md"), Core::StringView("ied:/")).IsEmpty(), "so is a file");
+		assert_true(Ai::MissingSearchPath(root, Core::StringView(""), Core::StringView("ied:/")).IsEmpty(), "no path is the whole workspace");
+		FS::RemoveAll(root.CStr());
+	}
+
+	[test("same_named_search_file")]
+	public static void TestSameNamedSearchFile() {
+		Core::StringBuilder folder;
+		folder.Append("ied-search-named-");
+		folder.AppendInt(Platform::UnixTimeNs());
+		FS::Path root = FS::TempDirectory() / folder.View();
+		FS::MakeDirectories((root / "Engine/src/EngineCore").CStr());
+		FS::MakeDirectories((root / "build/int").CStr());
+		FS::MakeDirectories((root / "Tools/a").CStr());
+		FS::MakeDirectories((root / "Tools/b").CStr());
+		FS::WriteFileAtomically((root / "Engine/src/EngineCore/EngineCore.ch").CStr(), (const void*)"x", 1);
+		FS::WriteFileAtomically((root / "build/int/EngineCore.ch").CStr(), (const void*)"x", 1);
+		FS::WriteFileAtomically((root / "Tools/a/Main.cf").CStr(), (const void*)"x", 1);
+		FS::WriteFileAtomically((root / "Tools/b/Main.cf").CStr(), (const void*)"x", 1);
+		assert_se("Engine/src/EngineCore/EngineCore.ch", Ai::SameNamedSearchFile(root, Core::StringView("Engine/src/EngineCore.ch")).CStr(), "a file's path that misses: the only source of its name, build output's copy left out");
+		assert_true(Ai::SameNamedSearchFile(root, Core::StringView("src/Main.cf")).IsEmpty(), "two of that name: no guess");
+		assert_true(Ai::SameNamedSearchFile(root, Core::StringView("Engine/EngineCore")).IsEmpty(), "a folder's name is not looked for as a file");
+		assert_true(Ai::SameNamedSearchFile(root, Core::StringView("Nowhere.ch")).IsEmpty(), "none of that name");
+		FS::RemoveAll(root.CStr());
+	}
 }
