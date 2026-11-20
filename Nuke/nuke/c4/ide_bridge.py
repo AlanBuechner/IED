@@ -76,6 +76,16 @@ def write(workspace, name, job, toolchain, compiler_args, scripts=()):
 	return path
 
 
+def write_program(session, project):
+	"""An executable's options, with the description they name: its test harness's, as the language server analyzes every
+	program as its -test build sees it (C4 docs/tools/03): each project's tests/ is compiled there, and the
+	[dev-dependencies] they include must be the program's too, or each is an error the build never has (C4 BUG-475)."""
+	job = c4compile.plan(session, project, test=True)
+	fsutil.write_if_changed(job.description_path, job.description_text)
+	return write(session.workspace, project.name, job, session.toolchain(), c4compile.compiler_args(project, session.configuration),
+		script_scopes(session, project))
+
+
 def write_unbuilt(session):
 	"""The options of every program of the workspace no build has written them for, with the description they name: a
 	workspace just made is analyzed as it will compile from the moment it is opened. Returns how many it wrote."""
@@ -84,8 +94,6 @@ def write_unbuilt(session):
 		unbuilt = project.package is None and project.is_c4 and project.kind == "executable"
 		if not unbuilt or os.path.isfile(options_path(session.workspace, project.name)):
 			continue
-		job = c4compile.plan(session, project)
-		fsutil.write_if_changed(job.description_path, job.description_text)
-		write(session.workspace, project.name, job, session.toolchain(), c4compile.compiler_args(project, session.configuration), script_scopes(session, project))
+		write_program(session, project)
 		written += 1
 	return written

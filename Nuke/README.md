@@ -357,7 +357,9 @@ harnesses (C4/docs/language/15-projects.md rule 7), so each case runs once in a 
 **IDE bridge.** After each compile of a program (an executable's build, a module's test build), also one that
 fails, Nuke writes `<workspace>/.ied/local/lsp-options/<P>.json`: `includePaths`, `defines`, `c4Home` (the
 toolchain), `toolchain`, `projects` (the description) and `target` (the `-m...` compiler arguments) - the exact
-input the compiler saw, so the language server in IED agrees with the build. IED hands every one of them to one
+input the compiler saw, so the language server in IED agrees with the build. The description is the program's test
+harness's, also for an executable's build: C4LSP analyzes every program as its `-test` build sees it, each project's
+`tests/` included, so the `[dev-dependencies]` those tests include must be in it (C4 BUG-475). IED hands every one of them to one
 C4LSP for the workspace, which analyzes a module's files in a program that compiles them. `nuke init --ied` writes them for the workspace's programs not built yet, with the description they name, so a workspace just made is analyzed as it will compile from the moment it is opened. `ide = false` in `[workspace]` turns it off. `.ied/local/` is machine-local; `nuke init` adds it to
 `.gitignore`.
 

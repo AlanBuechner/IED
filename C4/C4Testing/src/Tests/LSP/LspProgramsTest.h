@@ -54,6 +54,10 @@ namespace Testing
 		TEST_FUNC(Lsp.Programs)
 		void TestALibrarysOwnSourcesAreItsProgram();
 
+		// BUG-474: a file outside the workspace folder, opened unchanged after its program's analysis, has its tokens.
+		TEST_FUNC(Lsp.Programs)
+		void TestAFileOutsideTheRootOpenedLaterHasTokens();
+
 		// The planner, honest: as few programs as hold the documents.
 		TEST_FUNC(Lsp.Programs.Plan)
 		void TestAssignDocumentsCoversWithFewPrograms();

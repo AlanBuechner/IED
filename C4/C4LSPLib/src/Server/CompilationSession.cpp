@@ -602,7 +602,9 @@ void CompilationSession::RunPreprocessPhase()
 		if (memIt != m_InMemorySources.end())
 			return memIt->second;
 
-		fs::path path = IsAbsolutePath(displayName) ? fs::path(displayName) : fs::path(m_RootFolder) / displayName;
+		// The document's own file: outside the root folder a display name is the bare file name (BUG-474).
+		const std::string onDisk = Protocol::DocumentUri::FromUri(uri);
+		const fs::path path = IsAbsolutePath(onDisk) ? fs::path(std::u8string(onDisk.begin(), onDisk.end())) : fs::path(m_RootFolder) / displayName;
 		std::ifstream f(path, std::ios::binary);
 		if (!f.is_open())
 			return std::string();

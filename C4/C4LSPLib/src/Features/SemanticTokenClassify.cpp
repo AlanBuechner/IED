@@ -316,6 +316,30 @@ namespace C4LSP::Features::TokenWalk
 		return isLast ? K(SemanticTokenKind::Field) : K(SemanticTokenKind::Namespace); // conservative fallbacks
 	}
 
+	/// One segment of a type reference, `prefix` naming it from the outermost segment, looked up from where `path`
+	/// declares it. A type the scopes declare keeps its own declaration kind - an alias its generic `type`, never taken
+	/// for an unresolved name (BUG-471) - and the namespace color is the fallback for a name that declares no type, so
+	/// `Engine::Thing` reads as a struct although "Engine" is a namespace prefix. `endsPrimitive`: the segment is the
+	/// last of a type that resolves to a primitive; it is builtin only when it names the primitive itself (`int32`),
+	/// not an alias of one.
+	static TokInfo ClassifyTypeSegment(const Ctx& ctx, const std::string& prefix, const std::string& name, bool endsPrimitive,
+		const Core::Vector<const Scripting::AstNode*>& path)
+	{
+		const Scripting::SymbolInfo* entry = ctx.resolver ? ctx.resolver->Lookup(prefix, 0, &path) : nullptr;
+		const bool declaresType = entry && entry->kind == Scripting::SymbolKind::Type;
+		if (endsPrimitive && !declaresType)
+			return { K(SemanticTokenKind::Type), SemanticTokenModifiers::Builtin };
+		if (ctx.templateParamNames.count(name))
+			return { K(SemanticTokenKind::TypeParameter), None }; // `Box<T>`: a declared parameter use, not a type
+		if (declaresType)
+			return { TypeDeclKind(entry->declNode), None };
+		if (IsNamespacePrefix(ctx, prefix))
+			return { K(SemanticTokenKind::Namespace), None };
+		// A nested type (`struct Vec2` inside `class Test`) the lookup misses: the walk's type-name table has its kind.
+		auto declared = entry ? ctx.typeNames.end() : ctx.typeNames.find(name);
+		return { declared != ctx.typeNames.end() ? declared->second : K(SemanticTokenKind::Type), None };
+	}
+
 	/// Classify a type reference (a QualType or one of its template-argument types): primitives read in the
 	/// keyword family + builtin, user-defined types with their OWN declaration kind, `T` as typeParameter. The
 	/// resolved type comes from the model's own type verb (the compiler is the source of truth); a single-segment
@@ -333,45 +357,18 @@ namespace C4LSP::Features::TokenWalk
 			isPrimitive = named && named->IsPrimitive();
 		}
 
+		const auto& segments = qt.BaseName()->GetSegments();
 		std::string prefix; // outermost..this segment, for namespace / type resolution
-		for (const auto& seg : qt.BaseName()->GetSegments())
+		for (uint32 i = 0; i < segments.Count(); ++i)
 		{
+			const auto& seg = segments[i];
 			if (seg.nameToken.GetType() != Scripting::TokenType::Identifier)
 				continue;
-			prefix += (prefix.empty() ? "" : "::") + std::string(seg.nameToken.GetText());
+			const std::string name(seg.nameToken.GetText());
+			prefix += (prefix.empty() ? "" : "::") + name;
 
-			uint32 kind = K(SemanticTokenKind::Type); // user-defined type reference: gold, in any context
-			uint32 mods = None;
-			if (isPrimitive)
-				mods |= SemanticTokenModifiers::Builtin;
-			else if (ctx.templateParamNames.count(seg.nameToken.GetText()))
-				kind = K(SemanticTokenKind::TypeParameter); // `Box<T>`: a declared parameter use, not a type
-			else if (ctx.resolver)
-			{
-				// A user-defined type in ANY context (member variable, parameter, ...): color it with its own
-				// declaration kind instead of the generic gold. The class/enum family is distinct from `type`.
-				const Scripting::SymbolInfo* entry = ctx.resolver->Lookup(prefix, 0);
-				if (entry && entry->kind == Scripting::SymbolKind::Type)
-					kind = TypeDeclKind(entry->declNode);
-				else if (!entry && !IsNamespacePrefix(ctx, prefix))
-				{
-					// Nested types (`struct Vec2` inside `class Test`) don't resolve through the global
-					// qualified lookup; fall back to the walk's type-name table so they still read with
-					// their own declaration kind (struct) rather than generic gold.
-					auto tnIt = ctx.typeNames.find(seg.nameToken.GetText());
-					if (tnIt != ctx.typeNames.end())
-						kind = tnIt->second;
-				}
-			}
-
-			if (kind == K(SemanticTokenKind::Type) && !mods && IsNamespacePrefix(ctx, prefix))
-				// Namespace coloring is the CONSERVATIVE FALLBACK only: a segment that resolved to a real type
-				// above keeps its declaration kind. Without this ordering `Engine::Thing` (a struct living in
-				// namespace Engine) would read as a NAMESPACE because "Engine" is a valid namespace prefix -
-				// the type must win, exactly like VS2022/Visual Assist color qualified names per segment.
-				kind = K(SemanticTokenKind::Namespace); // genuine namespace chain: Win::Sub in `Win::Sub::Thing`
-
-			RecordOffset(ctx, seg.nameToken.GetStartLocation(), TokInfo{ kind, mods });
+			const bool endsPrimitive = isPrimitive && i + 1 == segments.Count();
+			RecordOffset(ctx, seg.nameToken.GetStartLocation(), ClassifyTypeSegment(ctx, prefix, name, endsPrimitive, path));
 		}
 	}
 } // namespace C4LSP::Features::TokenWalk

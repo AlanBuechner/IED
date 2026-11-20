@@ -882,4 +882,98 @@ void Counter::Bump(Counter::Step step)
 		TEST_ASSERT_EQ(nested.kind, (uint32)SemanticTokenKind::Struct);
 		TEST_PASSED();
 	}
+
+	static void AssertTokenKind(const C4LSP::Features::SemanticTokensResult& result, const std::string& text,
+		const std::string& needle, SemanticTokenKind kind)
+	{
+		auto tok = TokenAt(result, text, needle, 1);
+		TEST_ASSERT(tok.found);
+		TEST_ASSERT_EQ(tok.kind, (uint32)kind);
+		TEST_ASSERT_EQ(tok.mods & SemanticTokenModifiers::Builtin, 0u);
+	}
+
+	void LspSemanticTokensTest::TestQualifiedAliasInTypePositionIsAType()
+	{
+		const std::string program =
+			R"(namespace Shapes
+{
+	template<T> class TBox { public T value; }
+	struct Plain { public int32 x; }
+	alias FBox = TBox<float>;
+	alias Box = FBox;
+	alias PlainAlias = Plain;
+}
+
+struct Holder
+{
+	public Shapes::FBox first;
+	public Shapes::Box second;
+	public Shapes::PlainAlias third;
+	public Shapes::Box* pointer;
+	public Shapes::Box[2] pair;
+	public Shapes::Plain plain;
+}
+
+int32 Count(Shapes::Box parameter) { return 0; }
+
+int32 main()
+{
+	Shapes::Box local;
+	return 0;
+}
+)";
+		auto session = Make("QualifiedAlias.cf", program);
+		auto result = SemanticTokens::ForDocument(session, Testing::Lsp::UriFor("QualifiedAlias.cf"));
+
+		AssertTokenKind(result, program, "Shapes::FBox first", SemanticTokenKind::Namespace);
+		AssertTokenKind(result, program, "FBox first", SemanticTokenKind::Type);
+		AssertTokenKind(result, program, "Box second", SemanticTokenKind::Type); // an alias of an alias
+		AssertTokenKind(result, program, "PlainAlias third", SemanticTokenKind::Type);
+		AssertTokenKind(result, program, "Box* pointer", SemanticTokenKind::Type);
+		AssertTokenKind(result, program, "Box[2] pair", SemanticTokenKind::Type);
+		AssertTokenKind(result, program, "Box parameter", SemanticTokenKind::Type);
+		AssertTokenKind(result, program, "Shapes::Box local", SemanticTokenKind::Namespace);
+		AssertTokenKind(result, program, "Box local", SemanticTokenKind::Type);
+		AssertTokenKind(result, program, "Plain plain", SemanticTokenKind::Struct); // a struct keeps its own kind
+		TEST_PASSED();
+	}
+
+	void LspSemanticTokensTest::TestAliasOfPrimitiveIsNotBuiltin()
+	{
+		const std::string program =
+			R"(namespace Units
+{
+	alias Meters = float;
+	struct Track { public Meters length; }
+}
+
+struct Holder
+{
+	public Units::Meters span;
+	public float raw;
+}
+
+int32 main()
+{
+	Units::Meters local = (Units::Meters)2.0f;
+	return 0;
+}
+)";
+		auto session = Make("PrimitiveAlias.cf", program);
+		auto result = SemanticTokens::ForDocument(session, Testing::Lsp::UriFor("PrimitiveAlias.cf"));
+
+		AssertTokenKind(result, program, "Meters length", SemanticTokenKind::Type); // unqualified, inside its namespace
+		AssertTokenKind(result, program, "Units::Meters span", SemanticTokenKind::Namespace);
+		AssertTokenKind(result, program, "Meters span", SemanticTokenKind::Type);
+		AssertTokenKind(result, program, "Units::Meters local", SemanticTokenKind::Namespace);
+		AssertTokenKind(result, program, "Meters local", SemanticTokenKind::Type);
+		AssertTokenKind(result, program, "Units::Meters)", SemanticTokenKind::Namespace); // the cast
+		AssertTokenKind(result, program, "Meters)", SemanticTokenKind::Type);
+
+		auto primitive = TokenAt(result, program, "float raw", 1);
+		TEST_ASSERT(primitive.found);
+		TEST_ASSERT_EQ(primitive.kind, (uint32)SemanticTokenKind::Type);
+		TEST_ASSERT((primitive.mods & SemanticTokenModifiers::Builtin) != 0);
+		TEST_PASSED();
+	}
 } // namespace Testing

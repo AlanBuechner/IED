@@ -200,8 +200,8 @@ class C4BuildTests(WorkspaceTest):
 			del os.environ["FAKE_C4_FAIL"]
 		self.assertNotEqual(code, 0, out)
 		options = json.loads(read(self.path(".ied", "local", "lsp-options", "Game.json")))
-		self.assertEqual(self.int("Game", "projects.toml").replace("\\", "/"), options["projects"].replace("\\", "/"))
-		self.assertTrue(os.path.isfile(self.int("Game", "projects.toml")), "the description the options name is there")
+		self.assertEqual(self.int("Game", "tests", "projects.toml").replace("\\", "/"), options["projects"].replace("\\", "/"))
+		self.assertTrue(os.path.isfile(self.int("Game", "tests", "projects.toml")), "the description the options name is there")
 
 	def test_up_to_date_until_something_changes(self):
 		self.nuke("build")
@@ -369,6 +369,22 @@ class C4TestHarnessTests(WorkspaceTest):
 		self.assertTrue(os.path.isfile(self.path("build", "bin", "Development-windows-x64", "Engine", "dxc.dll")))
 		self.nuke("build", "Game")
 		self.assertFalse(os.path.isfile(self.path("build", "bin", "Development-windows-x64", "Game", "dxc.dll")))
+
+	def test_a_programs_editor_options_hold_its_tests_packages(self):
+		"""The language server analyzes a program as its -test build sees it, the engine's tests/ included (C4 docs/tools/03):
+		the options Game's build writes name its harness's description, where the engine's tests reach their backend - in the
+		program's own description that include is an error the build never has, and it turns off every body's checks (C4 BUG-475)."""
+		self.dev_dependencies()
+		code, out = self.nuke("build", "Game")
+		self.assertEqual(code, 0, out)
+		options = json.loads(read(self.path(".ied", "local", "lsp-options", "Game.json")))
+		harness = self.path("build", "int", "Development-windows-x64", "Game", "tests", "projects.toml")
+		self.assertEqual(harness.replace("\\", "/"), options["projects"].replace("\\", "/"))
+		description = tomllib.loads(read(options["projects"]))
+		engine = next(p for p in description["project"] if p["name"] == "Engine")
+		self.assertEqual(["Rhi", "Dx12"], engine["depends"])
+		self.assertIn(self.path("Dx12", "src").replace("\\", "/"), options["includePaths"])
+		self.assertFalse(os.path.isfile(self.path("build", "bin", "Development-windows-x64", "Game", "dxc.dll")), "the build itself is the program's")
 
 	def test_a_dev_dependency_that_holds_the_project_is_a_cycle(self):
 		self.files({"nuke.toml": "[workspace]\ntoolchain = \"1.0.0\"\n",

@@ -145,5 +145,13 @@ namespace Testing
 	// bare in a method defined in the .cf, a type nested in a class named as an owner - still reads with its own kind.
 	TEST_FUNC(Lsp.Features.SemanticTokens)
 	void TestAnIncludedHeadersFieldsAndTypesKeepTheirKinds();
+
+	// BUG-471: `Ns::Alias` as a field, parameter, local, pointer or array type reads as a type, its namespace as one.
+	TEST_FUNC(Lsp.Features.SemanticTokens)
+	void TestQualifiedAliasInTypePositionIsAType();
+
+	// BUG-471: an alias of a primitive is the user's type name, not built in, and its namespace stays a namespace.
+	TEST_FUNC(Lsp.Features.SemanticTokens)
+	void TestAliasOfPrimitiveIsNotBuiltin();
 	};
 } // namespace Testing

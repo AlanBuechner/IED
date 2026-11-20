@@ -31,8 +31,7 @@ class Build(base.Command):
 		finally:
 			# A compile that fails still tells the editor what it compiles: its errors are what the editor should show.
 			if session.workspace.spec.ide:
-				ide_bridge.write(session.workspace, project.name, job, session.toolchain(), c4compile.compiler_args(project, session.configuration),
-					ide_bridge.script_scopes(session, project))
+				ide_bridge.write_program(session, project)
 		copy_files(session, project)
 
 

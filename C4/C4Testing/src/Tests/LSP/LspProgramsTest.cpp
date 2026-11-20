@@ -402,4 +402,18 @@ namespace Testing
 		TEST_ASSERT(ProgramsToConsult({ client, tool, within }, -1) == std::vector<size_t>({ 0, 1 }));
 		TEST_PASSED();
 	}
+
+	void LspProgramsTest::TestAFileOutsideTheRootOpenedLaterHasTokens()
+	{
+		const Workspace ws = MakeWorkspace("c4lsp_programs_outside_root");
+		ServerHarness server(FileUri(ws.root / "Client")); // the workspace folder: the engine's files lie outside it
+		server.Initialize(ws.WithPrograms());
+		server.Open(ws.clientMain, kClientMain);
+		server.Open(ws.engineSource, kEngineSource); // its text is the analyzed one: no analysis runs for it
+		const Value tokens = server.Request("textDocument/semanticTokens/full", ServerHarness::At(ws.engineSource, kEngineSource, "EngineValue"));
+		TEST_ASSERT(tokens.IsObject());
+		TEST_ASSERT(tokens.Member("data").Size() > 0);
+		fs::remove_all(ws.root);
+		TEST_PASSED();
+	}
 }
