@@ -86,7 +86,6 @@ namespace C4LSP::Features::TokenWalk
 	bool IsNamespacePrefix(const Ctx& ctx, const std::string& name);
 	uint32 ClassifyChainSegment(const Ctx& ctx, const std::vector<std::string>& segments, size_t i);
 	void ClassifyTypeSegments(const Scripting::QualTypeNode& qt, Ctx& ctx, const Core::Vector<const Scripting::AstNode*>& path);
-	void WalkTemplateArgument(const Scripting::AstNode& arg, Ctx& ctx, const Core::Vector<const Scripting::AstNode*>& path);
 
 	/// True when `node` (the last entry of `path`) is what its parent call calls: `x.Get` in `x.Get()`.
 	bool IsCallee(const Scripting::AstNode& node, const Core::Vector<const Scripting::AstNode*>& path);

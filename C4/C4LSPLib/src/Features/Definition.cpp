@@ -14,7 +14,6 @@
 #include "Parser/Nodes/Declarations/EnumDefinitionNode.h"
 #include "Parser/Nodes/Expressions/LambdaNode.h"
 #include "Features/TypeDefinition.h"
-#include "Features/TypeText.h"
 #include "Features/DeclarationText.h"
 #include "Model/SymbolTable.h"
 #include <cctype>
@@ -260,7 +259,7 @@ namespace C4LSP::Features
 	{
 		for (uint32 i = located.path.Count(); i-- > 0;)
 			if (located.path[i]->Type() == Scripting::NodeType::QualType)
-				return DeclarationOfNamedType(session.GetResolver().ResolveQualType(static_cast<const Scripting::QualTypeNode&>(*located.path[i]), located.path));
+				return session.GetResolver().DeclarationOfWrittenType(static_cast<const Scripting::QualTypeNode&>(*located.path[i]), located.path);
 		return nullptr;
 	}
 
@@ -333,6 +332,8 @@ namespace C4LSP::Features
 			const Scripting::AstNode* node = located.path[i];
 			if (node->Type() == Scripting::NodeType::LambdaExpression)
 				break; // a lambda is a function of its own: the call it is an argument of is not what its code names
+			if (node->Type() == Scripting::NodeType::QualType)
+				break; // on a type (`T` of `Get<T>()`): the call or type around it is not what it names (BUG-472)
 
 			if (Server::SemanticResolver::IsReference(*node, i > 0 ? located.path[i - 1] : nullptr))
 			{

@@ -372,13 +372,6 @@ namespace C4LSP::Features::TokenWalk
 				kind = K(SemanticTokenKind::Namespace); // genuine namespace chain: Win::Sub in `Win::Sub::Thing`
 
 			RecordOffset(ctx, seg.nameToken.GetStartLocation(), TokInfo{ kind, mods });
-
-			// Template arguments (`Box<int32>`) hang off the segment as a side field - NOT children of this
-			// node or its base name - so no other walk case ever reaches them. Classify each argument with its
-			// OWN declaration kind (primitives keyword+builtin, user types gold family, `T` typeParameter),
-			// exactly like the surrounding type context; first-wins keeps this from clobbering anything else.
-			if (seg.templateArgs)
-				WalkTemplateArgument(*seg.templateArgs, ctx, path);
 		}
 	}
 } // namespace C4LSP::Features::TokenWalk

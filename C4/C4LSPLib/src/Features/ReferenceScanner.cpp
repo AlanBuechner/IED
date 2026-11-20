@@ -11,7 +11,6 @@
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
 #include "Parser/Nodes/Declarations/AnnotationNode.h"
 #include "Server/WrittenChildren.h"
-#include "Features/TypeText.h"
 #include <algorithm>
 
 namespace C4LSP::Features
@@ -214,7 +213,7 @@ namespace C4LSP::Features
 		if (node.Type() == Scripting::NodeType::QualType && AnyTypeTarget(search.targets))
 		{
 			const auto& type = static_cast<const Scripting::QualTypeNode&>(node);
-			if (type.BaseName() && search.targets.count(DeclarationOfNamedType(search.resolver.ResolveQualType(type, path))) > 0)
+			if (type.BaseName() && search.targets.count(search.resolver.DeclarationOfWrittenType(type, path)) > 0)
 				search.sink(Occurrence{ &node, NameOf(node), true }, path);
 			return;
 		}

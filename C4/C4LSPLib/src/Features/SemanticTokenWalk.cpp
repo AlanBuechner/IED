@@ -41,30 +41,6 @@
 
 namespace C4LSP::Features::TokenWalk
 {
-	/// Classify a template-argument node (`Box<int32>`, `Pair<T, Vec2>`): each argument is parsed as its own
-	/// QualType / literal by the parser, so types inside `<...>` must be colored with their OWN declaration kind -
-	/// exactly like the surrounding type context. Without this the arguments fell through to plain identifier
-	/// classification and every `int32` in a template argument read as an unresolved VARIABLE (gold), while the
-	/// same token in `Box<int32> origin;` or `int32 id = 5;` read blue: one token, three colors. First-wins in
-	/// RecordOffset keeps this from clobbering a classification another node already recorded for the same offset.
-	void WalkTemplateArgument(const Scripting::AstNode& arg, Ctx& ctx, const Core::Vector<const Scripting::AstNode*>& path)
-	{
-		if (arg.Type() == Scripting::NodeType::QualType)
-		{
-			ClassifyTypeSegments(static_cast<const Scripting::QualTypeNode&>(arg), ctx, path);
-		}
-		else if (arg.Type() == Scripting::NodeType::TemplateArgumentList)
-		{
-			const auto& list = static_cast<const Scripting::TemplateArgumentListNode&>(arg); // nested `Box<Pair<int32>>`
-			for (uint32 i = 0; i < list.ArgumentCount(); ++i)
-				if (list.GetArguments()[i])
-					WalkTemplateArgument(*list.GetArguments()[i], ctx, path);
-		}
-
-		// Non-type arguments (literals, identifiers) fall through: the generic child recursion below reaches them
-		// and classifies them exactly like any other expression in the same file.
-	}
-
 	/// True when `node` (the last entry of `path`) is what its parent call calls: `x.Get` in `x.Get()`.
 	bool IsCallee(const Scripting::AstNode& node, const Core::Vector<const Scripting::AstNode*>& path)
 	{
@@ -368,22 +344,6 @@ namespace C4LSP::Features::TokenWalk
 			break;
 		}
 
-		// `Box<int32>` / `Identity<T>(41)`: the parser stores template arguments as their own nodes that NO generic
-		// child walk reaches (NamespaceQualifiedNameNode has no Children(), FunctionCallNode::Children() excludes them).
-		// Walk them explicitly so type arguments color with their declaration kind instead of falling to variable.
-		case Scripting::NodeType::TemplateArgumentList: {
-			const auto& list = static_cast<const Scripting::TemplateArgumentListNode&>(node);
-			for (uint32 i = 0; i < list.ArgumentCount(); ++i)
-				if (list.GetArguments()[i])
-					WalkTemplateArgument(*list.GetArguments()[i], ctx, path);
-			break; // arguments are NOT generic children: they were just walked with template-argument semantics
-		}
-		case Scripting::NodeType::FunctionCall: {
-			const auto& call = static_cast<const Scripting::FunctionCallNode&>(node);
-			if (call.HasTemplateArgs())
-				WalkTemplateArgument(*call.GetTemplateArgs(), ctx, path); // callee + args still recurse below
-			break;
-		}
 		case Scripting::NodeType::LambdaExpression: {
 			// A capture names a variable (`[&counter]`); an init capture's variable is walked as its declaration.
 			for (const Scripting::LambdaCapture& capture : static_cast<const Scripting::LambdaNode&>(node).GetCaptures())

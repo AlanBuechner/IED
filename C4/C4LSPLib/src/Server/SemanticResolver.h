@@ -65,6 +65,10 @@ namespace C4LSP::Server
 		/// Resolve a QualTypeNode to its concrete type in the context of its enclosing declarations.
 		const Scripting::Type* ResolveQualType(const Scripting::QualTypeNode& qt, const Core::Vector<const Scripting::AstNode*>& path) const;
 
+		/// The declaration of the type a QualTypeNode names: its resolved type's, else the template's when it specializes
+		/// one by a parameter still unbound (`Ref` of `Ref<T>` inside `template<T>`, which has no type, BUG-473).
+		const Scripting::AstNode* DeclarationOfWrittenType(const Scripting::QualTypeNode& qt, const Core::Vector<const Scripting::AstNode*>& path) const;
+
 		/// A simple or qualified name -> SymbolInfo (visibility-aware). The new LookupQualified/Lookup.
 		const Scripting::SymbolInfo* Lookup(const std::string& name, uint32 unitId, const Core::Vector<const Scripting::AstNode*>* path = nullptr) const;
 

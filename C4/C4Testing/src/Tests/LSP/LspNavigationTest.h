@@ -100,5 +100,19 @@ namespace Testing
 		// A member reached with `->` through an object's [operator("->")] (`ref->Hurt(...)`), a template's too, resolves.
 		TEST_FUNC(Lsp.Navigation.Hover)
 		void TestMembersReachedThroughArrowOperatorsResolve();
+
+		// BUG-472: a type written as a template argument (`Ref<T>`, `Get<T>()`) is what go-to-definition and hover at it
+		// are about, not the template or the call around it.
+		TEST_FUNC(Lsp.Navigation.Definition)
+		void TestDefinitionOfATypeWrittenAsATemplateArgument();
+
+		// BUG-472: a type's references and rename include its uses as a template argument.
+		TEST_FUNC(Lsp.Navigation.References)
+		void TestReferencesOfATypeIncludeItsTemplateArguments();
+
+		// BUG-473: a template specialized by a template's own parameter (`Ref<T>` inside `template<T>`) names the template:
+		// references, highlight, rename and hover at it, and the template's references, include it.
+		TEST_FUNC(Lsp.Navigation.References)
+		void TestReferencesOfATemplateIncludeItsUsesByAParameter();
 	};
 }

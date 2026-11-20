@@ -139,6 +139,43 @@ int32 main() { return 0; }
 int32 main() { return 0; }
 )";
 
+	// A type written as a template argument: of a return type, of a call, nested, and behind namespace qualifiers.
+	static const char* kTemplateArguments =
+		R"(namespace Scene
+{
+	struct TransformComponent { public int32 x; };
+
+	template<T> struct ComponentRef
+	{
+		public T* m_Target;
+	};
+
+	struct Entity
+	{
+		template<T> public ComponentRef<T> GetComponent() const { ComponentRef<T> found; return found; }
+	};
+
+	struct Behaviour
+	{
+		public ComponentRef<TransformComponent> GetTransform() const { return m_Entity.GetComponent<TransformComponent>(); }
+		public Entity m_Entity;
+	};
+}
+
+int32 main()
+{
+	Scene::ComponentRef<Scene::ComponentRef<Scene::TransformComponent>> nested;
+	return 0;
+}
+)";
+
+	// The line go-to-definition leads to from `needle`'s first character (its `occurrence`-th), -1 unless it finds one place.
+	static int64 DefinitionLine(C4LSP::Server::CompilationSession& session, const std::string& uri, const char* needle, int occurrence = 1)
+	{
+		const auto found = Definition::At(session, uri, Testing::Lsp::PositionOf(kTemplateArguments, needle, occurrence));
+		return found.Count() == 1 ? static_cast<int64>(found[0].range.start.line) : -1;
+	}
+
 	static const DocumentSymbol* Named(const Core::Vector<DocumentSymbol>& symbols, const std::string& name)
 	{
 		for (const auto& symbol : symbols)
@@ -560,6 +597,78 @@ int32 main() { return 0; }
 		TEST_ASSERT(Contains(field.contents, "public int32 Ied::Health::m_Value"));
 		auto templated = Hover::At(session, uri, Testing::Lsp::PositionOf(kArrowOperators, "Hurt(2)"));
 		TEST_ASSERT(Contains(templated.contents, "public int32 Ied::Health::Hurt(int32 by)"));
+		TEST_PASSED();
+	}
+
+	void LspNavigationTest::TestDefinitionOfATypeWrittenAsATemplateArgument()
+	{
+		auto session = Testing::Lsp::MakeSession("Behaviour.cf", kTemplateArguments);
+		const std::string uri = Testing::Lsp::UriFor("Behaviour.cf");
+		const int64 transform = Testing::Lsp::PositionOf(kTemplateArguments, "struct TransformComponent").line;
+		const int64 componentRef = Testing::Lsp::PositionOf(kTemplateArguments, "template<T> struct ComponentRef").line;
+		const int64 getComponent = Testing::Lsp::PositionOf(kTemplateArguments, "GetComponent() const").line;
+		TEST_ASSERT_EQ(DefinitionLine(session, uri, "TransformComponent> GetTransform"), transform);
+		TEST_ASSERT_EQ(DefinitionLine(session, uri, "ComponentRef<TransformComponent> GetTransform"), componentRef);
+		TEST_ASSERT_EQ(DefinitionLine(session, uri, "TransformComponent>()"), transform); // a call's argument, not the call
+		TEST_ASSERT_EQ(DefinitionLine(session, uri, "GetComponent<TransformComponent>"), getComponent);
+		TEST_ASSERT_EQ(DefinitionLine(session, uri, "TransformComponent>> nested"), transform); // nested, qualified
+		TEST_ASSERT_EQ(DefinitionLine(session, uri, "ComponentRef<Scene::TransformComponent>>"), componentRef);
+		TEST_ASSERT_EQ(DefinitionLine(session, uri, "ComponentRef<Scene::ComponentRef"), componentRef);
+
+		auto middle = Testing::Lsp::PositionOf(kTemplateArguments, "TransformComponent> GetTransform");
+		middle.character += 9; // a click inside the word
+		auto fromMiddle = Definition::At(session, uri, middle);
+		TEST_ASSERT_EQ(fromMiddle.Count(), 1u);
+		TEST_ASSERT_EQ(static_cast<int64>(fromMiddle[0].range.start.line), transform);
+
+		auto inReturnType = Hover::At(session, uri, Testing::Lsp::PositionOf(kTemplateArguments, "TransformComponent> GetTransform"));
+		TEST_ASSERT(Contains(inReturnType.contents, "TransformComponent"));
+		TEST_ASSERT(!Contains(inReturnType.contents, "ComponentRef"));
+		auto inCall = Hover::At(session, uri, Testing::Lsp::PositionOf(kTemplateArguments, "TransformComponent>()"));
+		TEST_ASSERT(Contains(inCall.contents, "TransformComponent"));
+		TEST_ASSERT(!Contains(inCall.contents, "GetComponent"));
+		TEST_ASSERT_EQ(CallHierarchy::Prepare(session, uri, Testing::Lsp::PositionOf(kTemplateArguments, "TransformComponent>()")).Count(), 0u);
+		TEST_PASSED();
+	}
+
+	void LspNavigationTest::TestReferencesOfATypeIncludeItsTemplateArguments()
+	{
+		auto session = Testing::Lsp::MakeSession("Behaviour.cf", kTemplateArguments);
+		const std::string uri = Testing::Lsp::UriFor("Behaviour.cf");
+		const auto inReturnType = Testing::Lsp::PositionOf(kTemplateArguments, "TransformComponent> GetTransform");
+		const auto inCall = Testing::Lsp::PositionOf(kTemplateArguments, "TransformComponent>()");
+		const auto nested = Testing::Lsp::PositionOf(kTemplateArguments, "TransformComponent>> nested");
+		auto fromDeclaration = References::At(session, uri, Testing::Lsp::PositionOf(kTemplateArguments, "TransformComponent"));
+		TEST_ASSERT_EQ(fromDeclaration.Count(), 3u);
+		TEST_ASSERT_EQ(fromDeclaration[0].range.start.character, inReturnType.character);
+		TEST_ASSERT_EQ(fromDeclaration[1].range.start.character, inCall.character);
+		TEST_ASSERT_EQ(fromDeclaration[2].range.start.line, nested.line);
+		TEST_ASSERT_EQ(fromDeclaration[2].range.start.character, nested.character);
+		TEST_ASSERT_EQ(References::At(session, uri, inCall).Count(), 3u); // asked at a call's argument: the type's, not the call's
+		TEST_ASSERT_EQ(References::At(session, uri, Testing::Lsp::PositionOf(kTemplateArguments, "ComponentRef<Scene::TransformComponent>>")).Count(), 5u);
+
+		auto renamed = Rename::At(session, uri, inCall);
+		TEST_ASSERT(renamed.found);
+		TEST_ASSERT_EQ(renamed.occurrences.Count(), 4u); // the declaration and its three uses as an argument
+		TEST_PASSED();
+	}
+
+	void LspNavigationTest::TestReferencesOfATemplateIncludeItsUsesByAParameter()
+	{
+		auto session = Testing::Lsp::MakeSession("Behaviour.cf", kTemplateArguments);
+		const std::string uri = Testing::Lsp::UriFor("Behaviour.cf");
+		const auto byParameter = Testing::Lsp::PositionOf(kTemplateArguments, "ComponentRef<T> GetComponent");
+		// `ComponentRef<T>` twice in GetComponent, GetTransform's return type, and the two of `nested`.
+		TEST_ASSERT_EQ(References::At(session, uri, byParameter).Count(), 5u);
+		TEST_ASSERT_EQ(References::At(session, uri, Testing::Lsp::PositionOf(kTemplateArguments, "ComponentRef<TransformComponent> GetTransform")).Count(), 5u);
+		TEST_ASSERT_EQ(DocumentHighlight::At(session, uri, byParameter).Count(), 6u); // and the declaration
+		auto renamed = Rename::At(session, uri, Testing::Lsp::PositionOf(kTemplateArguments, "ComponentRef<T> found"));
+		TEST_ASSERT(renamed.found);
+		TEST_ASSERT_EQ(renamed.occurrences.Count(), 6u);
+		TEST_ASSERT_EQ(DefinitionLine(session, uri, "ComponentRef<T> found"), static_cast<int64>(Testing::Lsp::PositionOf(kTemplateArguments, "template<T> struct ComponentRef").line));
+		auto hover = Hover::At(session, uri, byParameter);
+		TEST_ASSERT(Contains(hover.contents, "ComponentRef"));
+		TEST_ASSERT(!Contains(hover.contents, "GetComponent"));
 		TEST_PASSED();
 	}
 }

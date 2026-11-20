@@ -111,9 +111,7 @@ namespace Testing
 
 	// Template instantiation arguments get real type coloring instead of plain variable: `Box<int32>`'s int32 is a
 	// language primitive (type + builtin), `Box<Vec2>`'s Vec2 keeps its struct kind, and the template parameter T in
-	// `Box<T>` reads as typeParameter. Regression guard for the "instantiation args read as variable" bug: template-arg
-	// QualTypes are never semantic-resolved, so classification must fall back to a symbol-table probe (a single-segment
-	// global Type symbol without a declaring AST node is a language primitive).
+	// `Box<T>` reads as typeParameter; so do nested arguments (`Box<Box<Vec2>>`) and a call's (`Make<Vec2>()`).
 	TEST_FUNC(Lsp.Features.SemanticTokens)
 	void TestTemplateInstantiationArgumentsKeepTypeColors();
 

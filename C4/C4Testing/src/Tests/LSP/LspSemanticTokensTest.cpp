@@ -647,10 +647,14 @@ int32 main() { int32 hp = MAX_HP; return hp; })";
 
 struct Vec2 { float x, y; }
 
+template<T> Box<T> Make() { Box<T> made; return made; }
+
 int32 main() {
 	Box<int32> a;      // primitive arg: type + builtin (blue), NOT variable
 	Box<Vec2> b;       // user-defined struct arg: keeps its struct kind (gold)
 	Box<T> c;          // template-parameter use: typeParameter
+	Box<Box<Vec2>> d;  // nested: the inner template and its argument keep their kinds
+	Box<Vec2> e = Make<Vec2>(); // a call's template argument
 	return 0;
 }
 )";
@@ -659,25 +663,37 @@ int32 main() {
 		auto uri = Testing::Lsp::UriFor("S.cf");
 		auto result = SemanticTokens::ForDocument(session, uri);
 
-		// `Box<int32>` - the int32 in the instantiation argument list. Before the fix this read as a plain variable
-		// because template-argument QualTypes are never semantic-resolved; it must now match the standalone primitive
-		// references elsewhere (type + builtin). `int32` first appears here, so occurrence 1 is unambiguous.
-		auto primArg = TokenAt(result, code, "int32", 1); // inside Box<int32>
+		// `Box<int32>` - the int32 in the instantiation argument list: type + builtin, as a primitive reads anywhere.
+		auto primArg = TokenAt(result, code, "int32> a", 1);
 		TEST_ASSERT(primArg.found);
 		TEST_ASSERT_EQ(primArg.kind, (uint32)SemanticTokenKind::Type);
 		TEST_ASSERT((primArg.mods & SemanticTokenModifiers::Builtin) != 0);
 
-		// `Box<Vec2>` - the struct argument keeps its declaration kind. Vec2 is defined earlier in the file, so its use
-		// as an instantiation argument must still classify by symbol (struct), not fall back to a plain variable/type.
-		auto vecArg = TokenAt(result, code, "Vec2", 1); // inside Box<Vec2>
+		// `Box<Vec2>` - the struct argument keeps its declaration kind, not a plain variable or the generic type.
+		auto vecArg = TokenAt(result, code, "Vec2> b", 1);
 		TEST_ASSERT(vecArg.found);
 		TEST_ASSERT_EQ(vecArg.kind, (uint32)SemanticTokenKind::Struct);
 
-		// `Box<T>` - the template parameter use reads as typeParameter. T is declared in <class T>, so occurrence 1 is
-		// that declaration; occurrence 2 is the Box<T> argument we care about.
-		auto tArg = TokenAt(result, code, "T", 2); // inside Box<T> (occurrence 1 is the `class T` declaration)
+		// `Box<T>` - the template parameter use reads as typeParameter.
+		auto tArg = TokenAt(result, code, "T> c", 1);
 		TEST_ASSERT(tArg.found);
 		TEST_ASSERT_EQ(tArg.kind, (uint32)SemanticTokenKind::TypeParameter);
+
+		// `Box<Box<Vec2>>` - an argument's own arguments (BUG-472: the walk reaches every level the same way).
+		auto innerBox = TokenAt(result, code, "Box<Vec2>> d", 1);
+		TEST_ASSERT(innerBox.found);
+		TEST_ASSERT_EQ(innerBox.kind, (uint32)SemanticTokenKind::Class);
+		auto innerVec = TokenAt(result, code, "Vec2>> d", 1);
+		TEST_ASSERT(innerVec.found);
+		TEST_ASSERT_EQ(innerVec.kind, (uint32)SemanticTokenKind::Struct);
+
+		// `Make<Vec2>()` - a call's template argument is a type like any other, the call a function.
+		auto callArg = TokenAt(result, code, "Vec2>()", 1);
+		TEST_ASSERT(callArg.found);
+		TEST_ASSERT_EQ(callArg.kind, (uint32)SemanticTokenKind::Struct);
+		auto callee = TokenAt(result, code, "Make<Vec2>", 1);
+		TEST_ASSERT(callee.found);
+		TEST_ASSERT_EQ(callee.kind, (uint32)SemanticTokenKind::Function);
 
 		TEST_PASSED();
 	}

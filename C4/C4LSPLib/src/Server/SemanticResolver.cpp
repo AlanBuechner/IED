@@ -651,6 +651,20 @@ namespace C4LSP::Server
 		return type;
 	}
 
+	const Scripting::AstNode* SemanticResolver::DeclarationOfWrittenType(const Scripting::QualTypeNode& qt,
+		const Core::Vector<const Scripting::AstNode*>& path) const
+	{
+		if (const Scripting::AstNode* declaration = Features::DeclarationOfNamedType(ResolveQualType(qt, path)))
+			return declaration;
+		if (!qt.HasTemplateArgs())
+			return nullptr;
+		std::string templateName;
+		for (const Scripting::NamespaceQualifiedNameNode::Segment& segment : qt.BaseName()->GetSegments())
+			templateName += (templateName.empty() ? "" : "::") + std::string(segment.nameToken.GetText());
+		const Scripting::SymbolInfo* info = Lookup(templateName, UnitIdOf(qt), &path);
+		return info && info->kind == Scripting::SymbolKind::Type ? info->declNode : nullptr;
+	}
+
 	void SemanticResolver::CollectNamespacePaths(std::unordered_set<std::string>& out) const
 	{
 		if (!m_Model.IsValid())

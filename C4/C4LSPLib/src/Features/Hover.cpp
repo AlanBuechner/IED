@@ -157,12 +157,12 @@ namespace C4LSP::Features
 
 	std::string Hover::BuildTypeHover(Server::CompilationSession& session, const Scripting::QualTypeNode& type, const Core::Vector<const Scripting::AstNode*>& path)
 	{
+		const Scripting::AstNode* declaration = session.GetResolver().DeclarationOfWrittenType(type, path);
+		const std::string declText = declaration ? DeclarationMarkdown(session, *declaration) : "";
+		if (!declText.empty())
+			return declText;
 		const Scripting::Type* resolved = session.GetResolver().ResolveQualType(type, path);
-		if (!resolved)
-			return "";
-		const Scripting::AstNode* declaration = DeclarationOfNamedType(resolved);
-		std::string declText = declaration ? DeclarationMarkdown(session, *declaration) : "";
-		return declText.empty() ? CodeBlock(TypeText(resolved)) : declText;
+		return resolved ? CodeBlock(TypeText(resolved)) : "";
 	}
 
 	std::string Hover::DeclarationMarkdown(Server::CompilationSession& session, const Scripting::AstNode& declaration)
