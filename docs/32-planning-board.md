@@ -65,7 +65,7 @@ The AI's convention (`skills/board`): the owner's freehand stays on its layer; a
 | `stroke` | `pts` (x, y pairs), `width`, `color`, `opacity` | freehand ink; the highlighter is a wide stroke at opacity 0.35 |
 | `rect`, `round`, `ellipse`, `diamond`, `cylinder`, `hexagon`, `parallelogram` | `x, y, w, h`, `color`, `fill`, `width`, `style`, `text`, `fontSize` | **nodes**: the shapes a diagram is made of; `text` is the label, centered and wrapped |
 | `text` | `x, y, w, h`, `text`, `fontSize`, `color` | free text; `w, h` its measured box |
-| `note` | `x, y, w, h`, `text`, `fill` | a sticky note |
+| `note` | `x, y, w, h`, `text`, `fill`, `color` | a sticky note: tinted by its `fill`, else its `color` (not `ink`), else yellow; `color` is also its outline; its text is ink |
 | `frame` | `x, y, w, h`, `text` (its title) | a group: it holds the elements of its own layer whose centers are inside it (a Mermaid `subgraph`) |
 | `image` | `x, y, w, h`, `src`, `iw`, `ih`, `crop` | a picture file of the workspace, its size in pixels, the part shown (`[x, y, w, h]` in its pixels) |
 | `line`, `arrow` | `pts`, `start`, `end` (`none`, `arrow`, `dot`) | free lines and arrows, bound to nothing |
@@ -81,7 +81,7 @@ A **change** is a list of operations applied at once - all of them or, when one 
 
 | op | fields |
 |---|---|
-| `add` | the element's fields at the op's top level; `ref` names it for later ops (`"@api"`); a node without `w, h` is sized to its text, without `x, y` placed beside the board's content; a frame's `around` fits it around ids and moves anything else inside out |
+| `add` | the element's fields at the op's top level; `ref` names it for later ops (`"@api"`); a node without `w, h` is sized to its text, without `x, y` placed beside the board's content; a frame's `around` fits it around ids - a frame among them brings what it holds, so frames nest - and moves anything else inside out |
 | `update` | `id` (or `ids`) and the fields to set (`null` clears one; `w`/`h` null refit to the text; `type` too); a frame takes `around` or `fit: true` |
 | `insert` | `on` (a connector) and a node's fields: the node goes into the connector's path, the connector becomes two, what lies past it moves on to make room |
 | `delete` | `ids` (connectors bound to them go too) |
@@ -251,9 +251,9 @@ What the runs changed, by what they hit:
 
 ## Checks
 
-- C4 unit tests (`plugins/board/tests`, 31 cases): geometry, the op engine (refs, refusals, undo by author and by field, the file round trip, tiles), layout, recognition, Mermaid both ways, the evaluation-driven ops. `toolchains/c4/dev/C4.exe -test plugins/board/code/core plugins/board/tests`.
+- C4 unit tests (`plugins/board/tests`, 33 cases): geometry, the op engine (refs, refusals, undo by author and by field, the file round trip, tiles), layout, recognition, Mermaid both ways, the evaluation-driven ops. `toolchains/c4/dev/C4.exe plugins/board/code/core plugins/board/tests -o .ied/local/board-tests/tests.exe -test`, then run that program (without `-o` the program is written as `output.exe` in the current folder).
 - Server checks (`tools/server-checks/tests/test_board.py`): changes on the topic with undo by author, the file written and read back after an outside change, an uploaded image kept and drawn, the tools through the binding, a chat turn (fake model) whose `board_edit` is the AI's and whose `board_view` picture reaches the model.
-- Frontend unit tests (`frontend/tests/boardsnap.test.js`): snapping to edges and centers within the tolerance and not past it, the nearest line winning, equal gaps between neighbours and after a pair, the guides for given edges.
+- Frontend unit tests (`frontend/tests/boardsnap.test.js`, `boardtext.test.js` - a note's tint among them): snapping to edges and centers within the tolerance and not past it, the nearest line winning, equal gaps between neighbours and after a pair, the guides for given edges.
 - The UI, driven in the browser pane at 1440x880 and 375x812: pen, rectangle with its label, connector, partial eraser splitting a stroke, pasted image and crop, the panels, the AI button opening the board's chat beside the board (a tab on a phone) with nothing sent and the board in its box, the same chat again with the owner's words kept; the Board window under the list in a fresh layout and placed once into a saved one, following the board shown (a layer added to one board, absent from the other), its hint with no board open, the phone's sheet; the chat in a new group at 30%, switching boards bringing the other board's chat (made the first time, in the Boards section) and back, closing a board closing its chat, a board chat made before sections moving into one, the Boards section closed under the owner's chats, a board chat's details panel closed at full width and its choice kept for that chat alone, the toolbar wrapped beside a narrow chat (1500x860 headless); snapping a moved box to two edges, to a row's equal gap, a resized edge and a drawn rectangle's corners, Alt mid-drag, the magnet off, a touch drag at phone width.
 
 ## Open items

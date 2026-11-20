@@ -3,6 +3,7 @@
 // Mermaid that carries descriptions, notes and colors both ways.
 
 include "Mermaid.ch"
+include "Render.ch"
 
 static Boards::ChangeResult BtRun(Boards::Board& board, const char* json) {
 	Serialization::DomDoc doc;
@@ -36,6 +37,34 @@ class BoardToolOpsTests
 		assert_true(members.Count() == 2, "the frame holds A and B alone");
 		assert_true(!frame->Frame().Contains(BtNamed(board, "C")->m_X + 50.0, BtNamed(board, "C")->m_Y + 15.0), "C was moved out of it");
 		assert_true(BtWarned(result, "out of the frame") && BtWarned(result, "holds e1 e2"), "and the answer says so");
+	}
+
+	[test("a_frame_around_a_frame_brings_its_members")]
+	public static void FrameAroundFrame() {
+		Boards::Board board;
+		Boards::InitBoard(board, Core::StringView("T"));
+		BtRun(board, "[{\"op\":\"add\",\"type\":\"rect\",\"x\":0,\"y\":0,\"w\":100,\"h\":50,\"text\":\"A\"},{\"op\":\"add\",\"type\":\"rect\",\"x\":200,\"y\":0,\"w\":100,\"h\":50,\"text\":\"B\"},{\"op\":\"add\",\"type\":\"frame\",\"text\":\"Inner\",\"around\":[\"e1\",\"e2\"]},{\"op\":\"add\",\"type\":\"rect\",\"x\":500,\"y\":0,\"w\":100,\"h\":50,\"text\":\"D\"}]");
+		Boards::ChangeResult result = BtRun(board, "[{\"op\":\"add\",\"type\":\"frame\",\"text\":\"Outer\",\"around\":[\"e3\",\"e4\"]}]");
+		assert_true(result.m_Error.IsEmpty(), result.m_Error.CStr());
+		assert_true(!BtWarned(result, "out of the frame"), "the inner frame's members stay where they are");
+		assert_eq((int64)2, board.MembersOf(*BtNamed(board, "Inner")).Count(), "the inner frame still holds A and B");
+		assert_eq((int64)4, board.MembersOf(*BtNamed(board, "Outer")).Count(), "the outer one holds Inner, A, B and D");
+		Boards::ChangeResult refit = BtRun(board, "[{\"op\":\"update\",\"id\":\"e5\",\"around\":[\"e3\"]}]");
+		assert_true(refit.m_Error.IsEmpty() && !BtWarned(refit, "out of the frame"), "refitted around the inner frame alone: its members come along");
+		assert_eq((int64)3, board.MembersOf(*BtNamed(board, "Outer")).Count(), "Inner, A and B; D is left outside");
+	}
+
+	[test("a_notes_color_tints_it_without_a_fill")]
+	public static void NoteTint() {
+		Boards::Element note;
+		assert_se("yellow", Core::String(Boards::NoteTint(note)).CStr(), "plain: yellow");
+		note.m_Color = Core::String("red");
+		assert_se("red", Core::String(Boards::NoteTint(note)).CStr(), "its color");
+		note.m_Fill = Core::String("blue");
+		assert_se("blue", Core::String(Boards::NoteTint(note)).CStr(), "a fill wins; the color stays its outline");
+		note.m_Fill = Core::String();
+		note.m_Color = Core::String("ink");
+		assert_se("yellow", Core::String(Boards::NoteTint(note)).CStr(), "ink tints nothing");
 	}
 
 	[test("layout_keeps_frames_together_and_others_out")]

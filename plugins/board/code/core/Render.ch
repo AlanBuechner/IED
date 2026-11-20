@@ -57,6 +57,8 @@ namespace Boards
 	alias ImageLoader = func<bool(Core::StringView, Imaging::Rgba&)>;
 
 	ViewResult RenderBoard(const Board& board, const ViewAsk& ask, const Theme& theme, ImageLoader loadImage);
+	// A note's tint, a palette name: its fill, else its color (ink tints nothing), else yellow - as ui/render.js's noteTint.
+	Core::StringView NoteTint(const Element& note);
 	// A rounded rectangle's outline as a polygon.
 	Core::Array<double> RoundedOutline(double x, double y, double w, double h, double radius);
 }

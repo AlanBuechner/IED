@@ -55,10 +55,14 @@ your own judgment (an ellipse made a cylinder, a note's wording).
 - Groups are frames: `{"op": "add", "type": "frame", "text": "Backend", "around": ["e3", "e4", "e6"]}` (anything else
   inside is moved out). A frame holds what on its own layer has its center inside it: `place` something outside to take
   it out (moves never grow a frame; `layout` and `tidy` refit them, `update` with `around` or `fit: true` refits one).
-  The answer says when a change moved something in or out.
+  The answer says when a change moved something in or out. Frames nest: a frame named in `around` brings what it holds
+  (`{"op": "add", "type": "frame", "text": "Runtime", "around": ["e12", "e20"]}` with `e12` a frame keeps its members
+  in it).
 - A node between two others: `insert` on their connector (it makes room), or `place` with `between`.
 - Read the answer's warnings (overlaps, connectors through nodes, frame membership) and fix them in the next call.
-- `color` is the outline and ink, `fill` a tint inside; both take the palette's names.
+- `color` is the outline and ink, `fill` a tint inside; both take the palette's names. A note is tinted yellow unless
+  told otherwise: its `color` is its outline and, when it has no `fill`, its tint too (`{"type": "note", "color":
+  "red"}` is a red note); its text stays ink.
 
 ## Readable at every zoom
 

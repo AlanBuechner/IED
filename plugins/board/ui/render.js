@@ -293,6 +293,13 @@ function node(ctx, palette, el, zoom) {
 	textIn(ctx, palette, el.text, el.x + inset, el.y, el.w - inset * 2, el.h, el.fontSize ?? 16, palette.ink, true, 0, zoom, fit);
 }
 
+// A note's tint: its fill, else its color (ink tints nothing), else yellow.
+export function noteTint(el) {
+	if (el.fill) return el.fill;
+	if (el.color && el.color !== "ink") return el.color;
+	return "yellow";
+}
+
 // Draws one element. `model` gives a connector its ends; `images` loads pictures (returns an image or null); `zoom` is the
 // scale it is drawn at (text stays readable when it is small, above; below OVERVIEW_ZOOM a frame's title is the canvas's
 // frame label instead).
@@ -347,13 +354,14 @@ export function drawElement(ctx, palette, el, model, images, zoom = 1) {
 			textIn(ctx, palette, el.text, el.x, el.y, Math.max(el.w, 4) + 100000, el.h, el.fontSize ?? 16, color, false, 0, zoom, null);
 			break;
 		case "note": {
-			const fill = palette.color(el.fill || "yellow");
+			// Its color is its outline, and its tint too when it has no fill (as the server's picture draws it, Render.cf).
+			const fill = palette.color(noteTint(el));
 			ctx.globalAlpha *= 0.3;
 			ctx.fillStyle = fill;
 			ctx.fillRect(el.x, el.y, el.w, el.h);
 			ctx.globalAlpha /= 0.3;
-			ctx.strokeStyle = fill;
-			ctx.lineWidth = 1;
+			ctx.strokeStyle = el.color ? color : fill;
+			ctx.lineWidth = el.color ? 2 : 1;
 			ctx.strokeRect(el.x, el.y, el.w, el.h);
 			textIn(ctx, palette, el.text, el.x, el.y, el.w, el.h, el.fontSize ?? 16, palette.ink, false, 10, zoom, [el.w - 20, el.h - 20]);
 			break;

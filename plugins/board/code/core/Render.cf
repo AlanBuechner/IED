@@ -196,6 +196,12 @@ namespace Boards
 		TextIn(canvas, element.m_Text.View(), BoxAt(x + inset, y, w - inset * 2.0, h), element.m_FontSize * view.m_Scale, theme.m_Ink, alpha, true, 0.0);
 	}
 
+	Core::StringView NoteTint(const Element& note) {
+		if (!note.m_Fill.IsEmpty()) return note.m_Fill.View();
+		if (!note.m_Color.IsEmpty() && note.m_Color != "ink") return note.m_Color.View();
+		return Core::StringView("yellow");
+	}
+
 	static void Draw(Canvas& canvas, const Board& board, const Element& element, const ViewTransform& view, const Theme& theme, double alpha, ImageLoader& loadImage, ViewResult& result) {
 		const double scale = view.m_Scale;
 		const Rgb color = theme.Color(element.m_Color.View());
@@ -235,9 +241,11 @@ namespace Boards
 			return;
 		}
 		if (element.m_Kind == Kind::Note) {
-			const Rgb fill = theme.Color(element.m_Fill.IsEmpty() ? Core::StringView("yellow") : element.m_Fill.View());
+			// Its color is its outline, and its tint too when it has no fill (as the canvas draws it, ui/render.js).
+			const Rgb fill = theme.Color(NoteTint(element));
+			const bool colored = !element.m_Color.IsEmpty();
 			canvas.FillRect(x, y, w, h, fill, opacity * 0.3);
-			canvas.Stroke(Closed(RoundedOutline(x, y, w, h, 0.0)), Math::Max(1.0, scale), fill, opacity, 0.0, 0.0);
+			canvas.Stroke(Closed(RoundedOutline(x, y, w, h, 0.0)), Math::Max(1.0, (colored ? 2.0 : 1.0) * scale), colored ? color : fill, opacity, 0.0, 0.0);
 			TextIn(canvas, element.m_Text.View(), BoxAt(x, y, w, h), element.m_FontSize * scale, theme.m_Ink, opacity, false, 10.0 * scale);
 			return;
 		}

@@ -275,10 +275,22 @@ namespace Boards
 		}
 	}
 
+	// A frame named in `around` brings what it holds along (and a frame inside it, what that one holds), so nested frames
+	// keep their members; the frame being fitted (`outer`) is never its own member.
+	static void WithFrameMembers(const Board& board, Core::StringView outer, Core::Array<Core::String>& ids) {
+		for (int64 i = 0; i < ids.Count(); ++i) {
+			const Element* named = board.Find(ids[i].View());
+			if (!named || named->m_Kind != Kind::Frame) continue;
+			for (const Element* member : board.MembersOf(*named))
+				if (member->m_Id != outer && !ids.Contains(member->m_Id)) ids.Push(member->m_Id);
+		}
+	}
+
 	static bool FrameAround(OpContext& ctx, const Serialization::DomNode& op, Element& element) {
 		if (!op.Member("around").IsValid()) return true;
 		Core::Array<Core::String> ids;
 		if (!ResolveIds(ctx, op, "around", ids)) return false;
+		WithFrameMembers(*ctx.m_Board, element.m_Id.View(), ids);
 		Box box;
 		for (const Core::String& id : ids) box.AddBox(ctx.m_Board->Bounds(*ctx.m_Board->Find(id.View())));
 		element.m_X = Tenth(box.m_X0 - c_FramePad);

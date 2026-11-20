@@ -2,7 +2,14 @@
 // screen as far as its box has room, and far out the frames are named on the screen above them.
 
 import { test, assertEqual } from "./harness.js";
-import { LABEL_PX, OVERVIEW_ZOOM, READABLE_PX, fittedSize, frameLabels } from "/plugins/ied.board/ui/render.js";
+import { LABEL_PX, OVERVIEW_ZOOM, READABLE_PX, fittedSize, frameLabels, noteTint } from "/plugins/ied.board/ui/render.js";
+
+test("board notes: a note's color tints it when it has no fill", () => {
+	assertEqual(noteTint({ type: "note" }), "yellow", "plain: yellow");
+	assertEqual(noteTint({ type: "note", color: "red" }), "red", "its color");
+	assertEqual(noteTint({ type: "note", color: "red", fill: "blue" }), "blue", "a fill wins; the color stays its outline");
+	assertEqual(noteTint({ type: "note", color: "ink" }), "yellow", "ink tints nothing");
+});
 
 const palette = { font: "sans-serif" };
 
