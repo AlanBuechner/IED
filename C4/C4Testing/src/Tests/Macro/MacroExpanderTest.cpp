@@ -1,5 +1,6 @@
 #include "MacroExpanderTest.h"
 #include "Macro/MacroExpander.h"
+#include "Macro/MacroToken.h"
 #include <string>
 
 namespace Testing
@@ -32,8 +33,8 @@ namespace Testing
 		table.Define("X", "1");
 		table.DefineFunction("S", { "x" }, "\"x\" 'x' x");
 		TEST_ASSERT(Expand(table, "S(2)") == "\"x\" 'x' 2");                 // BUG-125: not inside literals
-		TEST_ASSERT(Expand(table, "\"X\" X // X") == "\"X\" 1 // X");
-		TEST_ASSERT(Expand(table, "/* X */ X") == "/* X */ 1");
+		TEST_ASSERT(Expand(table, "\"X\" X // X") == "\"X\" 1");         // a comment is white space (R8: tokens)
+		TEST_ASSERT(Expand(table, "/* X */ X") == "1");
 		TEST_ASSERT(Expand(table, "u8\"X\" u\"X\" U'X'") == "u8\"X\" u\"X\" U'X'");
 	}
 
@@ -93,11 +94,11 @@ namespace Testing
 		TEST_ASSERT(Expand(table, "V(1, 2, 3)") == "f(1, 2, 3)");
 		TEST_ASSERT(Expand(table, "V(9,)") == "f(9)");
 		TEST_ASSERT(Expand(table, "NV(a, b, c)") == "a: b, c");
-		TEST_ASSERT(Expand(table, "NV(a)") == "a: ");
+		TEST_ASSERT(Expand(table, "NV(a)") == "a:");
 		TEST_ASSERT(Expand(table, "Z(1)") == "error: the macro 'Z' takes 0 arguments, but 1 was given");
 		TEST_ASSERT(Expand(table, "TWO(1)") == "error: the macro 'TWO' takes 2 arguments, but 1 was given");
 		TEST_ASSERT(Expand(table, "TWO(1, 2, 3)") == "error: the macro 'TWO' takes 2 arguments, but 3 were given");
-		TEST_ASSERT(Expand(table, "NV()") == ": ");
+		TEST_ASSERT(Expand(table, "NV()") == ":");
 	}
 
 	void MacroExpanderTest::FileAndLine()
@@ -108,15 +109,40 @@ namespace Testing
 		TEST_ASSERT(Expand(table, "HERE") == "7");
 	}
 
-	void MacroExpanderTest::CallsThatContinueOnTheNextLine()
+	void MacroExpanderTest::TokensKeepWhereTheFileSpellsThem()
 	{
 		MacroTable table;
-		table.DefineFunction("ADD", { "a", "b" }, "((a) + (b))");
-		TEST_ASSERT(MacroExpander::EndsInsideCall("int32 x = ADD(1,", table));
-		TEST_ASSERT(MacroExpander::EndsInsideCall("ADD(f(1), (2", table));
-		TEST_ASSERT(!MacroExpander::EndsInsideCall("int32 x = ADD(1, 2);", table));
-		TEST_ASSERT(!MacroExpander::EndsInsideCall("f(1,", table));          // not a macro
-		TEST_ASSERT(!MacroExpander::EndsInsideCall("\"ADD(1,\"", table));    // inside a literal
-		TEST_ASSERT(!MacroExpander::EndsInsideCall("// ADD(1,", table));     // inside a comment
+		table.DefineFunction("TWICE", { "x" }, "(x) * 2");
+		table.DefineFunction("CAT", { "a", "b" }, "a ## b");
+		const MacroTokens use = ReadMacroTokens("TWICE(count)", 100);
+		const TokenExpansion twice = MacroExpander::Expand(use, table, { "t.cf", 1 });
+		TEST_ASSERT_EQ(twice.tokens.size(), size_t(5));
+		TEST_ASSERT_EQ(twice.tokens[0].fileOffset, MacroToken::kNotInFile); // the body's `(`
+		TEST_ASSERT_EQ(twice.tokens[1].fileOffset, uint32(106));            // `count`, at its place in the call
+		TEST_ASSERT(twice.tokens[3].spaceBefore && !twice.tokens[1].spaceBefore);
+		const TokenExpansion pasted = MacroExpander::Expand(ReadMacroTokens("CAT(my, Var)", 0), table, { "t.cf", 1 });
+		TEST_ASSERT_EQ(pasted.tokens.size(), size_t(1));
+		TEST_ASSERT(pasted.tokens[0].spelling == "myVar" && pasted.tokens[0].IsIdentifier());
+		TEST_ASSERT_EQ(pasted.tokens[0].fileOffset, MacroToken::kNotInFile); // a pasted token is spelled nowhere in the file
+	}
+
+	void MacroExpanderTest::PasteSkipsEmptyOperands()
+	{
+		MacroTable table;
+		table.DefineFunction("CAT3", { "a", "b", "c" }, "a ## b ## c");
+		table.DefineFunction("AFTER", { "a", "b" }, "z a ## b");
+		TEST_ASSERT(Expand(table, "CAT3(x, , y)") == "xy");   // C's placemarker: an empty operand joins nothing
+		TEST_ASSERT(Expand(table, "CAT3(, , y)") == "y");
+		TEST_ASSERT(Expand(table, "AFTER(, b)") == "z b");   // never onto a token before the paste
+	}
+
+	void MacroExpanderTest::NumbersHoldNoNames()
+	{
+		MacroTable table;
+		table.Define("xFF", "1");
+		table.Define("e5", "2");
+		table.Define("N", "8");
+		TEST_ASSERT(Expand(table, "0xFF + 1e5 + xFF") == "0xFF + 1e5 + 1");
+		TEST_ASSERT(Expand(table, "[2...N]") == "[2...8]"); // a range's `...` ends the number
 	}
 } // namespace Testing

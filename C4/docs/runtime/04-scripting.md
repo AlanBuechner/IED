@@ -165,14 +165,15 @@ One binary file:
 | Debug information | whether the host was built with `-g`: its scripts are debugged at first (section 6.4) |
 | Projects | each project's name and dependencies (D-59), so includes resolve as in the host |
 | Folders | how many source folders the host registered; each project names its own |
-| Files | every source of the host in registration order (its sources, the Bedrock files it uses, the prelude): its unit id, project, folder and path in it (or its path in the library), whether it is a library file or the prelude, its **interface text**, the line its C bindings start on (the interop pass appended them: a binding two files repeat is one declaration in a script's compile, as in the host's), the macros it exports, and the templates it declares and those it adds to (section 4, step 3) |
+| Files | every source of the host in registration order (its sources, the Bedrock files it uses, the prelude): its unit id, project, folder and path in it (or its path in the library), whether it is a library file or the prelude, its **interface text**, whether it is a unit of C bindings and the binding units it includes (the interop pass makes a header's bindings a unit of their own: a binding two units repeat is one declaration in a script's compile, as in the host's), the macros it exports, and the templates it declares and those it adds to (section 4, step 3) |
 | Symbols | the names of the table's entries, in table order |
 | Collided symbols | each function symbol two or more functions claimed (all but the first got `_<n>`, in the order their records came in), with the unit of each claimant in that order (section 4, step 3) |
 | Reflected types | the qualified names of the types the host registered, so a script does not register them again |
 | Inline bodies | chunks of LLVM bitcode of the host functions a script may inline (section 3.3) |
 
-A file's **interface text** is its text after the preprocessor and the interop pass (macros expanded,
-conditional blocks resolved, bindings appended), with the body of every function that is not part of a template
+A file's **interface text** is its text as the host's parse read it (macros expanded and conditional blocks resolved
+through its macro layout; a header's C bindings are their own interface file), with the body of every function that
+is not part of a template
 removed: a definition becomes a declaration, an out-of-line method definition disappears (its declaration in the
 class stays). Template bodies stay, as does everything else: types, fields and their initializers, enums,
 global declarations with their initializers (constant folding needs them), aliases, annotations, default

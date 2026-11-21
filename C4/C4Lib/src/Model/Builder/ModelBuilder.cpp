@@ -60,11 +60,10 @@ namespace Scripting
 		return message;
 	}
 
-	bool ModelBuilder::IsBinding(uint32 unitId, const AstNode& declaration) const
+	// A unit of CBind's bindings (R8: a binding is a unit of its own, which the files binding the header include).
+	bool ModelBuilder::IsBinding(uint32 unitId) const
 	{
-		if (!m_Sources || unitId == 0 || !m_Sources->HasInfo(unitId)) return false;
-		const uint32 line = m_Sources->GetInfo(unitId).bindingsLine;
-		return line != 0 && declaration.startLocation.line >= line;
+		return m_Sources && unitId != 0 && m_Sources->HasInfo(unitId) && m_Sources->GetInfo(unitId).binding;
 	}
 
 	std::string_view ModelBuilder::DeclarationText(uint32 unitId, const AstNode& declaration) const
@@ -78,12 +77,12 @@ namespace Scripting
 
 	bool ModelBuilder::RepeatsBinding(const Context& ctx, const AstNode& declaration, const Core::String& name)
 	{
-		if (!IsBinding(ctx.unitId, declaration)) return false;
+		if (!IsBinding(ctx.unitId)) return false;
 		const std::string_view text = DeclarationText(ctx.unitId, declaration);
 		if (text.empty()) return false;
 		for (const auto& entry : ctx.scope->Entries(name))
 		{
-			if (!entry->declNode || !IsBinding(entry->definingUnit, *entry->declNode)) continue;
+			if (!entry->declNode || !IsBinding(entry->definingUnit)) continue;
 			if (DeclarationText(entry->definingUnit, *entry->declNode) != text) continue;
 			bool known = entry->definingUnit == ctx.unitId;
 			for (uint32 unit : entry->repeatedIn) known = known || unit == ctx.unitId;

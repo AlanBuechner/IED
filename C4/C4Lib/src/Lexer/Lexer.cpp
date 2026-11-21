@@ -12,9 +12,13 @@ namespace Scripting
 	// Construction / Destruction
 	// -----------------------------------------------------------------------
 
-	Lexer::Lexer(Source& source, uint32 sourceId)
-		: m_Source(source), m_SourceId(sourceId), m_SourceData(source.Data())
+
+	Lexer::Lexer(const Source& source, uint32 sourceId, const MacroLayout* macros)
+		: m_Source(source), m_SourceId(sourceId), m_Macros(macros && !macros->Empty() ? macros : nullptr)
 	{
+		m_File.data = source.Data();
+		m_File.size = source.Size();
+		m_LastEnd = static_cast<size_t>(-1);
 	}
 
 	Lexer::~Lexer() = default;
@@ -113,6 +117,7 @@ namespace Scripting
 			return 1;
 
 		const size_t byteOffset = out.GetByteOffset();
+		const bool follows = out.FollowsDirectly();
 		const SourceLocation start = out.GetStartLocation();
 		SourceLocation end = out.GetEndLocation();
 		uint32 count = 1;
@@ -123,7 +128,7 @@ namespace Scripting
 			if (pos + count >= m_Arena.Count())
 				break;
 			const Token& next = m_Arena.At(pos + count);
-			if (!ContinuesCompound(out, byteOffset, next))
+			if (!ContinuesCompound(out, next))
 				break;
 			Token combined;
 			if (out.CombineWith(next.GetText()[0], combined) != Token::TokenAppendMethod::Combine)
@@ -135,15 +140,17 @@ namespace Scripting
 		out.SetByteOffset(byteOffset);
 		out.SetStartLocation(start);
 		out.SetEndLocation(end);
+		out.SetFollowsDirectly(follows);
 		return count;
 	}
 
-	bool Lexer::ContinuesCompound(const Token& compound, size_t byteOffset, const Token& next) const
+	bool Lexer::ContinuesCompound(const Token& compound, const Token& next) const
 	{
 		if (!IsAtomicOperator(next.GetType()))
 			return false;
-		// A compound is a run of adjacent characters: whitespace or a comment ends it (`* ==` is not `*=`).
-		if (next.GetByteOffset() != byteOffset + compound.GetText().size())
+		// A compound is a run of adjacent characters: whitespace or a comment ends it (`* ==` is not `*=`); so does the
+		// edge of a macro use with white space at it.
+		if (!next.FollowsDirectly())
 			return false;
 		// `Map<K<V>>`: inside template arguments `>` `>` stays two closers.
 		return !(m_TemplateDepth > 0 && compound.GetType() == TokenType::Greater && next.GetText()[0] == '>');
@@ -162,6 +169,7 @@ namespace Scripting
 	namespace
 	{
 		bool IsDigit(char c) { return c >= '0' && c <= '9'; }
+		bool IsSpace(int c) { return c == ' ' || c == '\n' || c == '\r' || c == '\t'; }
 
 		// A '.' before a digit is a number missing its leading digit (`.5`), never a member access; the last
 		// '.' of `..` or `...` (`[1...3]`) belongs to that operator.
@@ -169,83 +177,154 @@ namespace Scripting
 		{
 			return IsDigit(rest[0]) || (rest[0] == '.' && !afterDot && rest.size() > 1 && IsDigit(rest[1]));
 		}
+
+		constexpr size_t kNowhere = static_cast<size_t>(-1);
 	}
 
 	Token* Lexer::ReadToken()
 	{
-		SkipWhitespace();
+		const bool spaced = PassToNextToken();
+		Reading& reading = m_Expansion.expansion != 0 ? m_Expansion : m_File;
 		Token* slot = m_Arena.Alloc();
-
-		const size_t start = m_Source.GetReadPosition();
-		slot->SetByteOffset(start);
-		slot->SetStartLocation(LocationAt(start));
-		if (start >= m_Source.Size())
+		const size_t start = reading.at;
+		if (start >= reading.size) // only the file's reading ends here: an expansion read to its end is left
 		{
 			MarkEndOfFile(*slot);
-			slot->SetEndLocation(slot->GetStartLocation());
+			Locate(*slot, start, start);
 			return slot;
 		}
-
-		const std::string_view rest(m_Source.Data() + start, m_Source.Size() - start);
-		const size_t quotePrefix = QuotedLiteralPrefix(rest);
-		if (StartsNumber(rest, start > 0 && m_Source.Data()[start - 1] == '.'))
-			ReadLiteral(*slot, ScanNumber(rest));
-		else if (quotePrefix != std::string_view::npos)
-			ReadLiteral(*slot, ScanQuoted(rest, quotePrefix));
-		else
-			ReadByAppending(*slot);
-		slot->SetEndLocation(LocationAt(m_Source.GetReadPosition()));
+		const bool ranOut = Scan(*slot, reading);
+		Locate(*slot, start, reading.at);
+		slot->SetFollowsDirectly(!spaced && m_LastIn == reading.expansion && m_LastEnd == start);
+		m_LastEnd = reading.at;
+		m_LastIn = reading.expansion;
+		if (slot->GetLiteralFacts().issue != LiteralIssue::None)
+			Report(*slot, LiteralIssueMessage(*slot));
+		if (ranOut && slot->GetType() == TokenType::MultiComment)
+			Report(*slot, "this '/*' comment has no closing '*/'");
 		return slot;
 	}
 
-	void Lexer::SkipWhitespace()
+	bool Lexer::PassToNextToken()
 	{
-		while (true)
+		bool spaced = false;
+		for (;;)
 		{
-			const int c = m_Source.ReadCharAt(m_Source.GetReadPosition());
-			if (c != ' ' && c != '\n' && c != '\r' && c != '\t')
-				return;
-			m_Source.ReadChar();
+			Reading& reading = m_Expansion.expansion != 0 ? m_Expansion : m_File;
+			while (IsSpace(reading.Peek())) { ++reading.at; spaced = true; }
+			if (m_Expansion.expansion != 0)
+			{
+				if (m_Expansion.at < m_Expansion.size) return spaced;
+				LeaveExpansion();
+				continue;
+			}
+			if (!m_Macros) return spaced;
+			const std::vector<MacroLayout::Region>& regions = m_Macros->Regions();
+			while (m_NextRegion < regions.size() && regions[m_NextRegion].end <= m_File.at) ++m_NextRegion; // passed (a comment took it)
+			if (m_NextRegion >= regions.size() || regions[m_NextRegion].begin > m_File.at) return spaced;
+			const MacroLayout::Region& region = regions[m_NextRegion++];
+			if (region.expansion == 0)
+			{
+				m_File.at = region.end;
+				spaced = true;
+				continue;
+			}
+			if (spaced || m_LastIn != 0 || m_LastEnd != region.begin) m_LastEnd = kNowhere; // the use is apart from the token before
+			else m_LastEnd = 0;
+			EnterExpansion(region.expansion);
+			m_LastIn = region.expansion;
+			spaced = false;
 		}
+	}
+
+	void Lexer::EnterExpansion(uint32 id)
+	{
+		const MacroExpansion& expansion = m_Macros->Expansion(id);
+		m_Expansion = { expansion.text.data(), expansion.text.size(), 0, id };
+		m_UseStart = LocationAt(expansion.begin);
+		m_UseEnd = LocationAt(expansion.end);
+	}
+
+	void Lexer::LeaveExpansion()
+	{
+		const MacroExpansion& expansion = m_Macros->Expansion(m_Expansion.expansion);
+		const bool endsAtEnd = m_LastIn == m_Expansion.expansion && m_LastEnd == m_Expansion.size;
+		m_File.at = expansion.end;
+		m_Expansion = {};
+		m_LastIn = 0;
+		m_LastEnd = endsAtEnd ? expansion.end : kNowhere;
+	}
+
+	void Lexer::Locate(Token& token, size_t start, size_t end) const
+	{
+		if (m_Expansion.expansion == 0)
+		{
+			token.SetByteOffset(start);
+			token.SetStartLocation(LocationAt(start));
+			token.SetEndLocation(LocationAt(end));
+			return;
+		}
+		const MacroExpansion& expansion = m_Macros->Expansion(m_Expansion.expansion);
+		SourceLocation first = m_UseStart, last = m_UseEnd;
+		if (const MacroExpansion::Piece* piece = expansion.PieceAt(static_cast<uint32>(start)); piece && piece->fileOffset != MacroToken::kNotInFile)
+		{
+			first = LocationAt(piece->fileOffset + (start - piece->textBegin)); // spelled in the file: an argument's own place
+			last = LocationAt(piece->fileOffset + (std::min<size_t>(end, piece->textEnd) - piece->textBegin));
+		}
+		first.expansion = last.expansion = m_Expansion.expansion;
+		first.inExpansion = static_cast<uint32>(start);
+		last.inExpansion = static_cast<uint32>(end);
+		token.SetByteOffset(first.byteOffset);
+		token.SetStartLocation(first);
+		token.SetEndLocation(last);
 	}
 
 	SourceLocation Lexer::LocationAt(size_t byteOffset) const
 	{
 		SourceLocation location{};
 		location.sourceId = m_SourceId;
-		location.byteOffset = byteOffset;
+		location.byteOffset = static_cast<uint32>(byteOffset);
 		m_Source.ByteOffsetToLineColumn(byteOffset, location.line, location.column);
 		return location;
 	}
 
-	void Lexer::ReadLiteral(Token& token, const ScannedLiteral& literal)
+	bool Lexer::Scan(Token& token, Reading& reading)
+	{
+		const std::string_view rest = reading.Rest();
+		const size_t quotePrefix = QuotedLiteralPrefix(rest);
+		if (StartsNumber(rest, reading.at > 0 && reading.data[reading.at - 1] == '.'))
+			ReadLiteral(token, ScanNumber(rest), reading);
+		else if (quotePrefix != std::string_view::npos)
+			ReadLiteral(token, ScanQuoted(rest, quotePrefix), reading);
+		else
+			return ReadByAppending(token, reading);
+		return false;
+	}
+
+	void Lexer::ReadLiteral(Token& token, const ScannedLiteral& literal, Reading& reading)
 	{
 		token.SetType(literal.type);
 		token.SetText(literal.text);
 		token.SetLiteralFacts(literal.facts);
-		m_Source.Seek(token.GetByteOffset() + literal.length);
-		if (literal.facts.issue != LiteralIssue::None)
-			Report(token, LiteralIssueMessage(token));
+		reading.at += literal.length;
 	}
 
-	void Lexer::ReadByAppending(Token& token)
+	bool Lexer::ReadByAppending(Token& token, Reading& reading)
 	{
 		// Identifiers, operators and comments grow a character at a time until AppendChar closes or rejects.
 		Token::TokenAppendMethod result = Token::TokenAppendMethod::Consume;
+		bool ranOut = false;
 		while (result == Token::TokenAppendMethod::Consume)
 		{
-			const int c = m_Source.ReadChar();
-			if (c == -1)
-			{
-				if (token.GetType() == TokenType::MultiComment)
-					Report(token, "this '/*' comment has no closing '*/'");
-				break;
-			}
+			const int c = reading.Peek();
+			if (c == -1) { ranOut = true; break; }
+			++reading.at;
 			result = token.AppendChar(static_cast<char>(c));
 		}
 		if (result == Token::TokenAppendMethod::Reject)
-			m_Source.PushBack();
+			--reading.at;
 		token.PromoteKeyword();
+		return ranOut;
 	}
 
 	void Lexer::Report(const Token& token, const Core::String& message)

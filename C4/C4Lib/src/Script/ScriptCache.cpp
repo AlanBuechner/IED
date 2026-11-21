@@ -83,7 +83,8 @@ namespace Scripting
 			AddNumber(digest, static_cast<uint64>(static_cast<int64>(file.folder)));
 			digest.Add(file.path);
 			digest.Add(file.library ? "library" : file.prelude ? "prelude" : "source");
-			AddNumber(digest, file.bindingsLine);
+			digest.Add(file.binding ? "binding" : "own");
+			for (uint32 binding : file.bindings) AddNumber(digest, binding);
 			for (const MacroDefinition& macro : file.macros)
 			{
 				digest.Add(macro.name);

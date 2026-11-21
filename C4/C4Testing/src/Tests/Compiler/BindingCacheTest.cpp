@@ -62,7 +62,8 @@ namespace Testing
 		const auto bind = [&] { return InteropPass::RunFolder({ folder.generic_string() }, { file }, {}, objDir, {}, false, true); };
 		const auto bound = [&](const char* name) {
 			const InteropPass::Result result = bind();
-			return result.errors.empty() && result.files.size() == 1 && result.files[0].text.find(name) != std::string::npos;
+			return result.errors.empty() && result.files.size() == 1 && result.files[0].bindings.size() == 1
+				&& result.files[0].bindings[0].text.find(name) != std::string::npos;
 		};
 
 		TEST_ASSERT(bound("inner_one"));

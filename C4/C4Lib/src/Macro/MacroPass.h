@@ -1,7 +1,7 @@
 #pragma once
 #include "MacroTable.h"
 #include "Macro/MacroDiagnostic.h"
-#include "SourceManager/ColumnMap.h"
+#include "Macro/MacroLayout.h"
 #include <functional>
 #include <string>
 #include <map>
@@ -9,24 +9,23 @@
 
 namespace Scripting
 {
-	/// Runs the macro preprocessor over a set of C4 source files (a folder or a
-	/// single file), producing for each file its fully macro-expanded text and its
-	/// final effective MacroTable.
-	///
-	/// Include resolution is relative to the including file's directory, then falls
-	/// back to the root folder - mirroring how the compiler resolves `include`/`#include`.
+	/// Runs the macro preprocessor over a set of C4 source files, producing for each file where its text is left out and
+	/// its uses expanded (its MacroLayout, R8) and its final effective MacroTable. Each file is processed once, with the
+	/// macros it starts with plus what its includes export (docs/language/02).
 	class MacroPass
 	{
 	public:
 		struct FileResult
 		{
-			std::string name;   // display name (relative path within the owning root folder)
+			std::string name;    // display name (relative path within the owning root folder)
 			std::string absPath; // normalized absolute path - the file's unique identity across roots
-			std::string text;   // macro-expanded source
-			MacroTable table;   // final effective macro state
+			Ref<MacroLayout> layout; // what the pass did to its text; null for a file it kept as it is (an interface file)
+			MacroTable table;    // final effective macro state
 			MacroTable exported; // what an includer receives: the table without the macros the file started with (its project's, D-59)
-			std::vector<MacroDiagnostic> diagnostics; // the errors and warnings of its directives
-			ColumnMap columns;  // where the macro uses `text` expanded were (SourceManager::SetExpandedText)
+			std::vector<MacroDiagnostic> diagnostics; // the errors and warnings of its directives and uses
+
+			/// The file's text as the pass leaves it: `written` read through its layout (MacroLayout::Render).
+			std::string Text(std::string_view written) const;
 		};
 
 		/// One file for RunFiles.

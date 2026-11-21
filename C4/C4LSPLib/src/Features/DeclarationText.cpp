@@ -2,6 +2,7 @@
 #include "Server/CompilationSession.h"
 #include "Server/SemanticResolver.h"
 #include "SourceManager/Source.h"
+#include "Macro/MacroLayout.h"
 #include "Model/OperatorAnnotations.h"
 #include "Parser/AstNode.h"
 #include "Parser/Nodes/Declarations/AnnotationNode.h"
@@ -42,7 +43,7 @@ namespace C4LSP::Features
 	{
 		for (const auto& annotation : annotations)
 			if (annotation)
-				at = std::max(at, annotation->endLocation.byteOffset);
+				at = std::max<size_t>(at, annotation->endLocation.byteOffset);
 		return at;
 	}
 
@@ -185,21 +186,21 @@ namespace C4LSP::Features
 			const auto& func = static_cast<const Scripting::FunctionDefinitionNode&>(decl);
 			at = LaterOf(at, func.GetAnnotations());
 			if (Present(func.GetAccessModifierToken()))
-				at = std::max(at, func.GetAccessModifierToken().GetEndLocation().byteOffset);
+				at = std::max<size_t>(at, func.GetAccessModifierToken().GetEndLocation().byteOffset);
 			break;
 		}
 		case NodeType::VariableDefinition: {
 			const auto& var = static_cast<const Scripting::VariableDefinitionNode&>(decl);
 			at = LaterOf(at, var.GetAnnotations());
 			if (Present(var.GetAccessModifierToken()))
-				at = std::max(at, var.GetAccessModifierToken().GetEndLocation().byteOffset);
+				at = std::max<size_t>(at, var.GetAccessModifierToken().GetEndLocation().byteOffset);
 			break;
 		}
 		case NodeType::ObjectDefinition: {
 			const auto& obj = static_cast<const Scripting::ObjectDefinitionNode&>(decl);
 			at = LaterOf(at, obj.GetAnnotations());
 			if (Present(obj.GetAccessModifierToken()))
-				at = std::max(at, obj.GetAccessModifierToken().GetEndLocation().byteOffset);
+				at = std::max<size_t>(at, obj.GetAccessModifierToken().GetEndLocation().byteOffset);
 			break;
 		}
 		case NodeType::EnumDefinition:
@@ -222,7 +223,7 @@ namespace C4LSP::Features
 
 	size_t DeclarationText::HeaderEnd(std::string_view text, const Scripting::AstNode& decl)
 	{
-		const size_t end = std::min(decl.endLocation.byteOffset, text.size());
+		const size_t end = std::min<size_t>(decl.endLocation.byteOffset, text.size());
 		switch (decl.Type())
 		{
 		case NodeType::FunctionDefinition: {
@@ -314,14 +315,26 @@ namespace C4LSP::Features
 		return false;
 	}
 
-	std::string DeclarationText::Header(std::string_view text, const Scripting::AstNode& decl, const std::string& name)
+	// [begin, end) of the file as its parse read it: a macro use is its expansion (`kLimit = ((64) * 2)`), R8.
+	static std::string AsParsed(const Scripting::MacroLayout* macros, std::string_view text, size_t begin, size_t end)
+	{
+		return macros ? macros->Render(text, static_cast<uint32>(begin), static_cast<uint32>(end)) : std::string(text.substr(begin, end - begin));
+	}
+
+	const Scripting::MacroLayout* DeclarationText::MacrosOf(Server::CompilationSession& session, uint32 sourceId)
+	{
+		const auto& sources = session.GetSourceManager();
+		return sourceId != 0 && sources.HasInfo(sourceId) ? sources.GetInfo(sourceId).macros.Get() : nullptr;
+	}
+
+	std::string DeclarationText::Header(std::string_view text, const Scripting::MacroLayout* macros, const Scripting::AstNode& decl, const std::string& name)
 	{
 		const size_t start = StartOf(decl);
 		const size_t end = std::min(HeaderEnd(text, decl), text.size());
 		const Span span = NameSpan(decl);
 		if (span.end == 0 || span.start < start || span.end > end)
 			return "";
-		const std::string slice = std::string(text.substr(start, span.start - start)) + name + std::string(text.substr(span.end, end - span.end));
+		const std::string slice = AsParsed(macros, text, start, span.start) + name + AsParsed(macros, text, span.end, end);
 		return Dedent(slice, IndentBefore(text, start));
 	}
 
@@ -331,7 +344,7 @@ namespace C4LSP::Features
 		const Span span = NameSpan(decl);
 		if (text.empty() || span.end == 0 || span.end > text.size())
 			return "";
-		return Header(text, decl, std::string(text.substr(span.start, span.end - span.start)));
+		return Header(text, MacrosOf(session, decl.startLocation.sourceId), decl, std::string(text.substr(span.start, span.end - span.start)));
 	}
 
 	std::string DeclarationText::Qualified(Server::CompilationSession& session, const Scripting::AstNode& decl)
@@ -340,7 +353,7 @@ namespace C4LSP::Features
 		if (text.empty())
 			return "";
 		const std::string owner = OwnerOf(session, decl);
-		return Header(text, decl, owner.empty() ? WrittenName(decl) : owner + "::" + NameOf(decl));
+		return Header(text, MacrosOf(session, decl.startLocation.sourceId), decl, owner.empty() ? WrittenName(decl) : owner + "::" + NameOf(decl));
 	}
 
 	std::string DeclarationText::Detail(Server::CompilationSession& session, const Scripting::AstNode& decl)
@@ -354,9 +367,10 @@ namespace C4LSP::Features
 		const size_t start = std::min(AfterAccess(text, decl), name.start);
 		const bool typeOnly = decl.Type() == NodeType::VariableDefinition || decl.Type() == NodeType::Parameter || decl.Type() == NodeType::ForLoop;
 		const size_t end = typeOnly ? name.end : std::min(HeaderEnd(text, decl), text.size());
-		std::string kept(text.substr(start, name.start - start));
+		const Scripting::MacroLayout* macros = MacrosOf(session, decl.startLocation.sourceId);
+		std::string kept = AsParsed(macros, text, start, name.start);
 		if (end > name.end)
-			kept += std::string(text.substr(name.end, end - name.end));
+			kept += AsParsed(macros, text, name.end, end);
 		return OneLine(kept);
 	}
 

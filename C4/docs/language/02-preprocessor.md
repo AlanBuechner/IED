@@ -1,12 +1,21 @@
 # 2. Preprocessor (macros)
 
 C4 keeps C-style `#define` macros and conditional compilation, but `include` is NOT part of the
-preprocessor (see [01-program-model](01-program-model.md#12-include)). Macros run as a text pass over each
-file before it is lexed. Each file is expanded once, in isolation, and the final macro table of every
-file it includes is merged in. The default library next to `C4.exe` goes through the same pass.
+preprocessor (see [01-program-model](01-program-model.md#12-include)). The macro pass reads each file before it is
+parsed. Each file is processed once, in isolation, and the final macro table of every file it includes is merged in.
+The default library next to `C4.exe` goes through the same pass.
+
+The pass never rewrites a file's text. It records what it does over the file's own text - the lines it leaves out
+(directives, the code of inactive `#if` groups) and each macro use it expands, with the tokens the use expands to
+(a `MacroLayout`) - and the parser's lexer reads the file through that record. Expansion works on tokens: a use's
+name and arguments, a macro's body and what they expand to are tokens, and each token knows where the file spells
+it. So every token the parser reads is located in the file as written: one a macro body made is at its use, and an
+argument's token at its own place in the call; both know the expansion they came from. An error inside an expansion
+names the macro: `note: in the expansion of the macro 'TWICE' (lib.ch:3): (count) * 2`.
 
 Implementation: `C4Lib/src/Macro/` - `MacroPass` (files and includes), `MacroPreprocessor` /
-`MacroDirectives` (lines and directives), `MacroExpander` / `MacroSubstitution` (expansion),
+`MacroDirectives` (lines and directives), `MacroToken` (the pass's tokens), `MacroExpander` / `MacroSubstitution`
+(expansion over tokens), `MacroLayout` (what the pass did to a file, which the lexer reads it through),
 `MacroExpression` (`#if`), `ConditionalStack`, `PredefinedMacros`.
 
 ---
@@ -59,8 +68,9 @@ int32 t = CALL(9,);               // SumAll(9): an empty trailing argument of a 
 - `#param` (function-like macros only) is the argument as written in quotes: spaces collapse to one,
   quotes and backslashes inside its literals are escaped, and the argument is not expanded first. `#`
   before anything that is not a parameter is an error.
-- `a ## b` joins the tokens on either side; its operands are not expanded first. `##` cannot start or end
-  a body. It also works in object-like macros.
+- `a ## b` joins the tokens on either side into one; its operands are not expanded first. An operand that is empty
+  joins nothing (C's placemarker): with `#define F(x, y) x ## y`, `F(, b)` is `b` and `a ## EMPTY ## b` is `ab`.
+  `##` cannot start or end a body. It also works in object-like macros.
 - `__VA_ARGS__` is the variadic arguments joined with `", "`. `#define F(a, b, ...)` (named parameters
   then `...`) is supported. Because forwarding an empty `__VA_ARGS__` often leaves a dangling comma, a
   trailing comma before `)` in a call argument list is accepted by the parser.
@@ -102,12 +112,11 @@ Errors: an empty or malformed condition, division or remainder by zero, a shift 
 
 **Status:** **Implemented**
 
-- A directive continues on the next line after a trailing `\`. Every line of the file stays one line of
-  the expanded text, so error locations keep their lines. Their columns are the file's too: the macro pass records
-  where each use it expanded was written (`ColumnMap`), and a location on such a line - a diagnostic, an editor's
-  position, a symbol's range - is the column as written (one inside an expansion is its use's), and C4.exe shows the
-  line as the file has it (BUG-446: the columns were the expanded text's). A call that continues on later lines maps
-  what follows it on the first line's end.
+- A directive continues on the next line after a trailing `\`. Every location is the file's own line and column: no
+  text is rewritten, so a token after a macro use on its line is where the file has it, and a call that continues on
+  later lines leaves what follows it on its own line. A token a macro body made is located at its use, an argument's
+  at its place in the call (BUG-446 was the columns of an expanded text; R8 removed the expanded text).
+- A number's letters are never a macro's name: in `0xFF` or `1e5`, `FF` and `e5` are not looked up.
 - A `#` line inside a `/* ... */` comment that spans lines is comment text, not a directive.
 - `#error message` stops the build with the message; `#warning message` reports a warning.
 - `#pragma` is accepted and ignored (`#pragma once` is a no-op: every file is parsed once anyway).
@@ -169,11 +178,13 @@ build description instead ([15-projects.md](15-projects.md), [../tools/02-nuke.m
 
 - Prefer `const` globals, `enum class`, templates and inline functions over macros for values and code;
   macros are for conditional compilation, platform switches and the rare code-generation shortcut.
-- Parenthesize macro bodies and parameters (`((x) * 2)`); expansion is textual.
+- Parenthesize macro bodies and parameters (`((x) * 2)`); expansion puts tokens in place, without regard for
+  precedence.
 - Keep macros that other files need in a header; they reach every includer automatically.
 
 ## 2.8 Tests
 
-C4Testing `Macro/MacroExpressionTest`, `Macro/MacroExpanderTest`, `Macro/MacroPreprocessorTest`; TestCode
+C4Testing `Macro/MacroExpressionTest`, `Macro/MacroExpanderTest`, `Macro/MacroPreprocessorTest`, `Macro/MacroLayoutTest`
+(what the pass lays over a file, and the lexer reading through it); TestCode
 `Core/Macros.cf`, `Core/MacroConditions.cf`; IsolatedTests `Macros/*` (conditions, stringize, paste, line
 continuation, predefined macros); NegativeTests for each directive error; ToolsTest `DefineFlag`.

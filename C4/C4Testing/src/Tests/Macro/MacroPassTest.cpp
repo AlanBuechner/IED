@@ -33,10 +33,11 @@ namespace Testing
 
 	void MacroPassTest::IncludesCarryTheirMacros()
 	{
-		std::vector<MacroPass::Input> files = { File("a.ch", "#define SIZE 4\n"), File("main.cf", "include \"a.ch\"\nint32 g = SIZE;\n") };
+		const std::string mainText = "include \"a.ch\"\nint32 g = SIZE;\n";
+		std::vector<MacroPass::Input> files = { File("a.ch", "#define SIZE 4\n"), File("main.cf", mainText) };
 		const std::vector<MacroPass::FileResult> results = MacroPass::RunFiles(std::move(files), ByName);
 		const MacroPass::FileResult* main = ResultOf(results, "main.cf");
-		TEST_ASSERT(main != nullptr && main->text.find("int32 g = 4;") != std::string::npos);
+		TEST_ASSERT(main != nullptr && main->Text(mainText).find("int32 g = 4;") != std::string::npos);
 		TEST_ASSERT(ResultOf(results, "a.ch")->exported.Has("SIZE"));
 		TEST_PASSED();
 	}
@@ -56,12 +57,13 @@ namespace Testing
 			files.push_back(File("l" + std::to_string(level) + "a.ch", text));
 			files.push_back(File("l" + std::to_string(level) + "b.ch", text));
 		}
-		files.push_back(File("main.cf", "include \"l0a.ch\"\nint32 g = DEEPEST;\n"));
+		const std::string mainText = "include \"l0a.ch\"\nint32 g = DEEPEST;\n";
+		files.push_back(File("main.cf", mainText));
 		const auto start = std::chrono::steady_clock::now();
 		const std::vector<MacroPass::FileResult> results = MacroPass::RunFiles(std::move(files), ByName);
 		const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 		TEST_ASSERT(seconds < 5.0);
-		TEST_ASSERT(ResultOf(results, "main.cf")->text.find("int32 g = 42;") != std::string::npos);
+		TEST_ASSERT(ResultOf(results, "main.cf")->Text(mainText).find("int32 g = 42;") != std::string::npos);
 		TEST_ASSERT_EQ(results.size(), (size_t)(2 * kLevels + 1));
 		TEST_PASSED();
 	}
@@ -79,8 +81,9 @@ namespace Testing
 		for (const MacroPass::FileResult& result : results)
 			if (result.absPath == MacroIdentity(sources.GetInfo(main))) expanded = &result;
 		TEST_ASSERT(expanded != nullptr);
-		TEST_ASSERT(expanded->text.find("int32 g = 9;") != std::string::npos);
-		TEST_ASSERT(expanded->text.find("#if") == std::string::npos);
+		const std::string text = expanded->Text(sources.GetInfo(main).source->Text());
+		TEST_ASSERT(text.find("int32 g = 9;") != std::string::npos);
+		TEST_ASSERT(text.find("#if") == std::string::npos);
 		TEST_ASSERT(MacroIdentity(sources.GetInfo(header)) == "memory:" + std::to_string(header));
 		TEST_PASSED();
 	}
@@ -99,11 +102,11 @@ namespace Testing
 		{
 			if (result.absPath == MacroIdentity(sources.GetInfo(header)))
 			{
-				TEST_ASSERT(result.text == "int32 Area(int32 side) ;\n");
+				TEST_ASSERT(result.layout == nullptr); // its text is read as it is
 				TEST_ASSERT(result.exported.Has("SQUARE"));
 			}
 			if (result.absPath == MacroIdentity(sources.GetInfo(script)))
-				TEST_ASSERT(result.text.find("int32 g = ((3) * (3));") != std::string::npos);
+				TEST_ASSERT(result.Text(sources.GetInfo(script).source->Text()).find("int32 g = ((3) * (3));") != std::string::npos);
 		}
 		TEST_PASSED();
 	}
@@ -128,7 +131,7 @@ namespace Testing
 		for (const MacroPass::FileResult& result : results)
 			if (result.absPath == MacroIdentity(sources.GetInfo(script))) expanded = &result;
 		TEST_ASSERT(expanded != nullptr);
-		TEST_ASSERT(expanded->text.find("int32 g = ((3) * (3)) + ((3) * (3)) + HIDDEN;") != std::string::npos);
+		TEST_ASSERT(expanded->Text(sources.GetInfo(script).source->Text()).find("int32 g = ((3) * (3)) + ((3) * (3)) + HIDDEN;") != std::string::npos);
 		TEST_PASSED();
 	}
 
@@ -140,7 +143,7 @@ namespace Testing
 		const uint32 script = sources.RegisterInMemory("script.cf", "#if TARGET_X64\nint32 g = TARGET_X64;\n#endif\n");
 		const std::vector<MacroPass::FileResult> results = ExpandScriptMacros(sources, { { "TARGET_X64", "1" } }, { script }, {});
 		TEST_ASSERT_EQ(results.size(), (size_t)1);
-		TEST_ASSERT(results[0].text.find("int32 g = 1;") != std::string::npos);
+		TEST_ASSERT(results[0].Text(sources.GetInfo(script).source->Text()).find("int32 g = 1;") != std::string::npos);
 		TEST_PASSED();
 	}
 } // namespace Testing

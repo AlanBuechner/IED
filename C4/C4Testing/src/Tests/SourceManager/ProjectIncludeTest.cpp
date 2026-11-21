@@ -50,7 +50,7 @@ namespace Testing
 			std::string Text(const std::vector<MacroPass::FileResult>& results, const std::string& file) const
 			{
 				for (const auto& r : results)
-					if (fs::path(r.absPath) == (root / file).lexically_normal()) return r.text;
+					if (fs::path(r.absPath) == (root / file).lexically_normal()) return r.Text(sources.GetInfo(Id(file)).source->Text());
 				return "";
 			}
 		};

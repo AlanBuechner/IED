@@ -56,6 +56,18 @@ namespace Scripting
 		return Run(sources, std::move(files), std::move(idOf));
 	}
 
+	void ApplyMacroLayouts(SourceManager& sources, const std::vector<MacroPass::FileResult>& results)
+	{
+		std::unordered_map<std::string, const MacroPass::FileResult*> byIdentity;
+		for (const MacroPass::FileResult& result : results) byIdentity[result.absPath] = &result;
+		for (uint32 id = 1; id <= sources.Count(); ++id)
+		{
+			if (!sources.HasInfo(id)) continue;
+			auto found = byIdentity.find(MacroIdentity(sources.GetInfo(id)));
+			if (found != byIdentity.end()) sources.SetMacroLayout(id, found->second->layout);
+		}
+	}
+
 	std::vector<MacroPass::FileResult> ExpandScriptMacros(const SourceManager& sources, const std::map<std::string, std::string>& predefined,
 		const std::vector<uint32>& scriptUnits, const std::unordered_map<uint32, MacroTable>& exported)
 	{

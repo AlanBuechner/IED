@@ -16,22 +16,10 @@ namespace Testing
 		void TestMemoryEmptySource();
 
 		TEST_FUNC(Source.Memory)
-		void TestMemorySequentialReadToEOF();
+		void TestMemoryTextIsAsGiven();
 
-		TEST_FUNC(Source.Memory)
-		void TestMemoryPushBack();
-
-		TEST_FUNC(Source.Memory)
-		void TestMemoryPushBackAtStartClamps();
-
-		TEST_FUNC(Source.Memory)
-		void TestMemorySeekThenRead();
-
-		TEST_FUNC(Source.Memory)
-		void TestMemorySeekBeyondEndClamps();
-
-		TEST_FUNC(Source.Memory)
-		void TestMemoryMultipleSeeks();
+		TEST_FUNC(Source.Lines)
+		void TestLineColumnToByteOffsetIsThePlainColumn();
 
 		TEST_FUNC(Source.Memory)
 		void TestMemoryReadCharAtOutOfRange();

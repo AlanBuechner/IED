@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <map>
@@ -12,6 +13,8 @@ namespace Scripting
 		bool isFunctionLike = false;     // `NAME(` with no space before the `(`; `NAME()` takes no arguments
 		std::vector<std::string> params; // the named parameters, then "..." for a variadic macro
 		std::string body;                // raw replacement text, expanded at use sites
+		std::string file;                // where its #define is (a file's display name, and its line); empty for one given
+		uint32_t line = 0;
 
 		bool IsVariadic() const { return !params.empty() && params.back() == "..."; }
 	};
@@ -25,6 +28,8 @@ namespace Scripting
 		void Define(const std::string& name, const std::string& body);
 		/// Define (or redefine) a function-like macro.
 		void DefineFunction(const std::string& name, const std::vector<std::string>& params, const std::string& body);
+		/// Define (or redefine) `def`, with where it is defined.
+		void Define(MacroDefinition def);
 
 		/// Remove a macro if present.
 		void Undef(const std::string& name);

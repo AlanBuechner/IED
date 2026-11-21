@@ -1,5 +1,6 @@
 #include "Macro/PredefinedMacros.h"
 #include "Server/CompilationSession.h"
+#include "Interop/InteropSources.h"
 #include "Server/SemanticResolver.h"
 #include "Macro/MacroPass.h"
 #include "Interop/InteropPass.h"
@@ -348,18 +349,6 @@ namespace C4LSP::Server
 		}
 	}
 
-	// Mirror the compiler's preprocess phase (see src/Source.cpp): macro expansion, then CBind
-	// interop bindings for extern "c"/"c++" includes. Bindings are declarations-only - the LSP
-	// never compiles or links foreign code. Without this, symbols generated from C/C++ headers
-	// would be reported as undefined.
-	static uint32 CountLines(const std::string& text)
-	{
-		uint32 n = 0;
-		for (char c : text)
-			if (c == '\n') ++n;
-		return n; // lines of content above the last newline; a trailing line without \n adds nothing
-	}
-
 		static std::string PercentDecode(const std::string& s)
 	{
 		std::string out;
@@ -404,7 +393,9 @@ namespace C4LSP::Server
 #endif
 
 
-void CompilationSession::RunPreprocessPhase()
+	// Mirror the compiler's preprocess phase (see src/Source.cpp): the macro pass, then CBind's bindings of the extern
+	// "c"/"c++" includes, declarations-only - the LSP never compiles or links foreign code.
+	void CompilationSession::RunPreprocessPhase()
 	{
 		// As C4.exe does: each on-disk file (an open document's editor text is already its source) starts with its
 		// project's macros, and an include carries what the included file defines. TEST as a -test build has it: a
@@ -412,71 +403,31 @@ void CompilationSession::RunPreprocessPhase()
 		std::vector<Scripting::MacroDefine> defines;
 		for (const auto& [name, value] : m_Defines)
 			defines.push_back({ name, value });
-		const auto& sources = m_Compiler->GetSourceManager();
+		auto& sources = m_Compiler->GetSourceManager();
 		auto macroResults = Scripting::ExpandSourceMacros(sources, Scripting::PredefinedMacros(true, m_Target, defines));
 		m_Compiler->AddMacroDiagnostics(macroResults);
-
-		std::unordered_map<std::string, uint32> projectOf;
-		for (uint32 id = 1; id <= sources.Count(); ++id)
-			if (sources.HasInfo(id)) projectOf[Scripting::MacroIdentity(sources.GetInfo(id))] = sources.GetInfo(id).project;
-		std::vector<Scripting::InteropFileInput> texts;
-		texts.reserve(macroResults.size());
-		for (const auto& r : macroResults)
-		{
-			auto owner = projectOf.find(r.absPath);
-			std::vector<std::string> folders = owner != projectOf.end() && !m_ProjectsFile.empty()
-				? sources.FoldersReachedFrom(owner->second) : std::vector<std::string>();
-			texts.push_back({ r.name, r.absPath, r.text, std::move(folders) });
-		}
-
+		// Each source keeps its text, which its parse reads through what the macro pass made of it (R8): its locations are
+		// the file's own. CBind's bindings are units of their own, which the files that bind a header include.
+		Scripting::ApplyMacroLayouts(sources, macroResults);
 		std::string objDir = (fs::temp_directory_path() / "c4_lsp_interop").string();
 		fs::create_directories(objDir);
-
-		auto interop = Scripting::InteropPass::RunFolder(BuildPreprocessRoots(), texts, m_IncludePaths, objDir, m_Target, false, true);
+		const auto interop = Scripting::InteropPass::RunFolder(BuildPreprocessRoots(), Scripting::InteropInputsOf(sources, !m_ProjectsFile.empty()),
+			m_IncludePaths, objDir, m_Target, false, true);
+		Scripting::RegisterBindings(sources, interop.files);
 
 		std::unordered_map<std::string, const Scripting::MacroPass::FileResult*> macroOf;
 		for (const auto& mr : macroResults) macroOf[mr.absPath] = &mr;
-		std::unordered_map<std::string, const Scripting::InteropFileResult*> boundOf;
-		for (const auto& ir : interop.files) boundOf[ir.absPath] = &ir;
-
-		m_BindingStartLine.clear();
-		m_BindingDirectiveLine.clear();
 		m_MacroTables.clear();
 		m_RawTexts.clear();
-		// Replace each source's text with its effective form (macro-expanded + bindings) so the parser sees exactly what
-		// the compiler would parse, its locations still the file's own columns (BUG-446). The bindings follow the user's
-		// text, so the user's lines are the editor's; record where the bindings start and the editor line of the
-		// `extern ... include` directive that produced them (the only place a generated symbol's definition is visible).
 		for (uint32 id = 1; id <= m_Compiler->SourceCount(); ++id)
 		{
-			const auto& info = m_Compiler->GetSourceManager().GetInfo(id);
-			// The macro pass names a source by its path, or `memory:<id>` for one given as text (BUG-343).
-			const std::string identity = Scripting::MacroIdentity(info);
+			const auto& info = sources.GetInfo(id);
 			if (info.source)
 				m_RawTexts[id] = std::string(info.source->Data(), info.source->Size());
-			const auto macro = macroOf.find(identity);
-			const Scripting::MacroPass::FileResult* expanded = macro != macroOf.end() ? macro->second : nullptr;
-			if (expanded && !expanded->table.Empty())
-				m_MacroTables[id] = expanded->table;
-			const auto bound = boundOf.find(identity);
-			const Scripting::InteropFileResult* bindings = bound != boundOf.end() ? bound->second : nullptr;
-			if (!bindings && !expanded)
-				continue;
-			const std::string& effective = bindings ? bindings->text : expanded->text;
-			if (effective.empty())
-				continue;
-
-			m_Compiler->GetSourceManager().SetExpandedText(id, effective, expanded ? expanded->columns : Scripting::ColumnMap());
-			m_Compiler->GetSourceManager().GetInfo(id).bindingsLine = bindings ? bindings->bindingsLine : 0;
-
-			if (bindings)
-			{
-				m_BindingStartLine[id] = (expanded ? CountLines(expanded->text) : 0) + 1;
-
-				// Editor line (1-based) of the directive, computed against the original text.
-				if (bindings->directiveOffset != SIZE_MAX && expanded)
-					m_BindingDirectiveLine[id] = static_cast<uint32>(std::count(expanded->text.begin(), expanded->text.begin() + bindings->directiveOffset, '\n')) + 1;
-			}
+			// The macro pass names a source by its path, or `memory:<id>` for one given as text (BUG-343).
+			const auto macro = macroOf.find(Scripting::MacroIdentity(info));
+			if (macro != macroOf.end() && !macro->second->table.Empty())
+				m_MacroTables[id] = macro->second->table;
 		}
 	}
 
@@ -509,20 +460,6 @@ void CompilationSession::RunPreprocessPhase()
 			return p;
 		};
 
-		// A declaration in the appended CBind binding block has no visible editor line. Redirect it to the
-		// `extern ... include` directive that produced those bindings, so F12/highlight land on a real,
-		// meaningful line instead of past the end of the file.
-		auto bindings = m_BindingStartLine.find(sourceId);
-		if (bindings != m_BindingStartLine.end() && (start.line >= bindings->second || end.line >= bindings->second))
-		{
-			auto it = m_BindingDirectiveLine.find(sourceId);
-			uint32 line = (it != m_BindingDirectiveLine.end()) ? it->second : 1; // 1-based
-			Protocol::Position p;
-			p.line = (line > 0) ? line - 1 : 0;   // -> 0-based editor line
-			p.character = 0;
-			return Protocol::Range{ p, p };
-		}
-
 		Protocol::Range r;
 		r.start = conv(start);
 		r.end = conv(end);
@@ -537,8 +474,8 @@ void CompilationSession::RunPreprocessPhase()
 
 	bool CompilationSession::InBindings(const Scripting::SourceLocation& location) const
 	{
-		auto bindings = m_BindingStartLine.find(location.sourceId);
-		return bindings != m_BindingStartLine.end() && location.line >= bindings->second;
+		const auto& sources = m_Compiler->GetSourceManager();
+		return sources.HasInfo(location.sourceId) && sources.GetInfo(location.sourceId).binding;
 	}
 
 	std::string CompilationSession::UriForSourceId(uint32 sourceId) const

@@ -183,8 +183,8 @@ namespace Scripting
 		const MacroPass::FileResult expanded = Preprocessed(text, defines);
 		SourceOutline outline;
 		outline.diagnostics = MacroDiagnosticsOf(expanded);
-		Ref<Source> source = Source::FromMemory(expanded.text);
-		Lexer lexer(*source, 0);
+		Ref<Source> source = Source::FromMemory(text);
+		Lexer lexer(*source, 0, expanded.layout.Get()); // the text as written, through what the macro pass made of it (R8)
 		ErrorTracker errors;
 		ParserState state(lexer, errors);
 		for (const LexicalDiagnostic& unpaired : lexer.RecoverBraces())

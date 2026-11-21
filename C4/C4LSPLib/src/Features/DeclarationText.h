@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-namespace Scripting { struct AstNode; }
+namespace Scripting { struct AstNode; class MacroLayout; }
 
 namespace C4LSP::Server { class CompilationSession; }
 
@@ -27,8 +27,8 @@ namespace C4LSP::Features
 		constexpr int Struct = 23;
 	}
 
-	/// What tools say about a declaration, read from the text it was parsed from (the macro-expanded source, whose
-	/// declaration lines are the file's own): the declaration as written, its detail, its owner and its kind.
+	/// What tools say about a declaration, read from its file's text as its parse read it (a macro use is its expansion,
+	/// R8): the declaration as written, its detail, its owner and its kind.
 	class DeclarationText
 	{
 	public:
@@ -62,8 +62,10 @@ namespace C4LSP::Features
 		static const Scripting::AstNode& InItsType(Server::CompilationSession& session, const Scripting::AstNode& decl);
 		/// The nodes from a unit's root down to `decl` (itself last); empty when no unit holds it.
 		static Core::Vector<const Scripting::AstNode*> PathTo(Server::CompilationSession& session, const Scripting::AstNode& decl);
-		/// The text a source was parsed from; empty when the session has none.
+		/// A source's text as written (its locations' bytes); empty when the session has none.
 		static std::string_view SourceText(Server::CompilationSession& session, uint32 sourceId);
+		/// What the macro pass made of a source's text; null when nothing.
+		static const Scripting::MacroLayout* MacrosOf(Server::CompilationSession& session, uint32 sourceId);
 
 	private:
 		struct Span { size_t start = 0; size_t end = 0; };
@@ -75,8 +77,9 @@ namespace C4LSP::Features
 		static size_t StartOf(const Scripting::AstNode& decl);
 		/// Where the part after the annotations and the access modifier begins.
 		static size_t AfterAccess(std::string_view text, const Scripting::AstNode& decl);
-		/// The header from the declaration's start to HeaderEnd, its name written as `name`, dedented.
-		static std::string Header(std::string_view text, const Scripting::AstNode& decl, const std::string& name);
+		/// The header from the declaration's start to HeaderEnd as its parse read it (through `macros`), its name written as
+		/// `name`, dedented.
+		static std::string Header(std::string_view text, const Scripting::MacroLayout* macros, const Scripting::AstNode& decl, const std::string& name);
 		static bool FindPath(const Scripting::AstNode& node, const Scripting::AstNode& target, Core::Vector<const Scripting::AstNode*>& path);
 	};
 } // namespace C4LSP::Features

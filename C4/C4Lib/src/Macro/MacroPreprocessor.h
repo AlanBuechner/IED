@@ -1,27 +1,27 @@
 #pragma once
 #include "MacroTable.h"
 #include "Macro/MacroDiagnostic.h"
-#include "SourceManager/ColumnMap.h"
+#include "Macro/MacroLayout.h"
 #include <functional>
 #include <string>
 #include <vector>
 
 namespace Scripting
 {
-	/// A file's macro-expanded text and the errors and warnings of its directives.
+	/// What the macro pass made of a file: where its lines are left out and its uses expanded, and the errors and warnings
+	/// of its directives and uses.
 	struct PreprocessedFile
 	{
-		std::string text;
+		Ref<MacroLayout> layout;
 		std::vector<MacroDiagnostic> diagnostics;
-		ColumnMap columns; // where the macro uses of the lines it expanded were: the file's own columns (BUG-446)
 	};
 
-	/// The directive processor (docs/language/02). Given one file's text and a running MacroTable it runs
-	/// #define / #undef / #if... / #error / #warning / #pragma, expands macro uses in live code, and calls
-	/// `inheritMacros(path)` at each `include "path"` line so the caller can merge that file's macros
-	/// before the lines after it expand. Comments and string literals are respected across lines, a
-	/// directive continues on the next line after a trailing `\`, and every line of the input stays one
-	/// line of the output, so locations map back unchanged. The table ends as the file's macro state.
+	/// The directive processor (docs/language/02). Given one file's text and a running MacroTable it runs #define / #undef /
+	/// #if... / #error / #warning / #pragma, expands macro uses in live code over tokens, and calls `inheritMacros(path)` at
+	/// each `include "path"` line so the caller can merge that file's macros before the lines after it expand. Comments and
+	/// string literals are respected across lines, and a directive continues on the next line after a trailing `\`. The
+	/// file's text is never rewritten: the result says which bytes are left out and which uses read as their expansion
+	/// (R8). The table ends as the file's macro state.
 	class MacroPreprocessor
 	{
 	public:

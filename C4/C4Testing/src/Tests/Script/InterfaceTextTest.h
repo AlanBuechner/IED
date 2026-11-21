@@ -36,5 +36,7 @@ namespace Testing
 		void TheResultParses();
 		TEST_FUNC(Script.InterfaceText)
 		void NodesOfAnotherTextFail();
+		TEST_FUNC(Script.InterfaceText)
+		void BodiesMacrosMakeAreCut();
 	};
 } // namespace Testing

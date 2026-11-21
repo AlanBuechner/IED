@@ -12,28 +12,34 @@ namespace Testing
 	{
 		struct Run
 		{
+			std::string written;
 			PreprocessedFile file;
 			MacroTable table;
 			std::vector<std::string> includes;
+
+			// The file as its parse reads it: its text through its layout (R8).
+			std::string Text() const { return file.layout->Render(written, 0, static_cast<uint32>(written.size())); }
 		};
 
 		Run Process(const std::string& text)
 		{
 			Run run;
+			run.written = text;
 			run.file = MacroPreprocessor::Process(text, "t.cf", run.table,
 				[&](const std::string& path) { run.includes.push_back(path); });
 			return run;
 		}
 
 		// The non-blank lines of the output, trimmed.
-		std::vector<std::string> Code(const PreprocessedFile& file)
+		std::vector<std::string> Code(const Run& run)
 		{
+			const std::string text = run.Text();
 			std::vector<std::string> lines;
 			size_t start = 0;
-			while (start <= file.text.size())
+			while (start <= text.size())
 			{
-				const size_t eol = file.text.find('\n', start);
-				std::string line = file.text.substr(start, (eol == std::string::npos ? file.text.size() : eol) - start);
+				const size_t eol = text.find('\n', start);
+				std::string line = text.substr(start, (eol == std::string::npos ? text.size() : eol) - start);
 				const size_t b = line.find_first_not_of(" \t");
 				if (b != std::string::npos) lines.push_back(line.substr(b, line.find_last_not_of(" \t") - b + 1));
 				if (eol == std::string::npos) break;
@@ -54,9 +60,9 @@ namespace Testing
 	{
 		const Run run = Process("/*\n#define HIDDEN 1\n*/\n#ifdef HIDDEN\nbad\n#endif\nint x; /* a\n#undef X\n b */ int y;\n");
 		TEST_ASSERT(!run.table.Has("HIDDEN"));
-		TEST_ASSERT(Code(run.file) == (std::vector<std::string>{ "/*", "#define HIDDEN 1", "*/", "int x; /* a", "#undef X", "b */ int y;" }));
+		TEST_ASSERT(Code(run) == (std::vector<std::string>{ "/*", "#define HIDDEN 1", "*/", "int x; /* a", "#undef X", "b */ int y;" }));
 		const Run inString = Process("const char* s = \"/*\";\n#define AFTER 1\nAFTER\n");
-		TEST_ASSERT(inString.table.Has("AFTER") && Code(inString.file).back() == "1");
+		TEST_ASSERT(inString.table.Has("AFTER") && Code(inString).back() == "1");
 		TEST_ASSERT(inString.file.diagnostics.empty());
 	}
 
@@ -66,7 +72,7 @@ namespace Testing
 		TEST_ASSERT(!run.table.Get("FLAG")->isFunctionLike);           // BUG-126: a space before `(`
 		TEST_ASSERT(run.table.Get("F")->isFunctionLike && run.table.Get("F")->params.size() == 1);
 		TEST_ASSERT(run.table.Get("Z")->isFunctionLike && run.table.Get("Z")->params.empty());
-		TEST_ASSERT(Code(run.file) == (std::vector<std::string>{ "(1 << 3) [2] 7 ." }));
+		TEST_ASSERT(Code(run) == (std::vector<std::string>{ "(1 << 3) [2] 7 ." }));
 		TEST_ASSERT(run.file.diagnostics.empty());
 		const Run redefined = Process("#define A 1\n#define A 1\n#define A 2\n#undef A\n#define A 3\n");
 		TEST_ASSERT(redefined.file.diagnostics.size() == 1);
@@ -96,46 +102,46 @@ namespace Testing
 	{
 		const Run run = Process("#define ADD(a, b) \\\n\t((a) + (b))\n#if 1 && \\\n 1\nint x = ADD(1,\n\t2); // done\n#endif\n");
 		TEST_ASSERT(run.table.Get("ADD")->body == "((a) + (b))");
-		TEST_ASSERT(Code(run.file) == (std::vector<std::string>{ "int x = ((1) + (2));" }));
+		TEST_ASSERT(Code(run) == (std::vector<std::string>{ "int x = ((1) + (2))", "; // done" })); // what follows the call stays on its line
 		TEST_ASSERT(run.file.diagnostics.empty());
 		// A comment inside a call does not swallow the line after it.
 		const Run commented = Process("#define ADD(a, b) a+b\nADD(1, // one\n2)\n");
-		TEST_ASSERT(Code(commented.file) == (std::vector<std::string>{ "1+2" }));
+		TEST_ASSERT(Code(commented) == (std::vector<std::string>{ "1+2" }));
 	}
 
 	void MacroPreprocessorTest::EveryLineStaysInPlace()
 	{
 		const std::string text = "#define A \\\n 1\nA\n#if 0\nx\n#else\ny\n#endif\n#define F(a, b) a b\nF(1,\n2)\n__LINE__\n";
 		const Run run = Process(text);
-		TEST_ASSERT(std::count(run.file.text.begin(), run.file.text.end(), '\n') == std::count(text.begin(), text.end(), '\n'));
-		const std::vector<std::string> code = Code(run.file);
+		const std::string read = run.Text();
+		TEST_ASSERT(std::count(read.begin(), read.end(), '\n') == std::count(text.begin(), text.end(), '\n'));
+		const std::vector<std::string> code = Code(run);
 		TEST_ASSERT(code == (std::vector<std::string>{ "1", "y", "1 2", "12" }));
 		// A trailing comment is not part of a macro body.
 		TEST_ASSERT(Process("#define B 2 // two\nB\n").table.Get("B")->body == "2");
 		TEST_ASSERT(Process("#define C 3 /* three */\n").table.Get("C")->body == "3");
 	}
 
-	void MacroPreprocessorTest::ColumnsMapToTheFilesOwn()
+	void MacroPreprocessorTest::UsesAreLaidOverTheFilesText()
 	{
-		const Run run = Process(
+		const std::string text =
 			"#define LONG_NAME 2\n"
 			"#define EMPTY\n"
-			"int32 a = LONG_NAME + LONG_NAME; int64 b = 1;\n" // expanded: "int32 a = 2 + 2; int64 b = 1;"
-			"EMPTY int32 c;\n"                                 // expanded: " int32 c;"
-			"/* a\n b */ int32 d = LONG_NAME;\n"               // a use after a comment that closes on its line
-			"int32 e;\n");
-		const ColumnMap& columns = run.file.columns;
-		TEST_ASSERT_EQ(columns.Written(3, 5), (uint32)5);   // before the first use
-		TEST_ASSERT_EQ(columns.Written(3, 11), (uint32)11); // the first use's expansion: its use
-		TEST_ASSERT_EQ(columns.Written(3, 15), (uint32)23); // the second's
-		TEST_ASSERT_EQ(columns.Written(3, 18), (uint32)34); // `int64`, after both
-		TEST_ASSERT_EQ(columns.Expanded(3, 34), (uint32)18);
-		TEST_ASSERT_EQ(columns.Expanded(3, 25), (uint32)15); // inside the second use: its expansion
-		TEST_ASSERT_EQ(columns.Written(4, 2), (uint32)7);   // `int32` after an empty expansion
-		TEST_ASSERT_EQ(columns.Expanded(4, 7), (uint32)2);
-		TEST_ASSERT_EQ(columns.Written(6, 17), (uint32)17); // " b */ int32 d = 2;": the use, where it is written
-		TEST_ASSERT_EQ(columns.Written(6, 18), (uint32)26); // the `;` after it
-		TEST_ASSERT_EQ(columns.Written(7, 3), (uint32)3);   // a line no use changed
+			"int32 a = LONG_NAME + LONG_NAME; int64 b = 1;\n"
+			"EMPTY int32 c;\n"
+			"/* a\n b */ int32 d = LONG_NAME;\n";
+		const Run run = Process(text);
+		const MacroLayout& layout = *run.file.layout;
+		TEST_ASSERT_EQ(layout.ExpansionCount(), uint32(4));
+		const uint32 first = static_cast<uint32>(text.find("LONG_NAME +"));
+		TEST_ASSERT_EQ(layout.Expansion(1).begin, first);
+		TEST_ASSERT_EQ(layout.Expansion(1).end, first + 9);
+		TEST_ASSERT(layout.Expansion(1).text == "2");
+		TEST_ASSERT_EQ(layout.Expansion(2).begin, static_cast<uint32>(text.find("LONG_NAME;")));
+		TEST_ASSERT(layout.Expansion(3).macro == "EMPTY" && layout.Expansion(3).text.empty()); // it expands to nothing
+		TEST_ASSERT_EQ(layout.Expansion(4).begin, static_cast<uint32>(text.rfind("LONG_NAME"))); // after a comment closed on its line
+		TEST_ASSERT_EQ(layout.ExpansionAt(static_cast<uint32>(text.find("int64"))), uint32(0)); // the file's own text, where it is
+		TEST_ASSERT(Code(run)[0] == "int32 a = 2 + 2; int64 b = 1;");
 	}
 
 	void MacroPreprocessorTest::ConditionalGroups()
@@ -146,7 +152,7 @@ namespace Testing
 			"#if 0\n#if 1 / 0\nnever\n#endif\n#elif TWO > 1\nd\n#endif\n"
 			"#ifndef NOPE\ne\n#endif\n"
 			"#if 0\n#error not reached\n#define NOT_DEFINED 1\n#endif\n");
-		TEST_ASSERT(Code(run.file) == (std::vector<std::string>{ "a", "d", "e" }));
+		TEST_ASSERT(Code(run) == (std::vector<std::string>{ "a", "d", "e" }));
 		TEST_ASSERT(run.file.diagnostics.empty());                  // a skipped #if is never evaluated
 		TEST_ASSERT(!run.table.Has("NOT_DEFINED"));
 	}

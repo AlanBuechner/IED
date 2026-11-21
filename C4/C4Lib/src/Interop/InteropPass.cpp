@@ -28,30 +28,6 @@ namespace Scripting
 			return r;
 		}
 
-		// A binding's macro constants (BUG-284) that an earlier binding in the same file already declared, left out: two
-		// headers that both include <stdint.h> each bind INT32_MAX. Constants follow CBind's marker, one per line as
-		// `const <type> <name> = <value>;`.
-		std::string WithoutRepeatedConstants(const std::string& binding, std::unordered_set<std::string>& declared)
-		{
-			std::istringstream lines(binding);
-			std::string out;
-			std::string line;
-			bool constants = false;
-			while (std::getline(lines, line))
-			{
-				if (line.rfind("// Constants from the header's object-like macros", 0) == 0) constants = true;
-				else if (constants && line.rfind("const ", 0) == 0)
-				{
-					std::istringstream words(line);
-					std::string keyword, type, name;
-					words >> keyword >> type >> name;
-					if (!declared.insert(name).second) continue;
-				}
-				out += line + "\n";
-			}
-			return out;
-		}
-
 		std::string FindCBindExe()
 		{
 			const fs::path cbind = Toolchain::CBind();
@@ -564,11 +540,7 @@ namespace Scripting
 
 			std::string fileDir = Norm(fs::path(f.absPath).parent_path().string());
 
-			std::string transformed = text;
-			std::unordered_set<std::string> boundConstants;
-			bool changed = false;
-			size_t dirOffset = SIZE_MAX; // offset of the first directive whose bindings were appended
-			uint32_t bindingsLine = 0;   // where the first bindings start: the user's lines, then the "\n" before them
+			InteropFileResult bound{ name, f.absPath, {} };
 
 			for (const auto& d : directives)
 			{
@@ -627,13 +599,9 @@ namespace Scripting
 				}
 					if (haveBindings)
 				{
-					// Append: file-scope declarations are order independent (docs/language/01 1.7), and after the
-					// user's text no user line moves, so diagnostics keep their lines. Record the first bound
-					// directive's offset so the LSP can map F12 on a generated symbol to it.
-					if (bindingsLine == 0) bindingsLine = (uint32_t)std::count(transformed.begin(), transformed.end(), '\n') + 2;
-					transformed = transformed + "\n" + WithoutRepeatedConstants(ReadFileBytes(outFile), boundConstants);
-					if (dirOffset == SIZE_MAX) dirOffset = d.offset;
-					changed = true;
+					// A unit of its own, which the file includes (R8): file-scope declarations are order independent
+					// (docs/language/01 1.7), and the file's own text and lines stay as they are.
+					bound.bindings.push_back({ outFile, fs::path(absPath).filename().string() + ".c4bind", ReadFileBytes(outFile) });
 
 					// C++ virtual dispatch: CBind emits a companion shim (one vtable trampoline per
 					// virtual method). Compile it as a foreign object and link it in so [link]
@@ -702,8 +670,8 @@ namespace Scripting
 				if (!have) result.libraries.push_back(resolved);
 			}
 
-		if (changed)
-			result.files.push_back({ name, f.absPath, transformed, dirOffset, bindingsLine });
+		if (!bound.bindings.empty())
+			result.files.push_back(std::move(bound));
 		}
 
 		return result;

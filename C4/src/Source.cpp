@@ -13,6 +13,7 @@
 #include "Macro/PredefinedMacros.h"
 #include "Macro/MacroPass.h"
 #include "Interop/InteropPass.h"
+#include "Interop/InteropSources.h"
 #include "Parser/Consumer/PrettyPrintConsumer.h"
 #include "Parser/Consumer/ASTWalker.h"
 #include "Backend/CodeGen/TestHarnessEmitter.h"
@@ -45,7 +46,7 @@ namespace
 {
 	/// The front-end pipeline, in order:
 	///   1. RegisterSources     - resolve the CLI input and register its source files
-	///   2. RunPreprocessPhase  - macro expansion + C/C++ interop pre-pass (rewrites source text)
+	///   2. RunPreprocessPhase  - the macro pass (each file's MacroLayout) + the C/C++ interop pass (binding units)
 	///   3. CompileAll          - parse all files into ASTs, resolving include dependencies
 	///   4. AnalyzeProgram      - build the single program-wide model (docs/compiler/02-program-model.md)
 	///   5. RunBackend          - HIR lowering, LLVM codegen, object and link (docs/compiler/04-codegen-and-abi.md)
@@ -328,16 +329,17 @@ namespace
 
 		void RunPreprocessPhase()
 		{
-			// Macro pre-pass: replaces each registered source's text with its macro-expanded form before
-			// parsing, so the real parse still happens once per file. Each file starts with its project's
-			// macros (D-59); the default library's files are expanded too.
-			auto macroResults = Scripting::ExpandSourceMacros(m_Compiler.GetSourceManager(),
-				Scripting::PredefinedMacros(m_Options.runTests, m_Options.target, m_Options.defines));
+			// The macro pass reads every registered source - the default library's too - each starting with its project's
+			// macros (D-59), and lays what it does over the file's own text (R8): each source keeps its text, and its parse
+			// reads it through its MacroLayout.
+			auto& sources = m_Compiler.GetSourceManager();
+			auto macroResults = Scripting::ExpandSourceMacros(sources, Scripting::PredefinedMacros(m_Options.runTests, m_Options.target, m_Options.defines));
 			m_Compiler.AddMacroDiagnostics(macroResults);
 			for (const auto& result : macroResults) m_ExportedMacros[result.absPath] = result.exported;
+			Scripting::ApplyMacroLayouts(sources, macroResults);
 
-			RunInteropPrepass(ResolveRootFolders(), macroResults);
-			ApplyEffectiveSourceTexts(macroResults, m_Interop.files);
+			RunInteropPrepass(ResolveRootFolders());
+			Scripting::RegisterBindings(sources, m_Interop.files);
 			ExportMacrosIfRequested(macroResults);
 		}
 
@@ -364,32 +366,11 @@ namespace
 			return roots;
 		}
 
-		/// Interop pre-pass: generate C4 bindings for `extern "c" include` headers and compile
-		/// `extern "c" source` files into objects to link. Runs on the macro-expanded text so it
-		/// sees the final form of each file before parsing.
-		void RunInteropPrepass(const std::vector<std::string>& rootFolders, const std::vector<Scripting::MacroPass::FileResult>& macroResults)
+		/// Interop pre-pass: generate C4 bindings for `extern "c" include` headers - each a unit of its own the including
+		/// file includes (R8) - and compile `extern "c" source` files into objects to link. It reads each file as its
+		/// parse will.
+		void RunInteropPrepass(const std::vector<std::string>& rootFolders)
 		{
-			// A file's headers are found in its project's folders and its dependencies' (D-59).
-			const auto& sources = m_Compiler.GetSourceManager();
-			std::unordered_map<std::string, uint32> projectOf;
-			for (uint32 id = 1; id <= sources.Count(); ++id)
-				if (sources.HasInfo(id)) projectOf[sources.GetInfo(id).absPath] = sources.GetInfo(id).project;
-			std::vector<Scripting::InteropFileInput> inputs;
-			inputs.reserve(macroResults.size());
-			std::unordered_map<uint32, std::vector<std::string>> reached; // each project's folders, found once
-			for (const auto& mr : macroResults)
-			{
-				auto owner = projectOf.find(mr.absPath);
-				std::vector<std::string> folders;
-				if (owner != projectOf.end() && !m_Options.projectsFile.empty())
-				{
-					auto [known, fresh] = reached.try_emplace(owner->second);
-					if (fresh) known->second = sources.FoldersReachedFrom(owner->second);
-					folders = known->second;
-				}
-				inputs.push_back({ mr.name, mr.absPath, mr.text, std::move(folders) });
-			}
-
 			std::vector<std::string> cliIncludes;
 			for (const auto& inc : m_Options.includeDirs)
 				cliIncludes.push_back(std::string(inc.c_str()));
@@ -408,6 +389,8 @@ namespace
 			// Foreign sources build at the program's optimization level, with its debug information (BUG-285).
 			std::vector<std::string> foreignFlags = { "-O" + std::to_string(m_Options.optLevel) };
 			if (m_Options.debugInfo) foreignFlags.push_back("-g");
+			// A file's headers are found in its project's folders and its dependencies' (D-59).
+			const auto inputs = Scripting::InteropInputsOf(m_Compiler.GetSourceManager(), !m_Options.projectsFile.empty());
 			m_Interop = Scripting::InteropPass::RunFolder(rootFolders, inputs, cliIncludes, objDir, m_Options.target, m_Options.verbose,
 				false, foreignFlags);
 
@@ -416,44 +399,6 @@ namespace
 			// Clang diagnostics were already printed by the interop pass; these hard errors gate the build.
 			for (const auto& e : m_Interop.errors)
 				m_Result.AddBackendError(e);
-		}
-
-		/// Replace each registered source's text with its effective form (macro-expanded + interop
-		/// bindings) so parsing sees the final content.
-		void ApplyEffectiveSourceTexts(const std::vector<Scripting::MacroPass::FileResult>& macroResults,
-			const std::vector<Scripting::InteropFileResult>& interopFiles)
-		{
-			// Match preprocessed text back to sources by UNIQUE identity (normalized absolute path),
-			// never by bare display name: a display name is only unique within one root folder, so a
-			// user file and a default-library file sharing a basename would otherwise both receive the
-			// same (user) text, silently overwriting the library's definitions.
-			std::unordered_map<std::string, const std::string*> byAbs;
-			std::unordered_map<std::string, const Scripting::ColumnMap*> columnsOf; // the bindings follow the user's lines: same columns
-			std::unordered_map<std::string, uint32> bindingsLine;
-			for (const auto& mr : macroResults)
-			{
-				byAbs[mr.absPath] = &mr.text;
-				columnsOf[mr.absPath] = &mr.columns;
-			}
-			for (const auto& ir : interopFiles)
-			{
-				byAbs[ir.absPath] = &ir.text; // interop text already includes the macro expansion
-				bindingsLine[ir.absPath] = ir.bindingsLine;
-			}
-
-			auto& sm = m_Compiler.GetSourceManager();
-			for (uint32 id = 1; id <= m_Compiler.SourceCount(); ++id)
-			{
-				auto& info = sm.GetInfo(id);
-				if (auto line = bindingsLine.find(Scripting::MacroIdentity(info)); line != bindingsLine.end()) info.bindingsLine = line->second;
-				auto it = byAbs.find(Scripting::MacroIdentity(info));
-				// Text the passes left as it was keeps its source and line table: no lexer has read one yet.
-				if (it != byAbs.end() && !(info.source && std::string_view(info.source->Data(), info.source->Size()) == *it->second))
-				{
-					const auto columns = columnsOf.find(Scripting::MacroIdentity(info));
-					sm.SetExpandedText(id, *it->second, columns != columnsOf.end() ? *columns->second : Scripting::ColumnMap());
-				}
-			}
 		}
 
 		void ExportMacrosIfRequested(const std::vector<Scripting::MacroPass::FileResult>& macroResults)

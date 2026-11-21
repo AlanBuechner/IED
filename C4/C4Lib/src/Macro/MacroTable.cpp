@@ -21,6 +21,12 @@ namespace Scripting
 		m_Defs[name] = std::move(def);
 	}
 
+	void MacroTable::Define(MacroDefinition def)
+	{
+		std::string name = def.name;
+		m_Defs[std::move(name)] = std::move(def);
+	}
+
 	void MacroTable::Undef(const std::string& name)
 	{
 		m_Defs.erase(name);

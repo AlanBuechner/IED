@@ -1,23 +1,20 @@
 #include "MacroExpander.h"
-#include "Macro/MacroText.h"
 
 namespace Scripting
 {
-	using namespace MacroText;
-
 	namespace
 	{
 		constexpr size_t kNoParam = static_cast<size_t>(-1);
 
-		// A macro body read as tokens: text kept as written, a parameter use, `#param` and `##`.
+		// A macro body read as tokens: a token as written, a parameter use, `#param` and `##`.
 		struct BodyToken
 		{
-			enum class Kind { Text, Space, Param, Stringize, Paste } kind = Kind::Text;
-			std::string text;
+			enum class Kind { Text, Param, Stringize, Paste } kind = Kind::Text;
+			MacroToken token;        // Text: the token; Param / Stringize: the parameter's name (its space before)
 			size_t param = kNoParam;
 		};
 
-		size_t ParamIndex(const MacroDefinition& def, std::string_view name)
+		size_t ParamIndex(const MacroDefinition& def, const std::string& name)
 		{
 			for (size_t p = 0; p < def.params.size(); ++p)
 				if (def.params[p] == name) return p;
@@ -27,151 +24,153 @@ namespace Scripting
 		std::vector<BodyToken> BodyTokens(const MacroDefinition& def)
 		{
 			using Kind = BodyToken::Kind;
-			const std::string& body = def.body;
-			std::vector<BodyToken> tokens;
-			for (size_t i = 0; i < body.size();)
+			const MacroTokens tokens = ReadMacroTokens(def.body, MacroToken::kNotInFile);
+			std::vector<BodyToken> body;
+			body.reserve(tokens.size());
+			for (size_t at = 0; at < tokens.size(); ++at)
 			{
-				if (StartsLiteral(body, i) || StartsComment(body, i))
+				const MacroToken& token = tokens[at];
+				if (token.Is("##")) { body.push_back({ Kind::Paste, token }); continue; }
+				if (token.Is("#") && def.isFunctionLike && at + 1 < tokens.size() && tokens[at + 1].IsIdentifier())
 				{
-					const size_t end = StartsLiteral(body, i) ? LiteralEnd(body, i) : CommentEnd(body, i);
-					tokens.push_back({ Kind::Text, body.substr(i, end - i) });
-					i = end;
+					if (const size_t param = ParamIndex(def, tokens[at + 1].spelling); param != kNoParam)
+					{
+						body.push_back({ Kind::Stringize, token, param });
+						++at;
+						continue;
+					}
 				}
-				else if (IsSpace(body[i]))
-				{
-					size_t end = i;
-					while (end < body.size() && IsSpace(body[end])) ++end;
-					tokens.push_back({ Kind::Space, body.substr(i, end - i) });
-					i = end;
-				}
-				else if (body.compare(i, 2, "##") == 0)
-				{
-					tokens.push_back({ Kind::Paste, "##" });
-					i += 2;
-				}
-				else if (body[i] == '#' && def.isFunctionLike)
-				{
-					const size_t nameStart = SkipSpaces(body, i + 1);
-					const size_t nameEnd = IdentifierEnd(body, nameStart);
-					const size_t param = ParamIndex(def, std::string_view(body).substr(nameStart, nameEnd - nameStart));
-					tokens.push_back(param == kNoParam ? BodyToken{ Kind::Text, "#" } : BodyToken{ Kind::Stringize, "", param });
-					i = param == kNoParam ? i + 1 : nameEnd;
-				}
-				else if (IsIdentStart(body[i]))
-				{
-					const size_t end = IdentifierEnd(body, i);
-					const size_t param = ParamIndex(def, std::string_view(body).substr(i, end - i));
-					tokens.push_back(param == kNoParam ? BodyToken{ Kind::Text, body.substr(i, end - i) } : BodyToken{ Kind::Param, "", param });
-					i = end;
-				}
-				else
-					tokens.push_back({ Kind::Text, std::string(1, body[i++]) });
+				const size_t param = token.IsIdentifier() ? ParamIndex(def, token.spelling) : kNoParam;
+				body.push_back({ param == kNoParam ? Kind::Text : Kind::Param, token, param });
 			}
-			return tokens;
+			return body;
 		}
 
-		// Named parameters before `...` take the leading arguments, those after it the trailing ones, and
-		// `__VA_ARGS__` the arguments between, joined with ", ".
-		std::string ArgumentFor(const MacroDefinition& def, const std::vector<std::string>& args, size_t param)
+		// Named parameters before `...` take the leading arguments, those after it the trailing ones, and `__VA_ARGS__` the
+		// arguments between, joined with ", ".
+		MacroTokens ArgumentFor(const MacroDefinition& def, const std::vector<MacroTokens>& args, size_t param)
 		{
-			if (!def.IsVariadic()) return param < args.size() ? args[param] : "";
-			const size_t ellipsis = def.params.size() - 1;
-			if (param < ellipsis) return param < args.size() ? args[param] : "";
-			std::string joined;
-			for (size_t a = ellipsis; a < args.size(); ++a)
-				joined += (joined.empty() ? "" : ", ") + args[a];
+			if (!def.IsVariadic() || param < def.params.size() - 1) return param < args.size() ? args[param] : MacroTokens();
+			MacroTokens joined;
+			for (size_t a = def.params.size() - 1; a < args.size(); ++a)
+			{
+				if (a > def.params.size() - 1)
+				{
+					MacroToken comma;
+					comma.spelling = ",";
+					joined.push_back(comma);
+				}
+				for (size_t t = 0; t < args[a].size(); ++t)
+				{
+					joined.push_back(args[a][t]);
+					if (t == 0) joined.back().spaceBefore = a > def.params.size() - 1;
+				}
+			}
 			return joined;
 		}
 
-		// `#x`: the argument as written, its spaces collapsed, quotes and backslashes in literals escaped.
-		std::string Stringized(const std::string& argument)
+		// `#x`: the argument as written, white space between its tokens one space, quotes and backslashes in literals escaped.
+		std::string Stringized(const MacroTokens& argument)
 		{
 			std::string out = "\"";
-			bool space = false;
-			for (size_t i = 0; i < argument.size();)
+			for (size_t at = 0; at < argument.size(); ++at)
 			{
-				if (StartsLiteral(argument, i))
+				if (at > 0 && argument[at].spaceBefore) out += ' ';
+				for (char c : argument[at].spelling)
 				{
-					const size_t end = LiteralEnd(argument, i);
-					for (size_t k = i; k < end; ++k)
-					{
-						if (argument[k] == '"' || argument[k] == '\\') out += '\\';
-						out += argument[k];
-					}
-					i = end;
-					space = false;
-					continue;
+					if (argument[at].kind == MacroToken::Kind::Literal && (c == '"' || c == '\\')) out += '\\';
+					out += c;
 				}
-				if (IsSpace(argument[i]))
-				{
-					if (!space) out += ' ';
-					space = true;
-					++i;
-					continue;
-				}
-				out += argument[i++];
-				space = false;
 			}
 			return out + "\"";
 		}
 
-		bool NextToPaste(const std::vector<BodyToken>& tokens, size_t i)
+		bool NextToPaste(const std::vector<BodyToken>& body, size_t at)
 		{
-			using Kind = BodyToken::Kind;
-			for (size_t k = i; k-- > 0;)
-				if (tokens[k].kind != Kind::Space) { if (tokens[k].kind == Kind::Paste) return true; break; }
-			for (size_t k = i + 1; k < tokens.size(); ++k)
-				if (tokens[k].kind != Kind::Space) return tokens[k].kind == Kind::Paste;
-			return false;
+			return (at > 0 && body[at - 1].kind == BodyToken::Kind::Paste) || (at + 1 < body.size() && body[at + 1].kind == BodyToken::Kind::Paste);
 		}
 
-		void TrimTrailingSpace(std::string& out)
+		// What one operand of the body puts out, pasted onto what came before when a `##` precedes it: the spellings of the
+		// left's last token and the right's first are one token, which has no place in the file. An empty operand pastes
+		// nothing (C's placemarker).
+		class Output
 		{
-			while (!out.empty() && IsSpace(out.back())) out.pop_back();
-		}
+		public:
+			void Paste() { m_Paste = true; }
+
+			void Append(MacroTokens tokens)
+			{
+				const bool chained = m_Paste;
+				m_Paste = false;
+				const bool paste = chained && !m_LastEmpty && !m_Out.empty() && !tokens.empty();
+				// What a paste chain holds so far is empty only when every operand of it was (`a ## EMPTY ## b` is `ab`).
+				m_LastEmpty = chained ? m_LastEmpty && tokens.empty() : tokens.empty();
+				size_t at = 0;
+				if (paste)
+				{
+					MacroToken& left = m_Out.back();
+					left.spelling += tokens[0].spelling;
+					left.kind = KindOfSpelling(left.spelling);
+					left.fileOffset = MacroToken::kNotInFile;
+					at = 1;
+				}
+				for (; at < tokens.size(); ++at) m_Out.push_back(std::move(tokens[at]));
+			}
+
+			MacroTokens Take() { return std::move(m_Out); }
+
+		private:
+			MacroTokens m_Out;
+			bool m_Paste = false;
+			bool m_LastEmpty = false;
+		};
 	}
 
-	std::string MacroExpander::Substitute(const MacroDefinition& def, const std::vector<std::string>& args)
+	MacroTokens MacroExpander::Substitute(const MacroDefinition& def, const std::vector<MacroTokens>& args)
 	{
 		using Kind = BodyToken::Kind;
-		const std::vector<BodyToken> tokens = BodyTokens(def);
-		std::string out;
-		for (size_t i = 0; i < tokens.size(); ++i)
+		const std::vector<BodyToken> body = BodyTokens(def);
+		Output out;
+		for (size_t at = 0; at < body.size(); ++at)
 		{
-			const BodyToken& token = tokens[i];
-			switch (token.kind)
+			const BodyToken& part = body[at];
+			switch (part.kind)
 			{
-			case Kind::Text:
-			case Kind::Space:
-				out += token.text;
-				break;
 			case Kind::Paste:
-				TrimTrailingSpace(out);
-				while (i + 1 < tokens.size() && tokens[i + 1].kind == Kind::Space) ++i;
+				out.Paste();
+				break;
+			case Kind::Text:
+				out.Append({ part.token });
 				break;
 			case Kind::Stringize:
-				out += Stringized(ArgumentFor(def, args, token.param));
-				break;
-			case Kind::Param:
-				out += NextToPaste(tokens, i) ? ArgumentFor(def, args, token.param)
-					: ExpandedArgument(ArgumentFor(def, args, token.param));
+			{
+				MacroToken literal;
+				literal.kind = MacroToken::Kind::Literal;
+				literal.spelling = Stringized(ArgumentFor(def, args, part.param));
+				literal.spaceBefore = part.token.spaceBefore;
+				out.Append({ literal });
 				break;
 			}
+			case Kind::Param:
+			{
+				MacroTokens argument = NextToPaste(body, at) ? ArgumentFor(def, args, part.param) : ExpandedArgument(ArgumentFor(def, args, part.param));
+				if (!argument.empty()) argument.front().spaceBefore = part.token.spaceBefore;
+				out.Append(std::move(argument));
+				break;
+			}
+			}
 		}
-		return out;
+		return out.Take();
 	}
 
 	std::string MacroBodyError(const MacroDefinition& def)
 	{
 		using Kind = BodyToken::Kind;
-		const std::vector<BodyToken> tokens = BodyTokens(def);
-		size_t first = 0, last = tokens.size();
-		while (first < last && tokens[first].kind == Kind::Space) ++first;
-		while (last > first && tokens[last - 1].kind == Kind::Space) --last;
-		if (first < last && (tokens[first].kind == Kind::Paste || tokens[last - 1].kind == Kind::Paste))
+		const std::vector<BodyToken> body = BodyTokens(def);
+		if (!body.empty() && (body.front().kind == Kind::Paste || body.back().kind == Kind::Paste))
 			return "'##' cannot start or end the body of the macro '" + def.name + "'";
-		for (const BodyToken& token : tokens)
-			if (def.isFunctionLike && token.kind == Kind::Text && token.text == "#")
+		for (const BodyToken& part : body)
+			if (def.isFunctionLike && part.kind == Kind::Text && part.token.Is("#"))
 				return "'#' in the macro '" + def.name + "' must be followed by one of its parameters";
 		return "";
 	}

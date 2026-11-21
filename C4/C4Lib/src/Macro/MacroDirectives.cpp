@@ -53,7 +53,6 @@ namespace Scripting
 		const size_t nameEnd = IdentifierEnd(text, nameStart);
 		const std::string name = text.substr(nameStart, nameEnd - nameStart);
 		const std::string rest = Trim(std::string_view(text).substr(nameEnd));
-		m_Out += '\n';
 		if (ConditionalDirective(name, rest, number) || !m_Conditions.Active())
 			return;
 		if (name.empty())
@@ -165,8 +164,9 @@ namespace Scripting
 
 		if (const MacroDefinition* old = m_Table.Get(def.name); old && !SameDefinition(*old, def))
 			Report(number, ErrorSeverity::Warning, "'" + def.name + "' is redefined: #undef it first");
-		if (def.isFunctionLike) m_Table.DefineFunction(def.name, def.params, def.body);
-		else m_Table.Define(def.name, def.body);
+		def.file = m_FileName;
+		def.line = number;
+		m_Table.Define(std::move(def));
 	}
 
 	void Preprocessor::Undef(const std::string& rest, unsigned number)

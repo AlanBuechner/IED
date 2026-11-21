@@ -1,4 +1,5 @@
 #include "CompilerInstance.h"
+#include "Compiler/SourceMacros.h"
 #include "Parser/Nodes/Declarations/AliasDefinitionNode.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
@@ -146,9 +147,7 @@ namespace Scripting
 
 	const PriorParse* CompilerInstance::PriorParseOf(uint32 sourceId) const
 	{
-		if (!m_PriorParses) return nullptr;
-		const SourceInfo& info = m_SourceManager.GetInfo(sourceId);
-		return info.source ? m_PriorParses->Find(sourceId, *info.source) : nullptr;
+		return m_PriorParses ? m_PriorParses->Find(sourceId, m_SourceManager) : nullptr;
 	}
 
 	std::shared_ptr<PriorParses> CompilerInstance::Parses() const
@@ -409,13 +408,15 @@ namespace Scripting
 
 	void CompilerInstance::AddMacroDiagnostics(const std::vector<MacroPass::FileResult>& results)
 	{
+		std::unordered_map<std::string, uint32> idOf; // a source given as text is `memory:<id>` to the macro pass (BUG-237)
+		for (uint32 id = 1; id <= m_SourceManager.Count(); ++id)
+			if (m_SourceManager.HasInfo(id)) idOf[MacroIdentity(m_SourceManager.GetInfo(id))] = id;
 		for (const MacroPass::FileResult& result : results)
 		{
 			if (result.diagnostics.empty()) continue;
-			uint32 sourceId = 0;
-			for (uint32 id = 1; id <= m_SourceManager.Count() && sourceId == 0; ++id)
-				if (m_SourceManager.HasInfo(id) && m_SourceManager.GetInfo(id).absPath == result.absPath) sourceId = id;
-			if (sourceId == 0) continue; // a file in a scanned folder that is not compiled
+			auto found = idOf.find(result.absPath);
+			if (found == idOf.end()) continue; // a file in a scanned folder that is not compiled
+			const uint32 sourceId = found->second;
 			for (const MacroDiagnostic& diagnostic : result.diagnostics)
 			{
 				SourceLocation location;

@@ -62,6 +62,7 @@ namespace Scripting
 
 	private:
 		void ReportLexicalErrors();
+		void IncludeBindings();
 		/// Asks for `include` as its parse did, and reports its answer's error as the parse would have.
 		void AskAgain(const IncludeAsked& include);
 		bool AnswersAnInclude(const CompilationError& error) const;
@@ -84,6 +85,8 @@ namespace Scripting
 		Core::Vector<Ref<AstNode>> m_OriginalChildren;
 
 		Ref<Source> m_Source;                      // the text parsed
+		Ref<MacroLayout> m_Macros;                 // what the macro pass made of it
+		std::vector<std::string> m_Bindings;       // the binding units it includes, by path (IncludeBindings)
 		Core::Vector<IncludeAsked> m_IncludesAsked; // the includes the parse asked for, in order
 	};
 }

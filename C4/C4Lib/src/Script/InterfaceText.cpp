@@ -21,24 +21,33 @@ namespace Scripting
 			bool leavesDeclaration = false;
 		};
 
+		// Where a location is in the text the parse read (R8: the file's text through its macro layout).
+		class ReadText
+		{
+		public:
+			ReadText(std::string_view written, const MacroLayout* macros) : m_Written(written), m_Macros(macros) {}
+
+			size_t At(const SourceLocation& location) const
+			{
+				if (!m_Macros) return location.byteOffset;
+				return m_Macros->RenderedOffset(m_Written, location.byteOffset, location.expansion, location.inExpansion);
+			}
+
+		private:
+			std::string_view m_Written;
+			const MacroLayout* m_Macros;
+		};
+
 		bool OutOfLine(const FunctionDefinitionNode& fn)
 		{
 			return fn.GetName() && fn.GetName()->GetSegments().Count() > 1;
 		}
 
-		// Where a definition starts: its first annotation, when it has one.
-		size_t StartOf(const FunctionDefinitionNode& fn)
-		{
-			size_t start = fn.startLocation.byteOffset;
-			for (const Ref<AnnotationNode>& annotation : fn.GetAnnotations())
-				if (annotation) start = std::min(start, annotation->startLocation.byteOffset);
-			return start;
-		}
-
 		class BodyCutter
 		{
 		public:
-			explicit BodyCutter(const std::unordered_set<const AstNode*>& declaredElsewhere) : m_DeclaredElsewhere(declaredElsewhere) {}
+			BodyCutter(const ReadText& text, const std::unordered_set<const AstNode*>& declaredElsewhere)
+				: m_Text(text), m_DeclaredElsewhere(declaredElsewhere) {}
 
 			void Walk(const AstNode* node, bool inTemplate)
 			{
@@ -69,13 +78,23 @@ namespace Scripting
 			}
 
 		private:
+			// Where a definition starts: its first annotation, when it has one.
+			size_t StartOf(const FunctionDefinitionNode& fn) const
+			{
+				size_t start = m_Text.At(fn.startLocation);
+				for (const Ref<AnnotationNode>& annotation : fn.GetAnnotations())
+					if (annotation) start = std::min(start, m_Text.At(annotation->startLocation));
+				return start;
+			}
+
 			void CutFunction(const FunctionDefinitionNode& fn, bool inTemplate)
 			{
 				if (!fn.IsDefinition() || inTemplate || fn.IsTemplated() || fn.GetOwnerTemplateDefinition()) return;
-				if (OutOfLine(fn) || m_DeclaredElsewhere.count(&fn)) m_Cuts.push_back({ StartOf(fn), fn.endLocation.byteOffset, false });
-				else m_Cuts.push_back({ fn.GetBody()->startLocation.byteOffset, fn.GetBody()->endLocation.byteOffset, true });
+				if (OutOfLine(fn) || m_DeclaredElsewhere.count(&fn)) m_Cuts.push_back({ StartOf(fn), m_Text.At(fn.endLocation), false });
+				else m_Cuts.push_back({ m_Text.At(fn.GetBody()->startLocation), m_Text.At(fn.GetBody()->endLocation), true });
 			}
 
+			const ReadText& m_Text;
 			const std::unordered_set<const AstNode*>& m_DeclaredElsewhere;
 			std::vector<Cut> m_Cuts;
 		};
@@ -84,15 +103,17 @@ namespace Scripting
 		std::string Replacement(const std::string& text, const Cut& cut)
 		{
 			std::string out = cut.leavesDeclaration ? ";" : "";
-			out.append(static_cast<size_t>(std::count(text.begin() + cut.start, text.begin() + cut.end, '\n')), '\n');
+			out.append(static_cast<size_t>(std::count(text.begin() + static_cast<std::ptrdiff_t>(cut.start), text.begin() + static_cast<std::ptrdiff_t>(cut.end), '\n')), '\n');
 			return out;
 		}
 	}
 
-	std::optional<std::string> InterfaceText(const std::string& text, const Core::Vector<Ref<AstNode>>& nodes,
+	std::optional<std::string> InterfaceText(std::string_view written, const MacroLayout* macros, const Core::Vector<Ref<AstNode>>& nodes,
 		const std::unordered_set<const AstNode*>& declaredElsewhere)
 	{
-		BodyCutter cutter(declaredElsewhere);
+		const std::string text = macros ? macros->Render(written, 0, static_cast<uint32>(written.size())) : std::string(written);
+		const ReadText read(written, macros);
+		BodyCutter cutter(read, declaredElsewhere);
 		for (const Ref<AstNode>& node : nodes) cutter.Walk(node.Get(), false);
 		std::string out;
 		size_t at = 0;

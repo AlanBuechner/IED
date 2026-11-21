@@ -16,13 +16,15 @@ in `C4Lib`.
         |
         v
  [2] RunPreprocessPhase
-        |   MacroPass    : #define/#if/... text expansion, macro tables inherited down includes
+        |   MacroPass    : #define/#if/... over tokens, macro tables inherited down includes
+        |                  -> each file's MacroLayout (left-out lines + expansions); its text is never rewritten
         |   InteropPass  : extern "c"/"c++" include|source -> CBind bindings, foreign objects, libs
-        |   effective text replaces each Source's text (matched by absolute path)
+        |                  -> each header's bindings a unit of their own, which the binding file includes
         v
  [3] CompileAll (CompilerInstance) -- parallel parse, each file exactly once
-        |   include "x.ch" -> RequestFileInclude message, requester parks until x is parsed,
-        |   x's include closure is folded into the requester's closure
+        |   the Lexer reads the file's own text through its MacroLayout
+        |   include "x.ch" (or a binding unit) -> RequestFileInclude message, requester parks until x is
+        |   parsed, x's include closure is folded into the requester's closure
         v
  [4] AnalyzeProgram
         |   DetectUserMain
@@ -70,7 +72,10 @@ interface, runtime+link.
 
 ### MacroPass (`Macro/`)
 
-A text pass that runs before lexing, once per file:
+A pass over each file before it is parsed, once per file, which never rewrites the file's text (R8): it lays what it
+does over the text as a `MacroLayout` (`Macro/MacroLayout`) - the bytes it leaves out (directive lines, the code of
+inactive `#if` groups) and each macro use it expands, with the tokens the use expands to - and the lexer reads the file
+through it.
 
 - Each file is processed with only the predefined macros plus what its own includes export. A `#define`
   written before an `include` therefore cannot change how the header is expanded - every includer sees the
@@ -80,10 +85,19 @@ A text pass that runs before lexing, once per file:
 - `Compiler/SourceMacros` (`ExpandSourceMacros`) runs it over every registered source, a source given as text
   too (known as `memory:<id>`, BUG-237); an interface file of a script's host (docs/runtime/04) is passed through
   as it is, with the macros it exports. The interop pass needs files on disk (it finds headers beside them).
-- `Preprocessor` (`MacroPreprocessor.cpp` lines, `MacroDirectives.cpp` directives) reads physical lines,
-  tracks comments that span lines, joins `\` continuations and macro calls that continue on later
-  lines, and keeps every line in place. `ConditionalStack` holds the `#if` groups, `MacroExpression`
-  evaluates conditions, `MacroExpander` / `MacroSubstitution` expand (`#`, `##`, `__FILE__`, `__LINE__`).
+- `Preprocessor` (`MacroPreprocessor.cpp` lines and uses, `MacroDirectives.cpp` directives) reads physical lines,
+  tracks comments that span lines, joins `\` continuations, and finds each use in live code: an object-like name, or
+  a function-like name and its call (which may go on to later lines, not past a directive line). The use is read as
+  tokens (`Macro/MacroToken`: each with its spelling, the place the file spells it, and whether white space came
+  before it), `MacroExpander` / `MacroSubstitution` expand them over tokens (`#`, `##` with C's placemarker,
+  `__FILE__`, `__LINE__`; an argument's token keeps its place in the file, a body's or a pasted one has none), and
+  the result is one `MacroExpansion` of the layout: the use's bytes, the macro and where it is defined, the tokens'
+  text, and each token's place. A use that expands to itself is no expansion. `ConditionalStack` holds the `#if`
+  groups, `MacroExpression` evaluates conditions.
+- `ApplyMacroLayouts` gives each registered source its layout (`SourceInfo::macros`); the source keeps its text.
+  `MacroLayout::Render` gives the text as the parse reads it - left-out bytes become their line breaks, a use its
+  expansion then its line breaks - for what needs it as text: the interop pass, a script host's interface file
+  (`Script/InterfaceText`, cutting bodies at `RenderedOffset`s), tools.
 - Errors and warnings come back per file (`FileResult::diagnostics`); `CompilerInstance::AddMacroDiagnostics`
   places them at their sources, and `GetAllDiagnostics` lists them first (CLI and LSP alike).
 - Predefined: `PredefinedMacros(test, -D defines)` - `TEST`, `PLATFORM_WINDOWS` or `PLATFORM_LINUX` (the target's system, D-86), `ARCH_X64`, `C4_VERSION`.
@@ -93,7 +107,8 @@ A text pass that runs before lexing, once per file:
 
 ### InteropPass (`Interop/`)
 
-Scans the macro-expanded text for root-level `extern` directives:
+Reads each file that may hold one (`Interop/InteropSources` `InteropInputsOf`: its text or an expansion has `extern`)
+as its parse will - through its layout - for root-level `extern` directives:
 
 ```c4
 extern "c++" include "game.hpp" { include_dir("third_party"); lib("d3d12.lib"); }
@@ -101,9 +116,13 @@ extern "c" source "helpers.c";
 ```
 
 - `include`: runs `CBind.exe` (`$C4_HOME/CBind/CBind.exe`, else `<dir of C4.exe>/../CBind/CBind.exe`) on the
-  header as a subprocess, which uses clang libtooling to generate C4 declarations. The generated text is
-  appended to the including file and cached as `<hash>_<name>.<flags>.c4bind` (one per way of parsing the header),
-  keyed on the header and CBind timestamps. C++ headers also get a generated shim with an `extern "C"` wrapper for every bound
+  header as a subprocess, which uses clang libtooling to generate C4 declarations, cached as
+  `<hash>_<name>.<flags>.c4bind` (one per way of parsing the header), keyed on the header and CBind timestamps. The
+  bindings are a unit of their own (R8): `RegisterBindings` registers the `.c4bind` once (`SourceManager::
+  RegisterBinding`, `SourceInfo::binding`; display name `<header>.c4bind`), and each file that binds the header lists
+  it (`SourceInfo::bindings`) and includes it - `CompilationUnit::IncludeBindings` asks for it by its absolute path
+  before the file's parse, as a header is asked for, so the file and its includers see the bindings and the file's
+  own text and lines are untouched. C++ headers also get a generated shim with an `extern "C"` wrapper for every bound
   constructor, destructor, method and C++-linkage function, compiled and linked as a foreign object, so
   C4 calls them (virtuals dispatch through a typed pointer in the wrapper).
 - `source`: compiles the C/C++ file with the bundled clang (`-std=c11` / `-std=c++20`, the build's `-O` and `-g`) and
@@ -115,8 +134,10 @@ extern "c" source "helpers.c";
 - `lib("x.lib")`: adds an import library (bare names are resolved against the newest Windows SDK).
 - Any interop failure is a hard error. See [../language/13-interop.md](../language/13-interop.md).
 
-The effective text (macro-expanded + bindings) replaces each `Source`'s text, matched by normalized absolute
-path. Diagnostics still report original file names.
+Each `Source` keeps the file's text: a location is always the file's own line and column (BUG-446 was the columns
+of the expanded text that used to replace it). A token a macro use made is located where the file spells it (an
+argument's token) or at the use, and knows its expansion (`SourceLocation::expansion`, `inExpansion`); a
+diagnostic there adds `note: in the expansion of the macro 'X' (file:line): ...` (`DiagnosticReporter`).
 
 ## 3. Parse (`Compiler/CompilerInstance`)
 
@@ -128,14 +149,19 @@ path. Diagnostics still report original file names.
   visibility domain used by every later name lookup. Include cycles are detected and recovered.
 - A compile given the parses of the one before (`UsePriorParses`, `Compiler/PriorParses`; the language server's
   analysis after an edit, never C4.exe) takes the tree and the lexer's and parser's errors of a file registered with the
-  same id and the same text (as written and as expanded) instead of parsing it, and asks for the file's includes again
+  same id that reads the same - its text, its macro layout and its binding units - instead of parsing it, and asks for
+  the file's includes (its binding units among them) again
   in the order its parse did (`CompilationUnit::StartReplay`): the include closure and the include errors are what a
   parse would give now, so a file that appeared answers an include, and an error at the place of the parse's error
   just before is dropped as `ErrorTracker::ReportOncePerLocation` drops it. Trees are never changed once parsed, so two
   compiles share them; a compile that takes prior parses never merges includes into its trees (`MergeIncludes`).
-- Include path resolution (`SourceManager::ResolveIncludePath`): first as a root-relative name, then relative
-  to the including file's directory (handles `..`). MacroPass resolves the other way round (relative first,
-  then root fallback); both reach the same file for well-formed projects.
+- Include path resolution (`SourceManager::ResolveInclude`): beside the including file, then its project's folders,
+  its dependencies' and the default library ([../language/15-projects.md](../language/15-projects.md)); a binding
+  unit by its absolute path. The macro pass resolves an include the same way (`Compiler/SourceMacros`), so it carries
+  the macros of the file the parse includes.
+- The lexer (`Lexer`) reads the file's own text through its `MacroLayout`: it passes over what the layout leaves out,
+  and reads a use as its expansion's text, locating each token as above. Two tokens form a compound operator only when
+  nothing came between them (`Token::FollowsDirectly`): white space at a use's edge keeps them apart as in the text.
 - Parser structure: one AST node type per `.h/.cpp` under `Parser/Nodes/`. Each node has a static
   `TryParse(ParserState&)` that commits irrevocably once its keyword matches, then `ParseBody`. Expressions
   use the Pratt parser (`PrattParser`, binding powers in `InfixBindPower`). Speculative parses (template
@@ -345,9 +371,9 @@ consumer (`unresolved signature for function 'main'`) - a weak diagnostic tracke
 
 | Phase | Input | Output | Must never |
 |---|---|---|---|
-| MacroPass | file text | expanded text + macro table | depend on the includer's macros |
-| InteropPass | expanded text | text with bindings, foreign objects, libs | silently skip a failed binding |
-| Parse | effective text | one AST per file, include closure | parse a file twice |
+| MacroPass | file text | a MacroLayout (left-out lines, expansions over tokens) + macro table | depend on the includer's macros; rewrite the text |
+| InteropPass | each file's text through its layout | binding units, foreign objects, libs | silently skip a failed binding; touch the binding file's text |
+| Parse | each file's text through its MacroLayout, binding units as includes | one AST per file, include closure | parse a file twice, rewrite a file's text |
 | ModelBuilder | every unit's own top-level declarations | `ProgramModel` | lower a function body |
 | HIR | one `FunctionRecord` + the model | typed `HIRFunction` (complete or not) + diagnostics | mutate the AST, re-derive layout |
 | Lowering (`ProgramLowering`) | the model | every tree the program needs, in one order (`LoweredProgram`) + diagnostics | depend on emission or on the threads |

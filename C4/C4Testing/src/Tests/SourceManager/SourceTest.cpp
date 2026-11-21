@@ -55,8 +55,8 @@ namespace Testing
 	{
 		Ref<Scripting::Source> src = Scripting::Source::FromMemory("");
 		TEST_ASSERT_EQ(ToU32(src->Size()), 0u);
-		TEST_ASSERT_EQ(src->ReadChar(), -1);
 		TEST_ASSERT_EQ(src->ReadCharAt(0), -1);
+		TEST_ASSERT(src->Text().empty());
 		uint32 line = 0, column = 0;
 		src->ByteOffsetToLineColumn(0, line, column);
 		TEST_ASSERT_EQ(line, 1u);
@@ -64,67 +64,26 @@ namespace Testing
 		TEST_PASSED();
 	}
 
-	void SourceTest::TestMemorySequentialReadToEOF()
+	void SourceTest::TestMemoryTextIsAsGiven()
 	{
 		Ref<Scripting::Source> src = Scripting::Source::FromMemory("abc");
 		TEST_ASSERT_EQ(ToU32(src->Size()), 3u);
-		TEST_ASSERT_EQ(src->ReadChar(), CharCode('a'));
-		TEST_ASSERT_EQ(src->ReadChar(), CharCode('b'));
-		TEST_ASSERT_EQ(src->ReadChar(), CharCode('c'));
-		TEST_ASSERT_EQ(src->ReadChar(), -1);
-		TEST_ASSERT_EQ(ToU32(src->GetReadPosition()), 3u);
+		TEST_ASSERT(src->Text() == "abc");
+		TEST_ASSERT_EQ(src->ReadCharAt(2), CharCode('c'));
+		TEST_ASSERT(src->SameTextAs(*Scripting::Source::FromMemory("abc")) && !src->SameTextAs(*Scripting::Source::FromMemory("abd")));
 		TEST_PASSED();
 	}
 
-	void SourceTest::TestMemoryPushBack()
+	void SourceTest::TestLineColumnToByteOffsetIsThePlainColumn()
 	{
-		Ref<Scripting::Source> src = Scripting::Source::FromMemory("abc");
-		src->ReadChar();
-		src->ReadChar();
-		src->PushBack();
-		TEST_ASSERT_EQ(ToU32(src->GetReadPosition()), 1u);
-		TEST_ASSERT_EQ(src->ReadChar(), CharCode('b'));
-		TEST_PASSED();
-	}
-
-	void SourceTest::TestMemoryPushBackAtStartClamps()
-	{
-		Ref<Scripting::Source> src = Scripting::Source::FromMemory("abc");
-		src->PushBack();
-		TEST_ASSERT_EQ(ToU32(src->GetReadPosition()), 0u);
-		src->Seek(1);
-		src->PushBack();
-		src->PushBack();
-		TEST_ASSERT_EQ(ToU32(src->GetReadPosition()), 0u);
-		TEST_PASSED();
-	}
-
-	void SourceTest::TestMemorySeekThenRead()
-	{
-		Ref<Scripting::Source> src = Scripting::Source::FromMemory("hello");
-		src->Seek(4);
-		TEST_ASSERT_EQ(src->ReadChar(), CharCode('o'));
-		TEST_ASSERT_EQ(src->ReadChar(), -1);
-		TEST_PASSED();
-	}
-
-	void SourceTest::TestMemorySeekBeyondEndClamps()
-	{
-		Ref<Scripting::Source> src = Scripting::Source::FromMemory("hi");
-		src->Seek(999);
-		TEST_ASSERT_EQ(ToU32(src->GetReadPosition()), 2u);
-		TEST_ASSERT_EQ(src->ReadChar(), -1);
-		TEST_PASSED();
-	}
-
-	void SourceTest::TestMemoryMultipleSeeks()
-	{
-		Ref<Scripting::Source> src = Scripting::Source::FromMemory("abcdef");
-		src->Seek(3);
-		src->Seek(1);
-		TEST_ASSERT_EQ(src->ReadChar(), CharCode('b'));
-		src->Seek(5);
-		TEST_ASSERT_EQ(src->ReadChar(), CharCode('f'));
+		// R8: a source is never an expanded text, so an editor's column is a byte of the line as written.
+		Ref<Scripting::Source> src = Scripting::Source::FromMemory("ab\n\tcd\nef");
+		TEST_ASSERT_EQ(ToU32(src->LineColumnToByteOffset(2, 2)), 4u);
+		TEST_ASSERT_EQ(ToU32(src->LineColumnToByteOffset(3, 1)), 7u);
+		TEST_ASSERT_EQ(ToU32(src->LineColumnToByteOffset(9, 1)), ToU32(src->Size())); // clamped
+		uint32 line = 0, column = 0;
+		src->ByteOffsetToLineColumn(4, line, column);
+		TEST_ASSERT(line == 2 && column == 2);
 		TEST_PASSED();
 	}
 
@@ -276,11 +235,7 @@ namespace Testing
 
 		Scripting::Source src(guard.path);
 		TEST_ASSERT_EQ(ToU32(src.Size()), ToU32(content.size()));
-		std::string read;
-		int c;
-		while ((c = src.ReadChar()) != -1)
-			read.push_back(static_cast<char>(c));
-		TEST_ASSERT(read == content);
+		TEST_ASSERT(src.Text() == content);
 
 		uint32 line = 0, column = 0;
 		src.ByteOffsetToLineColumn(9, line, column);
@@ -293,7 +248,7 @@ namespace Testing
 	{
 		Scripting::Source src(fs::temp_directory_path() / "c4_source_test_missing_zz.cf");
 		TEST_ASSERT_EQ(ToU32(src.Size()), 0u);
-		TEST_ASSERT_EQ(src.ReadChar(), -1);
+		TEST_ASSERT_EQ(src.ReadCharAt(0), -1);
 		TEST_PASSED();
 	}
 

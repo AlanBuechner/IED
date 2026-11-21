@@ -62,7 +62,7 @@ namespace Testing
 		return CpuTarget::FromFlags(flags, error).value_or(CpuTarget());
 	}
 
-	// As the driver does: a file's text is macro-expanded before it is parsed.
+	// As the driver does: a file's text is read through what the macro pass made of it (R8).
 	static bool ExpandMacros(CompilerInstance& compiler, uint32 id, const std::string& fileName)
 	{
 		auto& sources = compiler.GetSourceManager();
@@ -72,7 +72,7 @@ namespace Testing
 			table.Define(name, value);
 		PreprocessedFile expanded = MacroPreprocessor::Process(std::string(source.Data(), source.Size()), fileName, table, nullptr);
 		if (!expanded.diagnostics.empty()) return false;
-		sources.SetSourceText(id, expanded.text);
+		sources.SetMacroLayout(id, expanded.layout);
 		return true;
 	}
 

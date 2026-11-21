@@ -12,7 +12,7 @@ namespace Scripting
 	namespace
 	{
 		constexpr char kMagic[4] = { 'C', '4', 'I', 'F' };
-		constexpr uint32 kFormatVersion = 6;
+		constexpr uint32 kFormatVersion = 7;
 		constexpr size_t kBuildIdOffset = sizeof(kMagic) + sizeof(uint32); // after the magic and the version
 
 		// Little-endian fields: integers of fixed width, strings and lists after their length.
@@ -141,7 +141,8 @@ namespace Scripting
 			out.Bool(file.library);
 			out.Bool(file.prelude);
 			out.Text(file.text);
-			out.U32(file.bindingsLine);
+			out.Bool(file.binding);
+			out.Indexes(file.bindings);
 			out.U32(static_cast<uint32>(file.macros.size()));
 			for (const MacroDefinition& macro : file.macros) WriteMacro(out, macro);
 			out.Texts(file.templates);
@@ -158,7 +159,8 @@ namespace Scripting
 			file.library = in.Bool();
 			file.prelude = in.Bool();
 			file.text = in.Text();
-			file.bindingsLine = in.U32();
+			file.binding = in.Bool();
+			file.bindings = in.Indexes();
 			const uint32 macros = in.U32();
 			for (uint32 i = 0; i < macros && in.Ok(); ++i) file.macros.push_back(ReadMacro(in));
 			file.templates = in.Texts();

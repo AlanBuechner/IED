@@ -198,18 +198,32 @@ namespace Scripting
 		}
 	}
 
+	/// Where a token is, as the file has it (R8): its line, column and byte in the file's own text. A token a macro use made
+	/// is in that use's expansion (`expansion`, the file's MacroLayout's id, from 1) at byte `inExpansion` of its text; its
+	/// line, column and byte are where the file spells it - an argument's own place - or else the use's.
 	struct SourceLocation
 	{
-		uint32 line = 0;       // 1-based line number
-		uint32 column = 0;     // 1-based column number (within the line)
-		size_t byteOffset = 0; // byte offset from the beginning of the source
-		uint32 sourceId = 0;   // identifier for the source file
+		uint32 line = 0;        // 1-based line number
+		uint32 column = 0;      // 1-based column number (within the line)
+		uint32 byteOffset = 0;  // byte offset from the beginning of the file
+		uint32 sourceId = 0;    // identifier for the source file
+		uint32 expansion = 0;   // the macro use it came from; 0: written in the file
+		uint32 inExpansion = 0; // its place in that expansion's text
 
 		bool operator==(const SourceLocation& other) const
 		{
-			return line == other.line && column == other.column && byteOffset == other.byteOffset && sourceId == other.sourceId;
+			return line == other.line && column == other.column && byteOffset == other.byteOffset && sourceId == other.sourceId &&
+				expansion == other.expansion && inExpansion == other.inExpansion;
 		}
 		bool operator!=(const SourceLocation& other) const { return !(*this == other); }
+
+		/// Whether `a` comes before `b` in one file: by its byte, then by its place in a macro use both came from (two
+		/// declarations one use made are in its order).
+		static bool Before(const SourceLocation& a, const SourceLocation& b)
+		{
+			if (a.byteOffset != b.byteOffset) return a.byteOffset < b.byteOffset;
+			return a.expansion == b.expansion && a.inExpansion < b.inExpansion;
+		}
 	};
 
 	/// What is wrong with a literal token. A token is lexed once, so the parse that consumes it reports the
@@ -280,6 +294,11 @@ namespace Scripting
 		const LiteralFacts& GetLiteralFacts() const { return m_LiteralFacts; }
 		void SetLiteralFacts(const LiteralFacts& facts) { m_LiteralFacts = facts; }
 
+		/// Nothing - no white space, no comment - comes between this token and the one before it, so the two may form one
+		/// compound operator (`<` `<` is `<<`).
+		bool FollowsDirectly() const { return m_FollowsDirectly; }
+		void SetFollowsDirectly(bool follows) { m_FollowsDirectly = follows; }
+
 		/// Try to combine this atomic token with the next character into a compound token.
 		/// If successful, writes the combined token to outToken and returns Combine.
 		/// Otherwise returns Reject and leaves outToken unchanged.
@@ -297,5 +316,6 @@ namespace Scripting
 		SourceLocation m_StartLocation;
 		SourceLocation m_EndLocation;
 		LiteralFacts m_LiteralFacts;
+		bool m_FollowsDirectly = false;
 };
 }

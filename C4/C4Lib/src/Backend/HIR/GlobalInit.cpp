@@ -48,7 +48,8 @@ namespace Scripting
 		bool DeclaredBefore(const GlobalVariable& a, const GlobalVariable& b)
 		{
 			if (a.sym->definingUnit != b.sym->definingUnit) return a.sym->definingUnit < b.sym->definingUnit;
-			return a.declarator->m_NameToken.GetByteOffset() < b.declarator->m_NameToken.GetByteOffset();
+			// Two globals one macro use declares share the use's byte: its expansion orders them (R8).
+			return SourceLocation::Before(a.declarator->m_NameToken.GetStartLocation(), b.declarator->m_NameToken.GetStartLocation());
 		}
 
 		// The globals `wanted` picks, each with its declarator, scope and owning type.

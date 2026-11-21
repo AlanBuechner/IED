@@ -47,16 +47,19 @@ Rules:
 - A foreign source also sees the runtime's C headers, so native code can register with it: `#include
   "ReflectABI.h"` gives the reflection registry (`c4_reflect_register_type`, ..., see
   [runtime/02-reflection.md](../runtime/02-reflection.md)).
-- The interop pass runs as a text pre-pass after macro expansion, so the generated declarations
-  behave exactly like hand-written C4 declarations in the file: they follow the normal
-  include-visibility rules of the [program model](01-program-model.md). They are added after the
-  file's own text (file-scope declarations are order independent), so a diagnostic in the file keeps
-  its line number.
+- The interop pass runs after the macro pass, on each file as its parse reads it (a directive a macro makes counts).
+  The generated declarations of a header are a unit of their own - the binding, its file the cached `.c4bind` - that the
+  file with the directive includes, as it includes a header: they behave exactly like hand-written C4 declarations
+  of a header the file includes, and follow the normal include-visibility rules of the
+  [program model](01-program-model.md) (the file and every file that includes it see them). The file's own text is
+  not touched, so its diagnostics keep their lines and columns, and a binding's diagnostics name its `.c4bind`; the
+  editor's go-to-definition on a bound name opens that file (R8: the bindings were appended to the file's text).
 - Bindings may share declarations, as C translation units share headers: two projects binding `windows.h` (one
   through its own `Win32.h`, one through `d3d12.h`), or one file binding two headers that include a third. A
   binding's declaration that another binding has made already, with the same text, is that one: it is not defined
   again, and every file whose binding repeats it sees it as its own and its project reaches it
-  ([15-projects.md](15-projects.md) rule 4). The same name declared differently is still a redefinition. The
+  ([15-projects.md](15-projects.md) rule 4); files that bind one header the same way share one binding unit. The same
+  name declared differently is still a redefinition. The
   wrappers a C++ header's shim makes are `inline`, so the linker keeps one of each when several shims make them
   (BUG-420).
 - Every interop failure is a hard build error: unresolvable path, CBind missing, CBind rejecting

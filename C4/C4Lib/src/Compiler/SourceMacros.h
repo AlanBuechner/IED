@@ -20,4 +20,8 @@ namespace Scripting
 	/// includers the macros `exported` maps it to, and one it maps nothing to gives none: none is read again.
 	std::vector<MacroPass::FileResult> ExpandScriptMacros(const SourceManager& sources, const std::map<std::string, std::string>& predefined,
 		const std::vector<uint32>& scriptUnits, const std::unordered_map<uint32, MacroTable>& exported);
+
+	/// Each registered source's macro layout from `results` (matched by MacroIdentity): its parse reads its text through it
+	/// (R8). A source no result names keeps none.
+	void ApplyMacroLayouts(SourceManager& sources, const std::vector<MacroPass::FileResult>& results);
 }

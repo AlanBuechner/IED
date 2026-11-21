@@ -1,6 +1,7 @@
 #pragma once
 #include "Source.h"
 #include "Compiler/Projects.h"
+#include "Macro/MacroLayout.h"
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -26,7 +27,9 @@ namespace Scripting
 		uint32 project = 0;   // the project the file belongs to (docs/language/15-projects.md)
 		bool library = false; // a file of the default library (Bedrock)
 		bool byName = false;  // registered by itself (in memory, or one file): includes find it by its display name
-		uint32 bindingsLine = 0; // the line the C bindings the interop pass appended start on; 0: none (BUG-420)
+		Ref<MacroLayout> macros; // what the macro pass made of its text (R8); null: nothing
+		bool binding = false; // a unit of CBind's bindings of a C or C++ header (R8): what an `extern ... include` declares
+		std::vector<uint32> bindings; // the binding units its `extern ... include`s bring in: it includes each
 	};
 
 	/// The file an include names, or why it names none the includer may use.
@@ -60,7 +63,8 @@ namespace Scripting
 		void SetLibrary(const std::string& root, uint32 preludeId);
 
 		/// The file `include` names from `requester`: beside it, then in its project's folders, then in the folders of
-		/// the projects its project depends on, then in the default library (docs/language/15-projects.md).
+		/// the projects its project depends on, then in the default library (docs/language/15-projects.md). A binding unit is
+		/// named by its absolute path (CompilationUnit asks for each its file brings in).
 		IncludeTarget ResolveInclude(const std::string& include, uint32 requester) const;
 		/// The folders the includes of `project`'s files search: its own, then its dependencies', nearest first.
 		std::vector<std::string> FoldersReachedFrom(uint32 project) const;
@@ -118,8 +122,7 @@ namespace Scripting
 		SourceInfo& GetInfo(uint32 id) { return m_Sources.at(id); }
 		const SourceInfo& GetInfo(uint32 id) const { return m_Sources.at(id); }
 
-		/// Replace a registered source's text (e.g. with macro-expanded text). Rebuilds
-		/// the line table from the new content. No-op if the id is unknown.
+		/// Replace a registered source's text. Rebuilds the line table from the new content. No-op if the id is unknown.
 		void SetSourceText(uint32 id, const std::string& text)
 		{
 			auto it = m_Sources.find(id);
@@ -127,34 +130,26 @@ namespace Scripting
 			it->second.source = Source::FromMemory(text);
 		}
 
-		/// Replace a registered source's text with its macro-expanded form: `columns` says where its macro uses were, so
-		/// its locations stay the columns of its text as it is now (BUG-446).
-		void SetExpandedText(uint32 id, const std::string& expanded, ColumnMap columns)
+		/// What the macro pass made of a source's text (R8): its parse reads the text through it.
+		void SetMacroLayout(uint32 id, Ref<MacroLayout> layout)
 		{
 			auto it = m_Sources.find(id);
-			if (it == m_Sources.end()) return;
-			if (columns.Empty() || !it->second.source)
-			{
-				it->second.source = Source::FromMemory(expanded); // no use was expanded: its columns are the file's
-				return;
-			}
-			std::string written(it->second.source->Data(), it->second.source->Size());
-			it->second.source = Source::FromExpansion(expanded, std::move(written), std::move(columns));
+			if (it != m_Sources.end()) it->second.macros = layout && !layout->Empty() ? std::move(layout) : nullptr;
 		}
+
+		/// A source's text as its parse reads it: as written, through its macro layout (MacroLayout::Render).
+		std::string ExpandedText(uint32 id) const;
+
+		/// The binding unit of CBind's bindings at `absPath` (`text`, the generated declarations), brought in by `includer`'s
+		/// `extern ... include`: registered once, however many files bind the header the same way, in `includer`'s project.
+		/// `includer` includes it. Returns its id.
+		uint32 RegisterBinding(const std::string& absPath, const std::string& displayName, const std::string& text, uint32 includer);
 
 		Core::String GetLineText(uint32 id, uint32 line) const
 		{
 			auto it = m_Sources.find(id);
 			if (it == m_Sources.end() || line == 0 || !it->second.source) return Core::String();
 			return it->second.source->GetLineText(line);
-		}
-
-		/// A line as the file has it, before its macro uses were expanded.
-		Core::String GetWrittenLineText(uint32 id, uint32 line) const
-		{
-			auto it = m_Sources.find(id);
-			if (it == m_Sources.end() || line == 0 || !it->second.source) return Core::String();
-			return it->second.source->GetWrittenLineText(line);
 		}
 
 	private:
@@ -175,6 +170,8 @@ namespace Scripting
 		std::unordered_set<std::string> m_AbsPaths;
 		std::unordered_map<std::string, uint32> m_NameToId;
 		std::unordered_map<std::string, uint32> m_AbsPathToId;
+		// The binding units by their path, as a file that binds one names it: an include finds one at once (R8).
+		std::unordered_map<std::string, uint32> m_BindingIds;
 		uint32 m_NextId = 1;
 		uint32 m_PreludeId = 0;
 	};

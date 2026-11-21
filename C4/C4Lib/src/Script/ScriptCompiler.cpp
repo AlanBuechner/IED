@@ -46,7 +46,7 @@ namespace Scripting
 			return CpuTarget::FromLlvm(host.targetCpu, host.targetFeatures, unused).value_or(CpuTarget());
 		}
 
-		// The script's files as the macro pass expands them; the interface's are final already.
+		// The script's files through what the macro pass makes of them (R8); the interface's are final already.
 		void Preprocess(CompilerInstance& compiler, ScriptUnits& units, const CpuTarget& target)
 		{
 			SourceManager& sources = compiler.GetSourceManager();
@@ -57,7 +57,7 @@ namespace Scripting
 			for (uint32 id : units.scriptUnits)
 				if (auto it = resultOf.find(MacroIdentity(sources.GetInfo(id))); it != resultOf.end())
 				{
-					sources.SetExpandedText(id, it->second->text, it->second->columns);
+					sources.SetMacroLayout(id, it->second->layout);
 					units.exportedMacros[id] = it->second->exported;
 				}
 		}

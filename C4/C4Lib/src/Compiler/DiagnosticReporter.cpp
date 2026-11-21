@@ -82,8 +82,8 @@ namespace Scripting
 		const bool known = compiler && compiler->GetSourceManager().HasInfo(err.location.sourceId);
 		const std::string filePath = known ? compiler->GetSourceManager().GetInfo(err.location.sourceId).displayName : "unknown";
 		out << filePath << " (" << err.location.line << ":" << err.location.column << ") " << SeverityName(err.severity) << ": " << err.message << "\n";
-		// The line as the file has it: the column is the file's, also on a line its macro uses changed (BUG-446).
-		const std::string lineText = known ? std::string(compiler->GetSourceManager().GetWrittenLineText(err.location.sourceId, err.location.line).c_str()) : "";
+		// The line as the file has it: a location is always the file's own (R8).
+		const std::string lineText = known ? std::string(compiler->GetSourceManager().GetLineText(err.location.sourceId, err.location.line).c_str()) : "";
 		if (!lineText.empty())
 		{
 			std::string caretLine("  ");
@@ -92,8 +92,19 @@ namespace Scripting
 				caretLine += (lineText[static_cast<size_t>(i)] == '\t') ? '\t' : ' ';
 			out << "  " << lineText << "\n" << caretLine << "^\n";
 		}
+		if (known) out << ExpansionNote(err.location, compiler->GetSourceManager());
 		out << "\n";
 		return out.str();
+	}
+
+	std::string DiagnosticReporter::ExpansionNote(const SourceLocation& location, const SourceManager& sources)
+	{
+		const SourceInfo& info = sources.GetInfo(location.sourceId);
+		if (location.expansion == 0 || !info.macros || location.expansion > info.macros->ExpansionCount()) return "";
+		const MacroExpansion& expansion = info.macros->Expansion(location.expansion);
+		std::string note = "  note: in the expansion of the macro '" + expansion.macro + "'";
+		if (!expansion.definedIn.empty()) note += " (" + expansion.definedIn + ":" + std::to_string(expansion.definedLine) + ")";
+		return note + ": " + expansion.text + "\n";
 	}
 
 	void DiagnosticReporter::PrintSummaryFooter(const CompilationResult& result, const CompilerInstance* compiler)

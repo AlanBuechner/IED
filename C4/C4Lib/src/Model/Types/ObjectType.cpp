@@ -78,7 +78,7 @@ namespace Scripting
 		for (uint32 i = 0; i < m_Fields.Count(); ++i)
 		{
 			const AstNode* node = m_Fields[i].m_DeclaringNode;
-			if (node && declared && node->startLocation.byteOffset < declared->startLocation.byteOffset) index = i + 1;
+			if (node && declared && SourceLocation::Before(node->startLocation, declared->startLocation)) index = i + 1;
 		}
 		m_Fields.Insert(index, storage);
 		m_LaidOut = false;

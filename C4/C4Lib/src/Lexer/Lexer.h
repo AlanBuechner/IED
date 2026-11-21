@@ -3,6 +3,7 @@
 #include "LiteralScanner.h"
 #include "TokenArena.h"
 #include "SourceManager/Source.h"
+#include "Macro/MacroLayout.h"
 #include "Core/Core.h"
 #include <map>
 #include <vector>
@@ -17,6 +18,10 @@ namespace Scripting
 
 	/// Tokeniser that reads from a Source and produces tokens via an arena.
 	///
+	/// It reads the file's own text through what the macro pass made of it (its MacroLayout, R8): a part left out (a
+	/// directive, an inactive #if group) is passed over, and a macro use is read as its expansion, each of whose tokens is
+	/// located where the file spells it (an argument's) or at the use, and knows the expansion it is in.
+	///
 	/// All operator symbols are lexed as atomic single-character tokens internally.
 	/// Compound operators (e.g. <<, +=, &&) are formed by the caller using
 	/// NextCompoundToken() which greedily combines adjacent atomic tokens.
@@ -24,7 +29,8 @@ namespace Scripting
 	class Lexer
 	{
 	public:
-		Lexer(Source& source, uint32 sourceId);
+		/// `macros`: what the macro pass made of the file (null: nothing; the text is read as it is).
+		Lexer(const Source& source, uint32 sourceId, const MacroLayout* macros = nullptr);
 		~Lexer();
 
 		// Non-copyable, non-movable (holds a reference to Source).
@@ -100,13 +106,34 @@ namespace Scripting
 		// @}
 
 	private:
+	/// The text being read: the file's own, or the expansion of a macro use (`expansion` its id, 0 for the file).
+	struct Reading
+	{
+		const char* data = nullptr;
+		size_t size = 0;
+		size_t at = 0;
+		uint32 expansion = 0;
+
+		int Peek() const { return at < size ? static_cast<unsigned char>(data[at]) : -1; }
+		std::string_view Rest() const { return std::string_view(data + at, size - at); }
+	};
+
 	/// Read the next raw token from the source stream into the arena.
 	Token* ReadToken();
-	void SkipWhitespace();
+	/// The token at the reading place of `reading` (its white space already passed) into `token`: its text and kind, and
+	/// where it ends in `reading`. Returns whether the text ended inside it (a `/*` with no `*/`).
+	bool Scan(Token& token, Reading& reading);
+	/// Past the white space of the file and the parts the macro pass left out; into an expansion when a use starts there.
+	/// Returns whether white space or a comment came first.
+	bool PassToNextToken();
+	void EnterExpansion(uint32 id);
+	void LeaveExpansion();
+	/// Where a token that starts at `start` and ends at `end` of the text being read is, as the file has it.
+	void Locate(Token& token, size_t start, size_t end) const;
 	SourceLocation LocationAt(size_t byteOffset) const;
 	/// A number, character or string scanned whole (Lexer/LiteralScanner.h).
-	void ReadLiteral(Token& token, const ScannedLiteral& literal);
-	void ReadByAppending(Token& token);
+	void ReadLiteral(Token& token, const ScannedLiteral& literal, Reading& reading);
+	bool ReadByAppending(Token& token, Reading& reading);
 	void Report(const Token& token, const Core::String& message);
 
 	/// Advance pos past any comment tokens, reading from the source as needed so the arena holds
@@ -117,14 +144,21 @@ namespace Scripting
 	/// The compound token that starts at atomic `pos` (the longest run of adjacent atomic operators
 	/// that combine, or the token itself) into `out`; returns how many atomics it spans.
 	uint32 CombineAt(uint32 pos, Token& out);
-	bool ContinuesCompound(const Token& compound, size_t byteOffset, const Token& next) const;
+	bool ContinuesCompound(const Token& compound, const Token& next) const;
 	static void MarkEndOfFile(Token& token);
 	/// Every token up to the end of the file, read.
 	void ReadAll();
 
-		Source& m_Source;
+		const Source& m_Source;
 		uint32 m_SourceId;
-		const char* m_SourceData; // Cached pointer to source text for location computation.
+		const MacroLayout* m_Macros;
+		Reading m_File;      // the file's own text
+		Reading m_Expansion; // the expansion being read, when m_Expansion.expansion != 0
+		uint32 m_NextRegion = 0;     // the first of the layout's regions the file reading has not reached
+		SourceLocation m_UseStart;   // the use being read as its expansion, as the file has it
+		SourceLocation m_UseEnd;
+		size_t m_LastEnd = 0;        // where the token read last ends, in the text it came from
+		uint32 m_LastIn = 0;         // and which text that is (an expansion's id; 0: the file)
 		TokenArena m_Arena;
 		uint32 m_Offset = 0;  // Number of consumed tokens (front of queue)
 

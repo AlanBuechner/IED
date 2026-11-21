@@ -8,10 +8,12 @@ namespace Scripting
 	CompilationUnit::CompilationUnit(uint32 sourceId, SourceManager& sourceManager, CompilerInstance* compilerInstance) :
 		m_SourceId(sourceId), m_SourceManager(sourceManager), m_CompilerInstance(compilerInstance),
 		m_MessageQueue(compilerInstance ? &compilerInstance->GetMessageQueue() : nullptr),
-		m_Lexer(*sourceManager.GetInfo(sourceId).source.Get(), sourceId)
+		m_Lexer(*sourceManager.GetInfo(sourceId).source.Get(), sourceId, sourceManager.GetInfo(sourceId).macros.Get())
 	{
 		SourceInfo& info = sourceManager.GetInfo(sourceId);
 		m_Source = info.source;
+		m_Macros = info.macros;
+		for (uint32 binding : info.bindings) m_Bindings.push_back(sourceManager.GetInfo(binding).absPath);
 		if (!info.source)
 		{
 			m_ErrorTracker.AddError(
@@ -53,7 +55,7 @@ namespace Scripting
 
 	PriorParse CompilationUnit::ToPriorParse() const
 	{
-		PriorParse parse{ m_Source, m_RootASTNode, m_OriginalChildren, {}, m_IncludesAsked };
+		PriorParse parse{ m_Source, m_Macros, m_Bindings, m_RootASTNode, m_OriginalChildren, {}, m_IncludesAsked };
 		for (const CompilationError& error : m_ErrorTracker.GetErrors())
 			if (!AnswersAnInclude(error)) parse.errors.Push(error);
 		return parse;
@@ -66,6 +68,7 @@ namespace Scripting
 			parserState.RecordIncludesIn(&m_IncludesAsked);
 			for (const LexicalDiagnostic& unpaired : m_Lexer.RecoverBraces())
 				m_ErrorTracker.AddError(unpaired.location, unpaired.message, ErrorSeverity::Error);
+			IncludeBindings();
 
 			m_RootASTNode = CreateRef<NamespaceNode>();
 			m_RootASTNode->SetIsRoot(true);
@@ -83,6 +86,25 @@ namespace Scripting
 
 			m_MessageQueue->SendMessage(m_SourceId, MessageType::FinishedParsing, "");
 		});
+	}
+
+	// The binding units its `extern ... include`s bring in (R8): included as a header is, so the file and its includers see
+	// them; asked for as includes are, so a parse taken again asks again.
+	void CompilationUnit::IncludeBindings()
+	{
+		if (!m_MessageQueue) return;
+		for (const std::string& binding : m_Bindings)
+		{
+			const CompilerResponse response = m_MessageQueue->SendMessageAndAwaitResponse(m_SourceId, MessageType::RequestFileInclude, binding.c_str());
+			IncludeAsked asked{ binding.c_str(), SourceLocation{} };
+			asked.at.sourceId = m_SourceId;
+			if (response.type == ResponseType::Error)
+			{
+				asked.error = response.data;
+				m_ErrorTracker.AddError(asked.at, response.data, ErrorSeverity::Error);
+			}
+			m_IncludesAsked.Push(std::move(asked));
+		}
 	}
 
 	void CompilationUnit::ReportLexicalErrors()

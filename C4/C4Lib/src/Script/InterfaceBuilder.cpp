@@ -111,7 +111,7 @@ namespace Scripting
 			if (!sources.HasInfo(id)) continue;
 			const SourceInfo& info = sources.GetInfo(id);
 			Ref<CompilationUnit> unit = compiler.GetCompilationUnit(id);
-			std::optional<std::string> text = unit && info.source ? InterfaceText(std::string(info.source->Data()), unit->GetOriginalChildren(), declaredElsewhere) : std::nullopt;
+			std::optional<std::string> text = unit && info.source ? InterfaceText(info.source->Text(), info.macros.Get(), unit->GetOriginalChildren(), declaredElsewhere) : std::nullopt;
 			if (!text)
 			{
 				if (error) *error = "cannot write the interface of " + info.displayName + ": its declarations do not fit its text";
@@ -123,7 +123,8 @@ namespace Scripting
 			file.prelude = id == sources.PreludeId();
 			Place(sources, info, file);
 			file.text = std::move(*text);
-			file.bindingsLine = info.bindingsLine;   // the interface text keeps every line in place
+			file.binding = info.binding;
+			file.bindings = info.bindings;
 			file.macros = Exported(exportedMacros, MacroIdentity(info));
 			NameTemplates(*unit, file);
 			host.files.push_back(std::move(file));
@@ -150,7 +151,7 @@ namespace Scripting
 		{
 			const SourceInfo& info = sources.GetInfo(id);
 			Ref<CompilationUnit> unit = compiler.GetCompilationUnit(id);
-			std::optional<std::string> text = unit && info.source ? InterfaceText(std::string(info.source->Data()), unit->GetOriginalChildren(), declaredElsewhere) : std::nullopt;
+			std::optional<std::string> text = unit && info.source ? InterfaceText(info.source->Text(), info.macros.Get(), unit->GetOriginalChildren(), declaredElsewhere) : std::nullopt;
 			if (!text)
 			{
 				if (error) *error = "cannot write the interface of " + info.displayName + ": its declarations do not fit its text";

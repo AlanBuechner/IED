@@ -383,10 +383,36 @@ namespace Scripting
 		return "";
 	}
 
+	uint32 SourceManager::RegisterBinding(const std::string& absPath, const std::string& displayName, const std::string& text, uint32 includer)
+	{
+		uint32 id = FindByAbsPath(absPath);
+		if (id == 0)
+		{
+			const SourceInfo& from = GetInfo(includer);
+			id = RegisterVirtual(absPath, displayName, text, from.project, from.library);
+			SourceInfo& binding = GetInfo(id);
+			binding.binding = true;
+			m_BindingIds[binding.absPath] = id;
+		}
+		std::vector<uint32>& bindings = GetInfo(includer).bindings;
+		if (std::find(bindings.begin(), bindings.end(), id) == bindings.end()) bindings.push_back(id);
+		return id;
+	}
+
+	std::string SourceManager::ExpandedText(uint32 id) const
+	{
+		const SourceInfo& info = GetInfo(id);
+		if (!info.source) return "";
+		if (!info.macros) return std::string(info.source->Text());
+		return info.macros->Render(info.source->Text(), 0, static_cast<uint32>(info.source->Size()));
+	}
+
 	IncludeTarget SourceManager::ResolveInclude(const std::string& include, uint32 requester) const
 	{
 		const std::string written = NormalizePath(include);
 		if (written.empty()) return {};
+		// Not FindByAbsPath: a path it does not hold costs a scan of every source, and every include asked that (R8).
+		if (auto binding = m_BindingIds.find(written); binding != m_BindingIds.end()) return { binding->second };
 		const SourceInfo* from = HasInfo(requester) ? &GetInfo(requester) : nullptr;
 		if (from)
 			if (uint32 id = BesideRequester(*from, written)) return { id };

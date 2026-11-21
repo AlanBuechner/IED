@@ -1,10 +1,7 @@
 #include "MacroExpander.h"
-#include "Macro/MacroText.h"
 
 namespace Scripting
 {
-	using namespace MacroText;
-
 	namespace
 	{
 		std::string Quoted(const std::string& text)
@@ -19,7 +16,7 @@ namespace Scripting
 		}
 
 		// `Z()` passes no arguments; a variadic call may end in an empty argument (`CALL(9,)`).
-		std::vector<std::string> NormalizeArguments(const MacroDefinition& def, std::vector<std::string> args)
+		std::vector<MacroTokens> NormalizeArguments(const MacroDefinition& def, std::vector<MacroTokens> args)
 		{
 			if (args.size() == 1 && args[0].empty() && def.params.empty()) args.clear();
 			if (def.IsVariadic() && args.size() > 1 && args.back().empty()) args.pop_back();
@@ -35,124 +32,143 @@ namespace Scripting
 			return "the macro '" + def.name + "' takes " + wanted + " argument" + (named == 1 ? "" : "s") +
 				", but " + std::to_string(given) + (given == 1 ? " was" : " were") + " given";
 		}
+
+		MacroToken Made(MacroToken::Kind kind, std::string spelling, bool spaceBefore)
+		{
+			MacroToken token;
+			token.kind = kind;
+			token.spelling = std::move(spelling);
+			token.spaceBefore = spaceBefore;
+			return token;
+		}
+
+		// `tokens` in place of the use that started with `first`: the use's space before it comes before them.
+		void AppendInPlaceOf(const MacroToken& first, MacroTokens tokens, MacroTokens& out)
+		{
+			if (!tokens.empty()) tokens.front().spaceBefore = first.spaceBefore;
+			for (MacroToken& token : tokens) out.push_back(std::move(token));
+		}
 	}
 
-	ExpansionResult MacroExpander::Expand(const std::string& text, const MacroTable& table, const ExpansionSite& site)
+	TokenExpansion MacroExpander::Expand(const MacroTokens& tokens, const MacroTable& table, const ExpansionSite& site)
 	{
 		MacroExpander expander(table, site);
-		ExpansionResult result;
-		result.text.reserve(text.size());
-		expander.ExpandInto(text, result.text, &result.spans);
+		TokenExpansion result;
+		result.tokens.reserve(tokens.size());
+		expander.ExpandInto(tokens, result.tokens);
 		result.errors = std::move(expander.m_Errors);
 		return result;
 	}
 
-	bool MacroExpander::EndsInsideCall(const std::string& text, const MacroTable& table)
+	ExpansionResult MacroExpander::Expand(const std::string& text, const MacroTable& table, const ExpansionSite& site)
 	{
-		for (size_t i = 0; i < text.size();)
-		{
-			if (StartsLiteral(text, i)) { i = LiteralEnd(text, i); continue; }
-			if (StartsComment(text, i)) { i = CommentEnd(text, i); continue; }
-			if (!IsIdentStart(text[i])) { ++i; continue; }
-			const size_t end = IdentifierEnd(text, i);
-			const MacroDefinition* def = table.Get(text.substr(i, end - i));
-			const size_t open = SkipSpaces(text, end);
-			if (def && def->isFunctionLike && open < text.size() && text[open] == '(')
-			{
-				const Call call = ReadCall(text, open);
-				if (!call.closed) return true;
-				i = call.end;
-				continue;
-			}
-			i = end;
-		}
-		return false;
+		TokenExpansion expanded = Expand(ReadMacroTokens(text, MacroToken::kNotInFile), table, site);
+		return { MacroTokenText(expanded.tokens), std::move(expanded.errors) };
 	}
 
-	void MacroExpander::ExpandInto(const std::string& src, std::string& out, std::vector<ExpandedSpan>* spans)
+	MacroExpander::Call MacroExpander::ReadCall(const MacroTokens& tokens, size_t open)
 	{
-		for (size_t i = 0; i < src.size();)
+		Call call;
+		MacroTokens current;
+		int depth = 0;
+		for (size_t at = open; at < tokens.size(); ++at)
 		{
-			if (StartsLiteral(src, i) || StartsComment(src, i))
+			const MacroToken& token = tokens[at];
+			if (token.Is("(") && depth++ == 0) continue;
+			if (token.Is(")") && --depth == 0)
 			{
-				const size_t end = StartsLiteral(src, i) ? LiteralEnd(src, i) : CommentEnd(src, i);
-				out.append(src, i, end - i);
-				i = end;
+				call.args.push_back(std::move(current));
+				call.end = at + 1;
+				call.closed = true;
+				return call;
+			}
+			if (token.Is(",") && depth == 1)
+			{
+				call.args.push_back(std::move(current));
+				current.clear();
 				continue;
 			}
-			if (IsIdentStart(src[i]))
-			{
-				const size_t written = out.size();
-				const size_t end = ExpandIdentifier(src, i, IdentifierEnd(src, i), out);
-				const bool expanded = out.size() - written != end - i || out.compare(written, end - i, src, i, end - i) != 0;
-				if (spans && expanded)
-					spans->push_back({ static_cast<uint32>(i), static_cast<uint32>(end), static_cast<uint32>(written), static_cast<uint32>(out.size()) });
-				i = end;
-				continue;
-			}
-			out += src[i++];
+			current.push_back(token);
+		}
+		call.end = tokens.size();
+		return call;
+	}
+
+	void MacroExpander::ExpandInto(const MacroTokens& in, MacroTokens& out)
+	{
+		for (size_t at = 0; at < in.size();)
+		{
+			if (in[at].IsIdentifier()) { at = ExpandUse(in, at, out); continue; }
+			out.push_back(in[at++]);
 		}
 	}
 
-	size_t MacroExpander::ExpandIdentifier(const std::string& src, size_t start, size_t end, std::string& out)
+	size_t MacroExpander::ExpandUse(const MacroTokens& in, size_t at, MacroTokens& out)
 	{
-		const std::string name = src.substr(start, end - start);
-		const MacroDefinition* def = m_Table.Get(name);
-		if (!def && name == "__FILE__") { out += Quoted(m_Site.file); return end; }
-		if (!def && name == "__LINE__") { out += std::to_string(m_Site.line); return end; }
-		if (!def || m_Expanding.count(name)) { out += name; return end; }
+		const MacroToken& name = in[at];
+		const MacroDefinition* def = m_Table.Get(name.spelling);
+		if (!def && Builtin(name, out)) return at + 1;
+		if (!def || m_Expanding.count(name.spelling)) { out.push_back(name); return at + 1; }
 
-		const size_t open = SkipSpaces(src, end);
-		const bool called = open < src.size() && src[open] == '(';
+		const size_t open = at + 1;
+		const bool called = open < in.size() && in[open].Is("(");
 		if (def->isFunctionLike)
 		{
-			if (!called) { out += name; return end; }
-			return ExpandCall(*def, src, start, open, out);
+			if (!called) { out.push_back(name); return at + 1; }
+			return ExpandCall(*def, in, at, open, out);
 		}
-		const std::string replacement = Rescanned(name, Substitute(*def, {}));
-		// `#define CALL F` then `CALL(1)`: the replacement names a function-like macro the rest of the line calls.
-		const MacroDefinition* target = m_Table.Get(Trim(replacement));
+		MacroTokens replacement = Rescanned(def->name, Substitute(*def, {}));
+		// `#define CALL F` then `CALL(1)`: the replacement names a function-like macro the tokens after the use call.
+		const MacroDefinition* target = replacement.size() == 1 && replacement[0].IsIdentifier() ? m_Table.Get(replacement[0].spelling) : nullptr;
 		if (called && target && target->isFunctionLike && !m_Expanding.count(target->name))
-			return ExpandCall(*target, src, start, open, out);
-		out += replacement;
-		return end;
+			return ExpandCall(*target, in, at, open, out);
+		AppendInPlaceOf(name, std::move(replacement), out);
+		return at + 1;
 	}
 
-	size_t MacroExpander::ExpandCall(const MacroDefinition& def, const std::string& src, size_t start, size_t open, std::string& out)
+	size_t MacroExpander::ExpandCall(const MacroDefinition& def, const MacroTokens& in, size_t start, size_t open, MacroTokens& out)
 	{
-		const Call call = ReadCall(src, open);
+		Call call = ReadCall(in, open);
 		if (!call.closed)
 		{
-			out.append(src, start, open - start); // an unclosed call is left as written
+			out.insert(out.end(), in.begin() + static_cast<std::ptrdiff_t>(start), in.begin() + static_cast<std::ptrdiff_t>(open)); // an unclosed call is left as written
 			return open;
 		}
-		const std::vector<std::string> args = NormalizeArguments(def, call.args);
+		const std::vector<MacroTokens> args = NormalizeArguments(def, std::move(call.args));
 		const std::string error = ArgumentCountError(def, args.size());
 		if (!error.empty())
 		{
 			m_Errors.push_back(error);
-			out.append(src, start, call.end - start);
+			out.insert(out.end(), in.begin() + static_cast<std::ptrdiff_t>(start), in.begin() + static_cast<std::ptrdiff_t>(call.end));
 			return call.end;
 		}
-		out += Rescanned(def.name, Substitute(def, args));
+		AppendInPlaceOf(in[start], Rescanned(def.name, Substitute(def, args)), out);
 		return call.end;
 	}
 
-	std::string MacroExpander::Rescanned(const std::string& name, const std::string& text)
+	MacroTokens MacroExpander::Rescanned(const std::string& name, const MacroTokens& tokens)
 	{
 		m_Expanding.insert(name);
-		std::string out;
-		out.reserve(text.size());
-		ExpandInto(text, out);
+		MacroTokens out;
+		out.reserve(tokens.size());
+		ExpandInto(tokens, out);
 		m_Expanding.erase(name);
 		return out;
 	}
 
-	std::string MacroExpander::ExpandedArgument(const std::string& argument)
+	MacroTokens MacroExpander::ExpandedArgument(const MacroTokens& argument)
 	{
-		std::string out;
+		MacroTokens out;
 		out.reserve(argument.size());
 		ExpandInto(argument, out);
 		return out;
+	}
+
+	bool MacroExpander::Builtin(const MacroToken& name, MacroTokens& out) const
+	{
+		if (name.Is("__FILE__")) out.push_back(Made(MacroToken::Kind::Literal, Quoted(m_Site.file), name.spaceBefore));
+		else if (name.Is("__LINE__")) out.push_back(Made(MacroToken::Kind::Number, std::to_string(m_Site.line), name.spaceBefore));
+		else return false;
+		return true;
 	}
 }

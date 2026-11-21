@@ -141,7 +141,7 @@ private:
 		/// same text: two projects binding one header, or two headers sharing one (BUG-420). It is not made again, and
 		/// its unit sees and reaches the first as its own.
 		bool RepeatsBinding(const Context& ctx, const AstNode& declaration, const Core::String& name);
-		bool IsBinding(uint32 unitId, const AstNode& declaration) const;
+		bool IsBinding(uint32 unitId) const;
 		std::string_view DeclarationText(uint32 unitId, const AstNode& declaration) const;
 		void RegisterObject(Context& ctx, const ObjectDefinitionNode& obj);
 		void RegisterEnum(Context& ctx, const EnumDefinitionNode& en);

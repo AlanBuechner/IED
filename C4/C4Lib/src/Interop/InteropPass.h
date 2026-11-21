@@ -33,37 +33,39 @@ namespace Scripting
 	};
 
 	/// One file handed to the interop pass: its display name (for diagnostics), unique identity,
-	/// and macro-expanded text. The identity (normalized absolute path) is what callers match results
+	/// and its text as the macro pass leaves it. The identity (normalized absolute path) is what callers match results
 	/// back to sources on - a bare display name is only unique within one root folder.
 	struct InteropFileInput
 	{
 		std::string name;    // display name (relative path), for diagnostics
 		std::string absPath; // normalized absolute path - the file's unique identity across roots
-		std::string text;    // macro-expanded source
+		std::string text;    // its text through its macro layout (MacroLayout::Render)
 		std::vector<std::string> folders; // where its headers are found after its own folder (its project's and its dependencies', D-59); empty: the root folders
 	};
 
-	/// One interop transformation result, keyed by the source's unique identity.
+	/// CBind's declarations of one header, bound one way: a unit of their own that the files binding it include (R8).
+	struct BoundHeader
+	{
+		std::string path;        // the generated file (`<interop folder>/<tag>.c4bind`): the unit's identity
+		std::string displayName; // what diagnostics call it: the header's name, then `.c4bind`
+		std::string text;        // the declarations
+	};
+
+	/// What the interop pass gave a file, keyed by the source's unique identity: the bindings its `extern ... include`s bring
+	/// in, in their order.
 	struct InteropFileResult
 	{
 		std::string name;    // display name (relative path), matches the input
 		std::string absPath; // normalized absolute path - the file's unique identity across roots
-		std::string text;    // transformed source (bindings appended)
-		// Byte offset, in the input (macro-expanded) text, of the `extern ... include` directive
-		// whose bindings were appended. Lets the LSP map a go-to-definition on a generated symbol
-		// back to the directive line the user can actually see. SIZE_MAX when none was appended.
-		size_t directiveOffset = SIZE_MAX;
-		// The line (1-based) the appended bindings start on: every declaration from it on is a binding's (BUG-420).
-		uint32_t bindingsLine = 0;
+		std::vector<BoundHeader> bindings;
 	};
 
 	/// Runs the C/C++ interop pre-pass over a set of macro-expanded C4 sources.
 	///
 	/// Scans each file's text for `extern "c"|"c++" include|source "path" [ { config } ]`
 	/// directives. For `include`, it invokes the CBind tool to generate C4 declaration text
-	/// from the foreign header and appends it to the file (codegen dedupes types by name across
-	/// .cf files, so identical bindings in multiple files are safe). For `source`, it compiles
-	/// the foreign file into an object to be linked. Config blocks support define("N","V"),
+	/// from the foreign header: a unit of its own the file includes (R8; a declaration two bindings repeat is one, by
+	/// ModelBuilder::RepeatsBinding). For `source`, it compiles the foreign file into an object to be linked. Config blocks support define("N","V"),
 	/// include_dir("D"), and lib("path") / lib("name.lib") - import libraries appended to the
 	/// final link (used for Win32/DX12 apps that call user32/d3d12/etc. through a shim).
 	class InteropPass
@@ -71,7 +73,7 @@ namespace Scripting
 	public:
 		struct Result
 		{
-			std::vector<InteropFileResult> files;   // transformed texts (only files that changed)
+			std::vector<InteropFileResult> files;   // the files that bound a header, with their bindings
 			std::vector<ForeignObject> objects;     // foreign sources to compile + link
 			std::vector<std::string> libraries;     // import libraries (.lib paths or names) to link
 			// Hard failures in the interop pre-pass (unresolvable extern path, CBind rejected the

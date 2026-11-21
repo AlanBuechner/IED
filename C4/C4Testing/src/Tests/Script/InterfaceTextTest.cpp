@@ -1,6 +1,7 @@
 #include "InterfaceTextTest.h"
 #include "Compiler/CompilerInstance.h"
 #include "Script/InterfaceText.h"
+#include "Compiler/SourceMacros.h"
 #include <algorithm>
 #include <string>
 
@@ -18,7 +19,20 @@ namespace Testing
 			compiler.CompileAll();
 			Ref<CompilationUnit> unit = compiler.GetCompilationUnit(id);
 			if (!unit) return "<failed>";
-			return InterfaceText(source, unit->GetOriginalChildren()).value_or("<failed>");
+			return InterfaceText(source, nullptr, unit->GetOriginalChildren()).value_or("<failed>");
+		}
+
+		// The interface text of `source` after the macro pass, as a host build makes it (R8: the text through its layout).
+		std::string InterfaceAfterMacros(const std::string& source)
+		{
+			CompilerInstance compiler;
+			const uint32 id = compiler.RegisterInMemory("t.cf", source);
+			ApplyMacroLayouts(compiler.GetSourceManager(), ExpandSourceMacros(compiler.GetSourceManager(), {}));
+			compiler.CompileAll();
+			Ref<CompilationUnit> unit = compiler.GetCompilationUnit(id);
+			if (!unit) return "<failed>";
+			const SourceInfo& info = compiler.GetSourceManager().GetInfo(id);
+			return InterfaceText(info.source->Text(), info.macros.Get(), unit->GetOriginalChildren()).value_or("<failed>");
 		}
 
 		bool Has(const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; }
@@ -110,7 +124,7 @@ namespace Testing
 		compiler.CompileAll();
 		const Core::Vector<Ref<AstNode>>& nodes = compiler.GetCompilationUnit(id)->GetOriginalChildren();
 		const std::unordered_set<const AstNode*> elsewhere = { nodes[0].Get() };
-		const std::string text = InterfaceText(source, nodes, elsewhere).value_or("<failed>");
+		const std::string text = InterfaceText(source, nullptr, nodes, elsewhere).value_or("<failed>");
 		TEST_ASSERT(!Has(text, "Add"));
 		TEST_ASSERT(Has(text, "int32 Keep() ;"));
 		TEST_ASSERT_EQ(Lines(text), Lines(source));
@@ -193,7 +207,21 @@ namespace Testing
 		const std::string source = "int32 Long() {\n\treturn 1;\n}\n";
 		const uint32 id = compiler.RegisterInMemory("t.cf", source);
 		compiler.CompileAll();
-		TEST_ASSERT(!InterfaceText("int32", compiler.GetCompilationUnit(id)->GetOriginalChildren()).has_value());
+		TEST_ASSERT(!InterfaceText("int32", nullptr, compiler.GetCompilationUnit(id)->GetOriginalChildren()).has_value());
+		TEST_PASSED();
+	}
+
+	// R8: the text is read through the macro layout, and a body a macro use makes is cut as one written in the file.
+	void InterfaceTextTest::BodiesMacrosMakeAreCut()
+	{
+		const std::string text = InterfaceAfterMacros(
+			"#define GETTER(name, value) int32 name() { return value; }\n"
+			"GETTER(Ten, 10)\n"
+			"int32 Twice(int32 v) { return v * 2; }\n");
+		TEST_ASSERT(Has(text, "int32 Ten() ;"));
+		TEST_ASSERT(Has(text, "int32 Twice(int32 v) ;"));
+		TEST_ASSERT(!Has(text, "return") && !Has(text, "#define")); // expanded: the interface needs no macro to read
+		TEST_ASSERT_EQ(Lines(text), (size_t)3);
 		TEST_PASSED();
 	}
 } // namespace Testing

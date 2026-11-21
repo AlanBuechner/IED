@@ -24,7 +24,6 @@ namespace Scripting
 		result.absPath = absPath;
 		if (input.expanded)
 		{
-			result.text = input.text;
 			result.table = input.exports;
 			result.exported = input.exports;
 			return done.emplace(absPath, std::move(result)).first->second;
@@ -52,9 +51,8 @@ namespace Scripting
 		};
 
 		PreprocessedFile processed = MacroPreprocessor::Process(input.text, result.name, result.table, inheritMacros);
-		result.text = std::move(processed.text);
+		result.layout = std::move(processed.layout);
 		result.diagnostics = std::move(processed.diagnostics);
-		result.columns = std::move(processed.columns);
 		result.exported = result.table.Without(input.predefined);
 		return done.emplace(absPath, std::move(result)).first->second;
 	}
@@ -79,8 +77,13 @@ namespace Scripting
 		std::vector<FileResult> out;
 		out.reserve(done.size());
 		for (const auto& [abs, file] : ctx.files)
-			out.push_back(std::move(done.at(abs))); // each file's text and tables, moved: every file is in `done` once
+			out.push_back(std::move(done.at(abs))); // each file's layout and tables, moved: every file is in `done` once
 		return out;
+	}
+
+	std::string MacroPass::FileResult::Text(std::string_view written) const
+	{
+		return layout ? layout->Render(written, 0, static_cast<uint32>(written.size())) : std::string(written);
 	}
 
 	// Through FileIo, so a deep output folder is written (BUG-356).

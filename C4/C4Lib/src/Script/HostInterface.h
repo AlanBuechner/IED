@@ -18,9 +18,10 @@ namespace Scripting
 		bool library = false;  // a file of the default library (Bedrock)
 		bool prelude = false;  // the prelude every file sees
 		std::string text;      // the interface text (Script/InterfaceText.h)
-		// The line its C bindings start on (the interop pass appended them; 0: none): a binding another file repeats is
-		// one declaration in the script compile, as in the host's (ModelBuilder::RepeatsBinding).
-		uint32 bindingsLine = 0;
+		// A unit of CBind's bindings (R8): a declaration another binding unit repeats is one declaration in the script
+		// compile, as in the host's (ModelBuilder::RepeatsBinding).
+		bool binding = false;
+		std::vector<uint32> bindings; // the binding units it includes, by unit id
 		std::vector<MacroDefinition> macros; // what an includer receives
 		// The templates it declares (a class with a member template counts), and those it adds to - by a specialization, a
 		// member defined out of line, an extension - as Script/TemplateNames.h names them (qualified; an addition with the

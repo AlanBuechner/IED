@@ -27,7 +27,7 @@ namespace Testing
 			header.folder = 2;
 			header.path = "ai/brain.ch";
 			header.text = "int32 Think(int32 depth) ;\n";
-			header.bindingsLine = 7;
+			header.bindings = { 2 }; // it includes a binding unit
 			MacroDefinition object;
 			object.name = "MAX_DEPTH";
 			object.body = "16";
@@ -45,6 +45,7 @@ namespace Testing
 			prelude.library = true;
 			prelude.prelude = true;
 			prelude.text = std::string("with a \0 byte", 13);
+			prelude.binding = true;
 			host.files = { header, prelude };
 			host.symbols = { "Think_1int32", "g_score", "c4_alloc" };
 			host.reflectedTypes = { "Ai::Brain", "Box<int32>" };
@@ -72,8 +73,8 @@ namespace Testing
 		const InterfaceFile& header = read.files[0];
 		TEST_ASSERT(header.unitId == 1 && header.project == 1 && header.folder == 2 && header.path == "ai/brain.ch");
 		TEST_ASSERT(header.text == "int32 Think(int32 depth) ;\n" && !header.library && !header.prelude);
-		TEST_ASSERT_EQ(header.bindingsLine, (uint32)7); // where its C bindings start
-		TEST_ASSERT_EQ(read.files[1].bindingsLine, (uint32)0);
+		TEST_ASSERT(header.bindings == std::vector<uint32>{ 2 } && !header.binding); // the binding units it includes (R8)
+		TEST_ASSERT(read.files[1].binding && read.files[1].bindings.empty());
 		TEST_ASSERT_EQ(header.macros.size(), (size_t)2);
 		TEST_ASSERT(header.macros[1].isFunctionLike && header.macros[1].params == (std::vector<std::string>{ "x", "..." }));
 		TEST_ASSERT(header.macros[1].body == "((x) * (x))" && header.macros[0].body == "16");

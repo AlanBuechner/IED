@@ -1,65 +1,45 @@
 #pragma once
 #include "Core/Core.h"
-#include "SourceManager/ColumnMap.h"
 #include <string>
 #include <cstddef>
 
 namespace Scripting
 {
-	/// Synchronous source text holder with direct pointer access and a precomputed line table.
-	/// Replaces the async SourceStream ring buffer - no threads, mutexes, or prefetch overhead.
-	/// Maintains a read position for streaming APIs (ReadChar / PushBack / Seek) used by the Lexer.
+	/// One file's text, as written, with a precomputed line table. Never changed once made: a compile reads the file through
+	/// what its macro pass made of it (MacroLayout, R8), so locations are always the file's own.
 	class Source : public Refable
 	{
 	public:
 		explicit Source(const fs::path& path);
 		static Ref<Source> FromMemory(const std::string& content);
-		/// Text the macro pass expanded: `expanded` is what the compiler reads, `written` the file's text and `columns`
-		/// where its macro uses were - its locations are the file's own (BUG-446).
-		static Ref<Source> FromExpansion(const std::string& expanded, std::string written, ColumnMap columns);
 		~Source() = default;
 
 		Source(const Source&)            = delete;
 		Source& operator=(const Source&) = delete;
 
-		/// Read the character at the current read position and advance. Returns -1 on EOF.
-		int ReadChar();
-
-		/// Seek the read position to a byte offset (clamped to source size).
-		void Seek(size_t offset);
-
-		/// Push back one character (decrement read position by one, clamped to 0).
-		void PushBack();
-
 		/// Direct O(1) character access at arbitrary offset. Returns -1 if offset >= size.
 		int ReadCharAt(size_t offset) const;
-
-		/// Current read position (byte offset).
-		size_t GetReadPosition() const { return m_ReadPosition; }
 
 		/// Total number of bytes in the source text.
 		size_t Size() const { return m_Size; }
 
 		/// Pointer to the underlying source text (valid for the lifetime of this object).
 		const char* Data() const { return m_Data.c_str(); }
+		std::string_view Text() const { return m_Data; }
 
 		/// Byte offset where the given 1-based line starts. Returns size for out-of-range lines.
 		size_t LineToByteOffset(uint32 line) const;
 
-		/// Convert a byte offset to 1-based line and column using the precomputed line table; the column as the file has it
-		/// on a line its macro uses changed.
+		/// Convert a byte offset to 1-based line and column using the precomputed line table.
 		void ByteOffsetToLineColumn(size_t byteOffset, uint32& line, uint32& column) const;
-		/// The byte offset of 1-based `line` and `column` as the file has them (an editor's position); on a line its macro
-		/// uses changed, a column inside a use is its expansion's first byte. Clamped to the text.
+		/// The byte offset of 1-based `line` and `column` (an editor's position), clamped to the text.
 		size_t LineColumnToByteOffset(uint32 line, uint32 column) const;
 
 		/// Text content of the given 1-based line (excluding the trailing newline).
 		Core::String GetLineText(uint32 line) const;
-		/// The line as the file has it, before its macro uses were expanded: what a diagnostic shows.
-		Core::String GetWrittenLineText(uint32 line) const;
 
-		/// Whether `other` holds the same text, as written and as expanded: a parse of one is a parse of the other.
-		bool SameTextAs(const Source& other) const { return m_Data == other.m_Data && m_Written == other.m_Written; }
+		/// Whether `other` holds the same text.
+		bool SameTextAs(const Source& other) const { return m_Data == other.m_Data; }
 
 	private:
 		explicit Source(const std::string& content);
@@ -68,9 +48,6 @@ namespace Scripting
 
 		std::string m_Data;
 		size_t m_Size = 0;
-		mutable Core::Vector<size_t> m_LineTable;
-		size_t m_ReadPosition = 0;
-		std::string m_Written; // FromExpansion: the file's own text
-		ColumnMap m_Columns;   // FromExpansion: where its macro uses were
+		Core::Vector<size_t> m_LineTable;
 	};
 }

@@ -24,20 +24,14 @@ namespace Testing
 
 	namespace
 	{
-		// Expands every source as C4.exe does and keeps what each exports.
+		// Runs the macro pass over every source as C4.exe does and keeps what each exports.
 		std::unordered_map<std::string, MacroTable> Preprocess(CompilerInstance& compiler)
 		{
 			SourceManager& sources = compiler.GetSourceManager();
 			const std::vector<MacroPass::FileResult> results = ExpandSourceMacros(sources, PredefinedMacros(false, CpuTarget(), {}));
 			std::unordered_map<std::string, MacroTable> exports;
-			std::unordered_map<std::string, const std::string*> textOf;
-			for (const MacroPass::FileResult& result : results)
-			{
-				exports[result.absPath] = result.exported;
-				textOf[result.absPath] = &result.text;
-			}
-			for (uint32 id = 1; id <= sources.Count(); ++id)
-				if (auto it = textOf.find(MacroIdentity(sources.GetInfo(id))); it != textOf.end()) sources.SetSourceText(id, *it->second);
+			for (const MacroPass::FileResult& result : results) exports[result.absPath] = result.exported;
+			ApplyMacroLayouts(sources, results);
 			return exports;
 		}
 	}

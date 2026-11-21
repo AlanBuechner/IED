@@ -135,11 +135,10 @@ namespace C4LSP::Server
 		// file's; none when it compiled no such file.
 		std::optional<size_t> CompiledTextHash(const std::string& uri) const;
 
-		// CBind appends generated bindings to interop files' text before parsing, so the user's lines keep
-		// their numbers; a location inside the bindings maps to the directive that produced them.
+		// An editor range: a location is always its file's own (R8; a binding's is its unit's, the `.c4bind`).
 		Protocol::Range ToEditorRange(uint32 sourceId, const Scripting::SourceLocation& start, const Scripting::SourceLocation& end) const;
 		Protocol::Location ToEditorLocation(const Scripting::SourceLocation& start, const Scripting::SourceLocation& end) const;
-		// Whether a location is in those appended bindings, which no editor line holds.
+		// Whether a location is in a unit of CBind's bindings (R8).
 		bool InBindings(const Scripting::SourceLocation& location) const;
 
 	private:
@@ -195,8 +194,6 @@ namespace C4LSP::Server
 		std::map<std::string, std::string> m_OpenDocuments;   // uri -> editor text
 		std::map<uint32, Scripting::MacroTable> m_MacroTables; // sourceId -> its macros at its end (RunPreprocessPhase)
 		std::map<uint32, std::string> m_RawTexts;              // sourceId -> its text before macro expansion (RunPreprocessPhase)
-		std::map<uint32, uint32> m_BindingStartLine;          // sourceId -> 1-based effective line where the bindings start
-		std::map<uint32, uint32> m_BindingDirectiveLine;      // sourceId -> 1-based line of the extern include directive
 		std::vector<DiskFile> m_DiskFiles;                     // the files the last compile read from disk (RecordDiskFiles)
 		Timings m_Timings;
 		bool m_LoweredBodies = false;
