@@ -281,6 +281,19 @@ emission, imports, thunks, the finish) runs on them too.
   23966 bodies): `lower` 0.42 s cold and 0.46 s after an edit at `-O0` (0.43 s and 0.51 s before), 0.55-0.60 s at
   `-O3` (0.57-0.60 s before).
 
+**Planned (R10, designed, not started):** the model's changes during lowering become requests answered once -
+an instance from (template, arguments), a closure from the code that writes it, a lifecycle function on first use, a
+local type or function owned by its body - so bodies lower in one pass with no rounds, no `ModelFrozen` and no bodies
+lowered alone. What it needs: the tables lowering reads while another body's request writes them (`Scope`'s names and
+children, `SymbolTable::Records`, the `TypeStore`'s lists, an object type's members) as grow-only containers read
+without a lock; one request made at a time (double-checked: found without the lock, else made under it), every
+`ModelWrites::Ask` site either such a request or an assertion that it runs inside one; a type or record seen by other
+bodies only when its outermost request ends; names made from a request's inputs alone and each batch's new records and
+types sorted at its end, so the program does not depend on the threads. Measured on Claymore's editor (42001 bodies, 16
+threads): 8671 of 50672 lowerings are repeats or run alone today, about 0.1 s of a 1.3 s `lower` phase - the gain is
+the architecture (requests with explicit inputs, which an incremental front end can keep), not the time. Its gate is a
+thread-sanitizer run of C4Testing on the Linux builder besides `ParallelLowering.LoweringOnEightThreadsBuildsTheSameModule`.
+
 ## Diagnostics
 
 - One channel: `LoweringContext::Fail` / `Report` write to the body's `ErrorTracker`, which `ProgramReach` adds
