@@ -337,6 +337,9 @@ namespace Testing
 			"\t}) && more) {\n"
 			"\t\tSay(4);\n"
 			"\t}\n"
+			"\twhile (Busy())\n"
+			"\t\tif (Late()) return;\n"
+			"\t\telse Wait();\n" // an else after a one-line if stands where the if does
 			"\tLast();\n"
 			"}\n";
 		TEST_ASSERT(Apply(good, Features::Formatting::Format(good, { 4, false })) == good); // already right: untouched

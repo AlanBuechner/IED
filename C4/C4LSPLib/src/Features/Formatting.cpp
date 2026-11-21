@@ -203,6 +203,7 @@ namespace C4LSP::Features
 			void FixIndentationAndTrailing()
 			{
 				std::vector<Level> levels;
+				std::optional<std::pair<size_t, int>> oneLineIf; // the line before: a whole `if (...) statement;`, its depth and bonus
 				int pending = 0;        // the next line's bonus
 				bool afterHeader = false;
 				TokenType previousEnd = TokenType::None; // the last token of the code line before, None after a directive
@@ -252,6 +253,13 @@ namespace C4LSP::Features
 						bonus = after.back().bonus;
 						after.pop_back();
 					}
+					// An `else` right after a whole one-line `if (...) statement;` stands where that `if` stood, though a brace-less
+					// header put the `if` deeper than the header (`while (x)` / `if (y) return;` / `else Wait();`).
+					if (first.type == TokenType::Else && oneLineIf && oneLineIf->first == after.size()) bonus = oneLineIf->second;
+					const bool startsWithIf = first.type == TokenType::If ||
+						(first.type == TokenType::Else && firstIdx < lastIdx && tokens[firstIdx + 1].type == TokenType::If);
+					const size_t depth = after.size();
+					const int lineStartBonus = bonus;
 
 					// Leading whitespace: only ever touched when it is pure whitespace, so a line
 					// whose content starts inside a multi-line comment (`... */ int x`) is left alone; a directive keeps
@@ -303,6 +311,9 @@ namespace C4LSP::Features
 					if (opened > 0)
 						levels.push_back({ opened, lineBonus, openers.back() == TokenType::OpenCurl });
 					afterHeader = opened == 0 && EndsWithControlHeader(lastIdx);
+					oneLineIf.reset();
+					if (startsWithIf && opened == 0 && levels.size() == depth && !afterHeader && EndsStatement(tokens[lastIdx].type))
+						oneLineIf = std::make_pair(depth, lineStartBonus);
 					pending = afterHeader ? bonus + 1 : 0;
 					previousEnd = directive || includes ? TokenType::None : tokens[lastIdx].type;
 				}
