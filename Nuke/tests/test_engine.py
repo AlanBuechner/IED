@@ -48,6 +48,23 @@ class EngineTests(WorkspaceTest):
 		self.nuke("build", "dist")
 		self.assertIn("App dist-only", self.log())
 
+	def test_system_filters_steps(self):
+		self.files({
+			"nuke.toml": "[workspace]\ndefault-project = \"App\"\n",
+			"App/nuke.toml": "[project]\nkind = \"custom\"\n" + step("pre-build", "App", "windows-only", extra='systems = ["windows"]')
+				+ step("pre-build", "App", "linux-only", extra='systems = ["linux"]') + step("build", "App", "build"),
+		})
+		code, out = self.nuke("build", "-s", "linux")
+		self.assertEqual(code, 0, out)
+		self.assertEqual(self.log(), ["App linux-only", "App build"])
+		code, out = self.nuke("build", "-s", "windows")
+		self.assertEqual(code, 0, out)
+		self.assertEqual(self.log()[2:], ["App windows-only", "App build"])
+		self.files({"App/nuke.toml": "[project]\nkind = \"custom\"\n" + step("pre-build", "App", "x", extra='systems = ["mac"]')})
+		code, out = self.nuke("build")
+		self.assertNotEqual(code, 0)
+		self.assertIn("systems names no system: mac", out)
+
 	def test_custom_command_requires_and_workspace_steps(self):
 		self.workspace('[commands.kit]\ndescription = "Package"\nrequires = ["build"]\n'
 			'steps = [{ run = ["${python}", "${workspace.dir}/record.py", "${workspace.dir}/log.txt", "ws", "kit", "${config}"] }]\n')

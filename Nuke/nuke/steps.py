@@ -49,7 +49,7 @@ class StepContext:
 
 def run_steps(session, steps, phase, project=None):
 	for step in steps:
-		if step.phase == phase and step.applies_to(session.configuration.name):
+		if step.phase == phase and step.applies_to(session.configuration.name, session.system):
 			run_step(session, step, project)
 
 

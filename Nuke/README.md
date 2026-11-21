@@ -232,6 +232,7 @@ env = { COOK_LEVEL = "high" }
 inputs = ["assets/**/*.png"]       # with outputs: the step is skipped while every output exists, every input
 outputs = ["${int}/cooked/**"]     #   is as it was when its last good run began, and its command is unchanged
 configs = ["Development", "Dist"]  # run only in these configurations
+systems = ["windows"]              # run only when building for these systems (default: every one)
 ```
 
 Workspace-level steps go in `[[workspace.steps]]` with the same fields. A step that exits non-zero (or a

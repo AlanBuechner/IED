@@ -34,8 +34,11 @@ class StepSpec:
 	outputs: tuple = ()
 	configs: tuple = ()             # empty: every configuration
 	description: str = ""
+	systems: tuple = ()             # empty: every system; else the systems a build runs it for ("windows", "linux")
 
-	def applies_to(self, config_name):
+	def applies_to(self, config_name, system=None):
+		if system is not None and self.systems and system not in self.systems:
+			return False
 		return not self.configs or any(c.lower() == config_name.lower() for c in self.configs)
 
 
@@ -658,8 +661,12 @@ def _step(t, path):
 		outputs=t.strings("outputs"),
 		configs=t.strings("configs"),
 		description=t.string("description", ""),
+		systems=tuple(t.strings("systems")),
 	)
 	t.done()
+	unknown = [s for s in spec.systems if s not in ("windows", "linux")]
+	if unknown:
+		raise NukeError(f"{path}: {t.where}.systems names no system: {unknown[0]} (windows, linux)")
 	return spec
 
 
