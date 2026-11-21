@@ -21,6 +21,7 @@ namespace GC
 	alias RootEnumerator = funcptr<void(void*, VisitRoot, void*)>;
 	alias CollectionCallback = funcptr<void(void*)>;
 
+	// A stop-the-world collection, also while automatic ones are disabled; none once the program's exit has begun.
 	[link("c4_gc_collect")] void Collect() noexcept;
 	[link("c4_gc_get_stats")] Stats GetStats() noexcept;
 

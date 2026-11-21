@@ -20,11 +20,12 @@ namespace Core
 
 	// A buffer of `newBytes` in place of `elements` (`oldBytes`, null for none), its first `keepBytes` kept. The collector
 	// scans it only when `scanned`: when its elements may hold managed pointers (holds_pointers), so a buffer of numbers
-	// costs a collection nothing; it reads only the words the elements' pointer map names (`gcType`, their gc_type_of);
+	// costs a collection nothing; it reads only the words the elements' pointer map names (`gcType`, their gc_type_of;
+	// null, as before it was asked: every word);
 	// a scanned one is zero past the kept bytes (BUG-409). Past 1 MiB it grows in place (buffer_resize); over-aligned
 	// elements move into a block of their own, registered once they are in it, while the old one still is. A buffer keeps
 	// the form it was made with.
-	void* ResizeElementBytes(void* elements, uint64 oldBytes, uint64 keepBytes, uint64 newBytes, uint64 align, bool scanned, const void* gcType) {
+	void* ResizeElementBytes(void* elements, uint64 oldBytes, uint64 keepBytes, uint64 newBytes, uint64 align, bool scanned, const void* gcType = nullptr) {
 		if (align <= kRawAllocAlignment)
 			return scanned ? buffer_resize_scanned_typed(elements, oldBytes, keepBytes, newBytes, gcType) : buffer_resize(elements, oldBytes, keepBytes, newBytes);
 		void* moved = newBytes > 0u ? raw_alloc_aligned(newBytes, align) : nullptr;

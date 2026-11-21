@@ -93,7 +93,7 @@ GCSpan* gc_heap_take_span(GCHeap* heap, uint32_t spanClass, const void* owner)
 GCSpan* gc_heap_take_typed_span(GCHeap* heap, uint32_t spanClass, const c4_gc_type* type, const void* owner)
 {
 	const void* key = gc_typed_key(type, spanClass);
-	GCEntry* first = gc_map_find(&heap->typedPartial, key);
+	GCEntry* first = heap->typedPartial.count ? gc_map_find(&heap->typedPartial, key) : NULL;   // empty while the heap grows
 	GCSpan* span = first ? (GCSpan*)first->a : NULL;
 	if (span)
 	{

@@ -96,10 +96,25 @@ static inline GCThread* this_thread(void)
 
 void c4_gc_register_thread(void) { this_thread(); }
 
+static void settle_cycle(GCState* gc, GCThread* self);
+
+// The program's exit stops no thread again (BUG-491): ExitProcess kills a collector that stopped the exiting thread
+// before it resumes it, and the process hangs. Registered first, so it runs after every other exit handler.
+static void stop_collecting_at_exit(void)
+{
+	GCThread* self = this_thread();
+	GCState* gc = ready_collector();
+	gc_os_lock();
+	gc->exiting = 1;
+	gc_os_unlock();
+	settle_cycle(gc, self);
+}
+
 // The main thread registers before the program's global initialization runs (a C initializer of the C runtime).
 static int register_main_thread(void)
 {
 	this_thread();
+	atexit(stop_collecting_at_exit);
 	return 0;
 }
 C4_AT_STARTUP(register_main_thread);

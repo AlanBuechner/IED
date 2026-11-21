@@ -24,6 +24,8 @@ typedef struct GCPointerMaps
 {
 	GCPtrMap byRecord;        // a type record -> its map (a)
 	GCSpanMap* all;
+	const c4_gc_type* lastRecord;   // the record interned last and its map: refills take one type's spans in runs
+	const GCSpanMap* lastMap;
 } GCPointerMaps;
 
 // Objects of `type` are scanned by its map; NULL, or a type without one, is scanned whole.

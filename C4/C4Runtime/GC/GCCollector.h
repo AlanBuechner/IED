@@ -64,6 +64,7 @@ typedef struct GCState
 	int nativePending;                  // a collection ended: nextNative is set once its finalizers have run
 	int32_t percent;
 	int disabled;
+	int exiting;                        // the process is ending: no collection stops a thread any more (BUG-491)
 	int collecting;
 	int collected;                      // a collection ended whose callbacks and finalizers have not run yet
 	int runningFinalizers;              // a thread is running the ready finalizers

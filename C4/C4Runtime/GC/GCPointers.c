@@ -27,7 +27,7 @@ static GCSpanMap* new_map(GCPointerMaps* maps, const c4_gc_type* type)
 	return map;
 }
 
-const GCSpanMap* gc_pointers_intern(GCPointerMaps* maps, const c4_gc_type* type)
+static const GCSpanMap* find_or_make(GCPointerMaps* maps, const c4_gc_type* type)
 {
 	GCEntry* known = gc_map_find(&maps->byRecord, type);
 	if (known) return (const GCSpanMap*)known->a;
@@ -38,8 +38,19 @@ const GCSpanMap* gc_pointers_intern(GCPointerMaps* maps, const c4_gc_type* type)
 	return map;
 }
 
+const GCSpanMap* gc_pointers_intern(GCPointerMaps* maps, const c4_gc_type* type)
+{
+	if (type != maps->lastRecord)
+	{
+		maps->lastMap = find_or_make(maps, type);
+		maps->lastRecord = type;
+	}
+	return maps->lastMap;
+}
+
 void gc_pointers_forget_in(GCPointerMaps* maps, const void* low, const void* high)
 {
+	if ((const void*)maps->lastRecord >= low && (const void*)maps->lastRecord < high) maps->lastRecord = NULL;
 	for (size_t i = 0; i < maps->byRecord.capacity;)
 	{
 		const void* record = maps->byRecord.slots[i].key;

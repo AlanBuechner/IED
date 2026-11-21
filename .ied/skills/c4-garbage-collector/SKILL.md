@@ -78,6 +78,13 @@ size limit, and hooks may (un)register hooks while they run.
   wrote (Windows write watch, so no write barrier), a final stop to finish. Stops stay under ~1 ms; `Collect()`
   stops the world after finishing a running cycle; finalizers of a cycle run on the collector's thread.
   `C4_GC_CONCURRENT=always|never|<bytes>`, `C4_GC_VERIFY=1` (check every cycle), `C4_GC_TRACE=1` (a line a cycle).
+  Pacing counts from a cycle's end: what the program allocates while a cycle marks is not counted (new objects stay
+  unmarked, so the garbage among them goes in that cycle), so a cycle that marks faster leaves the next one less to
+  wait for - precise marking runs ~half a cycle more in the GC benchmark's 600 frames, each one shorter, frames even.
+  Read a benchmark's cycle count as a mean over many runs: where the last trigger falls against the run's end moves it.
+- **Exit**: once the program's exit begins (the collector's exit handler runs after every other one) a running cycle
+  finishes and no collection stops a thread again, `Collect()` included (BUG-491: a stop the exit killed midway left
+  the exiting thread suspended - a hang at exit, one run in five with threads collecting in a loop).
 - **Use after free**: `GC::SetPoison(true)` / `C4_GC_POISON=1` fills every object a sweep or `delete` ends with `0xDB`
   bytes, so a pointer read from a freed object faults at its use. A crash in a finalizer (`__c4_delete_...` under
   `c4_gc_run_finalizer`) is usually the program's own: an object finalized after something it reaches was `delete`d

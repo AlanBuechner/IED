@@ -1,0 +1,55 @@
+// BUG-491: a collection that stopped the thread running the program's exit, and that the exit killed before it
+// resumed that thread, left the process hanging - one run in five here. The collector stops no thread once the exit
+// has begun. The test starts itself as `child` many times (workers collecting without a pause while main returns);
+// main returns how many children did not end in time.
+include "bedrock.ch"
+
+struct Garbage { public int64[6] words; }
+
+const int32 kChildren = 30;
+const int32 kChildTimeoutMs = 10000;
+const int32 kWorkers = 3;
+const uint64 kCollectionsBeforeExit = 30;
+
+void Churn(int32 count) {
+	for (int32 i = 0; i < count; i++) {
+		Garbage* g = new Garbage;
+		g->words[0] = i;
+	}
+}
+
+void CollectForever(void* unused) {
+	for (;;) {
+		Churn(200);
+		gc_collect();
+	}
+}
+
+int32 RunChild() {
+	for (int32 i = 0; i < kWorkers; i++) {
+		if (thread_start(CollectForever, null) == null) return 100;
+	}
+	while (gc_collections() < kCollectionsBeforeExit) Churn(100);
+	return 0;
+}
+
+int32 RunChildren() {
+	Process::StartInfo info;
+	info.program = Core::String(Platform::ExecutablePath().CStr());
+	info.arguments.Push(Core::String("child"));
+	int32 failures = 0;
+	for (int32 i = 0; i < kChildren; i++) {
+		const Process::Output child = Process::Run(info, kChildTimeoutMs);
+		if (child.exitCode != 0) {
+			printf("child %d: exit %lld %s\n", i, child.exitCode, child.error.CStr());
+			failures++;
+		}
+	}
+	if (failures == 0) printf("EXIT DURING COLLECTION OK\n");
+	return failures;
+}
+
+int32 main(int32 argc, char8** argv) {
+	if (argc > 1) return RunChild();
+	return RunChildren();
+}

@@ -104,7 +104,7 @@ void gc_stops_record(GCStops* stops, uint64_t startNs, uint64_t endNs)
 
 void gc_collect(GCState* gc, GCThread* self)
 {
-	if (gc->collecting) return;
+	if (gc->collecting || gc->exiting) return;
 	gc->collecting = 1;
 	const uint64_t start = gc_os_now_ns();
 	gc_threads_stop(&gc->threads, self);
@@ -233,7 +233,7 @@ void* gc_allocate(GCState* gc, GCThread* self, GCAllocRequest request, int64_t n
 		gc->nativePending = 0;
 	}
 	const int due = gc_heap_live_bytes(&gc->heap) >= gc->nextCollection || nativeInUse >= gc->nextNative;
-	if (!gc->disabled && !gc->collecting && due) start_collection(gc, self);
+	if (!gc->disabled && !gc->exiting && !gc->collecting && due) start_collection(gc, self);
 	void* p = allocate_once(gc, self, request);
 	if (!p && gc_concurrent_busy(gc)) return NULL;
 	if (!p)
