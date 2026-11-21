@@ -256,7 +256,9 @@ template<U> void Box<U>::Set(float v) { ... }
   template base). Instantiations are cached by definition and resolved arguments and shared
   program-wide: `Box<int32>` written in two files is one type, and so are `Buf<>` and `Buf<int32, 4>`.
 - **Members are compiled when used (D-16).** An instance's member function is lowered and type-checked
-  only when something uses it: a call, its address, or - for a virtual member - the instance's vtable.
+  only when something uses it: a call, its address, or - for a virtual member - the instance's vtable. Reflection
+  can make every type it registers, an instance the program only names too ([runtime/02](../runtime/02-reflection.md)
+  section 2), so a registered instance's vtable, and with it each virtual member, is the program's.
   A method that only makes sense for some `T` (one that uses `<` on `T`) does not stop an instance whose
   `T` lacks it, as long as that method is not called; when it is called, its errors are reported then, each
   ending with the instance and the first place the program uses it: `(in 'Box<Owner>::Put', used at main.cf

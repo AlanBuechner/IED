@@ -1,5 +1,5 @@
 #include "SplitEmissionTest.h"
-#include "Backend/CodeGen/CodeGenDriver.h"
+#include "Backend/ProgramBackend.h"
 #include "Compiler/CompilerInstance.h"
 #include "Compiler/ModulePartitions.h"
 #include "Compiler/Toolchain.h"
@@ -50,7 +50,7 @@ namespace Testing
 			compiler.CompileAll();
 			compiler.AnalyzeProgram();
 			llvm::LLVMContext context;
-			CodeGenDriver driver(context);
+			ProgramBackend driver(context);
 			driver.LowerOn(3);
 			driver.SplitInto(count, false);
 			std::string error;
@@ -68,7 +68,7 @@ namespace Testing
 		template <typename Inspect>
 		bool LowerSplitWithImage(unsigned count, Inspect inspect)
 		{
-			return LowerSplitDriver(count, kLibrary, [&inspect](CodeGenDriver& driver) {
+			return LowerSplitDriver(count, kLibrary, [&inspect](ProgramBackend& driver) {
 				std::vector<llvm::Module*> modules;
 				for (unsigned i = 0; i < driver.PartitionCount(); ++i) modules.push_back(&driver.PartitionModule(i));
 				llvm::LLVMContext imageContext;
@@ -214,7 +214,7 @@ namespace Testing
 			Replaced(kLibrary, "class Square : public Shape {", "class Square : public Shape { public int32 corners;") };
 		std::string keys[4];
 		for (int i = 0; i < 4; ++i)
-			TEST_ASSERT(LowerSplitDriver(4, libraries[i], [&keys, i](CodeGenDriver& driver) { keys[i] = driver.ReflectionImageKey(); }));
+			TEST_ASSERT(LowerSplitDriver(4, libraries[i], [&keys, i](ProgramBackend& driver) { keys[i] = driver.ReflectionImageKey(); }));
 		TEST_ASSERT(!keys[0].empty());
 		TEST_ASSERT_EQ(keys[1], keys[0]);
 		TEST_ASSERT_EQ(keys[2], keys[0]);
@@ -228,7 +228,7 @@ namespace Testing
 	{
 		using Bodies = std::map<std::string, std::vector<std::string>>; // each partition's inline bodies, by its bitcode
 		auto collect = [](Bodies& bodies) {
-			return [&bodies](CodeGenDriver& driver) {
+			return [&bodies](ProgramBackend& driver) {
 				std::vector<llvm::Module*> modules;
 				for (unsigned i = 0; i < driver.PartitionCount(); ++i) modules.push_back(&driver.PartitionModule(i));
 				const std::vector<std::string> symbols = HostNamesOf(HostEntries(modules, {}));

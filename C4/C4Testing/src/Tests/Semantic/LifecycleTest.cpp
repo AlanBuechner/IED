@@ -2,7 +2,7 @@
 #include "Model/TypeHandle.h"
 #include "Backend/HIR/LifecycleFacts.h"
 #include "Backend/HIR/LoweringDriver.h"
-#include "Backend/CodeGen/CodeGenDriver.h"
+#include "Backend/ProgramBackend.h"
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Instructions.h>
@@ -283,7 +283,7 @@ namespace Testing
 		TEST_ASSERT(Record(model, "Quiet")->isNoexcept);
 		TEST_ASSERT(!Record(model, "Loud")->isNoexcept);
 		llvm::LLVMContext ctx;
-		CodeGenDriver driver(ctx);
+		ProgramBackend driver(ctx);
 		std::string error;
 		TEST_ASSERT(driver.Lower(model, "main", &error));
 		bool quietInvoked = false, plainInvoked = false, loudInvoked = false;

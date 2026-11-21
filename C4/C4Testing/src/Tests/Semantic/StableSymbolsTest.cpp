@@ -1,5 +1,5 @@
 #include "StableSymbolsTest.h"
-#include "Backend/CodeGen/CodeGenDriver.h"
+#include "Backend/ProgramBackend.h"
 #include "Compiler/CompilerInstance.h"
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -24,7 +24,7 @@ namespace Testing
 			compiler.CompileAll();
 			compiler.AnalyzeProgram();
 			llvm::LLVMContext context;
-			CodeGenDriver driver(context);
+			ProgramBackend driver(context);
 			if (!driver.Lower(compiler.GetProgramModelForLowering(), "main", nullptr)) return { "<failed>" };
 			std::set<std::string> names;
 			for (const llvm::Function& f : *driver.module())

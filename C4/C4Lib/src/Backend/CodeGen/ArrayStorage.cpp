@@ -7,8 +7,6 @@ namespace Scripting
 {
 	namespace
 	{
-		constexpr uint64 kCountSize = sizeof(int64);
-
 		llvm::Type* Ptr(ModuleContext& m) { return llvm::PointerType::get(m.context(), 0); }
 
 		// for (i = count; i > 0; ) { --i; destroy(first + i * stride); } with count > 0
@@ -30,12 +28,6 @@ namespace Scripting
 			B.CreateCondBr(B.CreateICmpEQ(index, B.getInt64(0)), done, loop);
 			B.SetInsertPoint(done);
 		}
-	}
-
-	uint64 ArrayStorage::CountBytes(uint64 elementAlignment)
-	{
-		const uint64 align = elementAlignment ? elementAlignment : 1;
-		return (kCountSize + align - 1) / align * align;
 	}
 
 	void ArrayStorage::ForEach(llvm::IRBuilder<>& B, llvm::Value* first, llvm::Value* count, uint64 stride,

@@ -4,7 +4,7 @@
 #include "Model/Types/VirtualTables.h"
 #include "Backend/CodeGen/Abi.h"
 #include "Backend/CodeGen/MsvcNames.h"
-#include "Backend/CodeGen/CodeGenDriver.h"
+#include "Backend/ProgramBackend.h"
 #include "Backend/CodeGen/ModuleContext.h"
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/LLVMContext.h>
@@ -342,7 +342,7 @@ namespace Testing
 			"class Square : IA, IB { public int32 side; public int32 A() { return side; } public int32 B() { return side * 2; } }\n"
 			"int32 main() { Square* s = new Square(); IB* b = s; IA* a = b as IA*; return a->A() + b->B(); }\n");
 		llvm::LLVMContext ctx;
-		CodeGenDriver driver(ctx);
+		ProgramBackend driver(ctx);
 		std::string error;
 		TEST_ASSERT(driver.Lower(model, "main", &error));
 		llvm::Module* m = driver.module();

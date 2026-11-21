@@ -1,5 +1,6 @@
 #include "AliasTagsTest.h"
 #include "Backend/CodeGen/CodeGen.h"
+#include "Backend/ProgramBackend.h"
 #include "Compiler/CompilerInstance.h"
 #include "Compiler/Toolchain.h"
 #include <llvm/IR/InstIterator.h>
@@ -37,7 +38,7 @@ namespace Testing
 			compiler.CompileAll();
 			compiler.AnalyzeProgram();
 			Lowered out;
-			CodeGenDriver driver(*out.context);
+			ProgramBackend driver(*out.context);
 			if (!strictAliasing) driver.DisableStrictAliasing();
 			std::string error;
 			const bool ok = driver.Lower(compiler.GetProgramModelForLowering(), "main", &error);

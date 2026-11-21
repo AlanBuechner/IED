@@ -3,8 +3,7 @@
 #include "Server/SemanticResolver.h"
 #include "Macro/MacroPass.h"
 #include "Interop/InteropPass.h"
-#include "Backend/HIR/LoweringDriver.h" // LowerFunction: the compiler's body-level type-checking pass
-#include "Backend/HIR/GlobalInit.h"
+#include "Backend/Lowering/ProgramLowering.h" // the compiler's lowering: its body-level type checking
 #include "Model/SymbolTable.h"
 #include "Compiler/Toolchain.h"
 #include "Compiler/ProjectFile.h"
@@ -20,6 +19,7 @@
 #include <sstream>
 #include <cstdio>
 #include <chrono>
+#include <thread>
 
 namespace fs = std::filesystem;
 
@@ -199,7 +199,7 @@ namespace C4LSP::Server
 					Scripting::InterfaceParse::Whole, checks, &m_SetupProblem);
 			if (units)
 			{
-				RunLoweringPass(units->interfaceUnits); // the host's bodies are its own
+				RunLoweringPass(Scripting::ScriptLowering{ &m_HostQuestions->symbols, &m_HostQuestions->types, units->interfaceUnits });
 				for (const auto& err : checks.GetErrors()) m_LoweringErrors.Push(err);
 			}
 		}
@@ -277,53 +277,7 @@ namespace C4LSP::Server
 		return true;
 	}
 
-	namespace
-	{
-		// Mirror CodeGenDriver::Lower's body loop exactly: lower every complete (non-local) function to HIR into ONE shared
-		// tracker, re-collecting records at a fixpoint because query-time template instantiation can add new bodies while
-		// lowering. No LLVM is emitted - only the diagnostics are kept, which is precisely what the compiler reports for type
-		// errors in function bodies.
-		void LowerBodies(Scripting::ProgramModel& model, Scripting::ErrorTracker& errors, uint32 interfaceUnits,
-			std::set<const Scripting::FunctionRecord*>& lowered)
-		{
-			bool changed = true;
-			while (changed)
-			{
-				changed = false;
-				Core::Vector<const Scripting::FunctionRecord*> all;
-				model.AllFunctionRecords(all);
-				for (const auto* rec : all)
-				{
-					if (!rec->bodyNode || lowered.count(rec) || rec->isLocal || rec->definingUnit <= interfaceUnits)
-						continue; // declaration only / already lowered / nested in a body (lowered with its parent) / the host's
-					lowered.insert(rec);
-					(void)Scripting::LowerFunction(model, errors, rec);
-					changed = true;
-				}
-			}
-		}
-
-		// BUG-433: every global's start - its initializer, or its construction - lowered as the program's start rounds lower
-		// it (CodeGenDriver::EmitGlobalInit), into trees that are thrown away. A script host's globals start in the host.
-		void LowerGlobalStarts(Scripting::ProgramModel& model, Scripting::ErrorTracker& errors, uint32 interfaceUnits)
-		{
-			Scripting::CheckConstantStarts(model, errors);
-			Scripting::StartedGlobals started;
-			model.Symbols()->CollectGlobalVariables([&](const Scripting::SymbolInfo& sym) {
-				if (sym.definingUnit >= 1 && sym.definingUnit <= interfaceUnits) started.insert(&sym);
-			});
-			for (bool more = true; more; )
-			{
-				Scripting::HIRFunction process;
-				Scripting::HIRFunction thread;
-				std::vector<Scripting::ConstantStart> constants;
-				more = Scripting::LowerGlobalInit(model, errors, process, started, constants);
-				more = Scripting::LowerThreadInit(model, errors, thread, started, constants) || more;
-			}
-		}
-	}
-
-	void CompilationSession::RunLoweringPass(uint32 interfaceUnits)
+	void CompilationSession::RunLoweringPass(const std::optional<Scripting::ScriptLowering>& script)
 	{
 		m_LoweringErrors.Clear();
 		m_LoweredBodies = false;
@@ -340,13 +294,15 @@ namespace C4LSP::Server
 			if (err.severity != Scripting::ErrorSeverity::Warning)
 				return; // front end has a hard error: the compiler stops before lowering
 
-		auto& model = m_Compiler->GetProgramModelForLowering();
-		Scripting::ErrorTracker loweringErrors;
-		std::set<const Scripting::FunctionRecord*> lowered;
-		LowerBodies(model, loweringErrors, interfaceUnits, lowered);
-		LowerGlobalStarts(model, loweringErrors, interfaceUnits);
-		LowerBodies(model, loweringErrors, interfaceUnits, lowered); // the template instances the starts use
-		for (const auto& err : loweringErrors.GetErrors())
+		// The compiler's own lowering (ProgramLowering), with the build's options: the same functions, in the same order,
+		// so the same diagnostics. No LLVM is emitted.
+		Scripting::LoweringOptions options;
+		options.threads = std::max(1u, std::thread::hardware_concurrency());
+		options.everyVtable = m_ScriptHostBuild;
+		options.script = script;
+		Scripting::ProgramLowering lowering(m_Compiler->GetProgramModelForLowering(), std::move(options));
+		lowering.Run();
+		for (const auto& err : lowering.Errors().GetErrors())
 			m_LoweringErrors.Push(err);
 		m_LoweredBodies = true;
 	}

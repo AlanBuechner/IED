@@ -1,5 +1,6 @@
 #include "ParallelLoweringTest.h"
 #include "Backend/CodeGen/CodeGen.h"
+#include "Backend/ProgramBackend.h"
 #include "Compiler/Toolchain.h"
 #include "Compiler/WorkerPool.h"
 #include "Model/ModelWrites.h"
@@ -108,7 +109,7 @@ namespace Testing
 			CompilerInstance compiler;
 			ProgramModel& model = MakeModel(compiler, source, true);
 			llvm::LLVMContext context;
-			CodeGenDriver driver(context);
+			ProgramBackend driver(context);
 			driver.LowerOn(threads);
 			Lowered lowered;
 			lowered.ok = driver.Lower(model, "main");

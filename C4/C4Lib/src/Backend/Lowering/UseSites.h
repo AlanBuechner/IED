@@ -9,7 +9,8 @@ namespace Scripting
 	SourceLocation UseSite(const HIRFunction& user, const FunctionRecord& callee);
 
 	/// What an error inside a template-made body adds, so that it names the instance and where the program uses it:
-	/// " (in 'Core::Array<Net::TcpStream>::Push', used at main.cf (12:5))". Empty for a function not made from a
-	/// template, or one no lowered code uses.
+	/// " (in 'Core::Array<Net::TcpStream>::Push', used at main.cf (12:5))"; the instance alone when no code of `user`
+	/// (null: the program itself, through a global's storage or every vtable of a script host) names it at a line. Empty
+	/// for a function not made from a template.
 	Core::String UseNote(const ProgramModel& model, const FunctionRecord& made, const HIRFunction* user);
 }

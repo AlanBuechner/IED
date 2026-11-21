@@ -1,9 +1,10 @@
 # 04 - Code generation and ABI
 
-The backend (`C4Lib/src/Backend/CodeGen/`) turns HIR trees plus the model's layout facts into ONE
-`llvm::Module` (vendored LLVM 22.1, opaque pointers). It is a "dumb emitter" by design: it never resolves a
-name, an overload or a type. If codegen needs a semantic fact the HIR node does not carry, the fix is to
-put the fact on the node, not to compute it here.
+The backend (`C4Lib/src/Backend/CodeGen/`) turns the HIR trees lowering produced (a `LoweredProgram`,
+[03-hir.md](03-hir.md#what-a-program-lowers-programlowering)) plus the model's layout facts into the program's
+`llvm::Module`s (vendored LLVM 22.1, opaque pointers). It is a "dumb emitter" by design: it never resolves a
+name, an overload or a type, and it never decides what is lowered. If codegen needs a semantic fact the HIR node does
+not carry, the fix is to put the fact on the node (or in the `LoweredProgram`), not to compute it here.
 
 ## Components
 
@@ -11,8 +12,12 @@ Every component is a 1:1 `.h/.cpp` pair; `CodeGen.h` is the umbrella.
 
 | Component | Lifetime | Responsibility |
 |---|---|---|
-| `CodeGenDriver` | one compile | Owns the `ModuleContext` and the lowered HIR trees; runs the assembly order below. Entry: `Lower(model, entryName, errorMessage, runTests)`. It remembers which emitted tree first referenced each new function, so an error in a template-made body ends with the instance and that use (`UseSites`: `(in 'Core::Array<Net::TcpStream>::Push', used at main.cf (12:5))`). |
-| `ModuleContext` | one compile | The module; the single C4 -> LLVM type map (`Lower`); struct creation/filling (`StructFor`, `FillStruct`); function signatures (`GetOrCreateFunction`, `SignatureOf`); global storage (`GlobalAddress`); runtime entry points (`RuntimeFunction`). Owns the `Abi` brick and the object-model emitters below. |
+| `ProgramEmitter` | one compile | Emits a `LoweredProgram` in the assembly order below. Entry: `Emit(model, program, settings, pool, error)`, after `ProgramLowering::Run`; `Backend/ProgramBackend` runs both for C4.exe and scripts. It checks that the code it emitted names no function with a body that lowering did not lower. |
+| `PartitionSet` | one compile | The program's modules (D-81): partition 0 and a split program's others, where each function and global goes (`ProgramPlacement`), every tree emitted into its partition with the partitions at once, each partition's own census counters, the static locals partition 0 declares for its GC roots. |
+| `StartupEmitter` | one compile | The code around main in partition 0: `__c4_global_init`'s and `__c4_thread_start`'s rounds (a constant start as the global's data, `StartAsData`), a script's `__c4_script_init` and first-use starts, the `@main` wrapper, the GC statistics printer. |
+| `ReflectionEmitter` | one compile | The thunks made locals only the image names, each reflected function's invoke entry and each type's, the reflection image (in partition 0, or a split program's module of its own, D-82) and `__c4_reflect_init`. |
+| `ImportEmitter` | one compile | Each partition's `available_externally` copies of the small functions it calls from the others (`ImportPlanner`). |
+| `ModuleContext` | one module | The module; the single C4 -> LLVM type map (`Lower`); struct creation/filling (`StructFor`, `FillStruct`); function signatures (`GetOrCreateFunction`, `SignatureOf`); global storage (`GlobalAddress`); runtime entry points (`RuntimeFunction`). Owns the `Abi` brick and the object-model emitters below. |
 | `Abi` | one compile | THE calling-convention brick: which types are by-value aggregates, register vs hidden pointer, sret, the LLVM param/return types at a boundary. |
 | `IRContext` | one function | The `IRBuilder`, slot allocas, `this`, entry-block temporaries, the `CleanupStack`, the unwind-target query, and the ONE call brick (`Call`: funclet bundle + invoke). Truthiness rule. |
 | `CleanupStack` | one function | The scope-exit obligations (cleanups), try scopes and catch handlers between the entry and the current point, in nesting order. |
@@ -20,7 +25,7 @@ Every component is a 1:1 `.h/.cpp` pair; `CodeGen.h` is the umbrella.
 | `RegionEmitter` | one function | Statements and control-flow blocks, block frames and labels, scope exit (`ExitCleanups` / `BranchThroughCleanups`), try/catch, throw, and the lazily created cleanup pads (`CleanupPadFor`). |
 | `ExprEmitter` (+ `ExprOperatorEmitter.cpp`: operators and conversions) | one function | Rvalue nodes -> SSA values; lvalue -> address resolution (incl. base sub-objects); loads/stores incl. SIMD lanes; conversions (object pointers move to the target sub-object); checked casts; the one store helper (`GcStore`). Creates blocks only for ternary and short-circuit joins. |
 | `CallEmitter` | one call | Hidden parameters in MSVC order, each argument per `Abi`, the callee (direct, virtual through the receiver's vptr, indirect through a funcptr), the result unpacked to its C4 type. Constructor calls share it. |
-| `AsmEmitter` | one `Asm` statement | a call of `llvm::InlineAsm` (Intel or AT&T dialect, side effects unless `pure`, stack alignment unless `nostack`, `memory(none)` / `memory(read)` for `nomem` / `readonly`); outputs extracted and stored into their slots; `noreturn` ends in `unreachable`. File-scope `asm` is module assembly (`CodeGenDriver::EmitFileAssembly`), each block wrapped in `.intel_syntax noprefix` / `.att_syntax prefix` unless it is AT&T. |
+| `AsmEmitter` | one `Asm` statement | a call of `llvm::InlineAsm` (Intel or AT&T dialect, side effects unless `pure`, stack alignment unless `nostack`, `memory(none)` / `memory(read)` for `nomem` / `readonly`); outputs extracted and stored into their slots; `noreturn` ends in `unreachable`. File-scope `asm` is module assembly (`ProgramEmitter::EmitFileAssembly`), each block wrapped in `.intel_syntax noprefix` / `.att_syntax prefix` unless it is AT&T. |
 | `ObjectEmitter` | one expression | `new T(...)`, `new T[n]`, `T(...)` temporaries, `__init_list<T>` arrays, `delete p`: storage, vptrs, then the constructor or the field fill. |
 | `VtableEmitter` | one compile | Vtables of complete objects (one per vptr location), this-adjusting thunks, `c4_purecall` for unimplemented slots, and the vptr sites of any type (`StoreVptrs`, `ZeroImage` for statics). |
 | `RttiEmitter` | one compile | MSVC RTTI: TypeDescriptors (by decorated name), ClassHierarchyDescriptors with their base class arrays, CompleteObjectLocators. |
@@ -31,12 +36,13 @@ Every component is a 1:1 `.h/.cpp` pair; `CodeGen.h` is the umbrella.
 | `AliasTags` | one compile | The `!tbaa` nodes of the module (root `C4 TBAA`, `bytes` the parent of every other class) and an access tag per class; off with `-fno-strict-aliasing`. |
 | `DebugInfo` | one compile (`-g` only) | The CodeView description of the module through `DIBuilder`: the compile unit and files, a subprogram per written function, parameters and locals at their slots, the C4 types, globals, and the line of each statement (see below). |
 
-## Assembly order (`CodeGenDriver::Lower`)
+## Assembly order (`ProgramEmitter::Emit`)
 
-`Lower` is one call per step: `LowerTypes` (1), `DeclareWrittenFunctions` (2), `EmitReachable` (4), the
-`TestHarnessEmitter` (6) or `EmitEntryPoint` (7), `EmitReachable` again for what those reference,
-`EmitStaticState` (invoke thunks, 5 and 3), `EmitReflection` (the reflection image), the imports of a split
-program, `InferNoUnwind` (see [Exceptions](#exceptions)), `FinishModule` (8, 9) and `Verify` (10).
+`Emit` is one call per step: `PartitionSet::Prepare` (1), `DeclareWrittenFunctions` (2), `PartitionSet::Emit` of
+every lowered tree (4), the shared vtables of a `--script-host` build, the `TestHarnessEmitter` (6) or
+`StartupEmitter::EmitEntryPoint` (7), `StartupEmitter::EmitStarts` (5), `MaterializeGlobals` (3), the
+`ReflectionEmitter` (thunks finished, the image), the check that everything named was lowered, the imports of a split
+program, `InferNoUnwind` (see [Exceptions](#exceptions)), `FinishModules` (8, 9) and the verifier (10).
 
 1. **Types.** Lower every object/union to a named struct, created opaque (so recursive and incomplete types
    are legal) and filled from the model's field offsets.
@@ -48,25 +54,24 @@ program, `InferNoUnwind` (see [Exceptions](#exceptions)), `FinishModule` (8, 9) 
    (step 5) every top-level variable gets its storage, whether or not code names it (reflection registers
    each). `[link("sym")]` variables
    become external declarations of `sym` with no storage (two declarations of one symbol share it, as do
-   two function declarations of one foreign function). Function-pointer initializers resolve to `@F`.
-4. **Bodies.** `EmitReachable`: HIR-lower and emit every record written as it is that has a body, then,
-   until none is left, every template-made or compiler-written function the emitted code referenced for
-   the first time (`ModuleContext::TakeNewFunctions` - calls, function addresses, constructors, finalizers,
-   vtable entries, EH copy and destroy functions). A class-template member nothing references is never
-   lowered (D-16). Any lowering error aborts the build with the diagnostics; the closure runs again after
-   the test harness and the entry point.
-5. **Global initialization**, after the bodies, the test harness and the entry point, so every template
-   instance they made is known: `__c4_global_init` (`CodeGenDriver::EmitGlobalInit`, HIR from
-   `Backend/HIR/GlobalInit`), registered in `@llvm.global_ctors` (priority 65535, after C++ static
-   constructors), calls the rounds `__c4_global_init_round<n>` in order. Every global and static member that
-   does not fold to a constant starts in a round, in declaration order (units in build order, each by source
-   position), each in its own defining unit and declaring scope, through the same `DeclLowerer` code as a
-   local (`StartGlobal`); one that needs destruction is followed by an `AtExit`. Each round is emitted with
-   what it reaches (`EmitReachable`); a template instance first made there has its static data members
-   started by the next round. Not emitted when nothing starts at run time. Then `MaterializeGlobals` gives
-   every global its storage, and the reflection image is emitted with its registering constructor
-   (`EmitReflection`, priority 65534: before every other static constructor; a split program's image in a module of
-   its own, D-82).
+   two function declarations of one foreign function). A function-pointer global starts at the `@F` lowering
+   resolved its initializer to (`LoweredProgram::functionPointerStarts`); codegen resolves no name.
+4. **Bodies.** Every tree lowering kept, in its order, each in its partition: the written bodies, the
+   template-made and compiler-written functions they need (D-16: a class-template member nothing needs was never
+   lowered), the thunks. Lowering already lowered everything the code names - calls, function addresses,
+   constructors, finalizers, vtable entries, EH copy and destroy functions
+   ([03-hir.md](03-hir.md#what-a-program-lowers-programlowering)); a function codegen names that lowering did not lower
+   is an internal error (`PartitionSet::NamedButNotLowered`, after every step but the imports).
+5. **Global initialization**: `__c4_global_init` (`StartupEmitter`, the rounds lowered by
+   `Backend/Lowering/GlobalStarts` from `Backend/HIR/GlobalInit`), registered in `@llvm.global_ctors` (priority
+   65535, after C++ static constructors), calls the rounds `__c4_global_init_round<n>` in order. Every global and
+   static member that does not fold to a constant starts in a round, in declaration order (units in build order,
+   each by source position), each in its own defining unit and declaring scope, through the same `DeclLowerer` code
+   as a local (`StartGlobal`); one that needs destruction is followed by an `AtExit`. A template instance first made
+   by a round's code has its static data members started by the next round. Not emitted when nothing starts at run
+   time. Then `MaterializeGlobals` gives every global its storage, and the reflection image is emitted with its
+   registering constructor (`ReflectionEmitter`, priority 65534: before every other static constructor; a split
+   program's image in a module of its own, D-82).
 6. **Test harness** (`-test`, see below).
 7. **Entry point.** Emit `@main` forwarding to the user's entry (`main_0` etc.), mirroring its
    `argc/argv` parameters and returning its value; a `void` entry returns 0. A `-test` build needs none.
@@ -82,7 +87,7 @@ program, `InferNoUnwind` (see [Exceptions](#exceptions)), `FinishModule` (8, 9) 
    globals were described as their functions and globals were emitted).
 10. **Verify.** `verifyModule`; on a failure `verifyFunction` per function, so the diagnostic names the culprit
     (`Compiler/IrVerification`). A build that optimizes its partitions alone (`--incremental`) leaves the
-    module unverified here (`CodeGenDriver::VerifyLater`) and verifies each partition as it is assembled, on its
+    module unverified here (`ProgramBackend::VerifyLater`) and verifies each partition as it is assembled, on its
     thread; a partition an earlier build assembled has the same bitcode and needs no second look.
 
 ## Type mapping (`ModuleContext::Lower`)
@@ -364,8 +369,9 @@ The runtime contract is in [../runtime/01-memory-and-gc.md](../runtime/01-memory
    no pointers (`TypeHandle::MayHoldPointers`); `type` is the type's census record (`CensusTypes`, one private
    `c4_gc_type { name, nativeBytes }` per name in the module): its QualifiedName (`T[]` for `new T[n]`) and, for a
    type that holds native memory (`NativeMemory::Holds`), an internal `__c4_native_bytes.<name>` function that
-   returns `native_bytes_of` the object (or of a counted array's elements). The driver lowers those functions in
-   `EmitReachable` (`NativeBytes::LowerCensusFunction`) with the bodies emitted code reaches. The runtime notes the
+   returns `native_bytes_of` the object (or of a counted array's elements). Lowering lowers each such function once
+   (`ProgramReach`, `NativeBytes::LowerCensusFunction`) for the types code allocates (`BodyNeeds`), and each partition
+   that allocates one defines its own copy from that tree (`PartitionSet::DefineCensusCounters`). The runtime notes the
    record only while a census runs; finalizer registration when `[operator("delete")]` exists.
    `new T[n]` (`ObjectEmitter::EmitNewArray`, `ArrayStorage`): one allocation of `n * sizeof(T)` bytes (at least
    one, so the pointer to the first element is always inside it). When the elements need destruction an `int64`
@@ -379,7 +385,7 @@ The runtime contract is in [../runtime/01-memory-and-gc.md](../runtime/01-memory
    code keeps only in callee-saved registers are roots too (no per-slot anchors are needed).
 5. **Value locals** are not GC objects: their `create`/`delete` are RAII, emitted as scope-exit defers by HIR.
 
-6. **Statistics.** With `-gc-stats`, `CodeGenDriver::InstallGcStatsPrinter` adds a last-priority global
+6. **Statistics.** With `-gc-stats`, `StartupEmitter::InstallGcStatsPrinter` adds a last-priority global
    constructor that calls `c4_gc_install_default_stats_printer()`, so the printer is in place before `main`.
 
 ## Test harness (`-test`)
@@ -456,7 +462,7 @@ an object return always goes through sret). `MakeFunc` builds the pair:
 
 ## Debug information (`-g`)
 
-`CodeGenDriver::EnableDebugInfo` makes `ModuleContext` own a `DebugInfo` (`CodeGen/DebugInfo`) for the compile;
+`ProgramBackend::EnableDebugInfo` makes each `ModuleContext` own a `DebugInfo` (`CodeGen/DebugInfo`) for the compile;
 without it nothing below is emitted.
 
 - **Module.** The `CodeView` and `Debug Info Version` module flags and one compile unit (producer `C4 x.y.z`).

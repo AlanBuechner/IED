@@ -1,7 +1,7 @@
 #include "StaticStorageTest.h"
 #include "Backend/HIR/GlobalInit.h"
 #include "Backend/HIR/LoweringDriver.h"
-#include "Backend/CodeGen/CodeGenDriver.h"
+#include "Backend/ProgramBackend.h"
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instructions.h>
@@ -94,7 +94,7 @@ namespace Testing
 		TEST_ASSERT(constantStart);
 
 		llvm::LLVMContext ctx;
-		CodeGenDriver driver(ctx);
+		ProgramBackend driver(ctx);
 		TEST_ASSERT(driver.Lower(model, "main"));
 		bool startsAtTen = false;
 		for (const llvm::GlobalVariable& g : driver.module()->globals())
@@ -117,7 +117,7 @@ namespace Testing
 		TEST_ASSERT_EQ(Count(fn, HIRNode::Kind::Defer), 1); // the reset an abandoned start runs, no scope-exit destroy
 
 		llvm::LLVMContext ctx;
-		CodeGenDriver driver(ctx);
+		ProgramBackend driver(ctx);
 		TEST_ASSERT(driver.Lower(model, "main"));
 		const std::vector<std::string> callees = CalleesOf(*FunctionStartingWith(*driver.module(), "F_"));
 		TEST_ASSERT(Contains(callees, "c4_once_begin") && Contains(callees, "c4_once_end") && Contains(callees, "c4_at_exit"));
@@ -167,7 +167,7 @@ namespace Testing
 		TEST_ASSERT(constants.empty());
 
 		llvm::LLVMContext ctx;
-		CodeGenDriver driver(ctx);
+		ProgramBackend driver(ctx);
 		TEST_ASSERT(driver.Lower(model, "main"));
 		const llvm::GlobalVariable* ctors = driver.module()->getGlobalVariable("llvm.global_ctors");
 		TEST_ASSERT(ctors && driver.module()->getFunction("__c4_global_init") && !driver.module()->getFunction("__c4_global_init")->isDeclaration());
@@ -178,7 +178,7 @@ namespace Testing
 		CompilerInstance compiler;
 		auto& model = MakeModel(compiler, "int32 g_a = 4;\nconst float g_b = 1.5f;\nint32[3] g_c;\nint32 main() { return g_a; }\n");
 		llvm::LLVMContext ctx;
-		CodeGenDriver driver(ctx);
+		ProgramBackend driver(ctx);
 		TEST_ASSERT(driver.Lower(model, "main"));
 		TEST_ASSERT(driver.module()->getFunction("__c4_global_init") == nullptr);
 		// The one static constructor registers reflection; nothing starts at run time.
@@ -218,7 +218,7 @@ namespace Testing
 		TEST_ASSERT(pairs.strings.size() == 1 && pairs.strings.count(8) == 1 && pairs.strings.at(8).stringValue == "seven");
 
 		llvm::LLVMContext ctx;
-		CodeGenDriver driver(ctx);
+		ProgramBackend driver(ctx);
 		TEST_ASSERT(driver.Lower(model, "main"));
 		const llvm::GlobalVariable* tableGlobal = driver.module()->getNamedGlobal("g_table");
 		TEST_ASSERT(tableGlobal && tableGlobal->isConstant() && !tableGlobal->getInitializer()->isNullValue());
@@ -254,7 +254,7 @@ namespace Testing
 
 		CompilerInstance again;
 		llvm::LLVMContext ctx;
-		CodeGenDriver driver(ctx);
+		ProgramBackend driver(ctx);
 		TEST_ASSERT(driver.Lower(MakeModel(again, source), "main"));
 		const llvm::Function* threadStart = driver.module()->getFunction("__c4_thread_start");
 		const llvm::Function* init = driver.module()->getFunction("__c4_global_init");
@@ -273,7 +273,7 @@ namespace Testing
 			"int32 F() { thread_local C c; return c.v; }\n"
 			"int32 main() { return F(); }\n");
 		llvm::LLVMContext ctx;
-		CodeGenDriver driver(ctx);
+		ProgramBackend driver(ctx);
 		TEST_ASSERT(driver.Lower(model, "main"));
 		const std::vector<std::string> callees = CalleesOf(*FunctionStartingWith(*driver.module(), "F_"));
 		TEST_ASSERT(!Contains(callees, "c4_once_begin") && !Contains(callees, "c4_at_exit")); // no lock, no process exit
@@ -312,7 +312,7 @@ namespace Testing
 			"int32 g_mutable = 3;\n"
 			"int32 main() { const int32* p = &kCount; return kCount + (int32)(kHalf * 2.0f) + (int32)(N::kBig / 1000000000) + g_mutable + *p; }\n");
 		llvm::LLVMContext ctx;
-		CodeGenDriver driver(ctx);
+		ProgramBackend driver(ctx);
 		TEST_ASSERT(driver.Lower(model, "main"));
 		const llvm::Module& module = *driver.module();
 		const llvm::GlobalVariable* count = GlobalNamed(module, "kCount");
@@ -336,7 +336,7 @@ namespace Testing
 		CompilerInstance compiler;
 		auto& model = MakeModel(compiler, "int32 g_value = Missing();\nint32 main() { return g_value; }\n");
 		llvm::LLVMContext ctx;
-		CodeGenDriver driver(ctx);
+		ProgramBackend driver(ctx);
 		TEST_ASSERT(!driver.Lower(model, "main"));
 		TEST_ASSERT(!driver.LoweringErrors().Empty());
 	}
@@ -353,7 +353,7 @@ namespace Testing
 			"int32 g_touched = Touch<int16>();\n"
 			"int32 main() { return Counter<int32>::start; }\n");
 		llvm::LLVMContext ctx;
-		CodeGenDriver driver(ctx);
+		ProgramBackend driver(ctx);
 		TEST_ASSERT(driver.Lower(model, "main"));
 		const llvm::Function* init = driver.module()->getFunction("__c4_global_init");
 		TEST_ASSERT(init && !init->isDeclaration());

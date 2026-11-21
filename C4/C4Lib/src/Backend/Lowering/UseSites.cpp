@@ -1,4 +1,4 @@
-#include "Backend/CodeGen/UseSites.h"
+#include "Backend/Lowering/UseSites.h"
 #include "Model/Types/QualifiedName.h"
 
 namespace Scripting
@@ -30,8 +30,8 @@ namespace Scripting
 
 	Core::String UseNote(const ProgramModel& model, const FunctionRecord& made, const HIRFunction* user)
 	{
-		if (made.templateOrigin == TemplateOrigin::None || !user) return Core::String();
-		const SourceLocation at = UseSite(*user, made);
+		if (made.templateOrigin == TemplateOrigin::None) return Core::String();
+		const SourceLocation at = user ? UseSite(*user, made) : SourceLocation();
 		if (at.line == 0) return " (in '" + InstanceName(made) + "')";
 		return " (in '" + InstanceName(made) + "', used at " + model.SourceName(at.sourceId) + " (" + std::to_string(at.line) + ":" +
 			std::to_string(at.column) + "))";

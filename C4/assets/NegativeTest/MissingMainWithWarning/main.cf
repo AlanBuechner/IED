@@ -1,0 +1,7 @@
+// A program with no `main` whose code also has a warning: the build reports the missing entry point, not just the
+// warning (C4.exe reported a backend failure only when lowering had no diagnostics at all, so a warning hid it).
+int32 Narrow(int64 wide)
+{
+	int32 narrow = wide;
+	return narrow;
+}

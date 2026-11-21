@@ -1,4 +1,5 @@
 #include "CodeGenTest.h"
+#include "Backend/ProgramBackend.h"
 #include "Backend/CodeGen/TestHarnessEmitter.h"
 #include "Compiler/TargetSystem.h"
 #include "Compiler/Toolchain.h"
@@ -31,7 +32,7 @@ namespace Testing
 	{
 		auto& model = MakeModel(compiler, source);
 		llvm::LLVMContext ctx;
-		CodeGenDriver driver(ctx);
+		ProgramBackend driver(ctx);
 		TestHarnessOptions tests;
 		if (!driver.Lower(model, "main", nullptr, runTests ? &tests : nullptr)) return false;
 		inspect(*driver.module());

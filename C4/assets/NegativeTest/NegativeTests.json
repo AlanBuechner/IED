@@ -1,4 +1,8 @@
 {
+    "MissingMainWithWarning": {
+        "expect": ["main.cf (5:17) warning: the conversion from 'int64' to 'int32' may change the value", "No entry point: the program has no 'main' function"],
+        "reason": "A warning beside a backend failure (no entry point) must not hide the failure: C4.exe reported the backend's message only when lowering had no diagnostic at all, so it printed the warning and 'Compilation Succeeded' and exited 1."
+    },
     "BrokenHeaderUnclosedType": {
         "expect": ["Broken.ch (2:1) error: this '{' has no matching '}': by the indentation, its block ends before line 6", "Errors:              1"],
         "reject": ["main.cf (", "unresolved"],

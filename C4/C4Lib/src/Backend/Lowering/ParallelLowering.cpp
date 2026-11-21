@@ -1,4 +1,4 @@
-#include "Backend/CodeGen/ParallelLowering.h"
+#include "Backend/Lowering/ParallelLowering.h"
 #include "Backend/HIR/LifecycleFacts.h"
 #include "Backend/HIR/LoweringDriver.h"
 #include "Model/ProgramModel.h"

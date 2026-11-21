@@ -18,6 +18,7 @@ namespace C4LSP::Server
 		std::vector<std::string> targetFlags;       // the build's -march / -m flags (D-62)
 		std::string libraryFolder;                  // <c4Home>/Bedrock; empty: the server's own
 		std::string projectsFile;                   // the build description (docs/language/15-projects.md)
+		bool scriptHost = false;                    // built with --script-host: every class's vtables are the program's
 		bool library = false;                       // the default library's own program (docs/tools/03 "The default library's own program")
 
 		// The processor the flags select; the default target when they select none.

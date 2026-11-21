@@ -1,5 +1,5 @@
 #include "TestHosts.h"
-#include "Backend/CodeGen/CodeGenDriver.h"
+#include "Backend/ProgramBackend.h"
 #include "Backend/Reflection/RegistrationEmitter.h"
 #include "Compiler/CompilerInstance.h"
 #include "Compiler/DiagnosticReporter.h"
@@ -82,7 +82,7 @@ namespace Testing
 		compiler.AnalyzeProgram();
 		for (const CompilationError& e : compiler.GetAllDiagnostics()) host.diagnostics += DiagnosticReporter::Format(e, &compiler);
 		llvm::LLVMContext context;
-		CodeGenDriver driver(context);
+		ProgramBackend driver(context);
 		driver.ShareVtables();
 		std::string error;
 		if (!driver.Lower(compiler.GetProgramModelForLowering(), "main", &error))

@@ -356,7 +356,8 @@ harnesses (C4/docs/language/15-projects.md rule 7), so each case runs once in a 
 
 **IDE bridge.** After each compile of a program (an executable's build, a module's test build), also one that
 fails, Nuke writes `<workspace>/.ied/local/lsp-options/<P>.json`: `includePaths`, `defines`, `c4Home` (the
-toolchain), `toolchain`, `projects` (the description) and `target` (the `-m...` compiler arguments) - the exact
+toolchain), `toolchain`, `projects` (the description), `target` (the `-m...` compiler arguments) and `scriptHost`
+(whether the compiler arguments say `--script-host`, whose lowering gives every class its vtables) - the exact
 input the compiler saw, so the language server in IED agrees with the build. The description is the program's test
 harness's, also for an executable's build: C4LSP analyzes every program as its `-test` build sees it, each project's
 `tests/` included, so the `[dev-dependencies]` those tests include must be in it (C4 BUG-475). IED hands every one of them to one

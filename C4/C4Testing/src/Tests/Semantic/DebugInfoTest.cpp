@@ -1,5 +1,5 @@
 #include "DebugInfoTest.h"
-#include "Backend/CodeGen/CodeGenDriver.h"
+#include "Backend/ProgramBackend.h"
 #include "Compiler/CompilerInstance.h"
 #include "Compiler/Toolchain.h"
 #include <llvm/BinaryFormat/Dwarf.h>
@@ -62,7 +62,7 @@ namespace Testing
 			compiler.CompileAll();
 			compiler.AnalyzeProgram();
 			llvm::LLVMContext context;
-			CodeGenDriver driver(context);
+			ProgramBackend driver(context);
 			if (debugInfo) driver.EnableDebugInfo();
 			if (!driver.Lower(compiler.GetProgramModelForLowering(), "main")) return false;
 			inspect(*driver.module());

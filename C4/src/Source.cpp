@@ -16,7 +16,7 @@
 #include "Parser/Consumer/PrettyPrintConsumer.h"
 #include "Parser/Consumer/ASTWalker.h"
 #include "Backend/CodeGen/TestHarnessEmitter.h"
-#include "Backend/CodeGen/CodeGen.h"
+#include "Backend/ProgramBackend.h"
 #include "Backend/Reflection/RegistrationEmitter.h"
 #include <optional>
 #include <unordered_map>
@@ -143,15 +143,17 @@ namespace
 
 		// --- Phase 3: backend -------------------------------------------------------------
 
-		void ReportBackendFailure(const Scripting::CodeGenDriver& driver, const std::string& backendError)
+		// The located diagnostics, and the backend's own message when none of them is an error (a warning beside a
+		// missing entry point or an invalid module must not hide why the build failed).
+		void ReportBackendFailure(const Scripting::ProgramBackend& driver, const std::string& backendError)
 		{
-			if (driver.LoweringErrors().Empty())
-			{
-				m_Result.AddBackendError(Core::String(backendError.c_str()));
-				return;
-			}
+			bool located = false;
 			for (const Scripting::CompilationError& e : driver.LoweringErrors())
+			{
 				m_Result.errors.Push(e);
+				located = located || e.severity != Scripting::ErrorSeverity::Warning;
+			}
+			if (!located) m_Result.AddBackendError(Core::String(backendError.c_str()));
 		}
 
 		// The context and the driver (the lowered HIR, the module) are never freed: the process ends with the build, and
@@ -159,7 +161,7 @@ namespace
 		bool RunBackend()
 		{
 			llvm::LLVMContext& ctx = *new llvm::LLVMContext;
-			Scripting::CodeGenDriver& driver = *new Scripting::CodeGenDriver(ctx, m_Options.target.System());
+			Scripting::ProgramBackend& driver = *new Scripting::ProgramBackend(ctx, m_Options.target.System());
 
 			// The entry point the generated main calls: a -test run drives the test harness (the compiler
 			// emits a synthetic main that runs every [test] function), otherwise the user's main.

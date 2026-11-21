@@ -5,7 +5,7 @@
 
 namespace Testing
 {
-	// A program emitted into partitions (CodeGenDriver::SplitInto, D-81, docs/compiler/05): each function and global
+	// A program emitted into partitions (ProgramBackend::SplitInto, D-81, docs/compiler/05): each function and global
 	// defined in one partition and declared where another names it, the locals other partitions name as hidden
 	// globals, the program's own code in the first.
 	CLASS(GROUP = Testing) SplitEmissionTest : public Test

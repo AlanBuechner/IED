@@ -1,5 +1,5 @@
 #include "ReflectionImageTest.h"
-#include "Backend/CodeGen/CodeGenDriver.h"
+#include "Backend/ProgramBackend.h"
 #include "Compiler/CompilerInstance.h"
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/LLVMContext.h>
@@ -27,7 +27,7 @@ namespace Testing
 			compiler.CompileAll();
 			compiler.AnalyzeProgram();
 			llvm::LLVMContext context;
-			CodeGenDriver driver(context);
+			ProgramBackend driver(context);
 			const bool ok = driver.Lower(compiler.GetProgramModelForLowering(), entry, nullptr);
 			inspect(ok ? driver.module() : nullptr, driver);
 		}
@@ -108,7 +108,7 @@ namespace Testing
 
 	void ReflectionImageTest::ImageCountsTheProgramsEntities()
 	{
-		Lowered(kProgram, "main", [](llvm::Module* module, CodeGenDriver&) {
+		Lowered(kProgram, "main", [](llvm::Module* module, ProgramBackend&) {
 			TEST_ASSERT(module != nullptr);
 			const llvm::ConstantStruct* image = Image(*module);
 			TEST_ASSERT(image != nullptr);
@@ -124,7 +124,7 @@ namespace Testing
 
 	void ReflectionImageTest::RegistersBeforeEveryOtherConstructor()
 	{
-		Lowered(kProgram, "main", [](llvm::Module* module, CodeGenDriver&) {
+		Lowered(kProgram, "main", [](llvm::Module* module, ProgramBackend&) {
 			TEST_ASSERT(module != nullptr);
 			TEST_ASSERT_EQ(CtorPriority(*module, "__c4_reflect_init"), int64_t(65534));
 			TEST_ASSERT_EQ(CtorPriority(*module, "__c4_global_init"), int64_t(65535));
@@ -135,7 +135,7 @@ namespace Testing
 
 	void ReflectionImageTest::VariablesRecordTheirStorage()
 	{
-		Lowered(kProgram, "main", [](llvm::Module* module, CodeGenDriver&) {
+		Lowered(kProgram, "main", [](llvm::Module* module, ProgramBackend&) {
 			TEST_ASSERT(module != nullptr);
 			const llvm::ConstantStruct* image = Image(*module);
 			TEST_ASSERT(image != nullptr);
@@ -152,7 +152,7 @@ namespace Testing
 
 	void ReflectionImageTest::InvokeThunksAreInternal()
 	{
-		Lowered(kProgram, "main", [](llvm::Module* module, CodeGenDriver&) {
+		Lowered(kProgram, "main", [](llvm::Module* module, ProgramBackend&) {
 			TEST_ASSERT(module != nullptr);
 			const llvm::ConstantStruct* image = Image(*module);
 			TEST_ASSERT(image != nullptr);
@@ -173,7 +173,7 @@ namespace Testing
 			"uint32 Mask(uint32 a, uint32 b) { return a & b; }\n"
 			"int64 Wide(int64 a, int64 b) { return a * b; }\n"
 			"int32 main() { return Add(1, 2) - Sub(5, 2) - (int32)Mask(1, 1) + (int32)Wide(1, 1) - 1; }\n";
-		Lowered(program, "main", [](llvm::Module* module, CodeGenDriver&) {
+		Lowered(program, "main", [](llvm::Module* module, ProgramBackend&) {
 			TEST_ASSERT(module != nullptr);
 			const llvm::ConstantStruct* image = Image(*module);
 			TEST_ASSERT(image != nullptr);
@@ -199,7 +199,7 @@ namespace Testing
 			"class Shape { public virtual int32 Sides() const { return 0; } }\n"
 			"class Square : Shape { public override int32 Sides() const { return 4; } }\n"
 			"int32 main() { Square s; Shape* shape = &s; return shape->Sides() - 4; }\n";
-		Lowered(program, "main", [](llvm::Module* module, CodeGenDriver&) {
+		Lowered(program, "main", [](llvm::Module* module, ProgramBackend&) {
 			TEST_ASSERT(module != nullptr);
 			const llvm::ConstantStruct* image = Image(*module);
 			TEST_ASSERT(image != nullptr);
@@ -225,7 +225,7 @@ namespace Testing
 			"class Resource { public int32 id; [operator(\"delete\")] public void Release() { id = 0; } }\n"
 			"class Holder { public Resource resource; }\n"
 			"int32 main() { Holder* h = new Holder(); return h->resource.id; }\n";
-		Lowered(program, "main", [](llvm::Module* module, CodeGenDriver&) {
+		Lowered(program, "main", [](llvm::Module* module, ProgramBackend&) {
 			TEST_ASSERT(module != nullptr);
 			TEST_ASSERT(module->getFunction("__c4_delete_Holder") != nullptr);
 			const llvm::ConstantStruct* image = Image(*module);
@@ -242,7 +242,7 @@ namespace Testing
 			"int32 Seven() { return 7; }\n"
 			"[Range(Seven())] int32 g_level = 1;\n"
 			"int32 main() { return g_level - 1; }\n";
-		Lowered(program, "main", [](llvm::Module* module, CodeGenDriver& driver) {
+		Lowered(program, "main", [](llvm::Module* module, ProgramBackend& driver) {
 			TEST_ASSERT(module == nullptr);
 			TEST_ASSERT(!driver.LoweringErrors().Empty());
 		});
@@ -252,7 +252,7 @@ namespace Testing
 	// BUG-236: an empty entry name is a module without main (a library, a script).
 	void ReflectionImageTest::ModuleWithoutEntryPointLowers()
 	{
-		Lowered("int32 Add(int32 a, int32 b) { return a + b; }\n", "", [](llvm::Module* module, CodeGenDriver&) {
+		Lowered("int32 Add(int32 a, int32 b) { return a + b; }\n", "", [](llvm::Module* module, ProgramBackend&) {
 			TEST_ASSERT(module != nullptr);
 			TEST_ASSERT(module->getFunction("main") == nullptr);
 			TEST_ASSERT(module->getFunction("Add_2int32int32") != nullptr);

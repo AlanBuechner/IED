@@ -1,8 +1,7 @@
 #include "Backend/CodeGen/CensusTypes.h"
 #include "Backend/CodeGen/ModuleContext.h"
+#include "Backend/Lowering/LoweredProgram.h"
 #include "Model/Types/NativeMemory.h"
-#include "Model/ProgramModel.h"
-#include "Model/Types/QualifiedName.h"
 
 namespace Scripting
 {
@@ -31,15 +30,18 @@ namespace Scripting
 		return record;
 	}
 
-	// `int64(void* object)`, declared now and lowered by the driver.
+	// `int64(void* object)`, lowered with the program and defined in this module, as a local of its own.
 	llvm::Constant* CensusTypes::Counter(const Type* type, uint64 countBytes)
 	{
-		FunctionRecord& record = m_Functions.emplace_back();
-		record.type = m_MCtx.CensusCounterType();
-		record.mangledName = "__c4_native_bytes." + QualifiedName(type) + (countBytes ? "[]" : "");
-		llvm::Function* function = m_MCtx.GetOrCreateFunction(record);
+		const CensusFunction* planned = m_Program ? m_Program->CensusOf({ type, countBytes }) : nullptr;
+		if (!planned)
+		{
+			m_Unplanned.push_back(type);
+			return NoCounter();
+		}
+		llvm::Function* function = m_MCtx.GetOrCreateFunction(*planned->record);
 		function->setLinkage(llvm::GlobalValue::InternalLinkage);
-		m_New.push_back({ type, countBytes, &record });
+		m_New.push_back(planned);
 		return function;
 	}
 

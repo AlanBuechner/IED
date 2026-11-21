@@ -57,6 +57,8 @@ Every layer pops by RAII, even on error.
 | `ReadOnly.{h,cpp}` | `ReadOnlyReason(ctx, lvalue)`: why a location cannot be written (a const local, parameter or global, a location behind a pointer or reference to const, a const field outside its object's create / copy / delete, `this` in a const method, an element of a const array), and `AddressType` (`&x` of a read-only x is a pointer to const) |
 | `PointerConversion.{h,cpp}` | `CheckPointerConversion`: the one rule for a pointer that becomes another pointer, shared by assignment, `InitialValue` (declarations, arguments, returns) - the same pointee, null, `void*` / `void**` either way, a derived-to-base upcast, never dropping const |
 | `LoweringDriver.{h,cpp}` | `LowerFunction` |
+| `HIRWalk.{h,cpp}` | `WalkEmitted`: every node and lvalue of a tree that codegen emits, in order (a node left out of the tree is not visited) |
+| `CountedArray.{h,cpp}` | `PrefixBytes`: the element count before a heap array whose elements need destruction |
 
 `ExprLowerer` is one class whose member definitions are split by concern: `ExprLowerer.cpp` (dispatch,
 names, `c ? a : b`, lambdas, default arguments), `ExprAccess.cpp` (members, indexing, static and enum
@@ -205,12 +207,41 @@ subsystem in `Backend/HIR/`; every other lowerer calls it instead of storing obj
   checks every goto: undefined label, a label in a nested block, or a forward jump across a declaration or
   defer of the label's block are errors.
 
+## What a program lowers (`ProgramLowering`)
+
+`Backend/Lowering/ProgramLowering` decides what a program has and lowers it - the one driver C4.exe
+(`ProgramBackend`), the language server and a script's compile share, so the editor's body diagnostics are the
+build's by construction. Its result, a `LoweredProgram`, is what codegen emits: every complete tree in the order it
+was lowered (with its kind: a function's body, an invoke or type thunk, a round of starts, a script's first-use
+start), the census counters, the thunks reflection calls through, the type thunks, the function each function
+pointer starts at, and the set of functions lowered. Codegen never decides what is lowered: it checks that what its
+code names was (an internal error otherwise).
+
+- **The closure (`ProgramReach`, D-16).** Lowering starts from every function written as it is with a body. What a
+  lowered body needs is lowered next: `BodyNeeds` follows the tree codegen emits (`HIRWalk`, never a node the
+  lowering made and left out, such as the copy a last use moved instead) and lists the functions its code names -
+  calls, addresses, constructors, GC finalizers, exit destroyers, an exception's copy and destroy - the types of
+  the objects whose vptrs it stores, and the census counters of what it allocates. An object type's needs are its
+  vtables' functions (`VtableEntries`, the final overriders through its own, its bases' and its fields' vptrs). A
+  body is kept with its diagnostics; a template-made one's end with where the program first uses it (`UseSites`).
+  An incomplete body is walked too, so what it names is lowered and its callees' errors come with its own.
+- **The steps (`ProgramLowering::Run`).** The written bodies; with `--script-host` every class's vtables;
+  reflection's invoke thunks (`InvokeThunkPlan`: a function with code - lowered completely - or any virtual
+  method, docs/runtime/02 section 3.2) and type thunks (`TypeThunkPlan`: every registered type, a template instance
+  the program only names too, so its vtables and their virtual methods are the program's); the globals' starts
+  (`GlobalStarts`, round by round, a script's host storage counting as started); the thunks again; then what every
+  global's storage needs (`GlobalStorage`: its type's vtables, the function a function pointer starts at), and from
+  the starts again while that lowers more. A step after a failed body still runs, so one run reports every error.
+- **One order.** Everything is lowered in the order it is found - a batch's needs in its bodies' order - so record
+  order, symbol names and each partition's bitcode do not depend on the threads.
+
 ## Lowering on several threads
 
-`ParallelLowering` (`Backend/CodeGen`) lowers each batch of `CodeGenDriver::EmitReachable`, and the invoke thunks
-(`LowerEach`), on `-j` threads (`CodeGenDriver::LowerOn`), and the program is the same whatever the threads: one
-thread runs the same rounds. Its `WorkerPool` keeps the threads, and the emit's other work on threads (each
-partition's emission, imports, thunks, the finish) runs on them too.
+`ParallelLowering` (`Backend/Lowering`) lowers each batch of `ProgramReach`, and the thunks (`LowerEach`), on `-j`
+threads (`LoweringOptions::threads`), and the program is the same whatever the threads: one thread runs the same
+rounds. What each lowered tree needs (`BodyNeeds`) is worked out on the same threads, each reading its own tree, and
+merged in the batch's order. Its `WorkerPool` keeps the threads, and the emit's work on threads (each partition's
+emission, imports, thunks, the finish) runs on them too.
 
 - **The frozen model.** Every place that changes what lowering reads asks the model's `ModelWrites` first
   (`Model/ModelWrites.h`): a type the store takes (`TypeStore::Own`), a record (`SymbolTable::AddFunctionRecord`),
@@ -237,21 +268,24 @@ partition's emission, imports, thunks, the finish) runs on them too.
 - **What a body sees.** A body never sees a change another body of its batch made unless it needed that change
   itself (it then stops and finds it next round), and the changes are made in one order, so record order and
   symbol names (`_1` for a second record with a symbol) do not depend on the threads.
-- `-ftime` prints the steps of `lower` (bodies, thunks, global starts, reflection, imports, finish), then the
-  rounds, the changes made between them, the bodies lowered alone, what stopped bodies by kind, and the time spent
-  preparing. IED server: 13346 bodies (thunks included) in 92 rounds (0.06 s), 2432 instances and closures made
-  between rounds, 10 lowered alone; the `lower` phase 0.51 s with every body lowered in order, 0.35 s with bodies
-  on threads, 0.33 s with closures and thunks in the rounds and the emit on the kept threads.
+- `-ftime` prints the steps of `lower` - lowering's (bodies, vtables, thunks, global starts, globals), then
+  emission's (emit, starts, reflection, imports, nounwind, finish) - then the rounds, the changes made between
+  them, the bodies lowered alone, what stopped bodies by kind, and the time spent preparing. IED server: 13346 bodies
+  (thunks included) in 92 rounds (0.06 s), 2432 instances and closures made between rounds, 10 lowered alone; the
+  `lower` phase 0.51 s with every body lowered in order, 0.35 s with bodies on threads, 0.33 s with closures and
+  thunks in the rounds and the emit on the kept threads. With lowering decided before emission (R2, 16 threads,
+  23966 bodies): `lower` 0.42 s cold and 0.46 s after an edit at `-O0` (0.43 s and 0.51 s before), 0.55-0.60 s at
+  `-O3` (0.57-0.60 s before).
 
 ## Diagnostics
 
-- One channel: `LoweringContext::Fail` / `Report` write to the body's `ErrorTracker`, which `CodeGenDriver` adds
-  to the build's after the bodies before it (with where a template-made body is first used). The first failure in a
+- One channel: `LoweringContext::Fail` / `Report` write to the body's `ErrorTracker`, which `ProgramReach` adds
+  to the program's after the bodies before it (with where a template-made body is first used). The first failure in a
   statement aborts that statement and is its only report (the layers the failure propagates through add
   nothing); the statements after it still lower (`StmtLowerer::LowerEach`), so a function reports one error per
   failed statement (BUG-361), and its tree stays incomplete. Other functions keep lowering, so one run
-  reports errors from many functions. `CodeGenDriver` lowers every body before emitting any; if any
-  lowering error exists it stops and reports them (at most the first 16, prefixed `lowering:`) instead of
+  reports errors from many functions. `ProgramLowering` lowers everything before codegen emits anything; if any
+  lowering error exists the build stops and reports them (at most the first 16, prefixed `lowering:`) instead of
   emitting a partial module.
 - Messages come from the model's `QueryResult` where the model detected the problem, with the AST node's
   location as fallback. Examples of what HIR rejects: `no variable named y`, `no matching overload of Add`, `no member
@@ -263,7 +297,8 @@ partition's emission, imports, thunks, the finish) runs on them too.
   body`, `cannot initialize ... dropping const is not allowed`.
 - Internal fallbacks (`expression not yet lowered`, `statement not yet lowered`) indicate a lowering gap,
   not a user error - each occurrence is a bug to fix.
-- The LSP runs this same lowering for its diagnostics, so the editor and `C4.exe` cannot disagree.
+- The LSP runs this same lowering (`ProgramLowering`, with the build's `--script-host`) for its diagnostics, so the
+  editor and `C4.exe` cannot disagree (C4Testing `Lsp.LoweringParity`).
 
 **Partial:** const methods, private/protected methods, protected fields and abstract-class instantiation
 are not enforced yet. See [../status/known-bugs.md](../status/known-bugs.md).

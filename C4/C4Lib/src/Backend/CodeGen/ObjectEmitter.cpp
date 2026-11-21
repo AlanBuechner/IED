@@ -4,6 +4,7 @@
 #include "Backend/CodeGen/CallEmitter.h"
 #include "Backend/CodeGen/ExprEmitter.h"
 #include "Backend/CodeGen/VtableEmitter.h"
+#include "Backend/HIR/CountedArray.h"
 #include "Model/ProgramModel.h"
 #include "Model/TypeHandle.h"
 #include "Model/Types/QualifiedName.h"
@@ -87,9 +88,9 @@ namespace Scripting
 		if (n->finalizer)
 		{
 			const ArrayCount layout = Layout(element);
-			llvm::Value* base = B.CreateGEP(B.getInt8Ty(), first, B.getInt64(-static_cast<int64>(ArrayStorage::CountBytes(element->GetAlignment()))));
-			llvm::Function* finalizer = ArrayStorage::Finalizer(m_Ctx.mctx(), *n->finalizer, layout.perElement, layout.stride,
-				ArrayStorage::CountBytes(element->GetAlignment()));
+			const uint64 countBytes = CountedArray::PrefixBytes(element->GetAlignment());
+			llvm::Value* base = B.CreateGEP(B.getInt8Ty(), first, B.getInt64(-static_cast<int64>(countBytes)));
+			llvm::Function* finalizer = ArrayStorage::Finalizer(m_Ctx.mctx(), *n->finalizer, layout.perElement, layout.stride, countBytes);
 			auto* regFn = m_Ctx.mctx().RuntimeFunction("c4_gc_register_finalizer", B.getVoidTy(), { B.getPtrTy(), B.getPtrTy() });
 			m_Ctx.Call(regFn, { base, finalizer }, false);
 		}
@@ -102,7 +103,7 @@ namespace Scripting
 		// allocated, so the pointer to the first element always points into the allocation.
 		auto& B = m_Ctx.builder();
 		const Type* element = n->objectType;
-		const uint64 countBytes = n->finalizer ? ArrayStorage::CountBytes(element->GetAlignment()) : 0;
+		const uint64 countBytes = n->finalizer ? CountedArray::PrefixBytes(element->GetAlignment()) : 0;
 		const uint64 align = std::max<uint64>(element->GetAlignment(), kDefaultAlignment);
 		llvm::Value* size = B.CreateAdd(B.CreateBinaryIntrinsic(llvm::Intrinsic::umax, bytes, B.getInt64(1)), B.getInt64(countBytes));
 		llvm::Constant* census = m_Ctx.mctx().census().ArrayRecord(element, CensusName(element) + "[]", countBytes);

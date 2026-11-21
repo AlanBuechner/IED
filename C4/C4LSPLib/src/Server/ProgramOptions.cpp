@@ -37,7 +37,7 @@ namespace C4LSP::Server
 	bool ProgramOptions::operator==(const ProgramOptions& other) const
 	{
 		return name == other.name && includePaths == other.includePaths && defines == other.defines && targetFlags == other.targetFlags &&
-			libraryFolder == other.libraryFolder && projectsFile == other.projectsFile && library == other.library;
+			libraryFolder == other.libraryFolder && projectsFile == other.projectsFile && library == other.library && scriptHost == other.scriptHost;
 	}
 
 	ProgramOptions ReadProgramOptions(const std::string& name, const Json::Value& options)
@@ -51,6 +51,8 @@ namespace C4LSP::Server
 		program.includePaths = Strings(options.Member("includePaths"));
 		program.defines = Defines(options.Member("defines"));
 		program.targetFlags = Strings(options.Member("target"));
+		const Json::Value scriptHost = options.Member("scriptHost");
+		program.scriptHost = scriptHost.IsBool() && scriptHost.GetBool();
 		return program;
 	}
 

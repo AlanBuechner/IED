@@ -21,9 +21,13 @@ and DAP, so any client can use them.
 The server never re-implements language rules. It links C4Lib, compiles the workspace with the same
 pipeline as C4.exe, and answers every request from the compiler's own data:
 
-- **Diagnostics**: parse errors per file plus ProgramModel errors, plus the errors from running the same
-  HIR lowering pass C4.exe runs over every function body and every global's start (its initializer, or its
-  construction: BUG-433 left those unchecked). Lowering is skipped when the front end already
+- **Diagnostics**: parse errors per file plus ProgramModel errors, plus the errors of the lowering C4.exe runs
+  (`ProgramLowering`, [../compiler/03-hir.md](../compiler/03-hir.md#what-a-program-lowers-programlowering)), without
+  its emission: every function written with a body, what those need (a member of a class-template instance only when
+  the program uses it - a call, its address, the instance's vtable - D-16), reflection's thunks, every global's start
+  and storage, a script against its host. The same functions in the same order, so the same errors, each in a
+  template-made body ending with where the program first uses it (until R2 the server copied the loop, lowered no
+  template-made body at all and so missed every error in one: BUG-482). Lowering is skipped when the front end already
   has hard errors (exactly like C4.exe). Results are de-duplicated by (line, column, message), so the
   editor shows exactly what a build would print. While a front-end error stops an analysis short of the bodies (every
   keystroke of an edit makes one), each other file whose text is unchanged and has no front-end error of its own keeps
@@ -110,7 +114,8 @@ drawn as a string), so typing in it asks for completion as typing a name does.
   are what the build-derived LSP options file holds (`includePaths`, `defines`, `c4Home`: the C4 install the project
   builds with, `projects`: the build description C4.exe gets, and `target`: the project's `-march` / `-m` compiler
   arguments, so the editor sees the build's `SIMD_*` macros and the intrinsics its processor allows, D-62; flags that
-  select no target are ignored), which Nuke writes for every program it compiles, also when the compile fails
+  select no target are ignored; `scriptHost`: `true` when the program builds with `--script-host`, whose lowering
+  gives every class its vtables, as the server's then does), which Nuke writes for every program it compiles, also when the compile fails
   (`.ied/local/lsp-options/<program>.json`; a module's tests are a program). `programs` (`{<name>: <options>}`) names
   every program of the workspace, and the options' own fields are one more program (one server for one program, as
   before). With a usable description a program compiles its projects, each with its own defines and boundary

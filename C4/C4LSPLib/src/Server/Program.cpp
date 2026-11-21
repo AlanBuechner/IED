@@ -204,6 +204,7 @@ namespace C4LSP::Server
 		session->SetTarget(m_Options.Target());
 		if (!m_Options.libraryFolder.empty()) session->SetLibraryFolder(m_Options.libraryFolder);
 		session->SetProjectsFile(m_Options.projectsFile);
+		session->SetScriptHostBuild(m_Options.scriptHost);
 		for (const auto& [uri, text] : documents) session->SetOpenDocument(uri, text);
 		session->UsePriorParses(std::move(prior));
 		session->Recompile();

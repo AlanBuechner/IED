@@ -85,7 +85,7 @@ Problem matchers apply line by line to a step's output (both streams); a match b
 
 ## LSP/build sync
 
-After each successful compile Nuke writes `.ied/local/lsp-options/<project>.json` with exactly the include paths, defines, toolchain (`c4Home`), build description (`projects`) and target arguments the compiler used (N1, done; `Nuke/nuke/c4/ide_bridge.py`). The `c4` plugin's LSP profile points `initializationOptionsFile` at it; IED watches the file and pushes changes (`didChangeConfiguration` or restart). Diagnostics therefore match a real build.
+After each successful compile Nuke writes `.ied/local/lsp-options/<project>.json` with exactly the include paths, defines, toolchain (`c4Home`), build description (`projects`), target arguments and whether it builds a script host (`scriptHost`) the compiler used (N1, done; `Nuke/nuke/c4/ide_bridge.py`). The `c4` plugin's LSP profile points `initializationOptionsFile` at it; IED watches the file and pushes changes (`didChangeConfiguration` or restart). Diagnostics therefore match a real build.
 
 ## Nuke work items
 

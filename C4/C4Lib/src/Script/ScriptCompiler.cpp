@@ -1,6 +1,5 @@
 #include "Script/ScriptCompiler.h"
-#include "Backend/CodeGen/CodeGenDriver.h"
-#include "Backend/CodeGen/PeTables.h"
+#include "Backend/ProgramBackend.h"
 #include "Backend/CodeGen/TestHarnessEmitter.h"
 #include "Backend/Reflection/RegistrationEmitter.h"
 #include "Compiler/AggregateCopies.h"
@@ -15,6 +14,7 @@
 #include "Script/InterfaceBuilder.h"
 #include "Script/ScriptModulePasses.h"
 #include "Script/ScriptReach.h"
+#include "Target/TargetAbi.h"
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Passes/PassBuilder.h>
@@ -281,7 +281,7 @@ namespace Scripting
 		std::string error;
 		std::unique_ptr<llvm::Module> module;
 		{
-			CodeGenDriver driver(*out.context, HostSystem()); // a script runs in the host that compiles it
+			ProgramBackend driver(*out.context, HostSystem()); // a script runs in the host that compiles it
 			driver.SetReflectionTag(options.name.c_str());
 			driver.EnableScriptMode({ &questions.symbols, &questions.types, units.interfaceUnits });
 			if (options.debugInfo) driver.EnableDebugInfo();
@@ -329,7 +329,7 @@ namespace Scripting
 		KeepImageOffsetsInImage(*module);
 		// ELF: each table reference relative to its own field, once the host functions they name are thunks in the
 		// script (a script lies anywhere in the address space, too far from the host for a 32-bit offset).
-		if (HostSystem() == TargetSystem::Linux) PeTables::AnchorAtFields(*module);
+		TargetAbi::For(HostSystem()).AnchorTables(*module);
 		if (out.layer) out.layer->symbols = LayerSymbols(*module);
 		out.assumptions.symbols = questions.symbols.Asked();
 		out.assumptions.types = questions.types.Asked();

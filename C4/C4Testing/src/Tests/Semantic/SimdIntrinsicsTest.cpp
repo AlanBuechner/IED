@@ -1,5 +1,6 @@
 #include "SimdIntrinsicsTest.h"
 #include "Backend/CodeGen/CodeGen.h"
+#include "Backend/ProgramBackend.h"
 #include "Compiler/CompilerInstance.h"
 #include "Compiler/CpuTarget.h"
 #include "Compiler/Toolchain.h"
@@ -45,7 +46,7 @@ namespace Testing
 			compiler.CompileAll();
 			compiler.AnalyzeProgram();
 			llvm::LLVMContext context;
-			CodeGenDriver driver(context);
+			ProgramBackend driver(context);
 			Lowered out;
 			std::string error;
 			out.ok = driver.Lower(compiler.GetProgramModelForLowering(), "main", &error);

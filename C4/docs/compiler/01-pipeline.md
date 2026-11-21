@@ -30,10 +30,11 @@ in `C4Lib`.
         |   -> one ProgramModel; diagnostics = parse errors + model errors
         |   any front-end error stops here
         v
- [5] RunBackend: CodeGenDriver::Lower
-        |   types -> function decls -> HIR LowerFunction + emit, to a fixpoint -> test harness (-test)
-        |   -> @main wrapper -> __c4_global_init rounds -> globals -> reflection image
-        |   -> __c4_gc_roots -> verify
+ [5] RunBackend: ProgramBackend::Lower
+        |   ProgramLowering: written bodies -> what they need (D-16), to a fixpoint -> reflection's thunks
+        |     -> global starts, round by round -> thunks -> every global's storage (the same for C4LSP)
+        |   ProgramEmitter: types -> function decls -> every lowered tree -> test harness or @main wrapper
+        |     -> __c4_global_init rounds -> globals -> reflection image -> __c4_gc_roots -> verify
         v
      -S / --emit-ir writes <out>.ll and stops here; -bc writes <out>.bc and stops
         |
@@ -178,34 +179,51 @@ path. Diagnostics still report original file names.
 tree to a declaration in a header it includes (the language server, `--pretty-print`). The model and the
 backend never use merged trees, so a build does not merge.
 
-## 5. Backend (`Backend/CodeGen/CodeGenDriver::Lower`)
+## 5. Backend (`Backend/ProgramBackend`: `Backend/Lowering/ProgramLowering`, then `Backend/CodeGen/ProgramEmitter`)
 
-Assembly order (details in [04-codegen-and-abi.md](04-codegen-and-abi.md)):
+The backend is two steps. **Lowering** (`ProgramLowering::Run`, [03-hir.md](03-hir.md#what-a-program-lowers-programlowering))
+decides what the program has and lowers it to HIR, on `-j` threads; the language server runs exactly this step, so
+its body diagnostics are the build's. **Emission** (`ProgramEmitter::Emit`) emits what lowering produced (a
+`LoweredProgram`) and decides nothing about what is lowered. Any lowering error fails the build before emission
+(never a silent omission), after every lowering step has run, so one run reports every error.
+
+Lowering, in order:
+
+1. Every function written as it is with a body (`LowerFunction`), then what the lowered bodies need, to a fixpoint
+   (`ProgramReach`, D-16): what their emitted code calls, takes the address of, constructs, finalizes, destroys at
+   exit or copies and destroys exceptions with, and the virtual methods of the objects they hold (`VtableEntries`).
+   A member of a class-template instance nothing needs is never lowered.
+2. With `--script-host`, every class's vtables.
+3. Reflection's invoke thunks and type thunks, and what they need.
+4. The starts of the globals and static members (`Backend/HIR/GlobalInit`), round by round, each with what it
+   reaches: a template instance first made by a round's code gets its static data members started in the next
+   round. They come after the bodies so the instances the bodies made are started too; then the thunks again.
+5. What every global's storage needs: its type's vtables, the function a function pointer starts at
+   (`GlobalStorage`); again from step 4 while that lowers more.
+
+Emission, in order (details in [04-codegen-and-abi.md](04-codegen-and-abi.md)):
 
 1. Lower every object/union type to a named LLVM struct, filled from the model's layout.
 2. Forward-declare every function (mutual recursion and forward calls are legal before any body).
-3. Lower every function body to HIR (`LowerFunction`) **to a fixpoint**: lowering can instantiate
-   templates, which adds new function records, so the record set is re-collected until nothing new
-   appears. Any lowering error fails the build (never a silent omission); otherwise every complete tree is
-   emitted.
+3. Every lowered tree, each in its partition, the partitions at once.
 4. Under `-test`, synthesize the test-harness `main`.
 5. Emit a thin `@main` forwarding to the user's entry (which carries an overload suffix such as `main_0`),
    mirroring `argc/argv` when declared; a `void` entry returns 0.
-6. Lower and emit `__c4_global_init` (`Backend/HIR/GlobalInit`), registered in `@llvm.global_ctors`:
-   every global and static member that does not fold to a constant starts there, in declaration order, and
-   each that needs destruction is registered for exit. A start that only stores constants (a table) becomes the
-   global's initial data instead (`ConstantImage`), so a program whose globals are all such starts has no rounds. It runs in rounds, each emitted with the functions it
-   reaches: a template instance first made by a round's code gets its static data members started in the
-   next round. It comes after the bodies so the instances they made are started too.
+6. Emit `__c4_global_init`'s rounds, registered in `@llvm.global_ctors`: every global and static member that does
+   not fold to a constant starts there, in declaration order, and each that needs destruction is registered for
+   exit. A start that only stores constants (a table) becomes the global's initial data instead (`ConstantImage`),
+   so a program whose globals are all such starts has no rounds.
 7. Materialize every global (reflection registers each, whether or not code names it), then describe the
    reflection image from the model (`Backend/Reflection/RegistrationEmitter`) and emit `__c4_reflect_init`, a
    static constructor that registers it under the `-reflect-tag` tag before every other one. The image's constants
    (`Backend/Reflection/ReflectionTables`) go into the module; a split program's go into a module of their own,
    built only when the object cache keeps no object of the image's key (D-82,
    [05-partitioned-emission.md](05-partitioned-emission.md#the-reflection-image-d-82)).
-8. Emit `__c4_gc_roots`: `{address, size}` of every global, static member and static local that may hold a
+8. Check that the emitted code names no function with a body that lowering did not lower (an internal error
+   otherwise: lowering and codegen would disagree about what the program needs).
+9. Emit `__c4_gc_roots`: `{address, size}` of every global, static member and static local that may hold a
    managed pointer.
-9. Verify each function (naming the culprit), then the module.
+10. Verify each function (naming the culprit), then the module.
 
 With `-g` the module also carries CodeView debug information: a subprogram per written function, its
 parameters and locals, the types, the globals and a line per statement
@@ -329,8 +347,9 @@ consumer (`unresolved signature for function 'main'`) - a weak diagnostic tracke
 | Parse | effective text | one AST per file, include closure | parse a file twice |
 | ModelBuilder | every unit's own top-level declarations | `ProgramModel` | lower a function body |
 | HIR | one `FunctionRecord` + the model | typed `HIRFunction` (complete or not) + diagnostics | mutate the AST, re-derive layout |
-| CodeGen | HIR trees + model layout/symbols | one verified `llvm::Module` | resolve names, overloads or types |
+| Lowering (`ProgramLowering`) | the model | every tree the program needs, in one order (`LoweredProgram`) + diagnostics | depend on emission or on the threads |
+| CodeGen (`ProgramEmitter`) | a `LoweredProgram` + model layout/symbols | verified `llvm::Module`s | resolve names, overloads or types; decide what is lowered |
 | ProgramOutput / ObjectEmission / BuildUtils | the verified module, runtimes, foreign objects | `.obj`, `.exe` (`.ll` for `-S`, `.bc` for `-bc`) | hide a tool failure |
 
-The LSP (`C4LSP`) runs phases 1-4 plus HIR lowering for diagnostics, so editor errors are exactly the
-compiler's (see [../tools/03-editor-lsp-dap.md](../tools/03-editor-lsp-dap.md)).
+The LSP (`C4LSP`) runs phases 1-4 plus the backend's lowering step (`ProgramLowering`, no emission) for
+diagnostics, so editor errors are exactly the compiler's (see [../tools/03-editor-lsp-dap.md](../tools/03-editor-lsp-dap.md)).

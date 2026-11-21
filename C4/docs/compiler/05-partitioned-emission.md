@@ -22,23 +22,26 @@ IR emission on one thread (0.4 s) and the script host's inline bodies (0.8 s, be
 
 ## The coordinator
 
-`CodeGenDriver` (`SplitInto(count, threads, onlyAlwaysInline)`) keeps what must be serial and orders everything, so
-the partitions' bitcode, and with it the object cache, does not depend on `-j`:
+`ProgramBackend` (`SplitInto(count, onlyAlwaysInline)`, `LowerOn(threads)`) lowers first and emits after, and orders
+everything, so the partitions' bitcode, and with it the object cache, does not depend on `-j`:
 
-- **HIR lowering stays on one thread.** It changes the model (template instances, closures, lowering scopes).
-- **Rounds.** `EmitReachable` lowers a batch, places each tree in its partition (`ProgramPlacement`), and the
-  partitions emit their trees at once, each in the batch's order (`EmitPlaced`); what each partition's code
-  referenced for the first time is the next batch, merged in partition order.
+- **Lowering decides, before any emission.** `ProgramLowering` lowers what the program needs on `-j` threads, the
+  model changes (template instances, closures, lowering scopes) made between its rounds in one order
+  ([03-hir.md](03-hir.md#what-a-program-lowers-programlowering)); its `LoweredProgram` holds every tree in the order it
+  was lowered.
+- **Emission.** `PartitionSet::Emit` places each tree in its partition (`ProgramPlacement`) and the partitions emit
+  their trees at once, each in the program's order; then each defines its own census counters.
 - **The model is read-only while partitions emit.** Object layouts, computed on their first query, are settled before
-  each round (`SettleLayouts`); the two things emission asks of the model that can change it (a census counter's
-  signature, the function a function-pointer global starts at) go through a lock the partitions share
-  (`ModuleContext::ShareModel`).
+  the partitions emit (`SettleLayouts`); the function a function-pointer global starts at was resolved by lowering
+  (`LoweredProgram::functionPointerStarts`) and a census counter's signature made with it, so emission changes nothing
+  in the model and needs no lock.
 - **The program's own code and data** come after the fixed point, in partition 0: global initialization, the
   reflection image's registration, the GC roots (which declare every other partition's static locals), the entry
   point or the test harness, the file-scope assembly. The reflection image itself is a module of its own (below).
-- **Invoke thunks** are lowered on the coordinator and emitted like any round's trees, an own thunk in its target's
-  partition and a shared one where its name places it, so an edit that adds a reflected method changes its own
-  partition only.
+- **Invoke thunks** are lowered with the rest and emitted like any tree, an own thunk in its target's partition and a
+  shared one where its name places it, so an edit that adds a reflected method changes its own partition only; the
+  `ReflectionEmitter` then makes each a local of the program and records its entry in the partition that defines the
+  target.
 - **Objects.** Each partition's bitcode is written on the output's threads, and a partition whose object the cache
   does not keep is assembled on the same thread right after (`WriteCachedObjects` with a bitcode callback), so an
   edit's partitions start while the others' bitcode is written; partitions with the same code (empty ones) claim
@@ -75,24 +78,24 @@ the fixed point. It is made in two steps: `DescribeReflectionImage` reads the mo
 points at), folding annotation arguments (the model checked them all as it was built, `AnnotationCheck`, and made the
 template instances they name, so this fold finds every type made already); `ReflectionTables::Build`
 makes the LLVM constants from it and reads no model. One partition builds it in place, sharing the module's strings.
-A split program keeps the description (`CodeGenDriver::KeepImageApart`) with its key, a 128-bit hash of every value
+A split program keeps the description (`ReflectionEmitter::KeepImageApart`) with its key, a 128-bit hash of every value
 in it and of the target (`ImageDescription::Key`), and partition 0 declares the image. The output keeps the image's
 object in the object cache by that key (`ObjectCache::ObjectKeyed`, a `KeyedModule` after the partitions): when an
 object of the key is kept, the image is neither built nor written as bitcode; otherwise an assembly thread builds it
-first, in a module and LLVM context of its own (`CodeGenDriver::BuildReflectionModule`), declaring what it points at
+first, in a module and LLVM context of its own (`ProgramBackend::BuildReflectionModule`), declaring what it points at
 by name (a function as `void()`, a global as a byte, a program local hidden), and assembles it from memory. An edit
 that changes no reflected declaration builds no image, and an edit of partition 0 reassembles no image with it. In
 the IED server the image is a 6.4 MB constant whose bitcode alone took 0.1 s of every build.
 
-## Imports (`Backend/CodeGen/ImportPlanner`)
+## Imports (`Backend/CodeGen/ImportEmitter`, `ImportPlanner`)
 
 Each partition gathers, on its thread, the facts of the functions it defines (size of their unoptimized IR, direct
 callees, `inline`, `noinline`, `minsize`); the coordinator picks each partition's copies by D-76's rule (a direct
 callee of at most 100 instructions, 70% of that a level further, three levels; an `inline` one whatever its size;
 at `-O0` only those); each partition emits its copies from their HIR trees as `available_externally`
 (`FunctionEmitter::EmitImport`), declaring their static storage and guards (`ModuleContext::SetImporting`) and
-their nested functions, which their own partition defines. The census counters the copies need are lowered and
-emitted after.
+their nested functions, which their own partition defines. Each partition then defines the census counters its
+copies call (lowering made every counter the program's code needs).
 
 ## A script host
 
@@ -116,5 +119,7 @@ finds each under its partition name.
 
 C4Testing `Semantic.SplitEmission` (each function and global defined in one partition, locals other partitions name
 hidden globals, the program's own code in partition 0, one partition keeping locals local, no storage for nameless
-constants, the reflection image in a module of its own that declares only what the partitions define); TestCode with `-Incremental` (e2e-incremental) builds TestCode split; the IED server's own tests build it
-split.
+constants, the reflection image in a module of its own that declares only what the partitions define); `Lowering.Program`
+(a census counter lowered once and defined in each partition that allocates the type; the lowering order the same on
+one thread and on eight; codegen refusing to name what lowering did not lower); TestCode with `-Incremental`
+(e2e-incremental) builds TestCode split; the IED server's own tests build it split.

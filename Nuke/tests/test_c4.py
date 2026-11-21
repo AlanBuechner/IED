@@ -160,6 +160,7 @@ class C4BuildTests(WorkspaceTest):
 		self.assertEqual(options["toolchain"], "1.0.0")
 		self.assertEqual(options["target"], ["-march=x86-64-v3"])
 		self.assertIn(self.path("Engine", "third").replace("\\", "/"), options["includePaths"])
+		self.assertFalse(options["scriptHost"], "built without --script-host")
 
 	def test_a_script_host_gives_the_editor_its_plugin_folders(self):
 		"""[project.script-host]: each plugin folder its globs match is a script scope in the program's IDE options, compiled
@@ -170,6 +171,7 @@ class C4BuildTests(WorkspaceTest):
 		code, out = self.nuke("build")
 		self.assertEqual(code, 0, out)
 		options = json.loads(read(self.path(".ied", "local", "lsp-options", "Game.json")))
+		self.assertTrue(options["scriptHost"], "the editor lowers every class's vtables, as the --script-host build does")
 		scopes = options["scripts"]
 		self.assertEqual([s["folders"] for s in scopes], [[self.path("Game", "plugins", "manga", "src").replace("\\", "/")],
 			[self.path("Game", "plugins", "tv", "src").replace("\\", "/")]], "one scope a plugin, in name order")

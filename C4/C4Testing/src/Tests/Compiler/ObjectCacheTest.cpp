@@ -334,7 +334,7 @@ namespace Testing
 		fs::remove_all(LongPath(DeepRoot()), ec);
 	}
 
-	// A build whose lowering left the module unverified (CodeGenDriver::VerifyLater) verifies each partition it
+	// A build whose lowering left the module unverified (ProgramBackend::VerifyLater) verifies each partition it
 	// assembles, a module kept whole too: the culprit is named, and nothing is assembled from it.
 	void ObjectCacheTest::InvalidCodeIsReportedWhenItsPartitionIsAssembled()
 	{

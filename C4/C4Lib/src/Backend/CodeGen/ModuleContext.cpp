@@ -9,10 +9,7 @@
 #include "Compiler/ModulePartitions.h"
 #include "Model/ProgramModel.h"
 #include "Model/TypeHandle.h"
-#include "Model/Types/FunPtrType.h"
-#include "Parser/Nodes/Expressions/IdentifierExpressionNode.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
-#include "Parser/Nodes/Declarations/NamespaceQualifiedNameNode.h"
 // IntegerType / PointerType / VectorType live in DerivedTypes.h on this vendored LLVM 22; the constant
 // builders (ConstantInt / ConstantFP) live in Constants.h.
 #include <llvm/IR/DerivedTypes.h>
@@ -122,7 +119,7 @@ namespace Scripting
 			else
 			{
 				result = StructFor(obj, base->GetName().c_str());
-				// Lazily fill the struct body. CodeGenDriver pre-fills every PROGRAM-level type, but a type
+				// Lazily fill the struct body. PartitionSet::Prepare pre-fills every PROGRAM-level type, but a type
 				// declared INSIDE a function body (doc 06) is registered only during lowering and is never in
 				// model.ObjectTypes() - without this its LLVM struct stays opaque and the slot alloca fails
 				// with "Cannot allocate unsized type". StructFor cached the opaque struct first, so a
@@ -312,32 +309,10 @@ namespace Scripting
 		if (sym.constValue.kind == ConstantValue::Kind::String) init = StringGlobal(sym.constValue);
 		else if (!sym.constValue.IsNone() && sym.constValue.kind != ConstantValue::Kind::Guid) init = NumberConstant(sym.constValue, sym.type, ty);
 		// A global function pointer initialized with a function address (`funcptr<R(a)> g = F;`) must start
-		// at @F, not null - the first call through it would otherwise fault. The initializer names the
-		// function (a bare or qualified identifier); resolve it against the model to its record.
-		if (!init && m_Model && sym.initializer)
-		{
-			const Type* base = sym.type ? TypeHandle::UnwrapToValue(sym.type) : nullptr;
-			if (base && base->GetKind() == TypeKind::FunPtr)
-			{
-				Core::String fnName;
-				if (const auto* id = dynamic_cast<const IdentifierExpressionNode*>(sym.initializer))
-					fnName = id->GetName();
-				else if (const auto* qn = dynamic_cast<const NamespaceQualifiedNameNode*>(sym.initializer))
-					for (uint32 i = 0; i < qn->SegmentCount(); ++i) { if (i) fnName += "::"; fnName += qn->GetSegments()[i].nameToken.GetText(); }
-				if (!fnName.empty())
-				{
-					const auto* fp = static_cast<const FunPtrType*>(base);
-					Core::Vector<const Type*> ptypes;
-					for (const auto* pt : fp->GetParameterTypes()) ptypes.Push(pt);
-					const FunctionRecord* rec = nullptr;
-					std::unique_lock<std::mutex> shared = m_ModelLock ? std::unique_lock<std::mutex>(*m_ModelLock) : std::unique_lock<std::mutex>();
-					auto sigR = m_Model->QueryFunction(fnName, nullptr, nullptr, ptypes,
-						LookupContext{ sym.definingUnit, nullptr, nullptr }, &rec);
-					shared = {};
-					if (sigR.Ok() && rec) init = GetOrCreateFunction(*rec);
-				}
-			}
-		}
+		// at @F, not null - the first call through it would otherwise fault. Lowering resolved the function
+		// (Backend/Lowering/GlobalStorage).
+		if (!init && m_FunctionPointerStarts)
+			if (const auto start = m_FunctionPointerStarts->find(&sym); start != m_FunctionPointerStarts->end()) init = GetOrCreateFunction(*start->second);
 		// A polymorphic global starts with its vptrs set: its initial bytes are an image of the zeroed object.
 		if (!init) init = m_Vtables->ZeroImage(sym.type);
 		if (!init) init = llvm::Constant::getNullValue(ty);
@@ -366,13 +341,6 @@ namespace Scripting
 		if (sym.type && sym.type->GetAlignment() > 1) gv->setAlignment(llvm::Align(sym.type->GetAlignment()));
 		m_GlobalCache[&sym] = gv;
 		return gv;
-	}
-
-	const FunctionType* ModuleContext::CensusCounterType()
-	{
-		std::unique_lock<std::mutex> shared = m_ModelLock ? std::unique_lock<std::mutex>(*m_ModelLock) : std::unique_lock<std::mutex>();
-		TypeStore* types = m_Model->TypeStorePtr();
-		return types->Function(types->Builtin(TypeKind::Int64), { types->Pointer(types->Builtin(TypeKind::Void)) });
 	}
 
 	void ModuleContext::SetPartition(std::function<bool(const SymbolInfo&)> definesGlobal)

@@ -46,6 +46,8 @@ def options(job, toolchain, compiler_args, scripts=()):
 		"toolchain": toolchain.version,
 		"projects": job.description_path,
 		"target": [arg for arg in compiler_args if arg.startswith("-m")],
+		# A script host's build lowers every class's vtables (C4 docs/runtime/04): the server lowers what the build does.
+		"scriptHost": "--script-host" in compiler_args,
 	}
 	if scripts:
 		result["scripts"] = list(scripts)

@@ -62,7 +62,8 @@ design gives every question exactly one home.
 ## Source tree (`C4Lib/src`)
 
 `C4Lib` is a static library; `src/Source.cpp` is the thin `C4.exe` driver on top of it. `C4LSP` links the same
-library so the editor sees exactly what the compiler sees.
+library so the editor sees exactly what the compiler sees: it runs the same `ProgramLowering` as a build, without
+emission, so its body diagnostics are the build's by construction.
 
 | Folder | Responsibility |
 |---|---|
@@ -75,9 +76,11 @@ library so the editor sees exactly what the compiler sees.
 | `Model/` | The `ProgramModel` and its subsystems: `SymbolTable` (scope tree), `TypeStore` (owns every type), `TypeResolver`, `SymbolQueries`, `TemplateInstantiator`, `OverloadResolution`, `OperatorTable` + `OperatorAnnotations`, `ConstEvaluator`, `LoweringScopes`, `TypeHandle`, `QueryResult`, reflection C emission (`ProgramModel.cpp`) |
 | `Model/Builder/` | `ModelBuilder` (pass 1 register + orchestration), `ModelResolver` (pass 2 fixed point), `FreeFunctionResolver` (free functions, extension methods, out-of-line definitions) |
 | `Model/Types/` | One class per type kind: Primitive, Pointer, Reference, Array, FunPtr, Function, Object, Union, Enum, Alias, Swizzle (packed sub-vector), InitList, TemplateParam, TemplateSpecialization, Invalid |
-| `Backend/HIR/` | Typed lowering of function bodies: `HIRNodes`, `HIRValue`, `ModelQueries`, `LoweringContext`, `ExprLowerer`, `StmtLowerer`, `DeclLowerer`, `LoopLowerer`, `ExceptionLowerer`, `JumpScopes`, `IndexLValue`, `LoweringDriver` |
-| `Backend/CodeGen/` | LLVM emission from HIR: `ModuleContext`, `IRContext`, `CleanupStack`, `Abi`, `ExprEmitter`, `RegionEmitter`, `FunctionEmitter`, `CodeGenDriver` |
-| `Testing/` | Empty (test-mode support lives in the model's test registry and `CodeGenDriver`'s harness) |
+| `Backend/HIR/` | Typed lowering of one function body: `HIRNodes`, `HIRValue`, `ModelQueries`, `LoweringContext`, `ExprLowerer`, `StmtLowerer`, `DeclLowerer`, `LoopLowerer`, `ExceptionLowerer`, `JumpScopes`, `IndexLValue`, `LoweringDriver` (`LowerFunction`), `HIRWalk` (the tree codegen emits), `CountedArray` |
+| `Backend/Lowering/` | What a program lowers and in what order (R2, [03-hir.md](03-hir.md#what-a-program-lowers-programlowering)) - the one driver C4.exe, the language server and scripts share: `ProgramLowering` (the steps), `ProgramReach` (the D-16 closure: what lowered bodies need is lowered next), `BodyNeeds` (what a tree names), `VtableEntries`, `InvokeThunkPlan`, `TypeThunkPlan`, `GlobalStarts`, `GlobalStorage`, `ScriptLowering`, `ParallelLowering` (bodies on threads), `UseSites`; its result is a `LoweredProgram` |
+| `Backend/CodeGen/` | LLVM emission of a `LoweredProgram`; it lowers nothing ([04](04-codegen-and-abi.md)): `ProgramEmitter` (the assembly order), `PartitionSet` (the modules, placement, emission on threads), `StartupEmitter`, `ReflectionEmitter`, `ImportEmitter`, `ModuleContext`, `IRContext`, `CleanupStack`, `Abi`, `ExprEmitter`, `RegionEmitter`, `FunctionEmitter`, `TestHarnessEmitter` |
+| `Backend/ProgramBackend` | The backend C4.exe and a script's compile run: `ProgramLowering`, then `ProgramEmitter` |
+| `Testing/` | Empty (test-mode support lives in the model's test registry and `TestHarnessEmitter`) |
 
 Runtime C sources linked into every program live outside the library in `C4Runtime/` (see
 [../runtime/01-memory-and-gc.md](../runtime/01-memory-and-gc.md)).

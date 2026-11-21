@@ -7,6 +7,7 @@
 #include "Macro/MacroTable.h"
 #include "Compiler/FileIo.h"
 #include "Script/ScriptCompiler.h" // HostQuestions, owned by value - the complete type is needed at destruction
+#include "Backend/Lowering/ScriptLowering.h"
 #include <functional>
 #include <map>
 #include <memory>
@@ -27,6 +28,10 @@ namespace C4LSP::Server
 
 		void SetRootFolder(const std::string& root);
 		const std::string& GetRootFolder() const { return m_RootFolder; }
+
+		// `--script-host` (docs/runtime/04 section 3.1): the program builds every class's vtables, so lowering reaches every
+		// virtual method, as the build's does.
+		void SetScriptHostBuild(bool scriptHost) { m_ScriptHostBuild = scriptHost; }
 
 		// Build configuration the client's project generator derived from the real compiler args.
 		// includeDirs mirror `-I` (macro expansion + interop header resolution only, matching the
@@ -81,10 +86,10 @@ namespace C4LSP::Server
 		SemanticResolver& GetResolver();
 		const SemanticResolver& GetResolver() const;
 
-		// Body-level (HIR lowering) diagnostics from the SAME pass C4.exe runs in CodeGenDriver::Lower:
-		// parse + program-model errors come from GetAllDiagnostics(), and these are the type errors a
-		// function BODY produces. Together they are the compiler's complete error output for the project,
-		// so the LSP reports exactly what the build would - no separate/duplicated error logic in the LSP.
+		// Body-level (HIR lowering) diagnostics from the SAME lowering C4.exe runs (ProgramLowering): parse and
+		// program-model errors come from GetAllDiagnostics(), and these are the type errors the bodies the program
+		// needs produce. Together they are the compiler's complete error output for the project, so the LSP reports
+		// exactly what the build would - no separate or duplicated error logic in the LSP.
 		const Core::Vector<Scripting::CompilationError>& GetLoweringDiagnostics() const { return m_LoweringErrors; }
 		// Whether the last compile lowered the bodies: its front end found no error (C4.exe lowers only then).
 		bool LoweredBodies() const { return m_LoweredBodies; }
@@ -157,11 +162,10 @@ namespace C4LSP::Server
 		void RunPreprocessPhase();
 		// Root folders the preprocess passes run over: the project root plus any -I dirs that exist.
 		std::vector<std::string> BuildPreprocessRoots() const;
-		// Lower every complete function body and every global's start through the compiler's OWN HIR lowering
-		// (LowerFunction, LowerGlobalInit), exactly as CodeGenDriver does, to collect the body-level type diagnostics.
-		// No LLVM is emitted - only the diagnostics matter here. Gated on a valid model, mirroring C4.exe which
-		// lowers only after a clean front end.
-		void RunLoweringPass(uint32 interfaceUnits = 0);
+		// Lower what the program needs through the compiler's own ProgramLowering - the bodies, the thunks, the globals'
+		// starts and storage, for a script against its host - to collect the body-level diagnostics. No LLVM is emitted.
+		// Gated on a clean front end, as C4.exe lowers only after one.
+		void RunLoweringPass(const std::optional<Scripting::ScriptLowering>& script = std::nullopt);
 		bool RecompileScript();
 		// The scope's files, each open one with the editor's text, as a script compile takes them.
 		Scripting::ScriptCompileOptions ScriptOptions() const;
@@ -197,6 +201,7 @@ namespace C4LSP::Server
 		Timings m_Timings;
 		bool m_LoweredBodies = false;
 		bool m_Compiled = false;
+		bool m_ScriptHostBuild = false;                        // see SetScriptHostBuild
 		ScriptScope m_Script;
 		std::shared_ptr<const LoadedInterface> m_ScriptHost; // set in script mode
 		std::unique_ptr<Scripting::HostQuestions> m_HostQuestions; // what the script's model asks of its host's table, per compile

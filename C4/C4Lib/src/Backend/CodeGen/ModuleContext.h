@@ -11,7 +11,6 @@
 #include <llvm/IR/Module.h>
 #include <functional>
 #include <memory>
-#include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -76,8 +75,8 @@ namespace Scripting
 		llvm::FunctionType* FunctionTypeOf(const FunctionRecord& rec);
 		/// Where this module keeps the thunk of a func signature (FuncThunk): one per signature type, null until made.
 		llvm::Function*& FuncThunkSlot(const Type* signature) { return m_FuncThunks[signature]; }
-		/// The records whose functions were created since the last call: what emitted code referenced for
-		/// the first time (the driver lowers the template-made ones among them, D-16).
+		/// The records whose functions were created since the last call: what emitted code referenced for the first time,
+		/// which lowering must have lowered (ProgramEmitter checks: lowering, not codegen, decides what lowers).
 		std::vector<const FunctionRecord*> TakeNewFunctions() { return std::move(m_NewFunctions); }
 
 		// The address (opaque ptr) of a model global's backing storage, created on first use. Used by lvalue
@@ -127,15 +126,13 @@ namespace Scripting
 		/// The census's record of each type `new` makes.
 		CensusTypes& census() { return *m_Census; }
 
-		// The model GlobalAddress uses to resolve function-pointer initializers (`funcptr<R(a)> g = F;`
-		// must start at @F, not null). Set once before any lowering.
+		// The model emission reads layouts and symbols from: read only, so partitions emit at once (D-81). Set once
+		// before any emission.
 		void SetModel(const ProgramModel* model) { m_Model = model; }
 		const ProgramModel* model() const { return m_Model; }
-		/// Partitions emitting at once (D-81) share the model: what emission asks of it that can change it (a census
-		/// counter's signature, the function a function-pointer global starts at) goes through `lock`.
-		void ShareModel(std::mutex* lock) { m_ModelLock = lock; }
-		/// `int64(void* object)`, the type of a census counter (CensusTypes).
-		const FunctionType* CensusCounterType();
+		/// The function each function-pointer global starts at (`funcptr<R(a)> g = F;` starts at @F, not null), as
+		/// lowering resolved it (LoweredProgram).
+		void UseFunctionPointerStarts(const std::unordered_map<const SymbolInfo*, const FunctionRecord*>* starts) { m_FunctionPointerStarts = starts; }
 
 		/// `-g` (B28): the module carries debug information; null when it does not.
 		void EnableDebugInfo(std::unordered_map<uint32, std::string> sourcePaths);
@@ -173,7 +170,7 @@ namespace Scripting
 		void PassOnStack(llvm::Function& fn, const FunctionRecord& rec);
 
 		const ProgramModel* m_Model = nullptr;
-		std::mutex* m_ModelLock = nullptr;
+		const std::unordered_map<const SymbolInfo*, const FunctionRecord*>* m_FunctionPointerStarts = nullptr;
 		llvm::LLVMContext& m_Context;
 		TargetSystem m_System;
 		std::unique_ptr<llvm::Module> m_OwnedModule;
