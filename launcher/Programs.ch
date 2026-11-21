@@ -10,9 +10,10 @@ namespace Launch
 	// another launcher) won the race.
 	const int32 c_AnotherServerExit = 3;
 
-	// ied-server.exe beside this program or in a sibling folder (the build layout); empty when none is.
+	// ied-server.exe (ied-server on Linux) beside this program or in a sibling folder (the build layout); empty when
+	// none is.
 	FS::Path ServerProgram();
-	// ied-desktop.exe, the same way.
+	// ied-desktop.exe, the same way (none on Linux, where the browser shows IED).
 	FS::Path DesktopProgram();
 	// The web client's folder: the nearest "frontend" above this program that holds login.html; empty when none does.
 	FS::Path WebClientFolder();

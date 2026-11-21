@@ -2,9 +2,13 @@ include "Programs.ch"
 
 namespace Launch
 {
-	// `<name>.exe` beside this program, else in the build layout's `../<name>/` folder.
+	// `<name>.exe` (on Linux `<name>`) beside this program, else in the build layout's `../<name>/` folder.
 	static FS::Path SiblingProgram(const char* name) {
+#if defined(PLATFORM_LINUX)
+		Core::String file = Core::String(name);
+#else
 		Core::String file = Core::String(name) + ".exe";
+#endif
 		FS::Path here = Platform::ExecutablePath().Parent();
 		FS::Path beside = here / file.View();
 		if (FS::FileExists(beside.CStr())) return beside;
@@ -63,7 +67,7 @@ namespace Launch
 	Net::LocalStream StartServer(Core::StringView control, Core::String& error, Process::Child* started) {
 		FS::Path program = ServerProgram();
 		if (program.IsEmpty()) {
-			error = Core::String("ied-server.exe is not beside ") + Platform::ExecutablePath().FileName();
+			error = Core::String("ied-server is not beside ") + Platform::ExecutablePath().FileName();
 			return Net::LocalStream();
 		}
 		Process::Child child = Process::Child::Start(ServerStart(program, control));

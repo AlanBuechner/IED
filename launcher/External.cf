@@ -12,9 +12,20 @@ namespace Launch
 	bool OpenExternal(Core::StringView url) {
 		if (!IsExternalUrl(url)) return false;
 		Process::StartInfo info;
+#if defined(PLATFORM_LINUX)
+		// The desktop's default browser; with no desktop session (an SSH shell) there is no browser to open, and the
+		// caller prints the URL instead.
+		if (Platform::GetEnvironmentVariable("DISPLAY").IsEmpty() && Platform::GetEnvironmentVariable("WAYLAND_DISPLAY").IsEmpty()) return false;
+		info.program = Core::String("xdg-open");
+		info.arguments.Push(Core::String(url));
+		info.input = Process::Redirect::Null;
+		info.output = Process::Redirect::Null;
+		info.errors = Process::Redirect::Null;
+#else
 		info.program = Core::String("rundll32");
 		info.arguments.Push(Core::String("url.dll,FileProtocolHandler"));
 		info.arguments.Push(Core::String(url));
+#endif
 		// The browser the handler starts is its child, and a child is born in the launcher's job: with the job killed on
 		// close (the default) the window it just opened goes with it once this call ends.
 		info.killOnClose = false;

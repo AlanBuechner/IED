@@ -3,9 +3,11 @@
 // channel", docs/27).
 
 include "Command.ch"
+#if defined(PLATFORM_WINDOWS)
 extern "c" include "foreground.h"
 
 static const uint32 c_AnyProcess = 0xFFFFFFFFu;   // ASFW_ANY
+#endif
 
 static Core::Array<Core::String> Arguments(int32 argc, char8** argv) {
 	Core::Array<Core::String> arguments;
@@ -69,7 +71,9 @@ static int32 Run(const Cli::Command& command, Net::LocalStream& stream) {
 		request.m_Col = command.m_Col;
 		request.m_In = command.m_In;
 		request.m_Reveal = !command.m_NoBrowser;
+#if defined(PLATFORM_WINDOWS)
 		if (request.m_Reveal) AllowSetForegroundWindow(c_AnyProcess);
+#endif
 		Launch::Reply reply = Launch::Ask(stream, Core::StringView("open"), Launch::OpenParams(request).View());
 		if (!reply.m_Ok) return Fail(reply.m_Error.View());
 		if (Launch::ResultFlag(reply, "revealed")) return 0;

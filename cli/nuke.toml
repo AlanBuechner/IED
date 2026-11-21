@@ -6,5 +6,8 @@ kind = "executable"
 description = "The IED command line: talks to the user's ied-server over its control pipe, starting it when needed"
 depends = ["launcher"]
 sources = ["."]
-links = ["user32"]
 working-dir = ".."
+
+# AllowSetForegroundWindow (foreground.h): Windows only; on Linux `ied` opens the browser (xdg-open).
+[project.system.windows]
+links = ["user32"]
