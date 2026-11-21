@@ -89,6 +89,12 @@ namespace Scripting
 		void OpenSection(ParserState& state);
 		// A member just parsed, under the open section: its access checked against it, and its annotations given.
 		void PlaceInSection(Ref<AstNode> node, ErrorTracker& errorTracker);
+		// The members up to the closing brace; one that does not parse is skipped to the next (m_BrokenMembers).
+		void ParseMembers(ParserState& state);
+		// The member at the lexer's position; null when none starts there.
+		static Ref<AstNode> ParseMember(ParserState& state);
+		// What is wrong with the member at the lexer's position that nothing parses.
+		Core::String BrokenMemberMessage(const Lexer& lexer) const;
 
 		Core::Vector<Ref<AnnotationNode>> m_Annotations;
 		AccessModifier m_AccessModifier = AccessModifier::None;
@@ -116,6 +122,7 @@ namespace Scripting
 		// must not be treated as an anonymous definition (HasBody) nor as a full type definition.
 		bool m_IsDeclaration = false;
 	Core::Vector<Ref<AstNode>> m_BodyMembers;
+	Core::Vector<Ref<AstNode>> m_BrokenMembers; // ErrorNodes: members that did not parse
 	Core::Vector<AccessSection> m_Sections;
 	Token m_CloseBraceToken;
 	Token m_SemicolonToken; // trailing semicolon after class body

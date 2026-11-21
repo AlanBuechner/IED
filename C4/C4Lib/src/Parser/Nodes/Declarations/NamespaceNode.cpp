@@ -1,5 +1,6 @@
 #include "NamespaceNode.h"
 #include "Parser/UnexpectedToken.h"
+#include "Parser/Recovery.h"
 #include "IncludeDeclarationNode.h"
 #include "ExternDeclarationNode.h"
 #include "AnnotationNode.h"
@@ -131,6 +132,8 @@ namespace Scripting
 			for (auto& inner : nested) inner->endLocation = close.GetEndLocation();
 			lexer.NextCompoundToken();
 		}
+		else
+			errorTracker.AddError(close.GetStartLocation(), "Expected '}' to close the namespace body", ErrorSeverity::Error);
 
 		return node;
 	}
@@ -158,11 +161,25 @@ namespace Scripting
 		return nested;
 	}
 
+	Ref<AstNode> NamespaceNode::ParseDeclaration(ParserState& state) const
+	{
+		for (const DeclarationParser& parser : DeclarationParsers())
+		{
+			if (parser.rootOnly && !m_IsRoot) continue;
+			if (auto node = parser.parse(state)) return node;
+		}
+		return nullptr;
+	}
+
+	// A declaration that did not parse is skipped to the next one (an ErrorNode marks it), so what follows parses on its
+	// own. Tokens left over by a declaration that reported its error, or on the line of the last error, are its
+	// consequence: skipped without another.
 	void NamespaceNode::ParseBody(ParserState& state)
 	{
 		Lexer& lexer = state.GetLexer();
 		ErrorTracker& errorTracker = state.GetErrorTracker();
 
+		bool afterError = false;
 		while (true)
 		{
 			Token token = lexer.PeekCompound();
@@ -173,26 +190,18 @@ namespace Scripting
 			if (!m_IsRoot && token.GetType() == TokenType::CloseCurl)
 				break;
 
-			bool matched = false;
-			for (const DeclarationParser& parser : DeclarationParsers())
+			const ErrorTracker::Mark before = errorTracker.Now();
+			if (Ref<AstNode> node = ParseDeclaration(state))
 			{
-				if (parser.rootOnly && !m_IsRoot) continue;
-				if (auto node = parser.parse(state))
-				{
-					m_ChildNodes.Push(node);
-					matched = true;
-					break;
-				}
+				m_ChildNodes.Push(node);
+				afterError = errorTracker.ReportedSince(before);
+				continue;
 			}
 
-			if (matched)
-				continue;
-
-			errorTracker.AddError(
-				token.GetStartLocation(),
-				UnexpectedTokenMessage(lexer),
-				ErrorSeverity::Error);
-			SkipRestOfStatement(lexer);
+			const Core::String why = UnexpectedTokenMessage(lexer);
+			if (!afterError && !errorTracker.LastErrorOnLineOf(token.GetStartLocation())) errorTracker.AddError(token.GetStartLocation(), why, ErrorSeverity::Error);
+			m_ChildNodes.Push(SkipBroken(lexer, Resume::Declaration, why));
+			afterError = false;
 		}
 	}
 

@@ -30,6 +30,25 @@ namespace Scripting
 		return last.severity != ErrorSeverity::Warning && last.location == error.location;
 	}
 
+	ErrorTracker::Mark ErrorTracker::Now() const
+	{
+		return { m_SuppressFrames.Count(), Target().Count() };
+	}
+
+	bool ErrorTracker::ReportedSince(const Mark& mark) const
+	{
+		if (m_SuppressFrames.Count() != mark.depth) return true; // a speculation still open: what it holds is not settled
+		return Target().Count() > mark.count;
+	}
+
+	bool ErrorTracker::LastErrorOnLineOf(const SourceLocation& at) const
+	{
+		const Core::Vector<CompilationError>& kept = Target();
+		if (kept.Empty()) return false;
+		const CompilationError& last = kept.Back();
+		return last.severity != ErrorSeverity::Warning && last.location.sourceId == at.sourceId && last.location.line == at.line;
+	}
+
 	void ErrorTracker::SuppressErrors()
 	{
 		m_SuppressFrames.Push(SuppressionFrame());

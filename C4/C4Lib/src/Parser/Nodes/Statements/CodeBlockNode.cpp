@@ -1,5 +1,6 @@
 #include "CodeBlockNode.h"
 #include "Parser/UnexpectedToken.h"
+#include "Parser/Recovery.h"
 #include "StatementParser.h"
 #include "Core/StringFormat.h"
 
@@ -61,6 +62,9 @@ namespace Scripting
 			return;
 		}
 
+		// A statement that does not parse is skipped to the next (an ErrorNode marks it); tokens left over by a statement
+		// that reported its error, or on the line of the last error, are skipped without another.
+		bool afterError = false;
 		while (true)
 		{
 			Token token = lexer.PeekCompound();
@@ -73,14 +77,18 @@ namespace Scripting
 			if (token.GetType() == TokenType::CloseCurl)
 				break;
 
-			if (Ref<AstNode> statement = ParseAnyStatement(state)) { m_Statements.Push(statement); continue; }
+			const ErrorTracker::Mark before = errorTracker.Now();
+			if (Ref<AstNode> statement = ParseAnyStatement(state))
+			{
+				m_Statements.Push(statement);
+				afterError = errorTracker.ReportedSince(before);
+				continue;
+			}
 
-			// No parser matched - report an error, then skip the rest of the statement.
-			errorTracker.AddError(
-				token.GetStartLocation(),
-				UnexpectedTokenMessage(lexer),
-				ErrorSeverity::Error);
-			SkipRestOfStatement(lexer);
+			const Core::String why = UnexpectedTokenMessage(lexer);
+			if (!afterError && !errorTracker.LastErrorOnLineOf(token.GetStartLocation())) errorTracker.AddError(token.GetStartLocation(), why, ErrorSeverity::Error);
+			m_Statements.Push(SkipBroken(lexer, Resume::Statement, why));
+			afterError = false;
 		}
 
 		// Consume closing brace

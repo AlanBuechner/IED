@@ -10,6 +10,7 @@
 #include "AliasDefinitionNode.h"
 #include "AnnotationDeclarationNode.h"
 #include "../Statements/CodeBlockNode.h"
+#include "Parser/Recovery.h"
 #include "Core/StringFormat.h"
 
 namespace Scripting
@@ -35,18 +36,26 @@ namespace Scripting
 			"'[operator(\"create\")] public void Init(int32 x) { ... }', and '" + typeName + "(1)' calls it";
 	}
 
-	// Past a member: through the closing brace of its body, or its `;` when it has none.
-	static void SkipMember(Lexer& lexer)
+	// A field that goes wrong after its name (`public int32 y +;`, a `;` left out): the token there is what is wrong.
+	// Empty when the member does not start as `[access] [static|const ...] Type[*|&...] name`.
+	static Core::String FieldMessage(const Lexer& lexer)
 	{
-		int braces = 0;
-		while (true)
+		uint32 at = IsAccessModifier(lexer.PeekCompound().GetType()) ? 1 : 0;
+		while (lexer.PeekCompound(at).GetType() == TokenType::Static || lexer.PeekCompound(at).GetType() == TokenType::Const) ++at;
+		if (lexer.PeekCompound(at).GetType() != TokenType::Identifier) return "";
+		++at;
+		while (lexer.PeekCompound(at).GetType() == TokenType::Star || lexer.PeekCompound(at).GetType() == TokenType::Ampersand) ++at;
+		const Token& name = lexer.PeekCompound(at);
+		if (name.GetType() != TokenType::Identifier) return "";
+		const Token& after = lexer.PeekCompound(at + 1);
+		switch (after.GetType())
 		{
-			const TokenType type = lexer.PeekCompound().GetType();
-			if (type == TokenType::EndOfFile || (type == TokenType::CloseCurl && braces == 0)) return;
-			lexer.NextCompoundToken();
-			if (type == TokenType::SemiColon && braces == 0) return;
-			if (type == TokenType::OpenCurl) ++braces;
-			else if (type == TokenType::CloseCurl && --braces == 0) return;
+		case TokenType::OpenParen: case TokenType::SemiColon: case TokenType::Equal: case TokenType::Comma: case TokenType::Less:
+		case TokenType::DoubleColon: case TokenType::OpenBracket:
+			return "";
+		default:
+			return Core::StringFormat::Format("Expected ';' after the field '{0}', got '{1}'", name.GetText(),
+				after.GetType() == TokenType::EndOfFile ? Core::String("end of file") : after.GetText());
 		}
 	}
 
@@ -521,62 +530,7 @@ namespace Scripting
 		}
 
 		// 9. Parse body members until closing brace
-		//
-		// Access sections: a `public:` / `private:` / `protected:` label opens a section that
-		// REQUIRES every plain member beneath it to carry a matching explicit modifier. The
-		// label groups members (so you can see the region at a glance) but never grants default
-		// visibility on its own - each member still states its own access, and it must agree with
-		// the section. Members before any label use the type's default (class -> private,
-		// struct/interface -> public). Nested types are sub-scopes and are exempt. Annotations
-		// written on a label (`[Property] private:`) are its fields' and methods' (PlaceInSection).
-		while (true)
-		{
-			Token t = lexer.PeekCompound();
-
-			if (t.GetType() == TokenType::EndOfFile || t.GetType() == TokenType::CloseCurl)
-				break;
-
-			if (StartsAccessLabel(state))
-			{
-				OpenSection(state);
-				continue;
-			}
-
-			// An annotation is the program's, not a type's: its declaration is parsed for the error and dropped.
-			if (AnnotationDeclarationNode::StartsHere(lexer))
-			{
-				auto declaration = AnnotationDeclarationNode::TryParse(state);
-				errorTracker.AddError(t.GetStartLocation(), Core::StringFormat::Format("[{0}] is declared at namespace scope, not in a type "
-					"(docs/language/12 section 4)", declaration->GetName()), ErrorSeverity::Error);
-				continue;
-			}
-
-#define TRY_PARSE_MEMBER(type) \
-			{ auto node = type::TryParse(state); \
-			if (node != nullptr) { PlaceInSection(node, errorTracker); continue; } }
-
-			TRY_PARSE_MEMBER(FunctionDefinitionNode);
-			TRY_PARSE_MEMBER(VariableDefinitionNode);
-			TRY_PARSE_MEMBER(SwizzleViewNode);
-			TRY_PARSE_MEMBER(ObjectDefinitionNode);
-			TRY_PARSE_MEMBER(EnumDefinitionNode);
-			TRY_PARSE_MEMBER(UnionDefinitionNode);
-			TRY_PARSE_MEMBER(AliasDefinitionNode);
-
-#undef TRY_PARSE_MEMBER
-
-			if (Core::String lifecycle = CppLifecycleMessage(lexer, m_NameToken.GetText()); !lifecycle.empty())
-			{
-				errorTracker.AddError(t.GetStartLocation(), lifecycle, ErrorSeverity::Error);
-				SkipMember(lexer);
-				continue;
-			}
-			errorTracker.AddError(
-				t.GetStartLocation(),
-				Core::StringFormat::Format("Unexpected token '{0}' in type body", t.GetText()),
-				ErrorSeverity::Error);
-			lexer.NextCompoundToken();
-		}
+		ParseMembers(state);
 
 		// Methods must be processed after every field/type so a member declared after its type's
 		// methods (C++-style trailing `private:` data section) is still visible to method bodies and
@@ -604,12 +558,10 @@ namespace Scripting
 			endLocation = closeBrace.GetEndLocation();
 			lexer.NextCompoundToken();
 		}
-		else if (closeBrace.GetType() != TokenType::EndOfFile)
+		else
 		{
-			errorTracker.AddError(
-				closeBrace.GetStartLocation(),
-				Core::StringFormat::Format("Expected '}}' to close type body, got '{0}'", closeBrace.GetText()),
-				ErrorSeverity::Error);
+			errorTracker.AddError(closeBrace.GetStartLocation(), closeBrace.GetType() == TokenType::EndOfFile ? Core::String("Expected '}' to close the type body") :
+				Core::StringFormat::Format("Expected '}}' to close type body, got '{0}'", closeBrace.GetText()), ErrorSeverity::Error);
 			endLocation = startLocation;
 		}
 
@@ -637,6 +589,78 @@ namespace Scripting
 		for (const AccessSection& section : m_Sections)
 			for (const auto& annotation : section.m_Annotations)
 				m_Children.Push(annotation);
+		for (const auto& broken : m_BrokenMembers)
+			m_Children.Push(broken);
+	}
+
+	// Access sections: a `public:` / `private:` / `protected:` label opens a section that REQUIRES every plain member beneath
+	// it to carry a matching explicit modifier. The label groups members (so you can see the region at a glance) but never
+	// grants default visibility on its own - each member still states its own access, and it must agree with the section.
+	// Members before any label use the type's default (class -> private, struct/interface -> public). Nested types are
+	// sub-scopes and are exempt. Annotations written on a label (`[Property] private:`) are its fields' and methods'
+	// (PlaceInSection). Tokens left over by a member that reported its error, or on the line of the last error, are skipped
+	// without another.
+	void ObjectDefinitionNode::ParseMembers(ParserState& state)
+	{
+		Lexer& lexer = state.GetLexer();
+		ErrorTracker& errorTracker = state.GetErrorTracker();
+		bool afterError = false;
+		while (true)
+		{
+			Token t = lexer.PeekCompound();
+
+			if (t.GetType() == TokenType::EndOfFile || t.GetType() == TokenType::CloseCurl)
+				break;
+
+			if (StartsAccessLabel(state))
+			{
+				OpenSection(state);
+				afterError = false;
+				continue;
+			}
+
+			// An annotation is the program's, not a type's: its declaration is parsed for the error and dropped.
+			if (AnnotationDeclarationNode::StartsHere(lexer))
+			{
+				auto declaration = AnnotationDeclarationNode::TryParse(state);
+				errorTracker.AddError(t.GetStartLocation(), Core::StringFormat::Format("[{0}] is declared at namespace scope, not in a type "
+					"(docs/language/12 section 4)", declaration->GetName()), ErrorSeverity::Error);
+				afterError = true;
+				continue;
+			}
+
+			const ErrorTracker::Mark before = errorTracker.Now();
+			if (Ref<AstNode> member = ParseMember(state))
+			{
+				PlaceInSection(member, errorTracker);
+				afterError = errorTracker.ReportedSince(before);
+				continue;
+			}
+
+			const Core::String why = BrokenMemberMessage(lexer);
+			if (!afterError && !errorTracker.LastErrorOnLineOf(t.GetStartLocation())) errorTracker.AddError(t.GetStartLocation(), why, ErrorSeverity::Error);
+			m_BrokenMembers.Push(SkipBroken(lexer, Resume::Member, why));
+			afterError = false;
+		}
+	}
+
+	Ref<AstNode> ObjectDefinitionNode::ParseMember(ParserState& state)
+	{
+		if (auto node = FunctionDefinitionNode::TryParse(state)) return node;
+		if (auto node = VariableDefinitionNode::TryParse(state)) return node;
+		if (auto node = SwizzleViewNode::TryParse(state)) return node;
+		if (auto node = ObjectDefinitionNode::TryParse(state)) return node;
+		if (auto node = EnumDefinitionNode::TryParse(state)) return node;
+		if (auto node = UnionDefinitionNode::TryParse(state)) return node;
+		if (auto node = AliasDefinitionNode::TryParse(state)) return node;
+		return nullptr;
+	}
+
+	Core::String ObjectDefinitionNode::BrokenMemberMessage(const Lexer& lexer) const
+	{
+		if (Core::String lifecycle = CppLifecycleMessage(lexer, m_NameToken.GetText()); !lifecycle.empty()) return lifecycle;
+		if (Core::String field = FieldMessage(lexer); !field.empty()) return field;
+		return Core::StringFormat::Format("Unexpected token '{0}' in type body", lexer.PeekCompound().GetText());
 	}
 
 

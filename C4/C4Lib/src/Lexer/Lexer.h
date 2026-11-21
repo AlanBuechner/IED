@@ -5,6 +5,7 @@
 #include "SourceManager/Source.h"
 #include "Core/Core.h"
 #include <map>
+#include <vector>
 
 namespace Scripting
 {
@@ -38,6 +39,12 @@ namespace Scripting
 		/// The tokens read, given back once the file's parse is over (AST nodes keep copies of theirs): a program's
 		/// tokens are as big as its AST, and nothing reads them after the parse. The lexer reads nothing more.
 		void ReleaseTokens();
+
+		/// A file whose `{` and `}` do not pair up, mended before it is parsed (BraceRecovery.h): by the indentation of its
+		/// lines, a `}` goes where a block that is never closed seems to end, and a `}` that closes nothing is left out, each
+		/// with an error at the brace. So a brace forgotten while typing does not swallow the rest of the file. Reads every
+		/// token; returns the errors (none when the braces pair up).
+		std::vector<LexicalDiagnostic> RecoverBraces();
 
 		// -----------------------------------------------------------------------
 		/// @name Token Access
@@ -112,6 +119,8 @@ namespace Scripting
 	uint32 CombineAt(uint32 pos, Token& out);
 	bool ContinuesCompound(const Token& compound, size_t byteOffset, const Token& next) const;
 	static void MarkEndOfFile(Token& token);
+	/// Every token up to the end of the file, read.
+	void ReadAll();
 
 		Source& m_Source;
 		uint32 m_SourceId;

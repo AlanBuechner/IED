@@ -34,16 +34,7 @@ namespace Scripting
 			node->startLocation = left->startLocation;
 			lexer.NextCompoundToken(); // consume ?
 
-			auto thenBranch = ParseExpression(state, 0);
-			if (!thenBranch)
-			{
-				state.GetErrorTracker().AddError(
-					opToken.GetStartLocation(),
-					"Expected expression after '?'", ErrorSeverity::Error);
-				node->m_Children[1] = nullptr;
-			}
-			else
-				node->m_Children[1] = thenBranch;
+			node->m_Children[1] = ParseOperand(state, 0, opToken.GetStartLocation(), "Expected expression after '?'");
 
 			Token colon = lexer.PeekCompound();
 			if (colon.GetType() != TokenType::Colon)
@@ -60,14 +51,7 @@ namespace Scripting
 			node->m_ColonToken = colon;
 			lexer.NextCompoundToken(); // consume :
 
-			auto elseBranch = ParseExpression(state, leftBindPower);
-			if (!elseBranch)
-			{
-				state.GetErrorTracker().AddError(
-					colon.GetEndLocation(),
-					"Expected expression after ':' in ternary", ErrorSeverity::Error);
-			}
-			else
+			if (auto elseBranch = ParseOperand(state, leftBindPower, colon.GetEndLocation(), "Expected expression after ':' in ternary"))
 			{
 				node->m_Children[2] = elseBranch;
 				node->endLocation = elseBranch->endLocation;
@@ -120,15 +104,8 @@ namespace Scripting
 			node->startLocation = left->startLocation;
 			lexer.NextCompoundToken(); // consume operator
 
-			auto right = ParseExpression(state, leftBindPower);
-			if (!right)
-			{
-				state.GetErrorTracker().AddError(
-					opToken.GetStartLocation(),
-					Core::StringFormat::Format("Expected expression after '{0}'", opToken.GetText()),
-					ErrorSeverity::Error);
-			}
-			else
+			if (auto right = ParseOperand(state, leftBindPower, opToken.GetStartLocation(),
+				Core::StringFormat::Format("Expected expression after '{0}'", opToken.GetText())))
 			{
 				node->m_Children[1] = right;
 				node->endLocation = right->endLocation;
@@ -145,13 +122,7 @@ namespace Scripting
 			node->startLocation = left->startLocation;
 			lexer.NextCompoundToken();
 
-			auto right = ParseExpression(state, leftBindPower);
-			if (!right)
-			{
-				state.GetErrorTracker().AddError(
-					opToken.GetStartLocation(), "Expected expression after '||'", ErrorSeverity::Error);
-			}
-			else
+			if (auto right = ParseOperand(state, leftBindPower, opToken.GetStartLocation(), "Expected expression after '||'"))
 			{
 				node->m_Children[1] = right;
 				node->endLocation = right->endLocation;
@@ -168,13 +139,7 @@ namespace Scripting
 			node->startLocation = left->startLocation;
 			lexer.NextCompoundToken();
 
-			auto right = ParseExpression(state, leftBindPower);
-			if (!right)
-			{
-				state.GetErrorTracker().AddError(
-					opToken.GetStartLocation(), "Expected expression after '&&'", ErrorSeverity::Error);
-			}
-			else
+			if (auto right = ParseOperand(state, leftBindPower, opToken.GetStartLocation(), "Expected expression after '&&'"))
 			{
 				node->m_Children[1] = right;
 				node->endLocation = right->endLocation;
@@ -190,21 +155,24 @@ namespace Scripting
 			node->startLocation = left->startLocation;
 			lexer.NextCompoundToken(); // consume operator
 
-			auto right = ParseExpression(state, leftBindPower);
-			if (!right)
-			{
-				state.GetErrorTracker().AddError(
-					opToken.GetStartLocation(),
-					Core::StringFormat::Format("Expected expression after '{0}'", opToken.GetText()),
-					ErrorSeverity::Error);
-			}
-			else
+			if (auto right = ParseOperand(state, leftBindPower, opToken.GetStartLocation(),
+				Core::StringFormat::Format("Expected expression after '{0}'", opToken.GetText())))
 			{
 				node->m_Children[1] = right;
 				node->endLocation = right->endLocation;
 			}
 			return node;
 		}
+	}
+
+	Ref<AstNode> PrattParser::ParseOperand(ParserState& state, uint32 bindPower, const SourceLocation& at, const Core::String& missing)
+	{
+		ErrorTracker& errorTracker = state.GetErrorTracker();
+		const ErrorTracker::Mark before = errorTracker.Now();
+		Ref<AstNode> operand = ParseExpression(state, bindPower);
+		if (!operand && !errorTracker.ReportedSince(before))
+			errorTracker.AddError(at, missing, ErrorSeverity::Error);
+		return operand;
 	}
 
 	// =========================================================================

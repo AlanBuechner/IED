@@ -1,6 +1,8 @@
 #include "Lexer.h"
 #include "Lexer/LiteralScanner.h"
+#include "Lexer/BraceRecovery.h"
 #include "Core/Core.h"
+#include "Core/StringFormat.h"
 #include <algorithm>
 
 namespace Scripting
@@ -271,6 +273,92 @@ namespace Scripting
 		m_Arena.Clear();
 		m_UndoStack.Clear();
 		m_Offset = 0;
+	}
+
+	void Lexer::ReadAll()
+	{
+		while (m_Arena.Empty() || m_Arena.At(m_Arena.Count() - 1).GetType() != TokenType::EndOfFile)
+			ReadToken();
+	}
+
+	// -----------------------------------------------------------------------
+	// Brace recovery (BraceRecovery.h)
+	// -----------------------------------------------------------------------
+
+	namespace
+	{
+		bool IsComment(const Token& token)
+		{
+			return token.GetType() == TokenType::Comment || token.GetType() == TokenType::MultiComment;
+		}
+
+		// The `}` that closes a block brace recovery found open: right after the last token before it.
+		Token ClosingAfter(const Token& last)
+		{
+			Token closing(TokenType::CloseCurl, last.GetEndLocation().byteOffset);
+			closing.SetText("}");
+			closing.SetStartLocation(last.GetEndLocation());
+			closing.SetEndLocation(last.GetEndLocation());
+			return closing;
+		}
+	}
+
+	std::vector<LexicalDiagnostic> Lexer::RecoverBraces()
+	{
+		ReadAll();
+		std::vector<BraceFact> facts;
+		std::vector<uint32> tokenOf; // a fact's token in the arena
+		uint32 line = 0, indent = 0;
+		for (uint32 at = 0; at < m_Arena.Count(); ++at)
+		{
+			const Token& token = m_Arena.At(at);
+			if (IsComment(token)) continue;
+			const bool startsLine = token.GetStartLocation().line != line;
+			if (startsLine)
+			{
+				line = token.GetStartLocation().line;
+				indent = token.GetStartLocation().column;
+			}
+			facts.push_back({ token.GetType(), indent, startsLine });
+			tokenOf.push_back(at);
+		}
+		const BraceRepairs repairs = PlanBraceRepairs(facts);
+		if (repairs.Empty()) return {};
+
+		std::vector<LexicalDiagnostic> errors;
+		for (const BraceRepairs::Closing& closing : repairs.closings)
+		{
+			const Token& before = m_Arena.At(tokenOf[closing.before]);
+			const Core::String where = before.GetType() == TokenType::EndOfFile ? Core::String("at the end of the file")
+				: Core::StringFormat::Format("before line {0}", before.GetStartLocation().line);
+			errors.push_back({ m_Arena.At(tokenOf[closing.open]).GetStartLocation(),
+				"this '{' has no matching '}': by the indentation, its block ends " + where });
+		}
+		for (uint32 dropped : repairs.dropped)
+			errors.push_back({ m_Arena.At(tokenOf[dropped]).GetStartLocation(), "this '}' has no matching '{': it is left out" });
+
+		std::vector<Token> tokens;
+		tokens.reserve(m_Arena.Count() + repairs.closings.size());
+		size_t nextClosing = 0, nextDropped = 0;
+		const Token* last = nullptr; // the last token that is not a comment
+		for (uint32 fact = 0, at = 0; at < m_Arena.Count(); ++at)
+		{
+			const Token& token = m_Arena.At(at);
+			const bool isFact = fact < tokenOf.size() && tokenOf[fact] == at;
+			if (isFact)
+			{
+				for (; nextClosing < repairs.closings.size() && repairs.closings[nextClosing].before == fact; ++nextClosing)
+					tokens.push_back(ClosingAfter(last ? *last : token));
+				const bool drop = nextDropped < repairs.dropped.size() && repairs.dropped[nextDropped] == fact;
+				++fact;
+				if (drop) { ++nextDropped; continue; }
+				last = &token;
+			}
+			tokens.push_back(token);
+		}
+		m_Arena.Clear();
+		for (Token& token : tokens) *m_Arena.Alloc() = std::move(token);
+		return errors;
 	}
 
 	// -----------------------------------------------------------------------

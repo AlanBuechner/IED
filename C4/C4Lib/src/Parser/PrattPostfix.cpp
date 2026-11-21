@@ -41,6 +41,7 @@ namespace Scripting
 			// --- Braced initializer: base{x, y} ---
 			if (type == TokenType::OpenCurl)
 			{
+				if (!BracesInitialize(*base)) break; // `if (x > 0 {`: the block of a statement whose `)` is missing
 				auto braceInit = CreateRef<BracedInitializerNode>();
 				braceInit->ParseBody(state);
 
@@ -249,6 +250,21 @@ namespace Scripting
 		}
 
 		return base;
+	}
+
+	bool PrattParser::BracesInitialize(const AstNode& base)
+	{
+		switch (base.Type())
+		{
+		case NodeType::IdentifierExpression:
+		case NodeType::StaticAccess:
+		case NodeType::NamespaceQualifiedName:
+		case NodeType::QualType:
+		case NodeType::MemberAccess:
+			return true;
+		default:
+			return false;
+		}
 	}
 
 	// =========================================================================

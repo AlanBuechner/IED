@@ -145,15 +145,10 @@ namespace Scripting
 			node->startLocation = token.GetStartLocation();
 			lexer.NextCompoundToken(); // consume operator
 
-			auto operand = ParseExpression(state, BindPower::PrefixOperand);
+			auto operand = ParseOperand(state, BindPower::PrefixOperand, token.GetStartLocation(),
+				Core::StringFormat::Format("Expected operand after '{0}'", token.GetText()));
 			if (!operand)
-			{
-				state.GetErrorTracker().AddError(
-					token.GetStartLocation(),
-					Core::StringFormat::Format("Expected operand after '{0}'", token.GetText()),
-					ErrorSeverity::Error);
 				return node;
-			}
 
 			node->m_Operand = operand;
 			node->endLocation = operand->endLocation;
@@ -165,12 +160,9 @@ namespace Scripting
 		if (type == TokenType::DoubleStar)
 		{
 			lexer.NextCompoundToken();
-			auto operand = ParseExpression(state, BindPower::PrefixOperand);
+			auto operand = ParseOperand(state, BindPower::PrefixOperand, token.GetStartLocation(), "Expected operand after '**'");
 			if (!operand)
-			{
-				state.GetErrorTracker().AddError(token.GetStartLocation(), "Expected operand after '**'", ErrorSeverity::Error);
 				return nullptr;
-			}
 			Token star = token;
 			star.SetType(TokenType::Star);
 			star.SetText("*");
@@ -360,15 +352,10 @@ namespace Scripting
 				lexer.NextCompoundToken();
 			}
 
-			auto operand = ParseExpression(state, BindPower::PrefixOperand);
+			auto operand = ParseOperand(state, BindPower::PrefixOperand, token.GetStartLocation(),
+				Core::StringFormat::Format("Expected operand after '{0}'", token.GetText()));
 			if (!operand)
-			{
-				state.GetErrorTracker().AddError(
-					token.GetStartLocation(),
-					Core::StringFormat::Format("Expected operand after '{0}'", token.GetText()),
-					ErrorSeverity::Error);
 				return node;
-			}
 
 			node->m_Operand = operand;
 			node->endLocation = operand->endLocation;

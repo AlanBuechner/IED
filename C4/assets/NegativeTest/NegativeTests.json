@@ -1,4 +1,34 @@
 {
+    "BrokenHeaderUnclosedType": {
+        "expect": ["Broken.ch (2:1) error: this '{' has no matching '}': by the indentation, its block ends before line 6", "Errors:              1"],
+        "reject": ["main.cf (", "unresolved"],
+        "reason": "R7: a type body left open is closed where the indentation says it ends, so the declarations after it are the file's and the includer reports nothing more (it reported no error in the header and 'unresolved type' in main.cf)."
+    },
+    "BrokenHeaderBadMember": {
+        "expect": ["Broken.ch (4:2) error: Expected ';' after the field 'y', got '+'", "Errors:              1"],
+        "reject": ["main.cf (", "Unexpected token"],
+        "reason": "R7: a member that does not parse is one error, skipped to the next member (it was one error per token); the type keeps its other members."
+    },
+    "BrokenHeaderBadFunction": {
+        "expect": ["Broken.ch (3:14) error: 'return' is a keyword: it cannot name a variable, parameter or function", "Errors:              1"],
+        "reject": ["main.cf (", "unresolved", "Unexpected token '}'"],
+        "reason": "R7: a function whose parameter list does not parse is skipped to the next declaration: the header's other declarations stay, and the includer reports nothing more."
+    },
+    "BrokenHeaderExtraBrace": {
+        "expect": ["Broken.ch (5:2) error: this '}' has no matching '{': it is left out", "Errors:              1"],
+        "reject": ["main.cf (", "Unexpected token"],
+        "reason": "R7: a '}' that closes nothing is left out by the indentation, so the body goes on (the rest of it was parsed at file level, an error a statement)."
+    },
+    "BrokenHeaderMissingParen": {
+        "expect": ["Broken.ch (3:12) error: Expected ')' after condition, got '{'", "Errors:              1"],
+        "reject": ["main.cf (", "keyword", "Unexpected token"],
+        "reason": "R7: 'if (v > 0 {' is one error: the '{' starts the block, not a braced initializer of 0."
+    },
+    "BrokenHeaderUnclosedMethod": {
+        "expect": ["Broken.ch (7:3) error: this '{' has no matching '}': by the indentation, its block ends before line 9", "Errors:              1"],
+        "reject": ["main.cf (", "unresolved"],
+        "reason": "R7: a block left open inside a method closes where a less indented '}' shows; the type keeps its later members and the includer reports nothing more."
+    },
     "BoolComparedWithNull": {
         "expect": ["operator '==' cannot compare a 'bool' and a 'void*'"],
         "reject": ["IR verification failed"],

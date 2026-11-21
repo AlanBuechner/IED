@@ -1,0 +1,7 @@
+include "Broken.ch"
+
+Size g_Unit = { 1, 1 };
+
+int32 Perimeter(Size s) { return 2 * (s.w + s.h); }
+
+int32 main() { return Area(g_Unit) + Perimeter(g_Unit) + Twice(1); }

@@ -41,6 +41,8 @@ namespace Scripting
 	private:
 		// The `::B::C` after `namespace A`, one node per name, outermost first.
 		static Core::Vector<Ref<NamespaceNode>> ParseNestedNames(ParserState& state);
+		// The declaration at the lexer's position; null when none starts there.
+		Ref<AstNode> ParseDeclaration(ParserState& state) const;
 
 		Token m_NameToken;                        // namespace identifier token (default-constructed for root)
 		bool m_IsRoot = false;                    // true for implicit file-level namespace

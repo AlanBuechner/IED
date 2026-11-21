@@ -141,13 +141,29 @@ path. Diagnostics still report original file names.
   argument lists vs comparisons, casts) use `LexerRecovery` save/restore plus `ErrorTracker` suppression
   frames, so a rolled-back probe never leaks diagnostics. Expression and block nesting depth are capped with
   a clean error.
+- Error recovery (R7): a file's parse never stops at an error, and one mistake is one error.
+  - Before the parse, `Lexer::RecoverBraces` reads the file's tokens and, only when its `{` and `}` do not pair up,
+    mends them by the indentation of its lines (`Lexer/BraceRecovery`, `PlanBraceRepairs`): a block never closed is
+    closed before the first later line indented no deeper than its own (a `}` that starts a line less indented than an
+    open block closes it first), and a `}` indented deeper than the `{` it would close is left out while there are too
+    many - each with one error at the brace. A brace forgotten while typing does not swallow the rest of the file.
+  - A declaration (file or namespace), member (type body) or statement (function body) that does not parse is one
+    error, then `Parser/Recovery`'s `SkipBroken` skips it: past its `;`, past its `{ ... }` group, up to the `}` that
+    closes the enclosing body, or up to a line that starts the next one of its kind (`struct`, `public`, `return`...).
+    An `ErrorNode` (`Parser/Nodes/ErrorNode`) stands where it was: a namespace's child, a type's child (never one of
+    its members), a block's statement. Tokens a declaration leaves after reporting its own error are skipped without
+    another (`ErrorTracker::Now` / `ReportedSince`), and an operand that is missing is said once (`PrattParser::
+    ParseOperand`: `v *;` is not also "expected expression after '*'").
+  - So every declaration that parsed is in the tree, and the model registers it: a header with a syntax error keeps
+    its other declarations, and the files that include it report nothing more.
 
 ## 4. Analyze (`CompilerInstance::AnalyzeProgram`)
 
 1. `DetectUserMain()` scans entry files for a lowercase global `main`.
 2. One `ModelBuilder` runs over every reachable unit's OWN top-level declarations. Each declaration is owned
    by the unit it is written in, so the union of all units yields every definition exactly once - no AST
-   merge, no per-file re-analysis. Units with parse errors are skipped (their errors still surface).
+   merge, no per-file re-analysis. A unit with parse errors is built like any other: every declaration it parsed
+   is registered and its `ErrorNode`s are passed by, so its includers resolve what they name in it (R7).
 3. Builder passes (details in [02-program-model.md](02-program-model.md#build-passes)):
    pass 1 registers every shell; pass 2 resolves to a fixed point (types, bases, fields, packed regions,
    methods, free and extension functions, out-of-line bodies, constant folding); then template

@@ -101,6 +101,7 @@ namespace Scripting
 	FoldExpression,
 	ValueList,
 	Destructuring,
+	Error, // a declaration or statement that did not parse (ErrorNode)
 	Unknown
 	};
 

@@ -187,6 +187,8 @@ namespace Scripting
 		Lexer lexer(*source, 0);
 		ErrorTracker errors;
 		ParserState state(lexer, errors);
+		for (const LexicalDiagnostic& unpaired : lexer.RecoverBraces())
+			errors.AddError(unpaired.location, unpaired.message, ErrorSeverity::Error);
 		auto root = CreateRef<NamespaceNode>();
 		root->SetIsRoot(true);
 		root->ParseBody(state);

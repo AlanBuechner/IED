@@ -1,0 +1,8 @@
+include "Broken.ch"
+
+Size g_Unit = { 1, 1 };
+Counter g_Counter;
+
+int32 Area(Size s) { return s.w * s.h; }
+
+int32 main() { g_Counter.Add(2); return Area(g_Unit) + g_Counter.Get(); }

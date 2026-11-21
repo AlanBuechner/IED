@@ -53,12 +53,19 @@ namespace Scripting
 
 		/// Parse an infix operator and its right operand.
 		static Ref<AstNode> ParseInfix(ParserState& state, Ref<AstNode> left, uint32 leftBindPower);
+		/// An operator's operand, up to `bindPower`; when there is none and its parse said nothing, the error `missing` at
+		/// `at` (one error for one mistake: `v *;` is not also "expected expression after '*'").
+		static Ref<AstNode> ParseOperand(ParserState& state, uint32 bindPower, const SourceLocation& at, const Core::String& missing);
 
 		/// The type after `is` / `as`, or null with an error naming the keyword.
 		static Ref<QualTypeNode> ParseTargetType(ParserState& state, const Token& keyword);
 
 		/// Parse postfix operators (chained): (), [], ., ->, ::, ++, --.
 		static Ref<AstNode> ParsePostfix(ParserState& state, Ref<AstNode> base);
+		/// Whether a `{` after `base` starts a braced initializer of it (`Point{ 1, 2 }`, `Ns::Box<int32>{ 3 }`): only after
+		/// what can name a type (ExprLowerer::QualifierType) - in `if (x > 0 {` or `if (Ready(x) {`, whose `)` is missing,
+		/// it is the block.
+		static bool BracesInitialize(const AstNode& base);
 
 		/// Parse a parenthesized expression or C-style cast disambiguation.
 		static Ref<AstNode> ParseParenOrCStyleCast(ParserState& state);

@@ -72,6 +72,7 @@ namespace Scripting
 		case NodeType::FoldExpression:           return "FoldExpression";
 		case NodeType::ValueList:                return "ValueList";
 		case NodeType::Destructuring:            return "Destructuring";
+		case NodeType::Error:                    return "Error";
 		case NodeType::Unknown:                  return "Unknown";
 		}
 		return "Unknown";

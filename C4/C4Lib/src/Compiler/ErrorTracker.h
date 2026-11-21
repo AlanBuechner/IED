@@ -38,6 +38,18 @@ namespace Scripting
 		/// from the first error: from now on an error at the same place as the error before it is dropped (BUG-311).
 		void ReportOncePerLocation() { m_OncePerLocation = true; }
 
+		/// Where the errors stand now, for ReportedSince: a parse that failed and said why needs no second error.
+		struct Mark
+		{
+			uint32 depth = 0;
+			uint32 count = 0;
+		};
+		Mark Now() const;
+		/// An error was kept since `mark` (one a rolled-back speculation reported is not).
+		bool ReportedSince(const Mark& mark) const;
+		/// The last error kept is on the line of `at`: what is left on that line follows from it.
+		bool LastErrorOnLineOf(const SourceLocation& at) const;
+
 		// ------------------------------------------------------------------
 		// Suppression for speculative parsing.
 		//
@@ -68,6 +80,7 @@ namespace Scripting
 	private:
 		// Whether `error` is at the place of the last error `reported` holds.
 		static bool FollowsFrom(const Core::Vector<CompilationError>& reported, const CompilationError& error);
+		const Core::Vector<CompilationError>& Target() const { return AreErrorsSuppressed() ? m_SuppressFrames.Back().buffered : m_Errors; }
 
 		struct SuppressionFrame
 		{

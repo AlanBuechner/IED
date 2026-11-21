@@ -1,0 +1,8 @@
+include "Broken.ch"
+
+Size g_Unit = { 1, 1 };
+Point g_Origin;
+
+int32 Area(Size s) { return s.w * s.h; }
+
+int32 main() { return Area(g_Unit) + g_Origin.Sum(); }

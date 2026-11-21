@@ -64,6 +64,8 @@ namespace Scripting
 		m_ProcessingThread = std::thread([this]() {
 			ParserState parserState(m_Lexer, m_ErrorTracker, m_MessageQueue);
 			parserState.RecordIncludesIn(&m_IncludesAsked);
+			for (const LexicalDiagnostic& unpaired : m_Lexer.RecoverBraces())
+				m_ErrorTracker.AddError(unpaired.location, unpaired.message, ErrorSeverity::Error);
 
 			m_RootASTNode = CreateRef<NamespaceNode>();
 			m_RootASTNode->SetIsRoot(true);
