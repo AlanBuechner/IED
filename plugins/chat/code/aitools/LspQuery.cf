@@ -613,12 +613,18 @@ namespace Ai
 		return kept;
 	}
 
+	// Outside the workspace: a URI, or a full path the server gave as it is (a C4 server's interop bindings in the temp folder).
+	static bool OutsideWorkspace(Core::StringView path) {
+		return path.StartsWith(Core::StringView("file:")) || path.StartsWith(Core::StringView("/")) || (path.ByteLength() > 1 && path.ByteAt(1) == ':');
+	}
+
 	// The workspace's own symbol when only one of `symbols` is the workspace's: a plain name the project defines is not
-	// made ambiguous by a library's (Bedrock's private InputLines::Fill against the project's Fill).
+	// made ambiguous by a library's (Bedrock's private InputLines::Fill against the project's Fill), nor by a struct of the
+	// same name in a C header's bindings (Windows' _ACCESS_ALLOWED_OBJECT_ACE::ObjectType against the compiler's ObjectType).
 	static Core::Array<CodeSymbol*> OwnFirst(const Core::Array<CodeSymbol*>& symbols) {
 		Core::Array<CodeSymbol*> own;
 		for (CodeSymbol* symbol : symbols)
-			if (!symbol->m_Selection.m_Path.View().StartsWith(Core::StringView("file:"))) own.Push(symbol);
+			if (!OutsideWorkspace(symbol->m_Selection.m_Path.View())) own.Push(symbol);
 		if (own.IsEmpty() || own.Count() == symbols.Count()) return symbols;
 		for (CodeSymbol* symbol : own)
 			if (symbol->Qualified() != own[0]->Qualified()) return symbols;
