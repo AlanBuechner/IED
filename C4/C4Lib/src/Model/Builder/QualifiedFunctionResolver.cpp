@@ -1,5 +1,7 @@
 #include "Model/Builder/FreeFunctionResolver.h"
+#include "Model/Builder/DeclarationQueries.h"
 #include "Model/TypeHandle.h"
+#include "Model/Types/AliasType.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
 
@@ -7,38 +9,43 @@ namespace Scripting
 {
 	// An unqualified qualifier (`C` in `C::Set` written inside a namespace) resolves from the declaring scope, where the
 	// type lives; a qualified one (`Ns::C`) from the program root.
-	const SymbolInfo* FreeFunctionResolver::QualifierOf(const ProgramModel& model, const ModelBuilder::PendingQualifiedFunc& f)
+	const SymbolInfo* FreeFunctionResolver::QualifierOf(const ModelBuilder::PendingQualifiedFunc& f) const
 	{
+		const ProgramModel& model = *m_Ctx.model;
 		if (f.prefix.find("::") != Core::String::npos) return model.FindVisibleQualified(f.prefix, f.unitId);
 		const Scope* from = f.declScope ? f.declScope : model.Symbols()->GetRoot();
 		return model.Symbols()->FindVisible(from, f.prefix, f.unitId);
 	}
 
-	bool FreeFunctionResolver::ResolveQualified(const ModelBuilder::PendingQualifiedFunc& f)
+	QueryResult<void> FreeFunctionResolver::ResolveQualified(const ModelBuilder::PendingQualifiedFunc& f)
 	{
-		const SymbolInfo* qualifier = QualifierOf(*m_Ctx.model, f);
-		if (!qualifier) return false; // the namespace or type may register later this round
+		const SymbolInfo* qualifier = QualifierOf(f);
+		if (!qualifier) return QueryResult<void>::Fail(QueryError::NotFound, "no namespace or type named '" + f.prefix + "'");
 		if (qualifier->kind == SymbolKind::Namespace && qualifier->scope)
 			return ResolveFree({ const_cast<Scope*>(qualifier->scope), f.last, f.fn, f.unitId });
 		if (qualifier->kind == SymbolKind::Type && qualifier->type)
 		{
-			const auto* owner = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(qualifier->type));
-			return owner && ResolveOutOfLineMethod(f, *owner);
+			// `Alias::Method` defines a method of the type the alias names.
+			if (qualifier->type->GetKind() == TypeKind::Alias)
+				if (auto named = m_Queries.Alias(*static_cast<const AliasType*>(qualifier->type)); !named.Ok()) return named;
+			if (const auto* owner = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(qualifier->type)))
+				return ResolveOutOfLineMethod(f, *owner);
+			return QueryResult<void>::Fail(QueryError::NotCallable, "'" + f.prefix + "' is a type without methods");
 		}
 		m_Builder.ErrorAt(m_Ctx, f.fn, "'" + f.prefix + "::" + f.last + "' names no function: '" + f.prefix + "' is not a namespace or a type");
-		return true;
+		return QueryResult<void>::Success();
 	}
 
 	// The definition must match a method the type declares: the name, the parameter and return types, and const.
-	bool FreeFunctionResolver::ResolveOutOfLineMethod(const ModelBuilder::PendingQualifiedFunc& f, const ObjectType& owner)
+	QueryResult<void> FreeFunctionResolver::ResolveOutOfLineMethod(const ModelBuilder::PendingQualifiedFunc& f, const ObjectType& owner)
 	{
-		Signature sig;
-		if (!ResolveSignature(*f.fn, f.unitId, m_Ctx.model->TypeScope(&owner), sig)) return false;
-		if (const FunctionRecord* declared = DeclaredMethod(owner, f.last, sig.type, f.fn->IsConstMethod()))
+		auto sig = ResolveSignature(*f.fn, f.unitId, m_Ctx.model->TypeScope(&owner));
+		if (!sig.Ok()) return QueryResult<void>::Fail(sig.error, sig.message, sig.loc);
+		if (const FunctionRecord* declared = DeclaredMethod(owner, f.last, sig.value.type, f.fn->IsConstMethod()))
 			AttachDefinition(*declared, *f.fn, f.unitId, f.prefix + "::" + f.last);
 		else
-			m_Builder.ErrorAt(m_Ctx, f.fn, UnmatchedDefinition(f, owner, sig));
-		return true;
+			m_Builder.ErrorAt(m_Ctx, f.fn, UnmatchedDefinition(f, owner, sig.value));
+		return QueryResult<void>::Success();
 	}
 
 	// `the definition of 'Box::Set' matches no declaration in 'Box': it is void (float); 'Box' declares void (int32)`.

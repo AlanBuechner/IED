@@ -80,6 +80,26 @@ namespace Scripting
 			auto found = cache.find(key);
 			return found != cache.end() ? found->second : nullptr;
 		}
+
+		// One more instance being built inside the ones being built, while it lives.
+		class Nesting
+		{
+		public:
+			explicit Nesting(uint32& depth) : m_Depth(depth) { ++m_Depth; }
+			~Nesting() { --m_Depth; }
+			Nesting(const Nesting&) = delete;
+			Nesting& operator=(const Nesting&) = delete;
+			bool TooDeep() const { return m_Depth > TemplateInstantiator::c_MaxInstantiationDepth; }
+		private:
+			uint32& m_Depth;
+		};
+
+		QueryResult<const Type*> NeverEnds(const Core::String& name)
+		{
+			return QueryResult<const Type*>::Fail(QueryError::CyclicDependency, "instantiating '" + name + "' goes more than " +
+				std::to_string(TemplateInstantiator::c_MaxInstantiationDepth) + " instances deep: a template whose instance needs a larger instance "
+				"of itself has no last instance");
+		}
 	}
 
 	// --- type templates --------------------------------------------------------------------------------
@@ -160,6 +180,8 @@ namespace Scripting
 		const Core::String& key, const TemplateArgs& instanceArgs, const TemplateArgs& args, Scope* binding, uint32 unitId) const
 	{
 		model.Writes().Ask("a class template instance");
+		const Nesting nesting(model.m_InstantiationDepth);
+		if (nesting.TooDeep()) return NeverEnds(name);
 		ObjectType* obj = new ObjectType(TypeKind::Object, name);
 		obj->SetAbstract(def.objectBody->IsAbstract());
 		obj->SetFinal(def.objectBody->IsFinal());
@@ -179,6 +201,7 @@ namespace Scripting
 		if (auto built = body.Build(); !built.Ok())
 		{
 			model.m_TypeInstantiations.erase(key); // a later use may retry
+			if (built.error == QueryError::CyclicDependency) return QueryResult<const Type*>::Fail(built.error, built.message);
 			return QueryResult<const Type*>::Fail(built.error, "cannot instantiate " + name + ": " + built.message);
 		}
 		if (auto cycle = ValueContainment::CheckNotSelfContaining(obj); !cycle.Ok())
@@ -196,6 +219,8 @@ namespace Scripting
 		const Core::String& name, const MemberTypeSite& site) const
 	{
 		model.Writes().Ask("a member type");
+		const Nesting nesting(model.m_InstantiationDepth);
+		if (nesting.TooDeep()) return NeverEnds(name);
 		ObjectType* obj = new ObjectType(TypeKind::Object, name);
 		obj->SetAbstract(def.objectBody->IsAbstract());
 		obj->SetFinal(def.objectBody->IsFinal());
@@ -210,7 +235,7 @@ namespace Scripting
 		const TemplateArgs none;
 		ObjectTemplateBody body(model, *obj, def, name, none, { binding, InstanceScope(model, *obj, def, name), site.unitId, &site.ownerBindings });
 		if (auto built = body.Build(); !built.Ok())
-			return QueryResult<const Type*>::Fail(built.error, "cannot build " + name + ": " + built.message);
+			return QueryResult<const Type*>::Fail(built.error, built.error == QueryError::CyclicDependency ? built.message : "cannot build " + name + ": " + built.message);
 		obj->CalculateLayout();
 		InstantiationBindings bindings = site.ownerBindings;
 		bindings.typeParams.Push({ name, self });

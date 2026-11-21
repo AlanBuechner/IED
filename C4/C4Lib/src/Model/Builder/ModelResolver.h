@@ -3,44 +3,52 @@
 
 namespace Scripting
 {
-	// =====================================================================
-	// MODEL RESOLVER (doc 02, PASS 2) - the fixed-point resolution phase. Pass 1 (ModelBuilder) has
-	// registered every shell; now that a name always resolves to something registered, this walks the
-	// builder's pending work-lists and settles them: field types, base classes, method signatures,
-	// enum values, alias targets, free functions (qualified + unqualified), out-of-line bodies, and
-	// constant folding - iterating until nothing changes. A name resolves because the thing it names
-	// was registered in pass 1, regardless of where it was written: declaration ORDER NEVER MATTERS.
-	// After convergence it also runs the ONE body-opening pass (GAP A): instantiate every template
-	// specialization a function body references, so those types are concrete and queryable before any
-	// lower system runs. It is friended into ModelBuilder to read the pending work-lists and report.
-	// =====================================================================
+	class DeclarationQueries;
+
+	/// How one pending declaration resolves (pass 2, docs/compiler/02-program-model.md): a variable's type, an enum's
+	/// underlying type and values, an alias's target, a union's fields, and an object's fields, lane views, bases and
+	/// in-class method declarations (ObjectMemberResolver.cpp). DeclarationQueries asks for each once; a failure is why
+	/// the declaration does not resolve, kept for the report. Free functions are FreeFunctionResolver's.
 	class ModelResolver
 	{
 	public:
-		/// One fixed-point round over every pending list; true when anything changed this round.
-		bool ResolveRound(ModelBuilder& builder, ModelBuilder::Context& ctx);
+		ModelResolver(ModelBuilder& builder, ModelBuilder::Context& ctx, DeclarationQueries& queries)
+			: m_Builder(builder), m_Ctx(ctx), m_Queries(queries) {}
 
-		/// GAP A (post-resolution): pass 2 resolves only DECLARATION-level types, so a `Vec<int32> v;`
-		/// inside a body is never resolved by it and its specialization would stay uninstantiated.
-		/// This walks every function body once, resolving each template-specialization type it names -
-		/// the ONLY place the model opens a body.
-		void InstantiateBodyReferences(ModelBuilder& builder, ModelBuilder::Context& ctx);
+		QueryResult<void> ResolveVariable(ModelBuilder::PendingVar& v);
+		QueryResult<void> ResolveEnum(ModelBuilder::PendingEnum& e);
+		QueryResult<void> ResolveAlias(ModelBuilder::PendingAlias& a);
+		QueryResult<void> ResolveUnion(ModelBuilder::PendingUnion& u);
+
+		/// The field's type, in its class's scope; a static member's symbols take it.
+		QueryResult<void> ResolveFieldType(ModelBuilder::PendingField& f);
+		/// A resolved field joins its object: one field per declarator.
+		void AttachField(const ModelBuilder::PendingField& f);
+		/// The lane views of one object (their places in the builder's list, in order): the views of one anonymous
+		/// union that share a lane type are one SIMD region. Each view's resolution says how it went.
+		void ResolveLaneViews(const Core::Vector<uint32>& places);
+		QueryResult<void> ResolveBase(ModelBuilder::PendingBase& b);
+		QueryResult<void> ResolveMethod(ModelBuilder::PendingMethodDecl& d);
+
+		/// The one pass that opens bodies: every template specialization a function body names in a type position is
+		/// instantiated, so those types are concrete before any body is lowered. An instance's methods are bodies
+		/// too, visited as they are made.
+		static void InstantiateBodyReferences(ProgramModel& model);
 
 	private:
-		friend class ModelBuilder; // drives the rounds + reports what stays pending
-
-		bool ResolveVariables(ModelBuilder& builder, ModelBuilder::Context& ctx);
-		bool ResolveEnums(ModelBuilder& builder, ModelBuilder::Context& ctx);
-		/// The values of `e`'s members in order; false, with the reason in `e.why`, when one does not fold yet.
-		static bool MemberValues(const ProgramModel& model, ModelBuilder::PendingEnum& e, Core::Vector<int64>& values);
+		/// The values of `e`'s members in order, or why one does not fold.
+		QueryResult<Core::Vector<int64>> MemberValues(const ModelBuilder::PendingEnum& e) const;
+		void ReportMembersOutOfRange(const ModelBuilder::PendingEnum& e, const Core::Vector<int64>& values);
 		static QueryResult<void> AttachBase(const ObjectType& derived, const Type* base);
-		static void ReportMembersOutOfRange(ModelBuilder& builder, const ModelBuilder::Context& ctx, const ModelBuilder::PendingEnum& e,
-			const Core::Vector<int64>& values);
-		bool ResolveAliases(ModelBuilder& builder, ModelBuilder::Context& ctx);
-		bool ResolveUnions(ModelBuilder& builder, ModelBuilder::Context& ctx);
-		bool ResolveObjectMembers(ModelBuilder& builder, ModelBuilder::Context& ctx);   // fields + bases + in-class method decls
-		// Free functions (unqualified + qualified namespace/class names) live in the
-		// FreeFunctionResolver subsystem; ResolveRound delegates to it.
-		// (constant folding moved to ConstEvaluator::FoldGlobalConstants - it is constant evaluation)
+		Scope* ClassScope(const ObjectType* object) const;
+		/// The run of packed views starting at `places[first]` that are one region: its last place's index.
+		uint32 LastViewOfRegion(const Core::Vector<uint32>& places, uint32 first, const Type* lane) const;
+		QueryResult<const Type*> LaneTypeOf(const ModelBuilder::PendingSwizzle& view) const;
+		void AddRegion(const Core::Vector<uint32>& places, uint32 first, uint32 last, const Type* lane);
+		QueryResult<FunctionType::ParameterInfo> MethodParameter(const ModelBuilder::PendingMethodDecl& d, uint32 index, Scope* classScope) const;
+
+		ModelBuilder& m_Builder;
+		ModelBuilder::Context& m_Ctx;
+		DeclarationQueries& m_Queries;
 	};
 } // namespace Scripting

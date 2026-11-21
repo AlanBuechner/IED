@@ -119,6 +119,7 @@ namespace Scripting
 		if (!operand.Ok()) return operand;
 		auto target = m_Model.ResolveTypeInternal(*cast.GetTargetType(), unitId, bindingScope, m_Context ? m_Context : m_Model.m_Symbols->GetRoot());
 		if (!target.Ok()) return Result::Fail(target.error, target.message);
+		if (auto known = Measurable(target.value); !known.Ok()) return Result::Fail(known.error, known.message);
 		return ConvertConstant(operand.value, target.value);
 	}
 }

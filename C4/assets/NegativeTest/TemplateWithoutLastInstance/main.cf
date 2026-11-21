@@ -1,0 +1,3 @@
+template<T> struct W { W<W<T>>* next; }
+W<int32> g_W;
+int32 main() { return 0; }

@@ -1,4 +1,5 @@
 #include "Model/TypeResolver.h"
+#include "Model/Builder/DeclarationQueries.h"
 #include "Model/NotIncluded.h"
 #include "Model/TypeNotFound.h"
 #include "Model/Types/ReturnLists.h"
@@ -211,7 +212,9 @@ namespace Scripting
 			// Without this, `Outer::Inner in;` fails with "not a namespace path: Outer".
 			if (info->kind == SymbolKind::Type && info->type)
 			{
-				const auto* obj = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(info->type));
+				auto prefix = NamedType(model, *info, name);
+				if (!prefix.Ok()) return prefix;
+				const auto* obj = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(prefix.value));
 				if (obj)
 				{
 					const Scope* ts = model.TypeScope(obj);
@@ -222,14 +225,25 @@ namespace Scripting
 		}
 			if (info->kind != SymbolKind::Type)
 				return QueryResult<const Type*>::Fail(QueryError::NotAValue, "not a type: " + name);
-			// An alias is transparent: the type it names, never the alias itself (BUG-187). One whose target is
-			// not resolved yet fails, so what names it waits for the next round.
-			const Type* named = info->type;
-			while (named && named->GetKind() == TypeKind::Alias) named = static_cast<const AliasType*>(named)->GetAliasedType();
-			if (!named) return QueryResult<const Type*>::Fail(QueryError::NotFound, "the alias '" + name + "' is not resolved yet");
-			return ApplyIndirections(model, named, node, unitId, bindingScope, context);
+			auto named = NamedType(model, *info, name);
+			if (!named.Ok()) return named;
+			return ApplyIndirections(model, named.value, node, unitId, bindingScope, context);
 		}
 		return QueryResult<const Type*>::Fail(QueryError::NotFound, "empty qualified name");
+	}
+
+	QueryResult<const Type*> TypeResolver::NamedType(const ProgramModel& model, const SymbolInfo& symbol, const Core::String& name)
+	{
+		const Type* named = symbol.type;
+		while (named && named->GetKind() == TypeKind::Alias)
+		{
+			const auto* alias = static_cast<const AliasType*>(named);
+			if (DeclarationQueries* pending = model.Pending())
+				if (auto resolved = pending->Alias(*alias); !resolved.Ok()) return QueryResult<const Type*>::Fail(resolved.error, resolved.message);
+			named = alias->GetAliasedType();
+		}
+		if (!named) return QueryResult<const Type*>::Fail(QueryError::NotFound, "the alias '" + name + "' names no type");
+		return QueryResult<const Type*>::Success(named);
 	}
 
 	QueryResult<const Type*> TypeResolver::ResolveReturnList(const ProgramModel& model, const QualTypeNode& node, uint32 unitId, Scope* bindingScope,
@@ -368,10 +382,8 @@ namespace Scripting
 		const SymbolInfo* info = FindVisibleQualified(model, name, unitId, scopeContext);
 		if (info && info->kind == SymbolKind::Type)
 		{
-			const Type* t = info->type;
-			while (t && t->GetKind() == TypeKind::Alias) // aliases are transparent: the SAME instance
-				t = static_cast<const AliasType*>(t)->GetAliasedType();
-			return QueryResult<const Type*>::Success(t);
+			auto named = NamedType(model, *info, name);
+			return named.Ok() || named.error == QueryError::CyclicDependency ? named : QueryResult<const Type*>::Success(nullptr);
 		}
 		if (info)
 			return QueryResult<const Type*>::Fail(QueryError::NotFound, "not a type: " + name); // a function name is NotFound as a type
@@ -413,7 +425,8 @@ namespace Scripting
 			if (info->kind == SymbolKind::Namespace && info->scope) { scope = info->scope; start = colon + 2; continue; }
 			if (info->kind == SymbolKind::Type && info->type)
 			{
-				const auto* obj = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(info->type));
+				auto prefix = NamedType(model, *info, segment);
+				const auto* obj = prefix.Ok() ? dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(prefix.value)) : nullptr;
 				if (obj)
 				{
 					auto it = model.m_TypeScopes.find(obj);

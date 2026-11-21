@@ -1,6 +1,5 @@
 #include "Model/Builder/ModelBuilder.h"
 #include "Model/Builder/ObjectIdentity.h"
-#include "Model/Builder/ModelResolver.h" // pass 2: fixed-point resolution + GAP A body scan
 #include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
 #include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
 #include "Parser/Nodes/Declarations/UnionDefinitionNode.h"
@@ -55,20 +54,6 @@ namespace Scripting
 		}
 	}
 
-	void ModelBuilder::ReportUnresolvedUnion(const Context& ctx, const PendingUnion& u)
-	{
-		const Core::String name = u.un->GetNameToken().GetText();
-		bool reported = false;
-		ForEachUnionField(*u.un, [&](const VariableDefinitionNode& field, int) {
-			if (reported) return;
-			const Core::String why = Why(ctx, field.GetType().Get(), u.unitId, u.scope);
-			if (why.empty()) return;
-			ErrorAt(ctx, &field, "unresolved type for field '" + field.GetNameToken().GetText() + "' in the union '" + name + "'" + why);
-			reported = true;
-		});
-		if (!reported) ErrorAt(ctx, u.un, "unresolved union '" + name + "'");
-	}
-
 	void ForEachUnionField(const UnionDefinitionNode& un, const std::function<void(const VariableDefinitionNode&, int view)>& visit)
 	{
 		int nextView = 0;
@@ -99,7 +84,7 @@ namespace Scripting
 			const auto* child = member.Get();
 			if (!child) continue;
 			if (const auto* vd = dynamic_cast<const VariableDefinitionNode*>(child))
-				QueueField({ obj, vd, ctx.unitId, regionId, -1 });                 // plain lane: aliases offset 0
+				QueueField(ctx, { obj, vd, ctx.unitId, regionId, -1 });            // plain lane: aliases offset 0
 			else if (const auto* od = dynamic_cast<const ObjectDefinitionNode*>(child))
 				FlattenSwizzleView(ctx, obj, *od, regionId, nextViewId++);          // struct view: sequential lanes
 			else if (const auto* sv = dynamic_cast<const SwizzleViewNode*>(child))
@@ -117,7 +102,7 @@ namespace Scripting
 			const auto* child = member.Get();
 			if (!child) continue;
 			if (const auto* vd = dynamic_cast<const VariableDefinitionNode*>(child))
-				QueueField({ obj, vd, ctx.unitId, regionId, viewId });              // a lane within this view
+				QueueField(ctx, { obj, vd, ctx.unitId, regionId, viewId });         // a lane within this view
 		}
 	}
 

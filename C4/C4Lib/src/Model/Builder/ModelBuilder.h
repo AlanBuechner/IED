@@ -20,7 +20,7 @@ namespace Scripting
 	struct QualTypeNode;
 	struct SwizzleViewNode;
 
-	/// The file-scope model build (doc 02/03), exactly two passes:
+	/// The file-scope model build (docs/compiler/02-program-model.md, Build passes), exactly two passes:
 	///
 	///   PASS 1 - REGISTER: one walk per unit. Every file-scope declaration becomes a shell:
 	///     types exist (incomplete), names exist in the scope tree, template definitions are
@@ -28,10 +28,10 @@ namespace Scripting
 	///     definition, so declaration ORDER NEVER MATTERS (forward refs, cross-file refs, and
 	///     mutual recursion all resolve in pass 2).
 	///
-	///   PASS 2 - RESOLVE (fixed point): now that every shell exists, resolve field types, base
-	///     classes, method signatures, enum values, alias targets, global types, and fold
-	///     constants - iterating until nothing changes. A name resolves because the thing it
-	///     names was registered in pass 1, regardless of where it was written.
+	///   PASS 2 - RESOLVE (on demand): each pending declaration is a query asked once (DeclarationQueries):
+	///     resolving one first resolves what it names - an alias's target, an enum's values, a variable's type,
+	///     an object's fields - and one asked for while it is resolving depends on itself. One sweep in
+	///     declaration order asks for every one.
 	///
 	/// The builder never enters a function body: bodies stay as AST for HIR lowering (doc 06).
 	/// Out-of-line definitions (`Str::FromCStr`, `template<T> void Vector::Init`) are matched to
@@ -56,11 +56,6 @@ namespace Scripting
 		/// "redefinition of <what> 'X': it is already a function (b.cf:12)" - what the name already is in the scope, and
 		/// where, so a clash across files names both sides (BUG-291).
 		Core::String Redefinition(const Context& ctx, const char* what, const Core::String& name) const;
-		/// `: <reason>` when `type` (a QualTypeNode) does not resolve in `scope`, else empty.
-		Core::String Why(const Context& ctx, const AstNode* type, uint32 unitId, const Scope* scope) const;
-		void ReportUnresolved(const Context& ctx, const AstNode* declaration, const Core::String& what, const AstNode* type, uint32 unitId,
-			const Scope* scope);
-		Core::String SignatureWhy(const Context& ctx, const FunctionDefinitionNode& fn, uint32 unitId, const Scope* scope) const;
 		// The base-list and interface rules (ClassHierarchy), reported at each type's declaration.
 		void CheckObjectTypes(const Context& ctx, ProgramModel& model);
 		// Every annotation reflection registers folds (AnnotationCheck); the template instances they name are opened and laid out.
@@ -76,24 +71,45 @@ private:
 			Scope* scope = nullptr; // current declaration scope (root, a namespace, or a class)
 		};
 
-		// --- Pass-1 pending work: shells exist, resolution is deferred to pass 2 ----------
-		struct PendingVar { SymbolInfo* info; const VariableDefinitionNode* var; uint32 unitId; };
-		struct PendingField { const ObjectType* obj; const VariableDefinitionNode* var; uint32 unitId; int unionRegionId = -1; int unionViewId = -1; };
-	// A `packed`/`unpacked` swizzle view inside an object body: becomes a PackedViewRegion (SIMD
-	// <N x T>) once its element type resolves in pass 2. Lanes are accessed via FindPackedLane.
-	struct PendingSwizzle { const ObjectType* obj; const SwizzleViewNode* node; uint32 unitId; AccessModifier access; }; // access: its union's
-		struct PendingMethodDecl { const ObjectType* obj; const FunctionDefinitionNode* fn; uint32 unitId; };
-		struct PendingMethodDef
+		// --- Pass-1 pending work: shells exist, each resolves when pass 2 asks for it ----------
+		/// Where a pending declaration's resolution stands. Failed is final: what the declaration names was resolved
+		/// first, so asking again could not go better.
+		enum class Stage : uint8 { Pending, Resolving, Resolved, Failed };
+		struct Resolution
 		{
-			Core::String className;   // first segment of the qualified name
-			Core::String methodName;  // last segment
+			Stage stage = Stage::Pending;
+			QueryResult<void> failure; // Failed: why, and where when the resolver knows
+			Core::String cycle;        // Failed by depending on itself: the cycle, as what asks for this one is told
+		};
+		struct PendingVar { SymbolInfo* info; const VariableDefinitionNode* var; uint32 unitId; Resolution resolution; };
+		// `type`: the field's type once resolved; a static member's symbols (registered in pass 1) take it then, the
+		// object its field when its fields are attached in declaration order.
+		struct PendingField
+		{
+			const ObjectType* obj;
+			const VariableDefinitionNode* var;
+			uint32 unitId;
+			int unionRegionId = -1;
+			int unionViewId = -1;
+			const Type* type = nullptr;
+			Resolution resolution;
+		};
+		// A `packed`/`unpacked` swizzle view inside an object body: becomes a PackedViewRegion (SIMD
+		// <N x T>) once its element type resolves in pass 2. Lanes are accessed via FindPackedLane.
+		struct PendingSwizzle { const ObjectType* obj; const SwizzleViewNode* node; uint32 unitId; AccessModifier access; Resolution resolution; }; // access: its union's
+		struct PendingMethodDecl { const ObjectType* obj; const FunctionDefinitionNode* fn; uint32 unitId; Resolution resolution; };
+		struct PendingFunc { Scope* scope; Core::String name; const FunctionDefinitionNode* fn; uint32 unitId; Resolution resolution; };
+		struct PendingQualifiedFunc
+		{
+			Core::String prefix;
+			Core::String last;
 			const FunctionDefinitionNode* fn;
 			uint32 unitId;
+			Scope* declScope = nullptr;
+			Resolution resolution;
 		};
-		struct PendingFunc { Scope* scope; Core::String name; const FunctionDefinitionNode* fn; uint32 unitId; };
-		struct PendingQualifiedFunc { Core::String prefix; Core::String last; const FunctionDefinitionNode* fn; uint32 unitId; Scope* declScope = nullptr; };
-		struct PendingBase { const ObjectType* obj; const QualTypeNode* type; const Scope* declScope; uint32 unitId; };
-		struct PendingEnum { EnumType* raw; const EnumDefinitionNode* en; uint32 unitId; const Scope* scope = nullptr; Core::String why; };
+		struct PendingBase { const ObjectType* obj; const QualTypeNode* type; const Scope* declScope; uint32 unitId; Resolution resolution; };
+		struct PendingEnum { EnumType* raw; const EnumDefinitionNode* en; uint32 unitId; const Scope* scope = nullptr; Resolution resolution; };
 		// `repeats`: the alias of the same name this declaration repeats, which must name the same type (BUG-273).
 		struct PendingAlias
 		{
@@ -103,8 +119,18 @@ private:
 			const Scope* scope = nullptr;
 			const AliasType* repeats = nullptr;
 			const AstNode* declaration = nullptr;
+			Resolution resolution;
 		};
-		struct PendingUnion { UnionType* raw; const UnionDefinitionNode* un; uint32 unitId; const Scope* scope = nullptr; };
+		// `failedField`: the field whose type did not resolve, when one did not.
+		struct PendingUnion
+		{
+			UnionType* raw;
+			const UnionDefinitionNode* un;
+			uint32 unitId;
+			const Scope* scope = nullptr;
+			const VariableDefinitionNode* failedField = nullptr;
+			Resolution resolution;
+		};
 
 		// --- Pass 1: registration (shells only) ------------------------------------------
 		void VisitUnit(Context& ctx, const AstNode* root);
@@ -127,31 +153,38 @@ private:
 		/// A file-scope `asm` block: assembly added to the program as it is, so it takes no operands.
 		void RegisterFileAssembly(Context& ctx, const AsmStatementNode& block);
 		void ReportUnionMembersItCannotHold(const Context& ctx, const UnionDefinitionNode& un);
-		void ReportUnresolvedUnion(const Context& ctx, const PendingUnion& u);
-		Core::String QualifiedWhy(const Context& ctx, const PendingQualifiedFunc& f) const;
+		/// A static data member is a variable of its class's scope from pass 1 on, as a global is of its namespace's:
+		/// a declaration that names it finds it, and asks for its type.
+		void RegisterStaticMember(Context& classCtx, const VariableDefinitionNode& member);
+
+		// --- After pass 2: the declarations that did not resolve, each with why ------------
+		struct Failure; // one unresolved declaration: what it is, where, and its resolution
+		void ReportUnresolved(const Context& ctx);
+		void ReportFailure(const Context& ctx, const Failure& failure);
 		// An anonymous union (swizzle) inside an object body is flattened into m_PendingFields as
 		// region-marked parent fields so `v.x` / `v.r` resolve and the layout shares one byte range.
 		void FlattenSwizzle(Context& ctx, const ObjectType* obj, const UnionDefinitionNode& un, int regionId);
-		// A field queued for pass 2: its object waits for one more part until the field is attached.
-		void QueueField(const PendingField& field);
+		// A field queued for pass 2: its object waits for one more part until the field is attached. A static one is a
+		// variable of the class scope (`classCtx`) at once.
+		void QueueField(Context& classCtx, const PendingField& field);
 		void FlattenSwizzleView(Context& ctx, const ObjectType* obj, const ObjectDefinitionNode& view, int regionId, int viewId);
 
-		// --- Pass 2 lives in the ModelResolver subsystem (Model/ModelResolver.{h,cpp}) --------
-		// The pending work-lists below are its input; Build() drives it. It is friended here so it can
-		// read them and report through Error(). One header, one implementation each: this file owns
-		// pass 1 (registration) + the build driver; ModelResolver owns pass 2 (fixed-point resolution).
+		// --- Pass 2 lives beside this class (Model/Builder): DeclarationQueries asks for each pending declaration
+		// once and finds cycles; ModelResolver and FreeFunctionResolver say how one declaration resolves. The
+		// pending lists below are their input; they are friends to read them and report through ErrorAt.
+		friend class DeclarationQueries;
 		friend class ModelResolver;
-		friend class FreeFunctionResolver; // pass-2 free-function resolver reads the pending work-lists
+		friend class FreeFunctionResolver;
 
 		ErrorTracker* m_Errors;
 		const SourceManager* m_Sources = nullptr; // during Build: the units' texts, for repeated bindings
 
-		// Pass-1 output: everything pass 2 must resolve. Items are removed as they settle.
+		// Pass-1 output: everything pass 2 resolves, in declaration order. A list keeps its entries (their places are
+		// what DeclarationQueries indexes); each entry's resolution says where it stands.
 		Core::Vector<PendingVar> m_PendingVars;
 		Core::Vector<PendingField> m_PendingFields;
 		Core::Vector<PendingSwizzle> m_PendingSwizzles;
 		Core::Vector<PendingMethodDecl> m_PendingMethodDecls;
-		Core::Vector<PendingMethodDef> m_PendingMethodDefs;
 		Core::Vector<PendingFunc> m_PendingFuncs;
 		Core::Vector<PendingQualifiedFunc> m_PendingQualifiedFuncs;
 		Core::Vector<PendingBase> m_PendingBases;

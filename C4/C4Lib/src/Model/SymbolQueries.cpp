@@ -1,4 +1,5 @@
 #include "Model/SymbolQueries.h"
+#include "Model/Builder/DeclarationQueries.h"
 #include "Model/NotIncluded.h"
 #include "Model/OverloadResolution.h"
 #include "Model/ConstEvaluator.h"
@@ -539,6 +540,8 @@ namespace Scripting
 		}
 		if (info->kind != SymbolKind::Variable)
 			return QueryResult<VariableInfo>::Fail(QueryError::NotCallable, "name is not a variable: " + name);
+		if (DeclarationQueries* pending = model.Pending())
+			if (auto typed = pending->Variable(*info); !typed.Ok()) return QueryResult<VariableInfo>::Fail(typed.error, typed.message);
 		VariableInfo v;
 		v.type = info->type;
 		v.isConst = info->isConst;
@@ -646,10 +649,8 @@ namespace Scripting
 			if (typeInfo && typeInfo->kind == SymbolKind::Type && typeInfo->type &&
 			    typeInfo->type->GetKind() == TypeKind::Enum)
 			{
-				const auto* e = static_cast<const EnumType*>(TypeHandle::UnwrapToValue(typeInfo->type));
-				for (const auto& m : e->GetMembers())
-					if (m.mName == name.substr(colon + 2))
-						return QueryResult<ConstantValue>::Success(ConstantValue::Int(m.m_Value));
+				auto member = EnumMember(model, *static_cast<const EnumType*>(typeInfo->type), name.substr(colon + 2));
+				if (member.error != QueryError::NotFound) return member;
 			}
 		}
 		return QueryResult<ConstantValue>::Fail(QueryError::NotFound, "no constant named " + name);
@@ -664,12 +665,23 @@ namespace Scripting
 		if (info->type && info->type->GetKind() == TypeKind::Enum)
 		{
 			size_t colon = name.rfind("::");
-			const Core::String& memberName = (colon == Core::String::npos) ? name : name.substr(colon + 2);
-			const auto* e = static_cast<const EnumType*>(TypeHandle::UnwrapToValue(info->type));
-			for (const auto& m : e->GetMembers())
-				if (m.mName == memberName) return QueryResult<ConstantValue>::Success(ConstantValue::Int(m.m_Value));
+			const Core::String memberName = (colon == Core::String::npos) ? name : name.substr(colon + 2);
+			auto member = EnumMember(model, *static_cast<const EnumType*>(info->type), memberName);
+			if (member.error != QueryError::NotFound) return member;
 		}
 		return QueryResult<ConstantValue>::Fail(QueryError::NotAValue, "'" + name + "' is a const whose initializer runs at startup");
+	}
+
+	// The value of `member`, NotFound when the enum has none of that name. While the model resolves, the enum's values
+	// resolve first; an enum that does not resolve is why the member has no value.
+	QueryResult<ConstantValue> SymbolQueries::EnumMember(const ProgramModel& model, const EnumType& type, const Core::String& member)
+	{
+		if (DeclarationQueries* pending = model.Pending())
+			if (auto values = pending->Enum(type); !values.Ok())
+				return QueryResult<ConstantValue>::Fail(values.error == QueryError::NotFound ? QueryError::NotAValue : values.error, values.message);
+		for (const auto& m : type.GetMembers())
+			if (m.mName == member) return QueryResult<ConstantValue>::Success(ConstantValue::Int(m.m_Value));
+		return QueryResult<ConstantValue>::Fail(QueryError::NotFound, "the enum '" + type.GetName() + "' has no member '" + member + "'");
 	}
 
 

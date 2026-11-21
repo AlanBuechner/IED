@@ -60,6 +60,7 @@ namespace Scripting
 		QueryResult<const FunctionType*> QueryNonObjectReceiver(const ProgramModel& model, const Core::String& name, const Type* receiverType,
 			const Core::Vector<const Type*>& argTypes, const LookupContext& ctx, const FunctionRecord** outRecord) const;
 
+		static QueryResult<ConstantValue> EnumMember(const ProgramModel& model, const EnumType& type, const Core::String& member);
 		static int FunctionTemplateOrder(const ProgramModel& model, const FunctionRecord* a, const FunctionRecord* b);
 		/// Does a record carry the given operator annotation (the [operator("...")] set, doc 08)?
 		static bool ContainsAnnotation(const FunctionRecord* rec, const Core::String& annotation);

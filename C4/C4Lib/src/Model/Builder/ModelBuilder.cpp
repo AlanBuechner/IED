@@ -9,8 +9,9 @@
 #include "Model/Abstractness.h"
 #include "Model/TargetAnnotation.h"
 #include "Model/Builder/ObjectIdentity.h"
-#include "Model/Builder/ModelResolver.h" // pass 2: fixed-point resolution + GAP A body scan
-#include "Model/Builder/FreeFunctionResolver.h"
+#include "Model/Builder/DeclarationQueries.h"
+#include "Model/Builder/ModelResolver.h"
+#include "Model/TemplateInstantiator.h"
 #include "Model/Templates/TemplateMethodDefinitions.h"
 #include "Compiler/CompilerInstance.h"
 #include "Parser/Nodes/Declarations/NamespaceNode.h"
@@ -21,7 +22,8 @@
 #include "Parser/Nodes/Declarations/AliasDefinitionNode.h"
 #include "Parser/Nodes/Declarations/AnnotationDeclarationNode.h"
 #include "Parser/Nodes/Declarations/UnionDefinitionNode.h"
-#include "Parser/Nodes/Declarations/QualTypeNode.h" // HasTemplateArgs: body-scanning pass (GAP A)
+#include "Parser/Nodes/Declarations/SwizzleViewNode.h"
+#include "Parser/Nodes/Declarations/QualTypeNode.h"
 #include "Model/ConstEvaluator.h"
 #include "Model/OperatorAnnotations.h" // [group("name")] collection for reflection (plan 14)
 #include <functional>
@@ -89,46 +91,6 @@ namespace Scripting
 			return true;
 		}
 		return false;
-	}
-
-	Core::String ModelBuilder::Why(const Context& ctx, const AstNode* type, uint32 unitId, const Scope* scope) const
-	{
-		// The failure of resolving `type` again, after every declaration has had its chance.
-		const auto* qualified = dynamic_cast<const QualTypeNode*>(type);
-		if (!qualified) return "";
-		auto resolved = ctx.model->ResolveTypeInContext(*qualified, unitId, scope);
-		return resolved.Ok() ? Core::String() : ": " + resolved.message;
-	}
-
-	// `what` did not resolve: reported with the reason, at the part of `type` that fails when the resolver knows it
-	// (an array size), else at `declaration`.
-	void ModelBuilder::ReportUnresolved(const Context& ctx, const AstNode* declaration, const Core::String& what, const AstNode* type,
-		uint32 unitId, const Scope* scope)
-	{
-		const auto* qualified = dynamic_cast<const QualTypeNode*>(type);
-		if (!qualified || !ctx.errors) { ErrorAt(ctx, declaration, what); return; }
-		auto resolved = ctx.model->ResolveTypeInContext(*qualified, unitId, scope);
-		if (resolved.Ok()) { ErrorAt(ctx, declaration, what); return; }
-		const SourceLocation at = resolved.loc.line ? resolved.loc : (declaration ? declaration->startLocation : SourceLocation());
-		ctx.errors->AddError(at, what + ": " + resolved.message, ErrorSeverity::Error);
-	}
-
-	Core::String ModelBuilder::SignatureWhy(const Context& ctx, const FunctionDefinitionNode& fn, uint32 unitId, const Scope* scope) const
-	{
-		if (Core::String why = Why(ctx, fn.GetReturnType().Get(), unitId, scope); !why.empty()) return why;
-		for (const auto& p : fn.GetParameters())
-			if (Core::String why = Why(ctx, p->GetType().Get(), unitId, scope); !why.empty()) return why;
-		return "";
-	}
-
-	// `Q::F` stays unresolved because nothing is named Q, or because a type in its signature does not resolve.
-	Core::String ModelBuilder::QualifiedWhy(const Context& ctx, const PendingQualifiedFunc& f) const
-	{
-		const SymbolInfo* qualifier = FreeFunctionResolver::QualifierOf(*ctx.model, f);
-		if (!qualifier) return ": no namespace or type named '" + f.prefix + "'";
-		const auto* owner = qualifier->kind == SymbolKind::Type ? dynamic_cast<const ObjectType*>(qualifier->type) : nullptr;
-		const Scope* scope = owner ? ctx.model->TypeScope(owner) : qualifier->scope ? qualifier->scope : f.declScope;
-		return SignatureWhy(ctx, *f.fn, f.unitId, scope);
 	}
 
 	namespace
@@ -304,50 +266,20 @@ namespace Scripting
 
 		// Queries are answerable from here on; pass 2 resolves the shells into a complete model.
 		model.BeginResolution();
-		// PASS 2 - RESOLVE (doc 02): fixed point. Every shell exists, so a name always resolves
-		// to something registered in pass 1 regardless of where it was written.
-		for (uint32 round = 0; round < 64; ++round)
+		// PASS 2 - RESOLVE: every shell exists, so a name always finds what pass 1 registered, wherever it was written;
+		// what it names resolves first, on demand, so one sweep in declaration order settles every declaration.
 		{
-			if (!ModelResolver().ResolveRound(*this, ctx)) break;
+			DeclarationQueries declarations(*this, ctx);
+			declarations.ResolveAll();
+			ConstEvaluator::FoldGlobalConstants(model);
 		}
-
-		// GAP A: pass 2 never opens a body, so a `Vec<int32> v;` inside one is unresolved and its
-		// specialization has no members/methods. Instantiate every body-referenced specialization as a
-		// fixed point (instantiating S<int32> creates method records whose bodies may name more).
-		uint32 prevRecs = 0;
-		for (int round = 0; round < 8; ++round)
-		{
-			ModelResolver().InstantiateBodyReferences(*this, ctx);
-			Core::Vector<const FunctionRecord*> now; ctx.model->AllFunctionRecords(now);
-			if (now.Count() == prevRecs) break; // converged: this pass created no new methods
-			prevRecs = now.Count();
-		}
+		ModelResolver::InstantiateBodyReferences(model);
 
 		model.m_Types->FinalizeLayouts(); // size/alignment fixed point for mutually-recursive types
 		CheckObjectTypes(ctx, model);
 		CheckAnnotations(ctx, model); // after the layouts: an argument may be a sizeof
-
-		// Anything still pending is a genuine error (unknown type, cycle, ...). Report it.
-		for (const auto& v : m_PendingVars)
-			ReportUnresolved(ctx, v.var, "unresolved type for variable '" + v.var->GetNameToken().GetText() + "'", v.var->GetType().Get(), v.unitId,
-				v.info->declaringScope);
-		for (const auto& f : m_PendingFields)
-			ReportUnresolved(ctx, f.var, "unresolved type for field '" + f.var->GetNameToken().GetText() + "' in '" + f.obj->GetName() + "'",
-				f.var->GetType().Get(), f.unitId, model.TypeScope(f.obj));
-		for (const auto& b : m_PendingBases) ErrorAt(ctx, b.type, "unresolved base class for '" + b.obj->GetName() + "'" + Why(ctx, b.type, b.unitId, b.declScope));
-		for (const auto& e : m_PendingEnums)
-			ErrorAt(ctx, e.en, "unresolved enum '" + e.en->GetNameToken().GetText() + "'" + (e.why.empty() ? Core::String() : ": " + e.why));
-		for (const auto& a : m_PendingAliases)
-			ErrorAt(ctx, a.target, "unresolved alias target for '" + a.raw->GetName() + "'" + Why(ctx, a.target, a.unitId, a.scope));
-		for (const auto& u : m_PendingUnions) ReportUnresolvedUnion(ctx, u);
-		for (const auto& f : m_PendingFuncs)
-			ErrorAt(ctx, f.fn, "unresolved signature for function '" + f.name + "'" + SignatureWhy(ctx, *f.fn, f.unitId, f.scope));
-		for (const auto& f : m_PendingQualifiedFuncs)
-			ErrorAt(ctx, f.fn, "unresolved signature for function '" + f.prefix + "::" + f.last + "'" + QualifiedWhy(ctx, f));
+		ReportUnresolved(ctx);
 		for (const auto& mismatch : TemplateMethodDefinitions::Unmatched(model)) ErrorAt(ctx, mismatch.definition, mismatch.why);
-		for (const auto& d : m_PendingMethodDecls)
-			ErrorAt(ctx, d.fn, "unresolved method '" + d.fn->GetName()->GetFirstIdentifierToken().GetText() + "' in '" + d.obj->GetName() + "'" +
-				SignatureWhy(ctx, *d.fn, d.unitId, model.TypeScope(d.obj)));
 
 		// A constant that never folded starts at runtime like any global (04), unless it depends on itself.
 		ctx.model->Symbols()->ForEachScopedSymbol([&](const Core::String&, SymbolInfo* info, const Scope&)
@@ -358,20 +290,68 @@ namespace Scripting
 		});
 	}
 
-	// A template instance an annotation names, made here, has its bodies opened and its layout fixed as the others had.
+	// A template instance an annotation names, made here, has its bodies opened and its layout fixed as the others had;
+	// its own annotations are checked in turn, until a check makes no type. An instance whose annotation names a
+	// larger instance of its template has no last one: the chain is as deep as instances may nest, then an error.
 	void ModelBuilder::CheckAnnotations(Context& ctx, ProgramModel& model)
 	{
 		model.m_DeclaredAnnotations = DeclaredAnnotations(model, model.m_AnnotationSites);
 		AnnotationCheck annotations(model, *ctx.errors);
-		constexpr int kRounds = 8; // as GAP A's: an instance's annotations may name another
-		for (int round = 0; round < kRounds; ++round)
+		for (uint32 depth = 0; depth <= TemplateInstantiator::c_MaxInstantiationDepth; ++depth)
 		{
 			const uint32 types = model.ObjectTypes().Count();
 			annotations.CheckNew();
 			if (model.ObjectTypes().Count() == types) return;
-			ModelResolver().InstantiateBodyReferences(*this, ctx);
+			ModelResolver::InstantiateBodyReferences(model);
 			model.m_Types->FinalizeLayouts();
 		}
+		const ObjectType* last = model.ObjectTypes()[model.ObjectTypes().Count() - 1];
+		ctx.errors->AddError(last->GetDeclLocation(), "the annotations of '" + last->GetName() + "' instantiate templates more than " +
+			std::to_string(TemplateInstantiator::c_MaxInstantiationDepth) + " instances deep: an instance whose annotation names a larger instance "
+			"of its template has no last instance", ErrorSeverity::Error);
+	}
+
+	// --- The declarations that did not resolve ----------------------------------------------------------------
+
+	struct ModelBuilder::Failure
+	{
+		const AstNode* declaration = nullptr;
+		Core::String what; // "unresolved type for variable 'x'"
+		const Resolution* resolution = nullptr;
+	};
+
+	// With the reason, at the part that fails when the resolver knows it (an array size), else at the declaration.
+	void ModelBuilder::ReportFailure(const Context& ctx, const Failure& failure)
+	{
+		const QueryResult<void>& why = failure.resolution->failure;
+		if (failure.resolution->stage != Stage::Failed || !ctx.errors) return;
+		const SourceLocation at = why.loc.line ? why.loc : (failure.declaration ? failure.declaration->startLocation : SourceLocation());
+		ctx.errors->AddError(at, why.message.empty() ? failure.what : failure.what + ": " + why.message, ErrorSeverity::Error);
+	}
+
+	void ModelBuilder::ReportUnresolved(const Context& ctx)
+	{
+		for (const auto& v : m_PendingVars)
+			ReportFailure(ctx, { v.var, "unresolved type for variable '" + v.var->GetNameToken().GetText() + "'", &v.resolution });
+		for (const auto& f : m_PendingFields)
+			ReportFailure(ctx, { f.var, "unresolved type for field '" + f.var->GetNameToken().GetText() + "' in '" + f.obj->GetName() + "'", &f.resolution });
+		for (const auto& v : m_PendingSwizzles)
+			ReportFailure(ctx, { v.node, "unresolved lane type for a lane view in '" + v.obj->GetName() + "'", &v.resolution });
+		for (const auto& b : m_PendingBases) ReportFailure(ctx, { b.type, "unresolved base class for '" + b.obj->GetName() + "'", &b.resolution });
+		for (const auto& e : m_PendingEnums) ReportFailure(ctx, { e.en, "unresolved enum '" + e.en->GetNameToken().GetText() + "'", &e.resolution });
+		for (const auto& a : m_PendingAliases) ReportFailure(ctx, { a.target, "unresolved alias target for '" + a.raw->GetName() + "'", &a.resolution });
+		for (const auto& u : m_PendingUnions)
+		{
+			const Core::String name = u.un->GetNameToken().GetText();
+			if (u.failedField)
+				ReportFailure(ctx, { u.failedField, "unresolved type for field '" + u.failedField->GetNameToken().GetText() + "' in the union '" + name + "'", &u.resolution });
+			else ReportFailure(ctx, { u.un, "unresolved union '" + name + "'", &u.resolution });
+		}
+		for (const auto& f : m_PendingFuncs) ReportFailure(ctx, { f.fn, "unresolved signature for function '" + f.name + "'", &f.resolution });
+		for (const auto& f : m_PendingQualifiedFuncs)
+			ReportFailure(ctx, { f.fn, "unresolved signature for function '" + f.prefix + "::" + f.last + "'", &f.resolution });
+		for (const auto& d : m_PendingMethodDecls)
+			ReportFailure(ctx, { d.fn, "unresolved method '" + d.fn->GetName()->GetFirstIdentifierToken().GetText() + "' in '" + d.obj->GetName() + "'", &d.resolution });
 	}
 
 	void ModelBuilder::VisitUnit(Context& ctx, const AstNode* root)

@@ -1,4 +1,5 @@
 #include "Model/Builder/FreeFunctionResolver.h"
+#include "Model/Builder/DeclarationQueries.h"
 #include "Model/Builder/LinkSymbol.h"
 #include "Model/Types/QualifiedName.h"
 #include "Model/TypeHandle.h"
@@ -55,42 +56,22 @@ namespace Scripting
 			return fn.IsExtensionMethod() ? ExtensionMethodKey(name) : name;
 		}
 
-		// The ones left keep their order, moved down over the settled ones in one pass.
-		template<typename Pending, typename Settle>
-		bool SettleEach(Core::Vector<Pending>& pending, Settle settle)
-		{
-			uint32 kept = 0;
-			for (uint32 i = 0; i < pending.Count(); ++i)
-			{
-				if (settle(pending[i])) continue;
-				if (kept != i) pending[kept] = std::move(pending[i]);
-				++kept;
-			}
-			const bool changed = kept != pending.Count();
-			pending.RemoveRange(kept, pending.Count());
-			return changed;
-		}
-	}
-
-	bool FreeFunctionResolver::Resolve()
-	{
-		bool changed = SettleEach(m_Builder.m_PendingFuncs, [this](const ModelBuilder::PendingFunc& f) { return ResolveFree(f); });
-		changed |= SettleEach(m_Builder.m_PendingQualifiedFuncs, [this](const ModelBuilder::PendingQualifiedFunc& f) { return ResolveQualified(f); });
-		return changed;
 	}
 
 	// In the defining scope, so a parameter type binds to that scope's own declarations (`Math::AddX(const Vec&)`
-	// finds Math's Vec, not a file-scope one).
-	bool FreeFunctionResolver::ResolveSignature(const FunctionDefinitionNode& fn, uint32 unitId, const Scope* scope, Signature& out) const
+	// finds Math's Vec, not a file-scope one). A failure is the first type that does not resolve.
+	QueryResult<FreeFunctionResolver::Signature> FreeFunctionResolver::ResolveSignature(const FunctionDefinitionNode& fn, uint32 unitId, const Scope* scope) const
 	{
+		using Result = QueryResult<Signature>;
+		Signature out;
 		auto returned = m_Ctx.model->ResolveTypeInContext(*fn.GetReturnType(), unitId, scope);
-		if (!returned.Ok()) return false;
+		if (!returned.Ok()) return Result::Fail(returned.error, returned.message, returned.loc);
 		Core::Vector<const Type*> types;
 		uint32 defaults = 0;
 		for (const auto& p : fn.GetParameters())
 		{
 			auto type = m_Ctx.model->ResolveTypeInContext(*p->GetType(), unitId, scope);
-			if (!type.Ok()) return false;
+			if (!type.Ok()) return Result::Fail(type.error, type.message, type.loc);
 			FunctionType::ParameterInfo info;
 			info.mName = p->HasName() ? p->GetNameToken().GetText() : ("arg" + std::to_string(out.params.Count()));
 			info.m_Type = type.value;
@@ -101,7 +82,7 @@ namespace Scripting
 		out.returnType = returned.value;
 		out.type = m_Ctx.model->m_Types->Function(returned.value, types, fn.IsVariadic());
 		out.minArity = out.params.Count() > defaults ? out.params.Count() - defaults : 0;
-		return true;
+		return Result::Success(out);
 	}
 
 	// Resolved in the defining scope: an extension method inside a namespace names its target by bare name.
@@ -119,6 +100,7 @@ namespace Scripting
 
 	const FunctionRecord* FreeFunctionResolver::DeclaredMethod(const ObjectType& owner, const Core::String& name, const FunctionType* signature, bool isConst) const
 	{
+		(void)m_Queries.Methods(owner); // a declaration that does not resolve is its own error; the others are matched
 		auto records = m_Ctx.model->m_MethodRecords.find(&owner);
 		if (records == m_Ctx.model->m_MethodRecords.end()) return nullptr;
 		const auto& methods = owner.GetMethods();
@@ -167,22 +149,23 @@ namespace Scripting
 		rec.minArity = params.Count() - trailing;
 	}
 
-	bool FreeFunctionResolver::ResolveFree(const ModelBuilder::PendingFunc& f)
+	QueryResult<void> FreeFunctionResolver::ResolveFree(const ModelBuilder::PendingFunc& f)
 	{
-		Signature sig;
-		if (!ResolveSignature(*f.fn, f.unitId, f.scope, sig)) return false;
+		auto resolved = ResolveSignature(*f.fn, f.unitId, f.scope);
+		if (!resolved.Ok()) return QueryResult<void>::Fail(resolved.error, resolved.message, resolved.loc);
+		const Signature& sig = resolved.value;
 		const Receiver receiver = ReceiverOf(f);
-		if (MergeWithDeclaration(f, sig, receiver)) return true;
+		if (MergeWithDeclaration(f, sig, receiver)) return QueryResult<void>::Success();
 		// A type's own method declared in its body (`[operator("create")] void Construct();`) defined by an `extends`.
 		if (const FunctionRecord* declared = receiver.object ? DeclaredMethod(*receiver.object, f.name, sig.type, f.fn->IsConstMethod()) : nullptr)
 		{
 			AttachDefinition(*declared, *f.fn, f.unitId, f.name);
-			return true;
+			return QueryResult<void>::Success();
 		}
 		const FunctionRecord* stored = AddFreeRecord(f, sig, receiver);
 		if (auto test = m_Ctx.model->MutableTests().Collect(*f.fn, *stored, f.unitId); !test.Ok())
 			m_Builder.ErrorAt(m_Ctx, f.fn, test.message);
-		return true;
+		return QueryResult<void>::Success();
 	}
 
 	// A declaration and its definition are one record: the same scope, interned signature and receiver.

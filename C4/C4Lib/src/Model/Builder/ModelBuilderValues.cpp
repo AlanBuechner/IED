@@ -2,7 +2,6 @@
 #include "Model/Builder/LinkSymbol.h"
 #include "Model/Templates/MemberTemplates.h"
 #include "Model/Builder/ObjectIdentity.h"
-#include "Model/Builder/ModelResolver.h" // pass 2: fixed-point resolution + GAP A body scan
 #include "Parser/Nodes/Declarations/AnnotationDeclarationNode.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
@@ -51,6 +50,31 @@ namespace Scripting
 			for (const auto& e : ctx.scope->Entries(name))
 				if (e->declNode == &var) { stored = e.get(); break; }
 			m_PendingVars.Push({ stored, &var, ctx.unitId });
+		}
+	}
+
+	// One symbol per declarator, as RegisterVariable makes for a global; the type resolves in pass 2, when the member's
+	// field does or when a declaration asks for it. A name the class scope already holds otherwise keeps its meaning.
+	void ModelBuilder::RegisterStaticMember(Context& classCtx, const VariableDefinitionNode& member)
+	{
+		for (const auto& declarator : member.GetDeclarators())
+		{
+			const Core::String& name = declarator.m_NameToken.GetText();
+			SymbolInfo info;
+			info.kind = SymbolKind::Variable;
+			info.isConst = member.IsConst(); // only a `const` static is a compile-time constant
+			info.isStatic = true;
+			info.isVolatile = member.IsVolatile();
+			info.isThreadLocal = member.IsThreadLocal();
+			info.definingUnit = classCtx.unitId;
+			info.declNode = &member;
+			info.initializer = declarator.m_Initializer ? declarator.m_Initializer.Get() : nullptr;
+			info.mangledName = CanonicalSymbolName(classCtx.scope, name);
+			info.linkSymbol = LinkSymbolOf(member.GetAnnotations()); // a bound C++ static data member is that variable
+			info.plainName = name;
+			for (const auto& annotation : member.GetAnnotations()) CollectGroupAnnotations(annotation.Get(), info.groups);
+			if (!info.linkSymbol.empty() && info.initializer) ErrorAt(classCtx, &member, LinkedInitializerMessage(name, info.linkSymbol));
+			classCtx.scope->Register(name, info);
 		}
 	}
 

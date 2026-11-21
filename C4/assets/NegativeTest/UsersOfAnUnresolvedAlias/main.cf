@@ -1,0 +1,4 @@
+alias Handle = Missing;
+struct Owner { Handle first; Handle second; int32 fine; }
+Handle g_Handle;
+int32 main() { return 0; }

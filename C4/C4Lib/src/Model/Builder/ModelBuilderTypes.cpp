@@ -3,7 +3,6 @@
 #include "Model/Types/ClassHierarchy.h"
 #include "Model/Types/VirtualTables.h"
 #include "Model/Builder/ObjectIdentity.h"
-#include "Model/Builder/ModelResolver.h" // pass 2: fixed-point resolution + GAP A body scan
 #include "Parser/Nodes/Declarations/NamespaceNode.h"
 #include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
@@ -235,7 +234,7 @@ namespace Scripting
 			switch (child->Type())
 			{
 			case NodeType::VariableDefinition:
-				QueueField({ raw, static_cast<const VariableDefinitionNode*>(child), ctx.unitId });
+				QueueField(memberCtx, { raw, static_cast<const VariableDefinitionNode*>(child), ctx.unitId });
 				break;
 			case NodeType::FunctionDefinition:
 			{
@@ -268,10 +267,11 @@ namespace Scripting
 		}
 	}
 
-	void ModelBuilder::QueueField(const PendingField& field)
+	void ModelBuilder::QueueField(Context& classCtx, const PendingField& field)
 	{
 		const_cast<ObjectType*>(field.obj)->AwaitPart();
 		m_PendingFields.Push(field);
+		if (field.var->IsStatic()) RegisterStaticMember(classCtx, *field.var);
 	}
 
 	void ModelBuilder::RegisterEnum(Context& ctx, const EnumDefinitionNode& en)

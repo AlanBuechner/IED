@@ -52,6 +52,10 @@ namespace Scripting
 		/// instance). A template name WITHOUT its arguments is not a type (NotFound with an actionable hint).
 		QueryResult<const Type*> QueryType(const ProgramModel& model, const Core::String& name, uint32 unitId, const Scope* scopeContext = nullptr) const;
 
+		/// The type a type symbol names: an alias is transparent (the type it names, never the alias itself, BUG-187),
+		/// and while the model resolves, an alias still pending resolves first.
+		static QueryResult<const Type*> NamedType(const ProgramModel& model, const SymbolInfo& symbol, const Core::String& name);
+
 	private:
 		friend class ProgramModel; // the only caller (public verbs delegate here)
 

@@ -1,0 +1,3 @@
+int32[kN] g_Arr;
+const int32 kN = sizeof(g_Arr);
+int32 main() { return 0; }

@@ -1,0 +1,5 @@
+alias CA = CB;
+alias CB = CC;
+alias CC = CA;
+CA g_Value;
+int32 main() { return 0; }

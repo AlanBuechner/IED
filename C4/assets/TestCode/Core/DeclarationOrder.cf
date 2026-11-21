@@ -1,0 +1,61 @@
+// Core - Declaration Order Tests (implementation)
+include "../Framework/Assert.ch"
+include "DeclarationOrder.ch"
+
+// Program model 1.7: a declaration resolves what it names first, however long the chain and wherever it is written.
+// Every declaration below names something declared after it.
+
+// BUG-480: `items` resolves through three declarations and `kind` at once; `items` is still the first field.
+struct DoLate { public int32[kDoCount] items; public DoShape::Kind kind; }
+const int32 kDoCount = DoSizes::Big / 2;
+struct DoSizes { public static const int32 Big = sizeof(DoPair) * 2; }
+struct DoPair { public DoWord a; public DoWord b; }
+alias DoWord = DoWide;
+alias DoWide = uint16;
+struct DoShape { public enum Kind : uint8 { Round, Square = kDoCount } }
+enum DoFlags { DoFirst = sizeof(DoLate), DoSecond = DoFirst + offsetof(DoLate, kind) }
+
+// BUG-478: an enum is measured with its underlying type, a union with its members, wherever they are declared.
+int32[sizeof(DoSmall)] g_DoBySize;
+struct DoUser { public int32[sizeof(DoEither)] tail; }
+union DoEither { DoBig big; uint8 byte; }
+struct DoBig { public int64 a; public int64 b; public int64 c; }
+enum DoSmall : uint8 { DoA, DoB }
+
+// A static constant is found by the fields written before it, and hides a global of its name.
+const int32 kDoSlots = 2;
+struct DoRack { public int32[kDoSlots] slots; public static const int32 kDoSlots = 5; }
+int32[DoGrid::kCells] g_DoCells;
+struct DoGrid { public int32[kCells] cells; public static const int32 kCells = kSide * kSide; public static const int32 kSide = 3; }
+
+// A method whose signature needs a later alias chain is defined out of line like any other.
+struct DoBox { public void Set(DoOuter value); public DoOuter Get() const; private DoOuter m_Value; }
+void DoBox::Set(DoOuter value) { m_Value = value; }
+DoOuter DoBox::Get() const { return m_Value; }
+alias DoOuter = DoMiddle;
+alias DoMiddle = DoInner;
+alias DoInner = int64;
+
+template<T> struct DoHolder { public T value; }
+struct DoDerived : DoHolder<DoLate> { public int32[sizeof(DoPair)] tail; }
+
+void TestDeclarationOrder() {
+	DoLate late = { { 1, 2, 3, 4 }, DoShape::Kind::Square };
+	AssertIntEquals(4, kDoCount, "a constant through a static constant and a size");
+	AssertIntEquals(0, (int32)offsetof(DoLate, items), "the first field declared is the first field");
+	AssertIntEquals(16, (int32)offsetof(DoLate, kind), "a field that resolves at once keeps its place");
+	AssertIntEquals(4, late.items[3], "braces fill the fields in declaration order");
+	AssertIntEquals(4, (int32)late.kind, "an enum value from a later constant");
+	AssertIntEquals(20, (int32)DoFirst, "an enum value from a size");
+	AssertIntEquals(36, (int32)DoSecond, "an enum value from an offset");
+	Assert(sizeof(g_DoBySize) == 4, "an extent from the size of a later enum with an underlying type");
+	Assert(sizeof(DoEither) == 24, "a union with a later struct");
+	Assert(sizeof(DoUser) == 96, "an extent from the size of a later union");
+	Assert(sizeof(DoRack) == 20, "a static constant hides a global of its name for the field before it");
+	Assert(sizeof(g_DoCells) == 36, "a global's extent from a static constant of a later type");
+	Assert(sizeof(DoGrid) == 36, "a field's extent from a static constant declared after it");
+	DoBox box;
+	box.Set(7);
+	Assert(box.Get() == 7, "a method whose signature names a later alias chain");
+	Assert(sizeof(DoDerived) == 36, "a template base of a later type");
+}

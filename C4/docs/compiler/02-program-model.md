@@ -91,19 +91,22 @@ from two unrelated bases with one signature is ambiguous (`SymbolQueries::Inheri
 declarations, then finalizes:
 
 1. **Pass 1 - register.** Every declaration becomes a shell: object types exist (incomplete), names are
-   registered in the scope tree, template definitions and out-of-line template methods are recorded,
-   pending work lists are filled (variables, fields, packed views, method declarations, method definitions,
-   free functions, qualified functions). Nothing is resolved, so declaration order never matters.
+   registered in the scope tree (a static data member in its class's scope, as a global in its namespace's),
+   template definitions and out-of-line template methods are recorded, and the pending lists are filled
+   (variables, fields, lane views, bases, method declarations, enums, aliases, unions, free functions, qualified
+   functions), each in declaration order. Nothing is resolved, so declaration order never matters.
    `BeginResolution()` then marks the model queryable.
-2. **Pass 2 - resolve to a fixed point.** `ModelResolver::ResolveRound` walks the work lists - variables,
-   enums, aliases, unions, object members (fields, bases, in-class method declarations), and via
-   `FreeFunctionResolver` free functions, extension methods and qualified out-of-line definitions - plus
-   `ConstEvaluator::FoldGlobalConstants`, repeating until a round changes nothing. A declaration and its
-   definition intern to one signature, so the body attaches to the existing record instead of adding an
+2. **Pass 2 - resolve on demand.** Each pending declaration is a query, asked at most once and answered from
+   its inputs alone - its node, its unit and its scope (`Model/Builder/DeclarationQueries`; see
+   [Declaration queries](#declaration-queries)). Resolving a declaration first asks for what it names, so
+   nothing waits for a later round; `ResolveAll` is one sweep over the lists in declaration order, and
+   `ConstEvaluator::FoldGlobalConstants` then stores every global's constant start once. A declaration and
+   its definition intern to one signature, so the body attaches to the existing record instead of adding an
    overload.
-3. **Body references.** `ModelResolver::InstantiateBodyReferences` walks each function body once to resolve
-   every template specialization it names, so those types are concrete before HIR runs. This is the only
-   place the model opens a body.
+3. **Body references.** `ModelResolver::InstantiateBodyReferences` (`BodyReferences.cpp`) walks the function
+   records once, the ones the walk makes included: every template specialization a body names in a type
+   position is instantiated, so those types are concrete before HIR runs, and an instance's methods are
+   bodies opened in turn. This is the only place the model opens a body.
 4. **Layouts.** `TypeStore::FinalizeLayouts` computes size/alignment for every object type (memoized).
 5. **Annotations.** `AnnotationCheck` (`Model/Builder/AnnotationCheck`) folds the annotations of every entity
    reflection registers (`Model/ReflectedEntities`: types, their fields, enums, unions, globals, functions and their
@@ -117,6 +120,53 @@ declarations, then finalizes:
 
 Build-time type resolution is program-wide (unit 0). Errors (duplicate definitions, unresolved types) are
 reported through the builder's error tracker.
+
+### Declaration queries
+
+`DeclarationQueries` lives for pass 2 and is `ProgramModel::Pending()` meanwhile (null before and after), which is
+how the rest of the model asks:
+
+| Query | Resolves | Asked by |
+|---|---|---|
+| `Alias(alias)` | the alias's target | `TypeResolver::NamedType`, wherever a type symbol is read |
+| `Enum(type)` | the underlying type and the members' values | `SymbolQueries::EnumMember` (a member's value), `ConstEvaluator::Measurable` (a constant converting to the enum) |
+| `Union(type)` | the union's fields | `Complete` |
+| `Variable(symbol)` | a global's or a static data member's type | `ConstEvaluator::FoldSymbol`, `SymbolQueries::QueryVariable` |
+| `Parts(object)` | the object's fields, lane views and bases, attached in declaration order | `Complete`, a field read in a constant (`sizeof(s.x)`) |
+| `Methods(object)` | the methods the object declares in its body | `FreeFunctionResolver::DeclaredMethod` (an out-of-line definition, an `extends` definition of a declared method) |
+| `Complete(type)` | everything a value of the type holds, then its layout again | `ConstEvaluator::FoldQuery` (`sizeof`, `alignof`, `offsetof`, `holds_*`) |
+
+- **How one declaration resolves** is `ModelResolver`'s (`ModelResolver.cpp`: variables, enums, aliases, unions;
+  `ObjectMemberResolver.cpp`: fields, lane views, bases, in-class method declarations) and
+  `FreeFunctionResolver`'s (free functions, extension methods, qualified definitions). Each returns a
+  `QueryResult<void>`: why the declaration does not resolve.
+- **The memo** is the declaration's `Resolution` in its pending list (`ModelBuilder::Stage`: `Pending`,
+  `Resolving`, `Resolved`, `Failed`). A failure is final and kept: what the declaration names resolved first, so
+  asking again could not go better. `ModelBuilder::ReportUnresolved` reports each failed declaration once, with
+  its reason (`unresolved type for field 'a' in 'S': ...`); what asked for a failed declaration is told `the alias
+  'A' does not resolve`.
+- **Cycles.** A declaration asked for while it is `Resolving` depends on itself: the answer is
+  `CyclicDependency` with the chain of what is resolving (`the layout of 'SA' depends on itself: SA -> SA::x -> SB
+  -> SB::y -> SA`; `the alias 'A' depends on itself: A -> B -> A`). A constant whose initializer is folding is a
+  link of the chain too (`DeclarationQueries::Step`), so `int32[kN] g; const int32 kN = sizeof(g);` reads `the
+  type of 'g' depends on itself: g -> kN -> g`. Naming a type is no dependency on its parts: `struct A { B* b; }`
+  and `struct B { A* a; }` never ask for each other's layout.
+- **An object's fields resolve together**, in declaration order, whichever was asked for first, so the layout
+  never depends on the order of resolution (BUG-480). A static data member is the exception that makes
+  `int32[kCount] items; static const int32 kCount = 4;` work: its type resolves alone (`Variable`), and its field
+  joins the object in its place.
+- **Measuring completes first.** `Complete` resolves what the measured value holds - an enum's underlying type
+  (BUG-478), a union's members, a field's object - and lays the value out again, since a layout made while a
+  member was a shell measured the shell.
+- **Template instances** are not pending declarations: an instance is built whole when it is first named. A
+  template whose instance needs a larger instance of itself (`template<T> struct W { W<W<T>>* next; }`) has no
+  last instance: past `TemplateInstantiator::c_MaxInstantiationDepth` instances built inside one another the
+  instantiation fails with `instantiating 'W' goes more than 100 instances deep` (BUG-479), and the annotation
+  check stops a chain of instances made by annotations at the same depth.
+
+This is the shape the incremental front end builds on (roadmap 5.3): a declaration's resolution is a function of
+its declaration and of the answers it asked for, so an edit invalidates the queries whose inputs changed and those
+that asked for them.
 
 ## Query API
 
@@ -336,9 +386,11 @@ QualifiedName, a string), `sizeof...`, fold expressions, and references to other
 - **On demand:** `Evaluate(expr, unitId, bindingScope)` folds any expression when asked (array sizes, enum
   values, global initializers, annotation arguments). `bindingScope` lets a template's `N` fold to its bound
   value.
-- **Order-independent:** `FoldGlobalConstants` is one sweep of the pass-2 fixed point; forward references,
-  chains and diamonds settle across rounds. A const that names itself reports `CyclicDependency` instead of
-  hanging.
+- **Order-independent:** a constant an expression names folds where it is declared, on demand, and while the
+  model resolves the evaluator asks for the declarations it reads (a variable's type, an enum's values, the
+  parts of a measured type: [Declaration queries](#declaration-queries)), so forward references, chains and
+  diamonds fold whatever the order. `FoldGlobalConstants` is one sweep after pass 2 that stores each global's
+  constant start. A const that names itself reports `CyclicDependency` instead of hanging.
 - Folded constants have no storage: a `const` global or local becomes its value.
 
 **Planned:** compile-time evaluation of user functions (constexpr-style) is not implemented.

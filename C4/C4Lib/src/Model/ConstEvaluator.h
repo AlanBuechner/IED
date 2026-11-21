@@ -18,8 +18,9 @@ namespace Scripting
 	/// Folds compile-time constant expressions to a value (doc 02 pass 3). Handles literals,
 	/// arithmetic/bitwise/logical operators on ints and floats, unary +/-/!, identifier references
 	/// to other constants (resolved through the model - so a const may name another const or an
-	/// enum member), sizeof, and parenthesized subexpressions. Order-independent: folds to a
-	/// fixpoint with cycle detection (a const naming itself is CyclicDependency, not a hang).
+	/// enum member), sizeof, and parenthesized subexpressions. Order-independent: a constant it names folds
+	/// first, and while the model resolves it asks for the declarations it reads (DeclarationQueries); a const
+	/// naming itself is CyclicDependency, not a hang.
 	class ConstEvaluator
 	{
 	public:
@@ -37,11 +38,10 @@ namespace Scripting
 		/// an expression: a template's bound value first, then a local constant, then the program's.
 		QueryResult<ConstantValue> EvaluateName(const Core::String& name, uint32 unitId = 0, Scope* bindingScope = nullptr) const;
 
-		/// One program-wide folding sweep (doc 02 pass-2 fixed point): every const variable whose
-		/// initializer is now constant gets its value stored on the symbol. True when anything folded
-		/// this sweep - the resolver iterates until a full sweep changes nothing. Order-independent
-		/// because a const may name another const or an enum member that folds in the same round.
-		static bool FoldGlobalConstants(const ProgramModel& model);
+		/// The program-wide folding sweep, once every declaration is resolved: every global whose initializer is
+		/// constant gets its value stored on the symbol. Order-independent: a constant an initializer names folds
+		/// where it is declared, whether the sweep stored it yet or not.
+		static void FoldGlobalConstants(const ProgramModel& model);
 
 		/// The value a variable of `type` starts holding from the constant `initializer` (StoredConstant): its
 		/// folded value converted to the type, or for a pointer `null` or a string literal.
@@ -73,6 +73,9 @@ namespace Scripting
 		QueryResult<const Type*> LiteralType(const LiteralNode& literal) const;
 		QueryResult<ConstantValue> EvaluateNamed(const Core::String& name, uint32 unitId, Visiting& visiting, Scope* bindingScope) const;
 		QueryResult<ConstantValue> FoldSymbol(const Core::String& name, const SymbolInfo& symbol, uint32 unitId, Visiting& visiting) const;
+		QueryResult<void> TypeKnown(const SymbolInfo& symbol) const;
+		/// While the model resolves: an enum's underlying type is resolved before a constant converts to it.
+		QueryResult<void> Measurable(const Type* type) const;
 		static Core::String LoopMessage(const Visiting& visiting, const SymbolInfo& symbol);
 		static bool IsIntKind(ConstantValue::Kind k) { return k == ConstantValue::Kind::Int64 || k == ConstantValue::Kind::Bool; }
 

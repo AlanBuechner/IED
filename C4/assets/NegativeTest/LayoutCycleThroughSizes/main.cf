@@ -1,0 +1,3 @@
+struct SA { int32[sizeof(SB)] x; }
+struct SB { int32[sizeof(SA)] y; }
+int32 main() { return 0; }

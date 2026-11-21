@@ -85,6 +85,7 @@ include "Types/FunctionPointer.ch"
 include "Types/AliasTemplate.ch"
 include "Types/AliasFields.ch"
 include "Core/ForwardConstUse.ch"
+include "Core/DeclarationOrder.ch"
 include "Types/BraceSlots.ch"
 include "Types/UnionCopies.ch"
 include "Functions/BracedArguments.ch"
@@ -292,6 +293,7 @@ int32 main() {
 	TestAliasTemplate();
 	TestAliasFields();
 	TestForwardConstUse();
+	TestDeclarationOrder();
 	TestBraceSlots();
 	TestUnionCopies();
 	TestBracedArguments();

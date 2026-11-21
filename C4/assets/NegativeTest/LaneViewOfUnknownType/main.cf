@@ -1,0 +1,2 @@
+struct Vec { public union { packed Missing x, y; }; }
+int32 main() { return 0; }

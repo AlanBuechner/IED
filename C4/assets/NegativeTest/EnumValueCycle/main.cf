@@ -1,0 +1,3 @@
+enum EA { X = EB::Y }
+enum EB { Y = EA::X }
+int32 main() { return 0; }

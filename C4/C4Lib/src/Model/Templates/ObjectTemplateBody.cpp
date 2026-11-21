@@ -39,6 +39,15 @@ namespace Scripting
 
 		Result Fail(const Core::String& what) { return Result::Fail(QueryError::NotAValue, what); }
 
+		// `part: why` for a member that does not resolve. A chain of instances that does not end (CyclicDependency) is
+		// passed on as it is, not wrapped once per instance of the chain.
+		template <typename T>
+		Result Fail(const char* part, const QueryResult<T>& failed)
+		{
+			if (failed.error == QueryError::CyclicDependency) return Result::Fail(failed.error, failed.message);
+			return Fail(Core::String(part) + ": " + failed.message);
+		}
+
 	}
 
 	QueryResult<void> ObjectTemplateBody::Build()
@@ -55,7 +64,7 @@ namespace Scripting
 		for (const auto& b : m_Def.objectBody->GetBaseClasses())
 		{
 			auto bt = m_Model.ResolveTypeInternal(*b.m_Type, m_UnitId, m_Binding, nullptr);
-			if (!bt.Ok()) return Fail("base class: " + bt.message);
+			if (!bt.Ok()) return Fail("base class", bt);
 			if (auto checked = ClassHierarchy::CheckCanInherit(&m_Instance, TypeHandle::UnwrapToValue(bt.value)); !checked.Ok()) return checked;
 			m_Instance.AddBaseType(static_cast<const ObjectType*>(TypeHandle::UnwrapToValue(bt.value)));
 		}
@@ -80,7 +89,7 @@ namespace Scripting
 		QueryResult<void> added = Result::Success();
 		if (const auto* nested = dynamic_cast<const ObjectDefinitionNode*>(member)) added = NestedTypes::AddObject(m_Model, owner, *nested);
 		else if (const auto* en = dynamic_cast<const EnumDefinitionNode*>(member)) added = NestedTypes::AddEnum(m_Model, owner, *en);
-		return added.Ok() ? added : Fail("nested type: " + added.message);
+		return added.Ok() ? added : Fail("nested type", added);
 	}
 
 	InstantiationBindings ObjectTemplateBody::OwnBindings() const
@@ -96,7 +105,7 @@ namespace Scripting
 		// A member alias (`alias Type = T;`) is visible to the members after it, and is a member of the instance
 		// as a nested type is (BUG-416): `Box<int32>::Type` and, in a template, `A::Type` name it.
 		auto at = m_Model.ResolveTypeInternal(*alias.GetAliasedType(), m_UnitId, m_Binding, nullptr);
-		if (!at.Ok()) return Fail("alias: " + at.message);
+		if (!at.Ok()) return Fail("alias", at);
 		SymbolInfo sym; sym.kind = SymbolKind::Type; sym.type = at.value; sym.definingUnit = 0;
 		m_Binding->Register(alias.GetNameToken().GetText(), sym);
 		m_Scope->Register(alias.GetNameToken().GetText(), sym);
@@ -106,7 +115,7 @@ namespace Scripting
 	QueryResult<void> ObjectTemplateBody::AddFields(const VariableDefinitionNode& var)
 	{
 		auto vt = m_Model.ResolveTypeInternal(*var.GetType(), m_UnitId, m_Binding, nullptr);
-		if (!vt.Ok()) return Fail("field: " + vt.message);
+		if (!vt.Ok()) return Fail("field", vt);
 		if (var.IsThreadLocal() && !var.IsStatic())
 			return Fail("field '" + var.GetNameToken().GetText() + "' cannot be thread_local: write 'static thread_local'");
 		for (const auto& d : var.GetDeclarators()) // `T first, second;` declares one field per declarator
@@ -196,10 +205,10 @@ namespace Scripting
 	QueryResult<void> ObjectTemplateBody::AddMethod(const FunctionDefinitionNode& fn)
 	{
 		auto rt = m_Model.ResolveTypeInternal(*fn.GetReturnType(), m_UnitId, m_Binding, nullptr);
-		if (!rt.Ok()) return Fail("return type: " + rt.message);
+		if (!rt.Ok()) return Fail("return type", rt);
 		// A parameter of the class's pack (`R Call(Ts... args)`) is one parameter per element, as a function template's is.
 		auto expanded = TemplateInstantiator::ExpandParameters(m_Model, fn, m_Binding, m_UnitId);
-		if (!expanded.Ok()) return Fail("parameter: " + expanded.message);
+		if (!expanded.Ok()) return Fail("parameter", expanded);
 		ObjectType::MethodInfo m;
 		m.mName = fn.GetName()->GetFirstIdentifierToken().GetText();
 		m.m_ReturnType = rt.value;

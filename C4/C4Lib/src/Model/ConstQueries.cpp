@@ -1,4 +1,5 @@
 #include "Model/ConstEvaluator.h"
+#include "Model/Builder/DeclarationQueries.h"
 #include "Model/CompileTimeQueries.h"
 #include "Model/Literals.h"
 #include "Model/ProgramModel.h"
@@ -28,6 +29,11 @@ namespace Scripting
 		if (const std::optional<int64> bytes = SizeOfStringLiteral(query)) return QueryResult<ConstantValue>::Success(ConstantValue::Int(*bytes));
 		auto operand = QueryOperandType(query, unitId, bindingScope);
 		if (!operand.Ok()) return QueryResult<ConstantValue>::Fail(operand.error, operand.message);
+		// While the model resolves, what the operand holds resolves before it is measured; one that cannot (a type
+		// whose declaration fails) is measured as the incomplete type it stays, and a cycle is the answer.
+		if (DeclarationQueries* pending = m_Model.Pending())
+			if (auto complete = pending->Complete(operand.value); complete.error == QueryError::CyclicDependency)
+				return QueryResult<ConstantValue>::Fail(complete.error, complete.message);
 		return CompileTimeQueryValue(query, operand.value);
 	}
 
@@ -73,6 +79,8 @@ namespace Scripting
 			if (const auto* p = dynamic_cast<const PointerType*>(value); p && arrow)
 				value = TypeHandle::UnwrapToValue(p->GetPointeeType());
 			const auto* object = dynamic_cast<const ObjectType*>(value);
+			if (DeclarationQueries* pending = object ? m_Model.Pending() : nullptr)
+				if (auto parts = pending->Parts(*object); !parts.Ok()) return Result::Fail(parts.error, parts.message);
 			const ObjectType::FieldInfo* field = object ? object->GetFieldByName(member->GetMemberNameToken().GetText()) : nullptr;
 			if (!field) return Result::Fail(QueryError::NotFound, "'" + expr->ToString() + "' names no field");
 			return Result::Success(field->m_Type);

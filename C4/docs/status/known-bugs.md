@@ -46,12 +46,26 @@ Next ID: **BUG-484**
 | BUG-421 | C4LSP puts a dependency's declarations in the root project of a multi-project program | Tools | Low |
 | BUG-435 | Intermittent internal compiler error (0xC0000005) or corrupt partition bitcode compiling a large split program | Codegen | High |
 | BUG-441 | `threading.thread.sleep_is_precise` fails in the gates while the machine is busy: sleeps land on the 15.6 ms tick | Runtime | Medium |
+| BUG-481 | A static constant of a class template instance (`Holder<Pair>::Size`) does not fold in a constant expression | Model | Medium |
 
 ---
 
 ## Parser, lexer and preprocessor
 
 ## Model, templates and semantics
+
+### BUG-481 A static constant of a class template instance (`Holder<Pair>::Size`) does not fold in a constant expression
+- **Area:** Model
+- **Severity:** Medium
+- **Status:** Open
+- **Found:** 2026-11-20
+- **Symptom:** With `template<T> struct Holder { T value; static const int32 Size = sizeof(T); }`, `int32[Holder<Pair>::Size]
+  a;` (a global or a local) is `the array size 'Holder<Pair>::Size' is not a constant expression: no constant named
+  Holder::Size`: the constant's path drops the template arguments and looks the template's bare name up.
+- **Repro:** the template above, `struct Pair { uint16 a; uint16 b; }` and `int32 main() { int32[Holder<Pair>::Size] local;
+  return (int32)sizeof(local); }`.
+- **Where:** `Model/ConstEvaluator.cpp` (`QualifiedConstantPath`, `EvaluateNamed`).
+- **Notes:** resolve the qualifier as a type when a segment has arguments, then read the static in the instance's scope.
 
 ### BUG-441 `threading.thread.sleep_is_precise` fails in the gates while the machine is busy: sleeps land on the 15.6 ms tick
 - **Area:** Runtime

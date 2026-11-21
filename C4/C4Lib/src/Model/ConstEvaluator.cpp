@@ -1,4 +1,5 @@
 #include "Model/ConstEvaluator.h"
+#include "Model/Builder/DeclarationQueries.h"
 #include <algorithm>
 #include <cmath>
 #include "Model/ConstConversions.h"
@@ -94,6 +95,7 @@ namespace Scripting
 	// constant reached again while its own initializer is folding depends on itself.
 	QueryResult<ConstantValue> ConstEvaluator::FoldSymbol(const Core::String& name, const SymbolInfo& symbol, uint32 unitId, Visiting& visiting) const
 	{
+		if (auto typed = TypeKnown(symbol); !typed.Ok()) return QueryResult<ConstantValue>::Fail(typed.error, typed.message);
 		if (const Type* type = TypeHandle::UnwrapToValue(symbol.type); type && type->IsNormalized())
 			return QueryResult<ConstantValue>::Fail(QueryError::NotAValue, "'" + name + "' is a normalized value, a fraction the constant does not fold over");
 		const bool unfolded = symbol.kind == SymbolKind::Variable && symbol.isConst && symbol.constValue.IsNone() && symbol.initializer;
@@ -101,11 +103,29 @@ namespace Scripting
 		if (std::find(visiting.begin(), visiting.end(), &symbol) != visiting.end())
 			return QueryResult<ConstantValue>::Fail(QueryError::CyclicDependency, LoopMessage(visiting, symbol));
 		visiting.Push(&symbol);
+		const DeclarationQueries::Step folding(m_Model.Pending(), &symbol, symbol.plainName);
 		auto r = ConstEvaluator(m_Model, symbol.declaringScope).EvaluateInner(symbol.initializer, symbol.definingUnit, visiting, nullptr);
 		visiting.Remove(visiting.Count() - 1);
 		if (r.Ok()) r = StoredConstant(r.value, symbol.type);
 		if (!r.Ok() && r.error == QueryError::NotAValue) r.message = "'" + name + "' starts at runtime: " + r.message;
 		return r;
+	}
+
+	// While the model resolves: the variable's type, and the underlying type of an enum it is, resolve before its
+	// value converts to them.
+	QueryResult<void> ConstEvaluator::TypeKnown(const SymbolInfo& symbol) const
+	{
+		DeclarationQueries* pending = m_Model.Pending();
+		if (!pending || symbol.kind != SymbolKind::Variable) return QueryResult<void>::Success();
+		if (auto typed = pending->Variable(symbol); !typed.Ok()) return typed;
+		return Measurable(symbol.type);
+	}
+
+	QueryResult<void> ConstEvaluator::Measurable(const Type* type) const
+	{
+		DeclarationQueries* pending = m_Model.Pending();
+		const auto* enumeration = pending ? dynamic_cast<const EnumType*>(TypeHandle::UnwrapToValue(type)) : nullptr;
+		return enumeration ? pending->Enum(*enumeration) : QueryResult<void>::Success();
 	}
 
 	Core::String ConstEvaluator::LoopMessage(const Visiting& visiting, const SymbolInfo& symbol)
@@ -167,6 +187,7 @@ namespace Scripting
 		auto value = AddressLiteral(initializer);
 		if (!value.Ok()) value = Evaluate(initializer, unitId, bindingScope);
 		if (!value.Ok()) return value;
+		if (auto known = Measurable(type); !known.Ok()) return QueryResult<ConstantValue>::Fail(known.error, known.message);
 		return StoredConstant(value.value, type);
 	}
 
@@ -384,10 +405,9 @@ namespace Scripting
 	}
 
 
-	// --- Program-wide constant folding (doc 02 pass-2 fixed point) ----------------------------
-	bool ConstEvaluator::FoldGlobalConstants(const ProgramModel& model)
+	// --- Program-wide constant folding ---------------------------------------------------------
+	void ConstEvaluator::FoldGlobalConstants(const ProgramModel& model)
 	{
-		bool changed = false;
 		model.Symbols()->ForEachScopedSymbol([&](const Core::String&, SymbolInfo* info, const Scope& scope)
 		{
 			// Fold EVERY global's constant initializer (const AND non-const): codegen uses the folded value as the
@@ -397,13 +417,8 @@ namespace Scripting
 				return;
 			ConstEvaluator eval(model, &scope);
 			auto v = eval.EvaluateStart(info->initializer, info->type);
-			if (v.Ok() && !v.value.IsNone())
-			{
-				info->constValue = v.value; // mutable until the model is sealed
-				changed = true;
-			}
+			if (v.Ok() && !v.value.IsNone()) info->constValue = v.value; // mutable until the model is sealed
 		});
-		return changed;
 	}
 
 } // namespace Scripting

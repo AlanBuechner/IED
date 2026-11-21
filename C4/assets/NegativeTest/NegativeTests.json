@@ -3014,5 +3014,34 @@
     "ReferenceVariableBoundToPartOfATemporary": {
         "expect": ["cannot bind 'kept' to part of the temporary a call returned: a reference names a location that lasts; copy it into a variable"],
         "reason": "BUG-453: a reference bound to part of a call's temporary named an object that ends with its statement."
+    },
+    "AliasCycle": {
+        "expect": ["main.cf (1:12) error: unresolved alias target for 'CA': the alias 'CA' depends on itself: CA -> CB -> CC -> CA"],
+        "reason": "R9: aliases that name each other in a loop depend on themselves; each was 'the alias is not resolved yet', with no cycle."
+    },
+    "LayoutCycleThroughSizes": {
+        "expect": ["main.cf (1:19) error: unresolved type for field 'x' in 'SA': the array size 'sizeof(SB)' is not a constant expression: the layout of 'SA' depends on itself: SA -> SA::x -> SB -> SB::y -> SA"],
+        "reason": "R9: two types whose sizes need each other say so with the chain of fields; each was 'sizeof of incomplete type'."
+    },
+    "EnumValueCycle": {
+        "expect": ["main.cf (1:1) error: unresolved enum 'EA': member 'X': the enum 'EA' depends on itself: EA -> EB -> EA"],
+        "reason": "R9: enums whose values name each other depend on themselves; each was 'no constant named EB::Y'."
+    },
+    "ExtentFromOwnSize": {
+        "expect": ["main.cf (1:7) error: unresolved type for variable 'g_Arr': the array size 'kN' is not a constant expression: the type of 'g_Arr' depends on itself: g_Arr -> kN -> g_Arr"],
+        "reason": "R9: a cycle through a constant names the constant; it was ''kN' starts at runtime: the operand has no type'."
+    },
+    "TemplateWithoutLastInstance": {
+        "expect": ["main.cf (2:1) error: unresolved type for variable 'g_W': instantiating 'W' goes more than 100 instances deep"],
+        "reject": ["cannot instantiate"],
+        "reason": "BUG-479: a template whose instance needs a larger instance of itself ran the compiler out of stack, with no message."
+    },
+    "LaneViewOfUnknownType": {
+        "expect": ["main.cf (1:29) error: unresolved lane type for a lane view in 'Vec': type not found: Missing"],
+        "reason": "R9: a lane view whose lane type did not resolve was dropped without a word."
+    },
+    "UsersOfAnUnresolvedAlias": {
+        "expect": ["main.cf (2:16) error: unresolved type for field 'first' in 'Owner': the alias 'Handle' does not resolve"],
+        "reason": "R9: what names a declaration that failed says which one; the alias's own error says why, once."
     }
 }

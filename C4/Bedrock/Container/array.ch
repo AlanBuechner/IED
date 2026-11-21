@@ -122,3 +122,4 @@ namespace Core
 	// Gives the empty Array<T> at `array` `count` elements of `element`, stored as Array<T> stores them and zero rather
 	// than created: the caller constructs them. False when the array is not empty.
 	bool ResizeEmptyArray(void* array, int64 count, ElementStorage element);
+}

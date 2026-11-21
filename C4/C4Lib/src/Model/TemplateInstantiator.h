@@ -12,6 +12,11 @@ namespace Scripting
 	class TemplateInstantiator
 	{
 	public:
+		/// How many instances may be being built inside one another: past it, a template whose instance needs a larger
+		/// instance of itself (`template<T> struct W { W<W<T>>* next; }`) is an error instead of a stack that runs out.
+		/// Each level takes a few kilobytes of the compiler's stack.
+		static constexpr uint32 c_MaxInstantiationDepth = 100;
+
 		/// The type template `name` found from `declScope`, for the arguments a use writes. The arguments resolve
 		/// in `outerBinding` (the enclosing instantiation's bindings, or null), then from `argContext`, the scope
 		/// the use is written in; the instance's body sees its parameters, then the template's declaring scope.

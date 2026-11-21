@@ -25,6 +25,7 @@
 namespace Scripting
 {
 	struct AsmStatementNode;
+	class DeclarationQueries;     // the pending declarations of a model being built (Model/Builder)
 	class TemplateDefinitionNode; // template parameter list (parser node)
 	class ObjectDefinitionNode;    // object template body
 	class FunctionDefinitionNode;  // function template body
@@ -113,6 +114,10 @@ namespace Scripting
 		/// every shell, before pass 2 resolves them. Queries then work throughout resolution and
 		/// after - a phase never distinguishes "resolving" from "resolved".
 		void BeginResolution() { m_Valid = true; }
+
+		/// While pass 2 runs: the declarations still to resolve, which a query asks for what it is about to read (an
+		/// alias's target, an enum's values, a variable's type, an object's parts). Null before and after.
+		DeclarationQueries* Pending() const { return m_Pending; }
 
 		// ===========================================================================
 		// TYPE QUERIES (doc 04). Input is the type AS WRITTEN - a QualTypeNode from the AST.
@@ -340,6 +345,7 @@ namespace Scripting
 
 	private:
 		friend class ModelBuilder;
+		friend class DeclarationQueries;   // is the model's pending declarations while it lives
 		friend class TemplateInstantiator; // builds concrete types/records from template defs (doc 05)
 		friend class TemplateArgumentResolver; // resolves and binds template arguments
 		friend class ObjectTemplateBody;  // builds an object-template instance's members
@@ -390,6 +396,8 @@ namespace Scripting
 		/// nullptr when any segment is missing or not visible. Every name query goes through this.
 		const SymbolInfo* FindVisibleQualified(const Core::String& name, uint32 unitId, const Scope* context = nullptr) const;
 
+		DeclarationQueries* m_Pending = nullptr;
+		mutable uint32 m_InstantiationDepth = 0; // object instances being built inside one another (TemplateInstantiator)
 		std::unique_ptr<ModelWrites> m_Writes; // before the store and the table, which ask it
 		std::unique_ptr<TypeStore> m_Types;
 		std::unique_ptr<SymbolTable> m_Symbols;
