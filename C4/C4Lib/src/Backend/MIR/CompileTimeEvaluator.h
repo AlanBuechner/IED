@@ -37,6 +37,10 @@ namespace Scripting
 		/// While the model resolves: the types `record` takes and returns, made whole before its body lowers, and every
 		/// type its body's slots hold, before it runs.
 		QueryResult<void> CompleteSignature(const FunctionRecord& record);
+		/// While the model resolves: each type `record`'s body writes (a local's, a cast's, a composite literal's) made whole
+		/// before the body lowers, which reads their members - a struct only the body uses may be declared after the constant.
+		/// One that cannot be whole yet is left to the lowering, which says so when the body needs it.
+		void CompleteWrittenTypes(const FunctionRecord& record);
 		QueryResult<void> CompleteTypes(const HIRFunction& body);
 
 		ProgramModel& m_Model;

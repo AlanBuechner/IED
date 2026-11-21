@@ -201,6 +201,22 @@ namespace Testing
 		TEST_ASSERT(annotations.Ok() && annotations.value[0].arguments[0].value.AsInt() == 25); // an annotation argument
 	}
 
+	// A field's extent folds in pass 2, before the struct the callee builds only inside its body is laid out (it is
+	// declared after the field's type): the body's types are completed as it lowers, not refused as "does not compile".
+	void CompileTimeTest::ABodysOwnTypesAreCompletedInPassTwo()
+	{
+		Program p("[compile_time] int32 Area() { Rect r; r.w = 3; r.h = 4; Rect copy = r; return copy.w * copy.h; }\n"
+			"struct Holder { public int32[Area()] cells; }\n"
+			"enum Size { Whole = Area() }\n"
+			"struct Rect { public int32 w; public int32 h; }\n");
+		TEST_ASSERT(!p.Reported("does not compile"));
+		const ObjectType* holder = nullptr;
+		for (const ObjectType* object : p.Model().ObjectTypes())
+			if (object->GetName() == "Holder") holder = object;
+		TEST_ASSERT(holder && holder->GetSize() == 48);
+		TEST_ASSERT(p.Model().QueryConstant("Size::Whole").value.AsInt() == 12);
+	}
+
 	void CompileTimeTest::AConstantCallsOnlyAMarkedFunction()
 	{
 		Program p("int32 Plain(int32 x) { return x; }\n"

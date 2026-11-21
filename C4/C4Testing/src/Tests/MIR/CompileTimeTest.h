@@ -29,6 +29,8 @@ namespace Testing
 		TEST_FUNC(Mir.CompileTime)
 		void EveryConstantPositionCallsThroughTheModel();
 		TEST_FUNC(Mir.CompileTime)
+		void ABodysOwnTypesAreCompletedInPassTwo();
+		TEST_FUNC(Mir.CompileTime)
 		void AConstantCallsOnlyAMarkedFunction();
 		TEST_FUNC(Mir.CompileTime)
 		void AGlobalTableStartsAsData();

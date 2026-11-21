@@ -111,8 +111,9 @@ interpreted over folded arguments.
   once; a constant in a function's own body that needs that function is refused (`'F' cannot run at compile time
   while it is compiled`). Only bodies that compiled are kept: one that failed while the model resolved is lowered
   again when asked later. While the model is still resolving (a field's extent or an enum value folds in pass 2),
-  the types a callee takes and returns are completed before its body lowers, and every type its slots hold before it
-  runs (`DeclarationQueries::Complete`), so it never reads a half-built layout; the callee itself is resolved first
+  the types a callee takes and returns, and every type its body writes (a local's, a cast's, a composite literal's: a
+  struct only the body uses may be declared after the constant), are completed before its body lowers, and every type
+  its slots hold before it runs (`DeclarationQueries::Complete`), so it never reads a half-built layout; the callee itself is resolved first
   (`DeclarationQueries::Functions`: free functions resolve last in pass 2), and a cycle through its signature is said
   as R9 says one (`the alias 'Row' depends on itself: Row -> Count -> Row`).
 - **Where a constant calls it.** `ConstEvaluator::FoldCall` (`Model/ConstCalls.cpp`): a call written with a

@@ -7,6 +7,8 @@
 #include "Model/SymbolTable.h"
 #include "Model/TypeHandle.h"
 #include "Model/Types/FunctionType.h"
+#include "Parser/Nodes/Declarations/NamespaceQualifiedNameNode.h"
+#include "Parser/Nodes/Declarations/QualTypeNode.h"
 #include <algorithm>
 #include <string>
 
@@ -72,6 +74,7 @@ namespace Scripting
 			// The types it takes and returns are whole before its body lowers (the body builds and reads them).
 			if (auto signature = CompleteSignature(record); !signature.Ok())
 				return QueryResult<const HIRFunction*>::Fail(signature.error, "'" + CompileTimeName(record) + "' cannot run at compile time yet: " + signature.message);
+			CompleteWrittenTypes(record);
 			// Only a body that compiled is kept: one that failed while the model resolved may compile once it has.
 			QueryResult<std::unique_ptr<HIRFunction>> lowered = Lower(record);
 			if (!lowered.Ok()) return QueryResult<const HIRFunction*>::Fail(lowered.error, lowered.message);
@@ -91,6 +94,29 @@ namespace Scripting
 		for (const FunctionType::ParameterInfo& parameter : record.type->GetParameters())
 			if (auto taken = pending->Complete(parameter.m_Type); !taken.Ok()) return taken;
 		return QueryResult<void>::Success();
+	}
+
+	void CompileTimeEvaluator::CompleteWrittenTypes(const FunctionRecord& record)
+	{
+		DeclarationQueries* pending = m_Model.Pending();
+		if (!pending || !record.bodyNode) return;
+		std::vector<const AstNode*> open{ record.bodyNode };
+		while (!open.empty())
+		{
+			const AstNode* node = open.back();
+			open.pop_back();
+			Ref<QualTypeNode> written;
+			if (const auto* type = dynamic_cast<const QualTypeNode*>(node)) written = QualTypeNode::FromParts(type->BaseName(), type->FuncPtrType(), {}, false);
+			else if (const auto* name = dynamic_cast<const NamespaceQualifiedNameNode*>(node))
+				written = QualTypeNode::FromParts(NamespaceQualifiedNameNode::FromSegments(name->GetSegments()), Ref<AstNode>(), {}, false);
+			// A name that is no type (a function, a variable, a template's parameter), or a type that cannot be whole yet (the
+			// one being resolved, named through a pointer), is the body's lowering's to report if the body needs it whole.
+			if (written && written->BaseName())
+				if (auto resolved = m_Model.ResolveTypeInUnitContext(*written, record.LookupUnit(), record.scope); resolved.Ok() && resolved.value)
+					(void)pending->Complete(resolved.value);
+			for (const Ref<AstNode>& child : node->Children())
+				if (child) open.push_back(child.Get());
+		}
 	}
 
 	QueryResult<void> CompileTimeEvaluator::CompleteTypes(const HIRFunction& body)
