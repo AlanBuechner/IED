@@ -18,7 +18,7 @@ namespace Testing
 			host.targetCpu = "x86-64-v3";
 			host.targetFeatures = "+avx2,+fma,-avx512f";
 			host.debugInfo = true;
-			host.projects.push_back({ "engine", {}, { 0 } });
+			host.projects.push_back({ "engine", {}, { 0 }, false }); // reflect = "off"
 			host.projects.push_back({ "game", { 0 }, { 1, 2 } });
 			host.folderCount = 3;
 			InterfaceFile header;
@@ -68,6 +68,7 @@ namespace Testing
 		TEST_ASSERT_EQ(read.projects.size(), (size_t)2);
 		TEST_ASSERT(read.projects[1].name == "game" && read.projects[1].dependencies == std::vector<uint32>{ 0 });
 		TEST_ASSERT(read.projects[1].folders == (std::vector<uint32>{ 1, 2 }));
+		TEST_ASSERT(!read.projects[0].reflect && read.projects[1].reflect); // a project's reflect setting reaches its scripts (D-89)
 		TEST_ASSERT_EQ(read.folderCount, (uint32)3);
 		TEST_ASSERT_EQ(read.files.size(), (size_t)2);
 		const InterfaceFile& header = read.files[0];

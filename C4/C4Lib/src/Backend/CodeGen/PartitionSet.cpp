@@ -1,5 +1,6 @@
 #include "Backend/CodeGen/PartitionSet.h"
 #include "Backend/CodeGen/CensusTypes.h"
+#include "Backend/Lowering/ScriptLowering.h"
 #include "Compiler/IrVerification.h"
 #include "Model/ProgramModel.h"
 #include "Model/Types/QualifiedName.h"
@@ -70,13 +71,14 @@ namespace Scripting
 		for (const CensusFunction* counter : Partition(i).census().TakeFunctions()) EmitterOf(i).Emit(*counter->tree);
 	}
 
-	std::vector<std::string> PartitionSet::NamedButNotLowered(const LoweredProgram& program)
+	std::vector<std::string> PartitionSet::NamedButNotLowered(const LoweredProgram& program, const ScriptLowering* script)
 	{
 		std::vector<std::string> missing;
 		for (unsigned i = 0; i < Count(); ++i)
 		{
 			for (const FunctionRecord* record : Partition(i).TakeNewFunctions())
-				if (HasBody(*record) && !record->isLocal && !program.lowered.count(record)) missing.push_back(record->mangledName.c_str());
+				if (HasBody(*record) && !record->isLocal && !program.lowered.count(record) && !(script && script->IsHostUnit(record->definingUnit)))
+					missing.push_back(record->mangledName.c_str());
 			for (const Type* type : Partition(i).census().Unplanned()) missing.push_back(std::string("the census counter of ") + QualifiedName(type).c_str());
 		}
 		return missing;

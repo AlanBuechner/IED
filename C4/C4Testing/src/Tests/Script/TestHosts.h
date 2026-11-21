@@ -26,6 +26,7 @@ namespace Testing
 		std::string name;
 		std::vector<std::string> depends;
 		std::vector<std::pair<std::string, std::string>> files;
+		bool reflect = true; // its `reflect` setting (D-89)
 	};
 
 	/// The host of `projects`, as `C4.exe --projects` builds one, the last the root (with the entry point), with the

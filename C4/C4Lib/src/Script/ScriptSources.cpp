@@ -56,6 +56,7 @@ namespace Scripting
 			{
 				Project project;
 				project.name = written.name;
+				project.reflect = written.reflect;
 				for (uint32 used : written.dependencies) project.depends.push_back(host.projects[used].name);
 				list.projects.push_back(std::move(project));
 			}

@@ -160,10 +160,10 @@ One binary file:
 
 | Section | Content |
 |---|---|
-| Header | magic `C4IF`, format version (6), build id, compiler version |
+| Header | magic `C4IF`, format version (8), build id, compiler version |
 | Target | the host's LLVM CPU name and feature string (D-62); a target the reading compiler does not know is refused |
 | Debug information | whether the host was built with `-g`: its scripts are debugged at first (section 6.4) |
-| Projects | each project's name and dependencies (D-59), so includes resolve as in the host |
+| Projects | each project's name and dependencies (D-59), so includes resolve as in the host, and its `reflect` setting (D-89), so a script's instance of its template is in reflection's scope as the host's would be |
 | Folders | how many source folders the host registered; each project names its own |
 | Files | every source of the host in registration order (its sources, the Bedrock files it uses, the prelude): its unit id, project, folder and path in it (or its path in the library), whether it is a library file or the prelude, its **interface text**, whether it is a unit of C bindings and the binding units it includes (the interop pass makes a header's bindings a unit of their own: a binding two units repeat is one declaration in a script's compile, as in the host's), the macros it exports, and the templates it declares and those it adds to (section 4, step 3) |
 | Symbols | the names of the table's entries, in table order |
@@ -173,7 +173,7 @@ One binary file:
 
 A file's **interface text** is its text as the host's parse read it (macros expanded and conditional blocks resolved
 through its macro layout; a header's C bindings are their own interface file), with the body of every function that
-is not part of a template
+is not part of a template and not `[compile_time]`
 removed: a definition becomes a declaration, an out-of-line method definition disappears (its declaration in the
 class stays). Template bodies stay, as does everything else: types, fields and their initializers, enums,
 global declarations with their initializers (constant folding needs them), aliases, annotations, default
@@ -183,8 +183,10 @@ header names the line it names in the host's source.
 A small Bedrock program's interface is about half a megabyte: 130 KB of text for 62 files, 340 KB of inline
 bodies, 1300 symbols. The vendored LLVM is built without zlib or zstd, so the file is not compressed.
 
-Nothing in C4 evaluates a function body at compile time (there is no `constexpr` and no deduced return type), so
-a declaration is all a script needs of a non-template function.
+A declaration is all a script needs of a non-template function, but for one marked `[compile_time]` (D-91): a
+script's constant may call it, and compile-time evaluation runs its body, so its definition stays whole (one a
+source file defines is kept there, beside the header's declaration). Called at run time, the script uses the host's
+code when the host's table names it (section 4.2), else its own.
 
 ### 3.3 Inline bodies
 

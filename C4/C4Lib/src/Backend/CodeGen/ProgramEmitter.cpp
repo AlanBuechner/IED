@@ -52,7 +52,7 @@ namespace Scripting
 		if (!m_Reflection.Emit(model, program, settings.reflectionTag, m_Errors, pool)) return false;
 		Timed("reflection", step);
 		m_Partitions.DefineCensusCounters(pool); // what the startup code and the harness allocate
-		if (!EverythingNamedLowered(program, error)) return false;
+		if (!EverythingNamedLowered(program, settings.script, error)) return false;
 		if (m_Partitions.Split() && settings.copies != PartitionCopies::None)
 			EmitImports(m_Partitions, model, program, settings.copies == PartitionCopies::Inline, pool);
 		MaterializeNamedGlobals();
@@ -146,9 +146,9 @@ namespace Scripting
 		if (DebugInfo* debug = home.Debug()) debug->DescribeGlobal(*storage, info, declaredIn);
 	}
 
-	bool ProgramEmitter::EverythingNamedLowered(const LoweredProgram& program, std::string* error)
+	bool ProgramEmitter::EverythingNamedLowered(const LoweredProgram& program, const ScriptLowering* script, std::string* error)
 	{
-		const std::vector<std::string> missing = m_Partitions.NamedButNotLowered(program);
+		const std::vector<std::string> missing = m_Partitions.NamedButNotLowered(program, script);
 		if (missing.empty()) return true;
 		std::string names;
 		for (const std::string& name : missing) names += (names.empty() ? "" : ", ") + name;

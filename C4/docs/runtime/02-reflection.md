@@ -83,13 +83,15 @@ handle (as a primitive's does).
 (through its fields, array elements and template arguments, as the serializer walks it), is a compile error at the
 type that is out: `error: 'Secret' is out of reflection's scope (its [reflect("off")] at main.cf (5:2)), but
 ToJson<Save> reads it through reflection (Save.secret): bring it back with [reflect("on")], or do not pass it there`. A
-member function template (`JsonFile::ReadNext<T>`) is not checked yet. A lookup by name at run time (`Reflection::FindType("Game::Secret")`) cannot be
-checked: it finds no entity, as for a name the program never had.
+member function template is checked the same way (`JsonFileStream::ReadNext<T>`: `ReadNext<Save> reads it through
+reflection`). A lookup by name at run time (`Reflection::FindType("Game::Secret")`) cannot be checked: it finds no
+entity, as for a name the program never had.
 
 **A script host.** The interface lists the types the host registers (section 1); a script registers its own types and
 instances and never a type its host declares, so a host type out of the host's scope is registered by no one. A host
-project's `reflect = "off"` is not in the interface: a script that makes an instance of such a project's template
-registers that instance (it is the script's), unless the template's own `[reflect("off")]` says otherwise.
+project's `reflect = "off"` is in the interface (each project's setting, [04 section 3.2](04-scripting.md)): an instance a
+script makes of such a project's template is out of the script's scope as it would be in the host, unless the template's
+own `[reflect("on")]` brings it back.
 
 **What it saves.** The IED server (`-O3 -g --incremental --script-host`) with its own project opted out, as an example
 (it is not shipped that way: it reads its types at run time): the reflection image's object 15.9 MB to 12.0 MB (Bedrock's

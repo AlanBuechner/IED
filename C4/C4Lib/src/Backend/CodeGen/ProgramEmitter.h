@@ -73,7 +73,7 @@ namespace Scripting
 		void MaterializeGlobals(const ProgramModel& model, bool every);
 		void MaterializeNamedGlobals();
 		void Materialize(const SymbolInfo& info, const Scope& declaredIn);
-		bool EverythingNamedLowered(const LoweredProgram& program, std::string* error);
+		bool EverythingNamedLowered(const LoweredProgram& program, const ScriptLowering* script, std::string* error);
 		void FinishModules(const ProgramModel& model, const EmitSettings& settings, WorkerPool& pool);
 		/// The script-mode passes over the finished module (Script/ScriptModulePasses).
 		void ApplyScriptLowering(const ScriptLowering& script);

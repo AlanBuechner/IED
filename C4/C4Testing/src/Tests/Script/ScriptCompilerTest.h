@@ -37,6 +37,10 @@ namespace Testing
 		TEST_FUNC(Script.Compiler)
 		void ReflectionHoldsOnlyTheScriptsOwn();
 		TEST_FUNC(Script.Compiler)
+		void AHostProjectsReflectOffReachesItsScripts();
+		TEST_FUNC(Script.Compiler)
+		void AScriptConstantRunsAHostCompileTimeFunction();
+		TEST_FUNC(Script.Compiler)
 		void HostBodiesAreInlined();
 		TEST_FUNC(Script.Compiler)
 		void ImportingCOrCppIsAnError();

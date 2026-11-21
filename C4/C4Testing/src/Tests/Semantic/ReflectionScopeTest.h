@@ -26,6 +26,8 @@ namespace Testing
 		TEST_FUNC(Semantic.ReflectionScope)
 		void ASerializerOfAnOutOfScopeTypeIsAnError();
 		TEST_FUNC(Semantic.ReflectionScope)
+		void AMemberSerializerOfAnOutOfScopeTypeIsAnError();
+		TEST_FUNC(Semantic.ReflectionScope)
 		void AWrongReflectArgumentIsAnError();
 	};
 } // namespace Testing

@@ -318,6 +318,43 @@ namespace Testing
 		}
 	}
 
+	// A host project's reflect = "off" reaches its scripts through the interface (D-89): a script's instance of that project's
+	// template is out of reflection's scope as the host's would be; one of another project's template is in.
+	void ScriptCompilerTest::AHostProjectsReflectOffReachesItsScripts()
+	{
+		static const TestHost host = MakeProjectTestHost({
+			{ "Engine", {}, { { "engine.ch", "namespace Engine { template<T> struct Box { public T value; } }\n" } }, false },
+			{ "Game", { "Engine" }, {
+				{ "game.ch", "namespace Game { template<T> struct Crate { public T value; } }\n" },
+				{ "main.cf", "include \"engine.ch\"\ninclude \"game.ch\"\nint32 main() { Engine::Box<int32> b; b.value = 0; return b.value; }\n" } } },
+		});
+		TEST_ASSERT_MSG(host.diagnostics.find("error") == std::string::npos, host.diagnostics.c_str());
+		TEST_ASSERT(!host.interface.projects[0].reflect && host.interface.projects[1].reflect);
+		CompiledScript script = CompileTestScript(host, "include \"engine.ch\"\ninclude \"game.ch\"\n"
+			"int32 Use() { Engine::Box<int64> b; b.value = 1; Game::Crate<int64> c; c.value = 2; return (int32)(b.value + c.value); }\n");
+		TEST_ASSERT(Compiled(script));
+		const std::vector<std::string> types = ImageTypes(*script.module);
+		TEST_ASSERT(!Lists(types, "Engine::Box<int64>"));
+		TEST_ASSERT(Lists(types, "Game::Crate<int64>"));
+		TEST_PASSED();
+	}
+
+	// A script's constant calls the host's [compile_time] functions (D-91): the interface keeps their bodies - one defined
+	// in a header, one declared there and defined in a source file.
+	void ScriptCompilerTest::AScriptConstantRunsAHostCompileTimeFunction()
+	{
+		static const TestHost host = MakeTestHost({
+			{ "math.ch", "namespace Math { [compile_time] int32 Square(int32 x) { return x * x; } [compile_time] int32 Cube(int32 x); }\n" },
+			{ "math.cf", "include \"math.ch\"\nnamespace Math { int32 Cube(int32 x) { return Square(x) * x; } }\n"
+				"int32 main() { return Math::Cube(1) - 1; }\n" } });
+		TEST_ASSERT_MSG(host.diagnostics.find("error") == std::string::npos, host.diagnostics.c_str());
+		CompiledScript script = CompileTestScript(host, "include \"math.ch\"\nint32[Math::Square(3)] g_Grid;\n"
+			"int64 Size() { int32[Math::Cube(2)] local; return sizeof(g_Grid) + sizeof(local); }\n");
+		TEST_ASSERT(Compiled(script));
+		TEST_ASSERT_EQ(Returned(*script.module, "Size"), (int64)(9 * 4 + 8 * 4));
+		TEST_PASSED();
+	}
+
 	// A script whose project depends on Engine alone reads Engine and Core, and Tools for its addition to Engine's Box -
 	// not the root's main.
 	void ScriptCompilerTest::ACompileReadsOnlyWhatItsProjectReaches()

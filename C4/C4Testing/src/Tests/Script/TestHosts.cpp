@@ -48,7 +48,11 @@ namespace Testing
 		CompilerInstance compiler;
 		SourceManager& sources = compiler.GetSourceManager();
 		ProjectList list;
-		for (const TestProject& project : projects) list.projects.push_back({ project.name, {}, {}, {}, project.depends });
+		for (const TestProject& project : projects)
+		{
+			list.projects.push_back({ project.name, {}, {}, {}, project.depends });
+			list.projects.back().reflect = project.reflect;
+		}
 		list.root = projects.back().name;
 		ProjectSetResult checked = ProjectSet::Check(std::move(list));
 		if (!checked.set)

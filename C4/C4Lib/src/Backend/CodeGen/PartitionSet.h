@@ -13,6 +13,7 @@
 namespace Scripting
 {
 	class ProgramModel;
+	struct ScriptLowering;
 
 	/// A lowered tree and the partition it is emitted into.
 	struct Placed
@@ -60,8 +61,9 @@ namespace Scripting
 		void EmitCopies(const ProgramModel& model, const std::vector<std::vector<const HIRFunction*>>& copies, WorkerPool& pool);
 		/// What code emitted since the last call names that `program` did not lower - a function with a body of its own (a
 		/// nested one comes with its parent), a census counter - each by its name: none, unless lowering and codegen
-		/// disagree about what code names (an internal error).
-		std::vector<std::string> NamedButNotLowered(const LoweredProgram& program);
+		/// disagree about what code names (an internal error). A script's (`script` set) names of its host's functions are the
+		/// host's code, which it never lowers (a [compile_time] one has its body in the interface).
+		std::vector<std::string> NamedButNotLowered(const LoweredProgram& program, const ScriptLowering* script);
 		/// The static locals every other partition defines, declared in partition 0 for its GC roots.
 		void DeclareOthersStaticStorage();
 		/// The verifier's diagnostic of the first invalid module, naming the culprit; none when every module is valid.

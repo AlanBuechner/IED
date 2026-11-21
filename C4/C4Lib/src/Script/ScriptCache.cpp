@@ -113,7 +113,7 @@ namespace Scripting
 				for (uint32 used : project.dependencies) AddNumber(digest, used);
 				digest.Add("|");
 				for (uint32 folder : project.folders) AddNumber(digest, folder);
-				digest.Add("|");
+				digest.Add(project.reflect ? "|" : "|off|");
 			}
 			AddNumber(digest, host.rootProject);
 			AddNumber(digest, host.folderCount);

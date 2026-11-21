@@ -2,6 +2,7 @@
 #include "Compiler/CompilerInstance.h"
 #include "Compiler/SourceMacros.h"
 #include "Compiler/Version.h"
+#include "Model/CompileTimeMark.h"
 #include "Model/ProgramModel.h"
 #include "Script/InterfaceText.h"
 #include "Script/TemplateNames.h"
@@ -42,6 +43,7 @@ namespace Scripting
 			for (uint32 p = 0; p < set.Count(); ++p)
 			{
 				projects[p].name = set.At(p).name;
+				projects[p].reflect = set.At(p).reflect;
 				for (const std::string& depended : set.At(p).depends)
 					for (uint32 q = 0; q < set.Count(); ++q)
 						if (set.At(q).name == depended) projects[p].dependencies.push_back(q);
@@ -92,6 +94,22 @@ namespace Scripting
 			}
 			return definitions;
 		}
+
+		// The definitions of `[compile_time]` functions: the interface keeps their bodies, which a script's constants run.
+		std::unordered_set<const AstNode*> CompileTimeDefinitions(const ProgramModel& model)
+		{
+			std::unordered_set<const AstNode*> definitions;
+			Core::Vector<const FunctionRecord*> records;
+			model.AllFunctionRecords(records);
+			for (const FunctionRecord* record : records)
+			{
+				if (!record->bodyNode || !IsCompileTime(*record)) continue;
+				for (const AstNode* declaration : record->declarations)
+					if (const auto* fn = dynamic_cast<const FunctionDefinitionNode*>(declaration); fn && fn->GetBody().Get() == record->bodyNode)
+						definitions.insert(fn);
+			}
+			return definitions;
+		}
 	}
 
 	std::optional<HostInterface> BuildInterface(CompilerInstance& compiler, const std::unordered_map<std::string, MacroTable>& exportedMacros,
@@ -99,6 +117,7 @@ namespace Scripting
 	{
 		const SourceManager& sources = compiler.GetSourceManager();
 		const std::unordered_set<const AstNode*> declaredElsewhere = DeclaredElsewhere(compiler.GetProgramModel());
+		const std::unordered_set<const AstNode*> compileTime = CompileTimeDefinitions(compiler.GetProgramModel());
 		HostInterface host;
 		host.compilerVersion = CompilerVersion::Encoded;
 		host.targetCpu = compiler.GetProgramModel().Target().Cpu();
@@ -111,7 +130,7 @@ namespace Scripting
 			if (!sources.HasInfo(id)) continue;
 			const SourceInfo& info = sources.GetInfo(id);
 			Ref<CompilationUnit> unit = compiler.GetCompilationUnit(id);
-			std::optional<std::string> text = unit && info.source ? InterfaceText(info.source->Text(), info.macros.Get(), unit->GetOriginalChildren(), declaredElsewhere) : std::nullopt;
+			std::optional<std::string> text = unit && info.source ? InterfaceText(info.source->Text(), info.macros.Get(), unit->GetOriginalChildren(), declaredElsewhere, compileTime) : std::nullopt;
 			if (!text)
 			{
 				if (error) *error = "cannot write the interface of " + info.displayName + ": its declarations do not fit its text";
@@ -144,6 +163,7 @@ namespace Scripting
 	{
 		const SourceManager& sources = compiler.GetSourceManager();
 		const std::unordered_set<const AstNode*> declaredElsewhere = DeclaredElsewhere(compiler.GetProgramModel());
+		const std::unordered_set<const AstNode*> compileTime = CompileTimeDefinitions(compiler.GetProgramModel());
 		std::vector<std::pair<std::string, uint32>> places;
 		for (const std::string& folder : folders) places.emplace_back(folder, 0);
 		std::vector<InterfaceFile> files;
@@ -151,7 +171,7 @@ namespace Scripting
 		{
 			const SourceInfo& info = sources.GetInfo(id);
 			Ref<CompilationUnit> unit = compiler.GetCompilationUnit(id);
-			std::optional<std::string> text = unit && info.source ? InterfaceText(info.source->Text(), info.macros.Get(), unit->GetOriginalChildren(), declaredElsewhere) : std::nullopt;
+			std::optional<std::string> text = unit && info.source ? InterfaceText(info.source->Text(), info.macros.Get(), unit->GetOriginalChildren(), declaredElsewhere, compileTime) : std::nullopt;
 			if (!text)
 			{
 				if (error) *error = "cannot write the interface of " + info.displayName + ": its declarations do not fit its text";

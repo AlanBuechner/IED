@@ -221,6 +221,26 @@ namespace Testing
 			"int32 main() { Save save; save.level = 3; return Serialization::ToJson(save).IsEmpty() ? 1 : 0; }\n", none), none.c_str());
 	}
 
+	// A member function template that reads its T through reflection is checked as a free one is: Bedrock's
+	// JsonFileStream::ReadNext<T>, and one of the program's own.
+	void ReflectionScopeTest::AMemberSerializerOfAnOutOfScopeTypeIsAnError()
+	{
+		const std::string secret = "include \"bedrock.ch\"\n[reflect(\"off\")] struct Secret { public int32 code; }\n"
+			"struct Save { public int32 level; public Secret secret; }\n";
+		std::string errors;
+		TEST_ASSERT(!Lowered(secret + "int32 main() { Serialization::JsonFileStream level; Save save; "
+			"return level.ReadNext(save) == Serialization::JsonEvent::Value ? 1 : 0; }\n", errors));
+		TEST_ASSERT_MSG(errors.find("ReadNext<Save> reads it through reflection (Save.secret)") != std::string::npos, errors.c_str());
+		std::string own;
+		TEST_ASSERT(!Lowered(secret + "struct Saver { [reflects(\"T\")] template<T> public int64 Write(const T& value) { "
+			"return Serialization::ToJson(value).ByteLength(); } }\n"
+			"int32 main() { Saver saver; Save save; return (int32)saver.Write(save); }\n", own));
+		TEST_ASSERT_MSG(own.find("Write<Save> reads it through reflection (Save.secret)") != std::string::npos, own.c_str());
+		std::string none;
+		TEST_ASSERT_MSG(Lowered("include \"bedrock.ch\"\nstruct Save { public int32 level; }\n"
+			"int32 main() { Serialization::JsonFileStream level; Save save; return level.ReadNext(save) == Serialization::JsonEvent::Value ? 1 : 0; }\n", none), none.c_str());
+	}
+
 	void ReflectionScopeTest::AWrongReflectArgumentIsAnError()
 	{
 		std::string errors;

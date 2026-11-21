@@ -46,8 +46,8 @@ namespace Scripting
 		class BodyCutter
 		{
 		public:
-			BodyCutter(const ReadText& text, const std::unordered_set<const AstNode*>& declaredElsewhere)
-				: m_Text(text), m_DeclaredElsewhere(declaredElsewhere) {}
+			BodyCutter(const ReadText& text, const std::unordered_set<const AstNode*>& declaredElsewhere, const std::unordered_set<const AstNode*>& compileTime)
+				: m_Text(text), m_DeclaredElsewhere(declaredElsewhere), m_CompileTime(compileTime) {}
 
 			void Walk(const AstNode* node, bool inTemplate)
 			{
@@ -89,13 +89,14 @@ namespace Scripting
 
 			void CutFunction(const FunctionDefinitionNode& fn, bool inTemplate)
 			{
-				if (!fn.IsDefinition() || inTemplate || fn.IsTemplated() || fn.GetOwnerTemplateDefinition()) return;
+				if (!fn.IsDefinition() || inTemplate || fn.IsTemplated() || fn.GetOwnerTemplateDefinition() || m_CompileTime.count(&fn)) return;
 				if (OutOfLine(fn) || m_DeclaredElsewhere.count(&fn)) m_Cuts.push_back({ StartOf(fn), m_Text.At(fn.endLocation), false });
 				else m_Cuts.push_back({ m_Text.At(fn.GetBody()->startLocation), m_Text.At(fn.GetBody()->endLocation), true });
 			}
 
 			const ReadText& m_Text;
 			const std::unordered_set<const AstNode*>& m_DeclaredElsewhere;
+			const std::unordered_set<const AstNode*>& m_CompileTime;
 			std::vector<Cut> m_Cuts;
 		};
 
@@ -109,11 +110,11 @@ namespace Scripting
 	}
 
 	std::optional<std::string> InterfaceText(std::string_view written, const MacroLayout* macros, const Core::Vector<Ref<AstNode>>& nodes,
-		const std::unordered_set<const AstNode*>& declaredElsewhere)
+		const std::unordered_set<const AstNode*>& declaredElsewhere, const std::unordered_set<const AstNode*>& compileTime)
 	{
 		const std::string text = macros ? macros->Render(written, 0, static_cast<uint32>(written.size())) : std::string(written);
 		const ReadText read(written, macros);
-		BodyCutter cutter(read, declaredElsewhere);
+		BodyCutter cutter(read, declaredElsewhere, compileTime);
 		for (const Ref<AstNode>& node : nodes) cutter.Walk(node.Get(), false);
 		std::string out;
 		size_t at = 0;

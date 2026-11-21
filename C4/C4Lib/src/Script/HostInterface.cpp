@@ -12,7 +12,7 @@ namespace Scripting
 	namespace
 	{
 		constexpr char kMagic[4] = { 'C', '4', 'I', 'F' };
-		constexpr uint32 kFormatVersion = 7;
+		constexpr uint32 kFormatVersion = 8; // 8: a project's reflect setting
 		constexpr size_t kBuildIdOffset = sizeof(kMagic) + sizeof(uint32); // after the magic and the version
 
 		// Little-endian fields: integers of fixed width, strings and lists after their length.
@@ -196,6 +196,7 @@ namespace Scripting
 			out.Text(project.name);
 			out.Indexes(project.dependencies);
 			out.Indexes(project.folders);
+			out.U32(project.reflect ? 1u : 0u);
 		}
 
 		InterfaceProject ReadProject(Reader& in)
@@ -204,6 +205,7 @@ namespace Scripting
 			project.name = in.Text();
 			project.dependencies = in.Indexes();
 			project.folders = in.Indexes();
+			project.reflect = in.U32() != 0;
 			return project;
 		}
 

@@ -44,6 +44,7 @@ namespace Scripting
 		std::string name;
 		std::vector<uint32> dependencies; // indexes into HostInterface::projects
 		std::vector<uint32> folders;      // its source folders
+		bool reflect = true;              // its `reflect` setting (D-89): its scripts' instances of its templates follow it
 	};
 
 	/// Everything a script compile needs of its host, written beside the host's executable as `<out>.c4i`:

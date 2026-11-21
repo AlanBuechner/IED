@@ -27,6 +27,7 @@ namespace Serialization
 		public JsonEvent SkipValue();
 		// The next whole value read into `value`: Value, or the event that stands where a value would. A value that does
 		// not fit T ends the stream with an Error.
+		[reflects("T")]
 		template<T> public JsonEvent ReadNext(T& value) {
 			values.Clear();
 			DomNode node;
