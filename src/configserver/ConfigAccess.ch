@@ -30,6 +30,13 @@ namespace Ied
 		public void Put(Core::StringView name, ConfigRole role, Core::StringView digest, int64 createdMs);
 		// {version, tokens: [...]}: what access.json holds.
 		public Core::String Json() const;
+		// The role of the token named `name`; None when there is none.
+		public ConfigRole RoleOf(Core::StringView name) const;
+		// Takes the token named `name` out; false when there was none.
+		public bool Remove(Core::StringView name);
+		public int64 AdminCount() const;
+		// [{name, role, createdMs}]: never a digest.
+		public Core::String ListJson() const;
 
 		private Core::Array<ConfigToken*> m_Tokens;
 	}
@@ -40,6 +47,11 @@ namespace Ied
 	// A new token for `name` with `role`, its digest kept in `root`/access.json (one of the same name is replaced, so
 	// making a token again revokes the old one): the token, or false with `error`.
 	bool MintConfigToken(const FS::Path& root, ConfigRole role, Core::StringView name, Core::String& token, Core::String& error);
+	// The token named `name` taken out of `root`/access.json: 200; 404 when there is none; 409 when it is the last admin
+	// token (nobody could manage the server then); 500 with `error` when the file cannot be read or written.
+	int32 RevokeConfigToken(const FS::Path& root, Core::StringView name, Core::String& error);
+	// A token's name: 1 to 64 letters, digits, '.', '_' and '-'.
+	bool IsConfigTokenName(Core::StringView name);
 	// The token an Authorization header carries ("Bearer <token>", the scheme in any case); empty when none.
 	Core::StringView BearerToken(Core::StringView header);
 	// The SHA-256 of `token`'s text, hex.

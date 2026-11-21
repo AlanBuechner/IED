@@ -493,3 +493,92 @@ class ConfigServerTests(ServerTestCase):
 		await watcher.request("configServer.retry", {})
 		await self.follow_state(await self.connect(client), "following", 6)
 		self.assertLess(time.monotonic() - began, 6, "the retry did not wait out the pause")
+
+	# --- The web page (/config/) -----------------------------------------------------------------------------------------
+
+	def page(self, method, path, cookie=None, header=True, body=None, bearer=None):
+		sent = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36 Edg/140.0"}
+		if cookie:
+			sent["Cookie"] = cookie
+		if header:
+			sent["X-IED-Config"] = "1"
+		if bearer:
+			sent["Authorization"] = "Bearer " + bearer
+		if isinstance(body, (dict, list)):
+			body = json.dumps(body).encode("utf-8")
+		return self.config_server.request(method, path, body, sent)
+
+	def test_the_page_is_served_without_a_token(self):
+		self.start_config()
+		index = self.config_server.request("GET", "/config/")
+		self.assertEqual(200, index.status, index.text())
+		self.assertIn("text/html", index.header("Content-Type"))
+		self.assertIn("script-src 'self'", index.header("Content-Security-Policy") or "", "the page has the web client's content policy")
+		self.assertIn("/config/config.js", index.text())
+		for path in ["/config/config.js", "/config/configmodel.js", "/config/config.css"]:
+			self.assertEqual(200, self.config_server.request("GET", path).status, path)
+		moved = self.config_server.request("GET", "/config")
+		self.assertEqual((301, "/config/"), (moved.status, moved.header("Location")))
+		for path in ["/config/..%2Fsecrets.json", "/config/access.json", "/config/kit/../../x.js", "/config/nothing.js"]:
+			self.assertEqual(404, self.config_server.request("GET", path).status, path)
+		self.assertEqual(401, self.config_server.request("GET", "/config/v1/whoami").status, "the API still wants a token")
+
+	def test_a_browser_signs_in_and_manages_tokens(self):
+		self.start_config()
+		self.assertEqual(403, self.page("POST", "/config/v1/session", bearer=self.reader, body={}).status, "a reader cannot sign a browser in")
+		signed = self.page("POST", "/config/v1/session", bearer=self.admin, body={})
+		self.assertEqual(200, signed.status, signed.text())
+		name = json.loads(signed.body)["name"]
+		self.assertRegex(name, r"^web-edge-on-windows-[0-9a-f]{6}$", "named for the browser")
+		cookie_header = signed.cookies()[0]
+		for part in ["Path=/config/", "HttpOnly", "SameSite=Strict", "Max-Age=31536000"]:
+			self.assertIn(part, cookie_header)
+		cookie = cookie_header.split(";", 1)[0]
+		self.assertNotIn(self.admin, cookie, "the browser has a token of its own")
+		self.assertEqual(403, self.page("GET", "/config/v1/whoami", cookie=cookie, header=False).status, "the cookie alone is refused: another site's form could send it")
+		me = json.loads(self.page("GET", "/config/v1/whoami", cookie=cookie).body)
+		self.assertEqual((name, "admin", True), (me["name"], me["role"], me["cookie"]))
+		self.assertTrue(me["serverVersion"] and me["startedMs"] and me["root"])
+		# Tokens: listed with when they were used, made (shown once), refused when misnamed, revoked.
+		listed = json.loads(self.page("GET", "/config/v1/tokens", cookie=cookie).body)
+		self.assertEqual(name, listed["you"])
+		rows = {t["name"]: t for t in listed["tokens"]}
+		self.assertEqual({"laptop", "deploy", name}, set(rows))
+		self.assertIn("lastUsedMs", rows[name])
+		self.assertNotIn("sha256", json.dumps(listed), "never a digest")
+		made = self.page("POST", "/config/v1/tokens", cookie=cookie, body={"name": "phone", "role": "reader"})
+		self.assertEqual(200, made.status, made.text())
+		phone = json.loads(made.body)["token"]
+		self.assertEqual(200, self.api("GET", "state", phone).status, "a made token works at once")
+		self.assertEqual(400, self.page("POST", "/config/v1/tokens", cookie=cookie, body={"name": "a/b", "role": "reader"}).status)
+		self.assertEqual(400, self.page("POST", "/config/v1/tokens", cookie=cookie, body={"name": "x", "role": "root"}).status)
+		self.assertEqual(403, self.api("POST", "tokens", self.reader, {"name": "x", "role": "admin"}).status, "a reader makes no token")
+		self.assertEqual(200, self.page("DELETE", "/config/v1/tokens/phone", cookie=cookie).status)
+		self.assertEqual(401, self.api("GET", "state", phone).status, "revoked at once")
+		self.assertEqual(404, self.page("DELETE", "/config/v1/tokens/phone", cookie=cookie).status)
+		# A one-time link signs another browser in, once.
+		link = json.loads(self.page("POST", "/config/v1/links", cookie=cookie).body)
+		self.assertRegex(link["url"], r"^/config/\?link=[0-9a-f]{64}$")
+		opened = self.page("GET", link["url"], header=False)
+		self.assertEqual((303, "/config/"), (opened.status, opened.header("Location")))
+		other = opened.cookies()[0].split(";", 1)[0]
+		self.assertEqual("admin", json.loads(self.page("GET", "/config/v1/whoami", cookie=other).body)["role"])
+		again = self.page("GET", link["url"], header=False)
+		self.assertEqual((303, "/config/#link-expired", []), (again.status, again.header("Location"), again.cookies()), "a link works once")
+		# Signing out revokes the browser's token; the last admin token cannot be revoked.
+		self.assertEqual(200, self.page("DELETE", "/config/v1/session", cookie=other).status)
+		self.assertEqual(401, self.page("GET", "/config/v1/whoami", cookie=other).status)
+		self.assertEqual(200, self.page("DELETE", "/config/v1/session", cookie=cookie).status)
+		last = self.api("DELETE", "tokens/deploy", self.admin)
+		self.assertEqual(409, last.status, "nobody could manage the server")
+		self.assertIn("last admin token", json.loads(last.body)["message"])
+		self.assertEqual(400, self.api("DELETE", "session", self.admin).status, "signing out is a browser's")
+		events = [json.loads(line) for line in read_lines(os.path.join(self.root, "config-data", "logs", "security.log"))]
+		said = [(e["event"], e.get("name"), e.get("by")) for e in events if e["event"].startswith("config-")]
+		self.assertIn(("config-signed-in", name, "deploy"), said)
+		self.assertIn(("config-token-made", "phone", name), said)
+		self.assertIn(("config-token-revoked", "phone", name), said)
+		self.assertIn("a sign-in link", [by for event, _, by in said if event == "config-signed-in"], "a link's sign-in says so")
+		with open(os.path.join(self.config, "access.json"), encoding="utf-8") as f:
+			kept = f.read()
+		self.assertNotIn(cookie.split("=", 1)[1], kept, "access.json keeps hashes alone")

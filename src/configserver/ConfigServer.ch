@@ -81,10 +81,17 @@ namespace Ied
 		// Why the served settings could not be read last ("" when they could).
 		public Core::String SettingsProblem();
 
+		// The web page's tokens (docs/35 "The web page"): a new one, in effect at once (access.json read again here,
+		// not when its watcher tells); one revoked (RevokeConfigToken's status); the list, never a digest.
+		public bool MintToken(ConfigRole role, Core::StringView name, Core::String& token, Core::String& error);
+		public int32 RevokeToken(Core::StringView name, Core::String& error);
+		public Core::String TokensJson();
+		// An event for the security log, `fields` JSON members.
+		public void Record(const char* event, Core::StringView fields);
+
 	private:
 		private void Watched(const ChangeBatch& batch);
 		private void LoadAccess();
-		private void Record(const char* event, Core::StringView fields);
 		private bool WritePublished(Core::StringView plugin, Core::StringView json, Core::String& problem);
 		private Core::String ServedSettings(Core::String& problem);
 		private void ReloadServerPlugins();

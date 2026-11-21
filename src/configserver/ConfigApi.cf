@@ -40,8 +40,79 @@ namespace Ied
 		return text.Substring(0, slash);
 	}
 
+	static int64 NowMs() { return Platform::UnixTimeNs() / 1000000; }
+
+	// 32 random bytes as 64 hex digits; empty when the system's generator fails.
+	static Core::String RandomHex(int32 bytes) {
+		uint8[32] random;
+		if (bytes > 32 || !Platform::RandomBytes((void*)&random[0], bytes)) return Core::String();
+		Core::StringBuilder text;
+		for (int32 i = 0; i < bytes; ++i) text.AppendUIntBase((uint64)random[i], 16, 2);
+		return text.ToString();
+	}
+
+	static void SetConfigCookie(Http::Response& response, Core::StringView value, int64 maxAgeS) {
+		Core::StringBuilder cookie;
+		cookie.Append(c_ConfigCookie);
+		cookie.Append("=");
+		cookie.Append(value);
+		cookie.Append("; Path=/config/; HttpOnly; SameSite=Strict; Max-Age=");
+		cookie.AppendInt(maxAgeS);
+		response.headers.Add(Core::StringView("Set-Cookie"), cookie.View());
+	}
+
+	static Core::String SecurityFields(const char* key, Core::StringView value, const char* key2, Core::StringView value2) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Field(key, value);
+		if (key2) json.Field(key2, value2);
+		json.EndObject();
+		Core::StringView members = json.View();
+		return Core::String(members.Substring(1, members.ByteLength() - 2));
+	}
+
+	Core::String WebTokenName(Core::StringView device, Core::StringView suffix) {
+		Core::StringBuilder name;
+		name.Append("web-");
+		bool dash = false;
+		int64 kept = 0;
+		for (int64 i = 0; i < device.ByteLength() && kept < 32; ++i) {
+			int32 c = device.ByteAt(i);
+			if (c >= 'A' && c <= 'Z') c += 32;
+			if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+				if (dash && kept > 0) {
+					name.AppendByte('-');
+					++kept;
+				}
+				name.AppendByte((uint8)c);
+				++kept;
+				dash = false;
+			}
+			else dash = true;
+		}
+		if (kept == 0) name.Append("browser");
+		name.AppendByte('-');
+		name.Append(suffix);
+		return name.ToString();
+	}
+
+	bool IsConfigPageFile(Core::StringView file) {
+		const bool typed = file.EndsWith(Core::StringView(".html")) || file.EndsWith(Core::StringView(".js")) || file.EndsWith(Core::StringView(".css")) || file.EndsWith(Core::StringView(".svg"));
+		if (!typed || file.ByteLength() > 64 || file.StartsWith(Core::StringView("."))) return false;
+		for (int64 i = 0; i < file.ByteLength(); ++i) {
+			const int32 c = file.ByteAt(i);
+			if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '.')) return false;
+		}
+		return file.IndexOf(Core::StringView(".."), 0) < 0;
+	}
+
 	bool ConfigApi::Handle(const Http::Request& request, Http::Response& response) {
 		Core::StringView path = request.path.View();
+		if (path == "/config" && m_Server->m_ConfigServer) {
+			response.status = 301;
+			response.headers.Set(Core::StringView("Location"), Core::StringView("/config/"));
+			return true;
+		}
 		if (!path.StartsWith(Core::StringView("/config/"))) return false;
 		response.headers.Set(Core::StringView("Cache-Control"), Core::StringView("no-store"));
 		ConfigServer* config = m_Server->m_ConfigServer;
@@ -50,20 +121,43 @@ namespace Ied
 			return true;
 		}
 		if (!path.StartsWith(Core::StringView(c_ConfigApiPrefix))) {
-			ApiRefuse(response, 404, "not_found", Core::StringView("the config API is /config/v1/"));
+			Page(config, path.Substring(8, path.ByteLength()), request, response);
 			return true;
 		}
+		// The token: an Authorization header's, else the signed-in browser's cookie, which counts only with the header
+		// no other site's page can send.
 		const Core::String* header = request.headers.Find(Core::StringView("Authorization"));
+		Core::StringView token = BearerToken(header ? header->View() : Core::StringView(""));
+		bool cookie = false;
+		if (token.IsEmpty()) {
+			const Core::String* cookies = request.headers.Find(Core::StringView("Cookie"));
+			token = cookies ? CookieValue(cookies->View(), Core::StringView(c_ConfigCookie)) : Core::StringView("");
+			cookie = !token.IsEmpty();
+		}
 		Core::String who;
-		ConfigRole role = config->Check(BearerToken(header ? header->View() : Core::StringView("")), who);
+		ConfigRole role = config->Check(token, who);
 		if (role == ConfigRole::None) {
 			response.headers.Set(Core::StringView("WWW-Authenticate"), Core::StringView("Bearer realm=\"ied-config\""));
-			ApiRefuse(response, 401, "unauthenticated", Core::StringView("the config API needs a token it knows: Authorization: Bearer <token> (ied-server --config-root <folder> --config-token reader|admin <name>)"));
+			if (cookie) SetConfigCookie(response, Core::StringView(""), 0);
+			ApiRefuse(response, 401, "unauthenticated", Core::StringView("the config API needs a token it knows: Authorization: Bearer <token> (ied-server --config-root <folder> --config-token reader|admin <name>), or sign in on the page at /config/"));
 			return true;
 		}
+		if (cookie) {
+			const Core::String* sent = request.headers.Find(Core::StringView(c_ConfigHeader));
+			if (!sent || sent->View() != "1") {
+				ApiRefuse(response, 403, "forbidden", Core::StringView("a request with the page's cookie needs the header X-IED-Config: 1"));
+				return true;
+			}
+		}
+		Used(who.View());
 		Core::StringView rest = path.Substring(Core::StringView(c_ConfigApiPrefix).ByteLength(), path.ByteLength());
-		Route(config, rest, role, who.View(), request, response);
+		Route(config, rest, role, who.View(), cookie, request, response);
 		return true;
+	}
+
+	void ConfigApi::Used(Core::StringView who) {
+		Threading::LockGuard guard(m_Lock);
+		m_LastUsed.At(Core::String(who)) = NowMs();
 	}
 
 	static int64 StateWaitMs(const Http::Request& request) {
@@ -74,11 +168,58 @@ namespace Ied
 		return seconds * 1000;
 	}
 
-	void ConfigApi::Route(ConfigServer* config, Core::StringView rest, ConfigRole role, Core::StringView who, const Http::Request& request, Http::Response& response) {
+	void ConfigApi::Route(ConfigServer* config, Core::StringView rest, ConfigRole role, Core::StringView who, bool cookie, const Http::Request& request, Http::Response& response) {
 		if (rest == "state") {
 			if (!ApiMethodIs(request, "GET", response)) return;
 			Core::StringView since = QueryValue(request.query.View(), Core::StringView("since"));
 			AnswerJson(response, 200, config->State(since, StateWaitMs(request)).View());
+			return;
+		}
+		if (rest == "whoami") {
+			if (!ApiMethodIs(request, "GET", response)) return;
+			JsonWriter json;
+			json.BeginObject();
+			json.Field("name", who);
+			json.Field("role", ConfigRoleName(role));
+			json.BoolField("cookie", cookie);
+			json.Field("serverVersion", m_Server->m_Config.m_Version.View());
+			json.IntField("startedMs", m_Server->m_StartedMs);
+			json.Field("root", config->Root().View());
+			json.EndObject();
+			AnswerJson(response, 200, json.View());
+			return;
+		}
+		if (rest == "session") {
+			Session(config, role, who, cookie, request, response);
+			return;
+		}
+		if (rest == "tokens" || rest.StartsWith(Core::StringView("tokens/"))) {
+			Tokens(config, rest == "tokens" ? Core::StringView("") : rest.Substring(7, rest.ByteLength()), role, who, cookie, request, response);
+			return;
+		}
+		if (rest == "links") {
+			if (!ApiAdmin(role, response) || !ApiMethodIs(request, "POST", response)) return;
+			Core::String code = RandomHex(32);
+			if (code.IsEmpty()) {
+				ApiRefuse(response, 500, "internal", Core::StringView("the system's random generator failed"));
+				return;
+			}
+			const int64 expires = NowMs() + c_ConfigLinkMs;
+			{
+				Threading::LockGuard guard(m_Lock);
+				Core::Array<Core::String> dead;
+				for (const Core::KeyValue<Core::String, int64>& entry : m_Links)
+					if (entry.value < NowMs()) dead.Push(entry.key);
+				for (const Core::String& key : dead) m_Links.Remove(key);
+				m_Links.At(TokenDigest(code.View())) = expires;
+			}
+			config->Record("config-link-made", SecurityFields("by", who, nullptr, Core::StringView("")).View());
+			JsonWriter json;
+			json.BeginObject();
+			json.Field("url", (Core::String("/config/?link=") + code.View()).View());
+			json.IntField("expiresMs", expires);
+			json.EndObject();
+			AnswerJson(response, 200, json.View());
 			return;
 		}
 		if (rest == "settings") {
@@ -98,6 +239,184 @@ namespace Ied
 			return;
 		}
 		Package(config, rest, role, who, request, response);
+	}
+
+	// A browser signed in: a new admin token named for it, kept in its cookie; `by` (the token or link that signed it in)
+	// goes to the security log.
+	bool ConfigApi::SignInBrowser(ConfigServer* config, const Http::Request& request, Http::Response& response, Core::StringView by, Core::String& name, Core::String& error) {
+		const Core::String* agent = request.headers.Find(Core::StringView("User-Agent"));
+		Core::String suffix = RandomHex(3);
+		if (suffix.IsEmpty()) {
+			error = Core::String("the system's random generator failed");
+			return false;
+		}
+		name = WebTokenName(DeviceNameFrom(agent ? agent->View() : Core::StringView("")).View(), suffix.View());
+		Core::String token;
+		if (!config->MintToken(ConfigRole::Admin, name.View(), token, error)) return false;
+		SetConfigCookie(response, token.View(), c_ConfigCookieMaxAgeS);
+		config->Record("config-signed-in", SecurityFields("name", name.View(), "by", by).View());
+		return true;
+	}
+
+	void ConfigApi::Session(ConfigServer* config, ConfigRole role, Core::StringView who, bool cookie, const Http::Request& request, Http::Response& response) {
+		if (request.method.View() == "POST") {
+			if (!ApiAdmin(role, response)) return;
+			Core::String name;
+			Core::String error;
+			if (!SignInBrowser(config, request, response, who, name, error)) {
+				ApiRefuse(response, 500, "internal", error.View());
+				return;
+			}
+			JsonWriter json;
+			json.BeginObject();
+			json.Field("name", name.View());
+			json.EndObject();
+			AnswerJson(response, 200, json.View());
+			return;
+		}
+		if (!ApiMethodIs(request, "DELETE", response)) return;
+		if (!cookie) {
+			ApiRefuse(response, 400, "bad_request", Core::StringView("signing out is a browser's: its cookie names the token to revoke"));
+			return;
+		}
+		Core::String error;
+		const int32 status = config->RevokeToken(who, error);
+		if (status != 200 && status != 404) {
+			ApiRefuse(response, status, status == 409 ? "conflict" : "internal", error.View());
+			return;
+		}
+		SetConfigCookie(response, Core::StringView(""), 0);
+		config->Record("config-signed-out", SecurityFields("name", who, nullptr, Core::StringView("")).View());
+		AnswerJson(response, 200, Core::StringView("{}"));
+	}
+
+	// tokens: GET the list (with when each was last used, and which is the caller's); POST {name, role} makes one.
+	// tokens/<name>: DELETE revokes it.
+	void ConfigApi::Tokens(ConfigServer* config, Core::StringView name, ConfigRole role, Core::StringView who, bool cookie, const Http::Request& request, Http::Response& response) {
+		if (!ApiAdmin(role, response)) return;
+		if (!name.IsEmpty()) {
+			if (!ApiMethodIs(request, "DELETE", response)) return;
+			Core::String decoded;
+			if (!PercentDecode(name, decoded) || !IsConfigTokenName(decoded.View())) {
+				ApiRefuse(response, 400, "bad_request", Core::StringView("a token's name is 1 to 64 letters, digits, '.', '_' and '-'"));
+				return;
+			}
+			Core::String error;
+			const int32 status = config->RevokeToken(decoded.View(), error);
+			if (status != 200) {
+				ApiRefuse(response, status, status == 404 ? "not_found" : status == 409 ? "conflict" : "internal", error.View());
+				return;
+			}
+			{
+				Threading::LockGuard guard(m_Lock);
+				m_LastUsed.Remove(decoded);
+			}
+			if (cookie && decoded.View() == who) SetConfigCookie(response, Core::StringView(""), 0);
+			config->Record("config-token-revoked", SecurityFields("name", decoded.View(), "by", who).View());
+			AnswerJson(response, 200, Core::StringView("{}"));
+			return;
+		}
+		if (request.method.View() == "GET") {
+			Serialization::DomDoc doc;
+			Core::String listed = config->TokensJson();
+			Serialization::ReadResult read = Serialization::ReadJson(listed.View(), doc);
+			JsonWriter json;
+			json.BeginObject();
+			json.Key(Core::StringView("tokens"));
+			json.BeginArray();
+			{
+				Threading::LockGuard guard(m_Lock);
+				for (int64 i = 0; read.Ok() && i < read.root.Count(); ++i) {
+					Serialization::DomNode entry = read.root.At(i);
+					json.BeginObject();
+					json.Field("name", entry.Member("name").AsView());
+					json.Field("role", entry.Member("role").AsView());
+					json.IntField("createdMs", entry.Member("createdMs").AsInt());
+					const int64* used = m_LastUsed.Find(Core::String(entry.Member("name").AsView()));
+					if (used) json.IntField("lastUsedMs", *used);
+					json.EndObject();
+				}
+			}
+			json.EndArray();
+			json.Field("you", who);
+			json.EndObject();
+			AnswerJson(response, 200, json.View());
+			return;
+		}
+		if (!ApiMethodIs(request, "POST", response)) return;
+		Serialization::DomDoc doc;
+		Serialization::ReadResult read = Serialization::ReadJson(request.BodyText(), doc);
+		Core::StringView wanted = read.Ok() ? read.root.Member("name").AsView() : Core::StringView("");
+		ConfigRole made = read.Ok() ? ConfigRoleOf(read.root.Member("role").AsView()) : ConfigRole::None;
+		if (!IsConfigTokenName(wanted) || made == ConfigRole::None) {
+			ApiRefuse(response, 400, "bad_request", Core::StringView("{name, role}: a name of 1 to 64 letters, digits, '.', '_' and '-', and the role reader or admin"));
+			return;
+		}
+		Core::String token;
+		Core::String error;
+		if (!config->MintToken(made, wanted, token, error)) {
+			ApiRefuse(response, 500, "internal", error.View());
+			return;
+		}
+		config->Record("config-token-made", SecurityFields("name", wanted, "by", who).View());
+		JsonWriter json;
+		json.BeginObject();
+		json.Field("name", wanted);
+		json.Field("role", ConfigRoleName(made));
+		json.Field("token", token.View());
+		json.EndObject();
+		AnswerJson(response, 200, json.View());
+	}
+
+	// /config/ and its files: the page's (frontend/config/), the ui-kit's (kit/) and the codicons (icons/), none of them
+	// data, so no token is asked for. /config/?link=<code> spends a sign-in link and goes on to the page.
+	void ConfigApi::Page(ConfigServer* config, Core::StringView file, const Http::Request& request, Http::Response& response) {
+		response.headers.Set(Core::StringView("X-Content-Type-Options"), Core::StringView("nosniff"));
+		response.headers.Set(Core::StringView("Referrer-Policy"), Core::StringView("no-referrer"));
+		if (request.method.View() != "GET") {
+			ApiRefuse(response, 405, "method_not_allowed", Core::StringView("the page's files are read with GET"));
+			return;
+		}
+		Core::StringView link = QueryValue(request.query.View(), Core::StringView("link"));
+		if (file.IsEmpty() && !link.IsEmpty()) {
+			bool alive = false;
+			{
+				Threading::LockGuard guard(m_Lock);
+				Core::String digest = TokenDigest(link);
+				const int64* expires = m_Links.Find(digest);
+				alive = expires && *expires >= NowMs();
+				m_Links.Remove(digest);
+			}
+			response.status = 303;
+			Core::String name;
+			Core::String error;
+			if (alive && SignInBrowser(config, request, response, Core::StringView("a sign-in link"), name, error)) response.headers.Set(Core::StringView("Location"), Core::StringView("/config/"));
+			else response.headers.Set(Core::StringView("Location"), Core::StringView("/config/#link-expired"));
+			return;
+		}
+		FS::Path home = FS::Path(m_Server->m_Config.m_HomeDir.View());
+		FS::Path target;
+		Core::StringView rest;
+		Core::StringView head = PathHead(file, rest);
+		if (file.IsEmpty()) target = FS::Path(m_Server->m_Config.m_StaticDir.View()) / "config" / "index.html";
+		else if (head == "kit" && IsConfigPageFile(rest) && !rest.EndsWith(Core::StringView(".html"))) target = home / "shared" / "ui-kit" / rest;
+		else if (head == "icons" && IsCodiconFile(rest)) {
+			FS::Path icons = home / "third_party" / "codicons" / "src" / "icons";
+			target = icons / rest;
+			if (!FS::FileExists(target.CStr())) {
+				Core::String other = CodiconAliasFile(icons, rest.Substring(0, rest.ByteLength() - 4));
+				if (!other.IsEmpty()) target = icons / other.View();
+			}
+		}
+		else if (rest.IsEmpty() && IsConfigPageFile(file)) target = FS::Path(m_Server->m_Config.m_StaticDir.View()) / "config" / file;
+		if (target.IsEmpty() || !FS::FileExists(target.CStr())) {
+			ApiRefuse(response, 404, "not_found", Core::StringView("no such file of the config server's page"));
+			return;
+		}
+		FS::File opened = FS::File(target.CStr(), "rb");
+		Core::String body = opened.ReadText();
+		response.SetText(Core::StringView(ContentTypeOf(target.Extension())), body.View());
+		if (target.Extension() == ".html") response.headers.Set(Core::StringView("Content-Security-Policy"), Core::StringView(c_ContentPolicy));
 	}
 
 	// <kind>/<id>[/files | /file/<path> | /stage[/<path>] | /commit]

@@ -98,6 +98,75 @@ namespace Ied
 		return json.ToString();
 	}
 
+	ConfigRole ConfigAccess::RoleOf(Core::StringView name) const {
+		for (ConfigToken* entry : m_Tokens)
+			if (entry->m_Name.View() == name) return entry->m_Role;
+		return ConfigRole::None;
+	}
+
+	bool ConfigAccess::Remove(Core::StringView name) {
+		for (int64 i = 0; i < m_Tokens.Count(); ++i)
+			if (m_Tokens[i]->m_Name.View() == name) {
+				m_Tokens.RemoveAt(i);
+				return true;
+			}
+		return false;
+	}
+
+	int64 ConfigAccess::AdminCount() const {
+		int64 count = 0;
+		for (ConfigToken* entry : m_Tokens)
+			if (entry->m_Role == ConfigRole::Admin) ++count;
+		return count;
+	}
+
+	Core::String ConfigAccess::ListJson() const {
+		JsonWriter json;
+		json.BeginArray();
+		for (ConfigToken* entry : m_Tokens) {
+			json.BeginObject();
+			json.Field("name", entry->m_Name.View());
+			json.Field("role", ConfigRoleName(entry->m_Role));
+			json.IntField("createdMs", entry->m_CreatedMs);
+			json.EndObject();
+		}
+		json.EndArray();
+		return json.ToString();
+	}
+
+	bool IsConfigTokenName(Core::StringView name) {
+		const int64 length = name.ByteLength();
+		if (length < 1 || length > 64) return false;
+		for (int64 i = 0; i < length; ++i) {
+			const int32 c = name.ByteAt(i);
+			const bool letter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+			if (!letter && !(c >= '0' && c <= '9') && c != '.' && c != '_' && c != '-') return false;
+		}
+		return true;
+	}
+
+	int32 RevokeConfigToken(const FS::Path& root, Core::StringView name, Core::String& error) {
+		FS::Path file = root / c_AccessFile;
+		ConfigAccess access;
+		if (!access.Load(file, error)) return 500;
+		const ConfigRole role = access.RoleOf(name);
+		if (role == ConfigRole::None) {
+			error = (Core::String("no token is named ") + name);
+			return 404;
+		}
+		if (role == ConfigRole::Admin && access.AdminCount() == 1) {
+			error = (Core::String("'") + name) + "' is the last admin token: make another before revoking it, or nobody could manage this server";
+			return 409;
+		}
+		access.Remove(name);
+		Core::String json = access.Json();
+		if (!FS::WriteFileAtomically(file.CStr(), (const void*)json.View().Data(), json.View().ByteLength())) {
+			error = Core::String("cannot write ") + file.View();
+			return 500;
+		}
+		return 200;
+	}
+
 	bool MintConfigToken(const FS::Path& root, ConfigRole role, Core::StringView name, Core::String& token, Core::String& error) {
 		if (role == ConfigRole::None) {
 			error = Core::String("a token's role is reader or admin");

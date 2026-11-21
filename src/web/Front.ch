@@ -60,4 +60,9 @@ namespace Ied
 	Core::String CodiconAliasFile(const FS::Path& icons, Core::StringView name);
 	// Whether the array `names` holds `name`.
 	bool NamesInclude(const Serialization::DomNode& names, Core::StringView name);
+
+	// A page's Content-Security-Policy (docs/11): the web client's, the config server's page's.
+	const char* c_ContentPolicy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+		"font-src 'self' data:; connect-src 'self'; frame-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; "
+		"frame-ancestors 'self'";
 }

@@ -4,6 +4,7 @@
 	python -I tools/config-server/deploy.py skill path\\to\\skills\\nas-deploy --watch
 	python -I tools/config-server/deploy.py plugin path/to/plugin --server https://nas.lan:8780/ --token <admin token>
 	python -I tools/config-server/deploy.py server-plugin spark.models --remove
+	python -I tools/config-server/deploy.py signin --open      a one-time link that signs a browser in to /config/
 
 The folder's files (but .git, build, __pycache__ and *.pyc) are staged on the server one by one, then committed with
 their list and SHA-256s, which the server checks before it renames the package into place. A plugin's id is its
@@ -219,8 +220,9 @@ def watch(server, kind, folder, plugin_id):
 
 def main(argv):
 	parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-	parser.add_argument("kind", choices=sorted(KINDS), help="what the folder is")
-	parser.add_argument("folder", help="the package's folder (with --remove: its id)")
+	parser.add_argument("kind", choices=sorted(KINDS) + ["signin"], help="what the folder is; signin: a one-time link that signs a browser in to the server's page")
+	parser.add_argument("folder", nargs="?", help="the package's folder (with --remove: its id)")
+	parser.add_argument("--open", action="store_true", help="signin: open the link in this machine's browser")
 	parser.add_argument("--server", help="the config server's URL (default: IED_CONFIG_SERVER, else configServer.url)")
 	parser.add_argument("--token", help="an admin token (default: IED_CONFIG_ADMIN_TOKEN)")
 	parser.add_argument("--cafile", help="a PEM file of CA certificates for an https server (default: IED_CONFIG_CAFILE)")
@@ -233,6 +235,18 @@ def main(argv):
 		if not token:
 			raise DeployError("no admin token: --token, or IED_CONFIG_ADMIN_TOKEN (ied-server --config-root <folder> --config-token admin <name> makes one)")
 		server = Server(server_url(args.server), token, args.cafile or os.environ.get("IED_CONFIG_CAFILE"))
+		if args.kind == "signin":
+			# docs/35 "The web page": the link works once, for 10 minutes; opened, the browser gets a token of its own.
+			link = server.url.rstrip("/") + server.call("POST", "links", b"")["url"]
+			if args.open:
+				import webbrowser
+				webbrowser.open(link)
+				print("opened a one-time sign-in link to %sconfig/ in the browser" % server.url)
+			else:
+				print(link)
+			return 0
+		if not args.folder:
+			raise DeployError("name the package's folder (with --remove: its id)")
 		kind = KINDS[args.kind]
 		if args.remove:
 			answer = server.call("DELETE", "%s/%s" % (kind, urllib.parse.quote(args.id or args.folder, safe="")))

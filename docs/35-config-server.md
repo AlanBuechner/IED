@@ -84,6 +84,52 @@ publish - makes a new version and wakes the waiting state requests; a change und
 plugins; a deploy's staging is never told. A `settings.json` that does not read is served as it last read, the problem
 in `server-plugins`' `settingsProblem` and the log. Staging left by a stop is removed at the next start.
 
+## The web page (`/config/`, 2026-11-21)
+
+Owner, 2026-11-21: "can we get some web UI for the config server so i dont need to run commands and i can see what is
+set up on the server. also add the url for the config srever web ui to the nas home."
+
+The config server serves a page of its own at `/config/` (`frontend/config/`: `index.html`, `config.js`, its model
+`configmodel.js`, `config.css`, on the theme's tokens and the ui-kit, which it serves at `/config/kit/` with the codicons at
+`/config/icons/` - the page needs no IED session). Its files are public (they hold no data); everything it shows comes
+from the API, as an admin:
+
+- **Overview**: the server's version and when it started, its config folder, the state's version, how many settings,
+  plugins, skills and server plugins it serves, and the IEDs that follow it - each reader token with when it was last
+  used (a following IED asks every 25 s).
+- **Settings**: the served settings, each key with where it comes from (`settings.json` or the server plugin that
+  published it), and `settings.json` itself in an editor box with Save (a JSON object, comments allowed; the server's
+  refusal shown).
+- **Server plugins**: each with its version, state, code (active, failed, building, its builds), compile diagnostics and
+  what it published; Remove.
+- **Plugins** and **Skills**: each with its version or hash and its files (a skill's `SKILL.md` readable in place); Remove.
+- **Tokens**: name, role, made, last used; New token (a name and a role) shows the token once with Copy, saying
+  that a token made again under a name replaces the old one; Revoke, never the last admin; a one-time sign-in link for
+  another browser.
+- The page follows the state with the waiting state request, so a deploy, a hand edit or a server plugin's publish
+  (SparkHub's models) shows as it happens. At phone width the sections are a row of tabs over one column.
+
+**Signing in.** The first visit asks for an admin token. `POST /config/v1/session` (that token as Bearer, body
+`{device}`) makes a new admin token for the browser, named `web-<device>-<6 hex>` (so it is listed, last used and revoked
+like any other), and sets it as the cookie `ied-config` (`Path=/config/; HttpOnly; SameSite=Strict`, a year); the page
+never sees it. `DELETE /config/v1/session` (Sign out) removes it. A token from that cookie is taken only with the header
+`X-IED-Config: 1`, which another site's page cannot send without a CORS preflight the server never grants; a bearer
+token needs no header. `POST /config/v1/links` (admin) makes a one-time sign-in link, `/config/?link=<32 random bytes
+as hex>`, alive 10 minutes: opening it makes the browser's token and cookie and goes on to `/config/`; it works once.
+`python -I tools/config-server/deploy.py signin [--open]` prints one (or opens it) with the admin token of this machine.
+The security log gets `config-signed-in` (the new token's name and the token or link that signed in),
+`config-token-made` and `config-token-revoked` (by whom).
+
+| Method | Path | Answers |
+|---|---|---|
+| GET | `/config/v1/whoami` | `{name, role, cookie, serverVersion, startedMs, root}` |
+| POST, DELETE | `/config/v1/session` | sign in (admin): `{name}` and the cookie; sign out |
+| GET, POST | `/config/v1/tokens` (admin) | `{tokens: [{name, role, createdMs, lastUsedMs?}], you}`; `{name, role}` makes one: `{name, role, token}` |
+| DELETE | `/config/v1/tokens/<name>` (admin) | revokes it; 409 for the last admin token |
+| POST | `/config/v1/links` (admin) | `{url, expiresMs}` |
+
+`lastUsedMs` is kept in memory: after a restart a token shows unused until it is used again.
+
 ## The client
 
 App setting `configServer.url` (`https://nas.lan:8780/`), `configServer.token` (never the token itself, docs/07:
@@ -214,6 +260,17 @@ NAS deploy tools install it) once the server builds for Linux (C4 D-86).
   Remove refused at once, bad names and values) and `test_a_change_of_server_is_followed_at_once` (Disconnect while the
   state request waits: off within seconds; Connect again; a server back after the pause between tries grew, followed at
   once on Retry now - before, the first request after a failure waited its 25 s); e2e `config_server_page`.
+- 2026-11-21, the web page: `frontend/config/` (`index.html`, `config.js`, `configmodel.js`, `config.css`);
+  `ConfigApi` serves it and its `kit/` and `icons/`, takes the `ied-config` cookie with `X-IED-Config`, and answers
+  `whoami`, `session`, `tokens`, `links`; `ConfigServer::MintToken`/`RevokeToken`/`TokensJson`, `ConfigAccess::RoleOf`/
+  `Remove`/`ListJson`, `RevokeConfigToken`; `c_ContentPolicy` moved to `web/Front.ch`; `deploy.py signin [--open]`. The
+  owner's NAS home (`nas-home`, a separate repository) links to it ("IED Config"). Checks: unit `server.configserver`
+  `web_page` (browser token names, page file names, the last admin kept); `test_the_page_is_served_without_a_token`
+  (its files public with the content policy, `/config` redirected, no file outside it, the API still asking for a token)
+  and `test_a_browser_signs_in_and_manages_tokens` (a reader cannot sign in; the cookie's flags; the cookie refused without
+  the header; `whoami`; tokens listed without digests, made and working at once, misnamed refused, revoked at once;
+  a one-time link once; sign out; the last admin refused; the security log); frontend `configpage.test.js`; headless Edge
+  over every section at desktop and phone width against a local config server running the real `spark.models`.
 
 ## Open items
 

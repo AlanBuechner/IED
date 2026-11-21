@@ -52,6 +52,7 @@ import "./hovercard.test.js";
 import "./newproject.test.js";
 import "./settings.test.js";
 import "./configserver.test.js";
+import "./configpage.test.js";
 import "./git.test.js";
 import "./semanticcolors.test.js";
 import "./bindings.test.js";

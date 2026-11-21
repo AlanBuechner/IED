@@ -1,8 +1,9 @@
 // configserver: a config server's tokens (made, kept as hashes, checked, replaced by name), package names, paths and
 // hashes, the served settings merging what plugins publish, the state's version, its command line, and what a client
-// makes of configServer.url and configServer.token (docs/35).
+// makes of configServer.url and configServer.token, the secret store, and the web page's names (docs/35).
 
 include "configserver/ConfigServer.ch"
+include "configserver/ConfigApi.ch"
 include "configserver/SharedMirror.ch"
 include "host/Config.ch"
 include "host/Appdata.ch"
@@ -290,5 +291,28 @@ class ConfigServerTests {
 		assert_se("{\"settings\":[{\"key\":\"ai.models\",\"members\":[\"b@lan\",\"a@lan\"]},{\"key\":\"editor.fontSize\"}],\"plugins\":[\"demo\"],\"skills\":[\"nas-deploy\"]}",
 			Ied::MirroredJson(shared).CStr(), "keys, an object's members, the packages");
 		FS::RemoveAll(shared.CStr());
+	}
+
+	// docs/35 "The web page": a browser's token name, the page's file names, revoking (never the last admin).
+	[test("web_page")]
+	public static void TestWebPage() {
+		assert_se("web-edge-on-windows-1a2b3c", Ied::WebTokenName(Core::StringView("Edge on Windows"), Core::StringView("1a2b3c")).CStr(), "from the device name");
+		assert_se("web-browser-0f", Ied::WebTokenName(Core::StringView(" !? "), Core::StringView("0f")).CStr(), "no letters: browser");
+		assert_true(Ied::IsConfigTokenName(Ied::WebTokenName(Core::StringView("Claude Desktop/5.11 on macOS"), Core::StringView("abcdef")).View()), "always a token name");
+		assert_true(Ied::IsConfigPageFile(Core::StringView("config.js")) && Ied::IsConfigPageFile(Core::StringView("index.html")) && Ied::IsConfigPageFile(Core::StringView("ui-kit.css")), "the page's files");
+		assert_true(!Ied::IsConfigPageFile(Core::StringView("access.json")) && !Ied::IsConfigPageFile(Core::StringView("..x.js")) && !Ied::IsConfigPageFile(Core::StringView("a/b.js")) && !Ied::IsConfigPageFile(Core::StringView(".js")), "nothing else");
+		assert_true(Ied::IsConfigTokenName(Core::StringView("my.pc_2-a")) && !Ied::IsConfigTokenName(Core::StringView("a b")) && !Ied::IsConfigTokenName(Core::StringView("")), "token names");
+		FS::Path root = ConfigTestScratch("ied-config-revoke-");
+		Core::String token;
+		Core::String error;
+		assert_true(Ied::MintConfigToken(root, Ied::ConfigRole::Admin, Core::StringView("deploy"), token, error), error.CStr());
+		assert_true(Ied::MintConfigToken(root, Ied::ConfigRole::Reader, Core::StringView("laptop"), token, error), error.CStr());
+		assert_eq((int64)409, (int64)Ied::RevokeConfigToken(root, Core::StringView("deploy"), error), "the last admin stays");
+		assert_eq((int64)404, (int64)Ied::RevokeConfigToken(root, Core::StringView("nobody"), error), "none of that name");
+		assert_eq((int64)200, (int64)Ied::RevokeConfigToken(root, Core::StringView("laptop"), error), error.CStr());
+		Ied::ConfigAccess access;
+		assert_true(access.Load(root / "access.json", error) && access.Count() == 1 && access.RoleOf(Core::StringView("laptop")) == Ied::ConfigRole::None, "revoked from the file");
+		assert_true(!access.ListJson().View().Contains(Core::StringView("sha256")), "the list holds no digest");
+		FS::RemoveAll(root.CStr());
 	}
 }

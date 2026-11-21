@@ -143,6 +143,25 @@ namespace Ied
 		return m_Access.Check(token, name);
 	}
 
+	bool ConfigServer::MintToken(ConfigRole role, Core::StringView name, Core::String& token, Core::String& error) {
+		Threading::LockGuard write(m_WriteLock);
+		if (!MintConfigToken(m_Root, role, name, token, error)) return false;
+		LoadAccess();
+		return true;
+	}
+
+	int32 ConfigServer::RevokeToken(Core::StringView name, Core::String& error) {
+		Threading::LockGuard write(m_WriteLock);
+		const int32 status = RevokeConfigToken(m_Root, name, error);
+		if (status == 200) LoadAccess();
+		return status;
+	}
+
+	Core::String ConfigServer::TokensJson() {
+		Threading::LockGuard guard(m_Lock);
+		return m_Access.ListJson();
+	}
+
 	Core::String ConfigServer::Version() {
 		Threading::LockGuard guard(m_Lock);
 		return m_Version;
