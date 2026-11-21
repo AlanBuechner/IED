@@ -6,6 +6,10 @@
 #        ied    = the IED web client's libraries and the web search services (installed by default; --without ied
 #                 skips them)
 #        extras = optional, for later milestones (--with extras)
+#        linux  = the web search services of a Linux install, fetched on Windows into vendor/linux/ for
+#                 tools/dist/ied_release.py (--with linux; a release installs them itself)
+#
+# skip: archive paths (after strip) left out when unpacking, a folder with all it holds.
 
 [packages.llvm]
 group = "core"
@@ -163,3 +167,42 @@ sha256 = "c1988c701de2f24f7d098d1d6d7f507b58f27740d097f29c246e0524d639b252"
 dest = "vendor/tor"
 format = "tgz"
 probe = "tor/tor.exe"
+
+# The Linux install's web search services (docs/29 "On Linux"): ied_release.py puts them in a Linux install's vendor/
+# beside SearXNG's own package above, which serves both systems. Unpacked on Windows, so an archive's symbolic links
+# are left out (the plugins run bin/python3.12, never the python3 link), and file modes come from the release's tar.
+[packages.python-linux]
+group = "linux"
+version = "3.12.10"
+description = "a relocatable CPython for Linux x64 (python-build-standalone 20250529, stripped): the private Python a Linux install runs SearXNG and web fetch's impersonator with; SearXNG's compiled packages are built for it, whatever python3 the machine has"
+url = "https://github.com/astral-sh/python-build-standalone/releases/download/20250529/cpython-3.12.10%2B20250529-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
+sha256 = "f50d08e0304b15d752b22932047135c1dc02f81977b284e51288be9d90627bca"
+dest = "vendor/linux/python"
+format = "tgz"
+strip = 1
+# Headers, terminfo, man pages, and libpython for embedding (bin/python3.12 has it linked in).
+skip = ["include", "share", "lib/pkgconfig", "lib/libpython3.12.so.1.0", "lib/libpython3.so"]
+probe = "bin/python3.12"
+
+# Not an archive: pip installs Linux wheels (--platform) into dest for python-linux, as for searxng-packages.
+[packages.searxng-packages-linux]
+group = "linux"
+kind = "pip"
+version = "for searxng d47cb96"
+description = "SearXNG's Python packages and waitress as manylinux x86_64 wheels, for the Linux private Python (docs/29)"
+requirements = "tools/setup/searxng-requirements-linux.txt"
+python-version = "3.12"
+platforms = ["manylinux_2_28_x86_64", "manylinux_2_17_x86_64", "manylinux2014_x86_64"]
+dest = "vendor/linux/searxng-packages"
+probe = "waitress/__init__.py"
+
+[packages.tor-linux]
+group = "linux"
+version = "15.0.26"
+description = "the Tor Expert Bundle for Linux x64: tor and the libraries beside it, which the ied.tor plugin of a Linux install runs (docs/29)"
+url = "https://archive.torproject.org/tor-package-archive/torbrowser/15.0.26/tor-expert-bundle-linux-x86_64-15.0.26.tar.gz"
+sha256 = "19cf18726eecb362e0f21d27afa9ea9efe5da928bfdfbb1ceb5fe54519e87f4a"
+dest = "vendor/linux/tor"
+format = "tgz"
+skip = ["debug"]                     # unstripped copies of the programs
+probe = "tor/tor"

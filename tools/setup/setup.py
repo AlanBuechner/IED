@@ -43,14 +43,26 @@ def load_packages():
 	for name, package in packages.items():
 		package["name"] = name
 		package.setdefault("strip", 0)
+		package.setdefault("skip", [])
 		if package.get("kind") == "pip":
 			package["sha256"] = sha256_of(os.path.join(ROOT, *package["requirements"].split("/")))
+			if package.get("platforms"):
+				package["fingerprint"] = choice_fingerprint([package["sha256"], package["platforms"], package["python-version"]])
 		elif package.get("kind") == "msvc":
 			package["fingerprint"] = kit_fingerprint(package)
-		elif "format" not in package:
-			package["format"] = _format_of(package["url"])
+		else:
+			if "format" not in package:
+				package["format"] = _format_of(package["url"])
+			if package["skip"]:
+				package["fingerprint"] = choice_fingerprint([package["sha256"], package["skip"]])
 		package.setdefault("fingerprint", package["sha256"])
 	return packages
+
+
+def choice_fingerprint(chosen):
+	"""What an install is made of besides its download (what it leaves out, the system pip installs for): a change to
+	it reinstalls the package. A package without such choices is fingerprinted by its download's SHA256 alone."""
+	return hashlib.sha256(json.dumps(chosen).encode()).hexdigest()
 
 
 def kit_fingerprint(package):
@@ -125,8 +137,9 @@ def extract(package, archive):
 	staging = dest + ".setup-tmp"
 	shutil.rmtree(staging, ignore_errors=True)
 	log(f"extracting {package['name']} into {os.path.relpath(dest, ROOT)}")
-	skipped = _extract_zip(archive, staging, package["strip"]) if package["format"] == "zip" else \
-		_extract_tar(archive, staging, package["strip"], "r:xz" if package["format"] == "txz" else "r:gz")
+	skip = [[p for p in entry.split("/") if p] for entry in package["skip"]]
+	skipped = _extract_zip(archive, staging, package["strip"], skip) if package["format"] == "zip" else \
+		_extract_tar(archive, staging, package["strip"], "r:xz" if package["format"] == "txz" else "r:gz", skip)
 	if skipped:
 		log(f"  skipped {skipped} file(s) whose names Windows cannot create")
 	place(package, staging)
@@ -158,18 +171,23 @@ def install_msvc(package, keep_downloads):
 		shutil.rmtree(downloads, ignore_errors=True)
 
 
-def _member_path(name, strip):
+def _member_path(name, strip, skip=()):
+	"""The member's path parts after `strip`, or None: outside the archive's tree, stripped away, or under an entry of
+	`skip` (lists of parts)."""
 	parts = [p for p in name.replace("\\", "/").split("/") if p not in ("", ".")]
 	if ".." in parts or len(parts) <= strip:
 		return None
-	return parts[strip:]
+	parts = parts[strip:]
+	if any(parts[:len(entry)] == entry for entry in skip):
+		return None
+	return parts
 
 
-def _extract_tar(archive, dest, strip, mode):
+def _extract_tar(archive, dest, strip, mode, skip=()):
 	skipped = 0
 	with tarfile.open(archive, mode) as tar:
 		for member in tar:
-			parts = _member_path(member.name, strip)
+			parts = _member_path(member.name, strip, skip)
 			if parts is None or not (member.isfile() or member.isdir()):
 				continue
 			if any(WINDOWS_ILLEGAL & set(p) for p in parts):
@@ -185,11 +203,11 @@ def _extract_tar(archive, dest, strip, mode):
 	return skipped
 
 
-def _extract_zip(archive, dest, strip):
+def _extract_zip(archive, dest, strip, skip=()):
 	skipped = 0
 	with zipfile.ZipFile(archive) as z:
 		for info in z.infolist():
-			parts = _member_path(info.filename, strip)
+			parts = _member_path(info.filename, strip, skip)
 			if parts is None:
 				continue
 			if any(WINDOWS_ILLEGAL & set(p) for p in parts):
@@ -242,7 +260,8 @@ def remove_installed(dest):
 
 def install_with_pip(package, packages, keep_downloads):
 	"""pip, itself a package, installs a hash-pinned requirements file into the package's folder for the private
-	Python: binary wheels only, nothing the file does not name."""
+	Python: binary wheels only, nothing the file does not name. With `platforms`, the wheels are another system's
+	(foreign_platform)."""
 	install(packages["pip"], packages, force=False, keep_downloads=keep_downloads)
 	dest = dest_of(package)
 	staging = dest + ".setup-tmp"
@@ -250,11 +269,23 @@ def install_with_pip(package, packages, keep_downloads):
 	log(f"installing {package['name']} with pip into {os.path.relpath(dest, ROOT)}")
 	command = [sys.executable, "-I", os.path.join(dest_of(packages["pip"]), "pip"), "install", "--disable-pip-version-check",
 		"--no-input", "--no-warn-script-location", "--no-deps", "--require-hashes", "--only-binary=:all:", "--target", staging,
-		"-r", os.path.join(ROOT, *package["requirements"].split("/"))]
+		"-r", os.path.join(ROOT, *package["requirements"].split("/"))] + foreign_platform(package)
 	if subprocess.run(command).returncode != 0:
 		shutil.rmtree(staging, ignore_errors=True)
 		raise SetupError(f"pip could not install {package['name']} (see above)")
 	place(package, staging)
+
+
+def foreign_platform(package):
+	"""pip's options for the wheels of another system (a Linux install's, from Windows): the package's `platforms` (the
+	manylinux tags, the first preferred) and CPython `python-version`. None for this system's own Python."""
+	if not package.get("platforms"):
+		return []
+	version = package["python-version"]
+	options = ["--python-version", version, "--implementation", "cp", "--abi", "cp" + version.replace(".", "")]
+	for platform in package["platforms"]:
+		options += ["--platform", platform]
+	return options
 
 
 def install(package, packages, force, keep_downloads):
@@ -370,7 +401,7 @@ def print_list(packages):
 
 def parse(argv):
 	parser = argparse.ArgumentParser(prog="setup.bat", description=__doc__)
-	parser.add_argument("--with", dest="with_groups", action="append", default=[], help="also install a group (extras)")
+	parser.add_argument("--with", dest="with_groups", action="append", default=[], help="also install a group (extras, linux)")
 	parser.add_argument("--without", dest="without_groups", action="append", default=[], help="skip a group (ied)")
 	parser.add_argument("--only", help="install only these packages (comma-separated)")
 	parser.add_argument("--force", action="store_true", help="download and extract again even when installed")

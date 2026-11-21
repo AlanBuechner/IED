@@ -3,9 +3,11 @@ nothing outside it, an SDK installer fetched with the CAB files it names (and an
 packages found by id and language, the SDK's libraries for other processors removed; and setup's record of what it
 installed, which for the kit covers the packages it takes from the manifest."""
 
+import io
 import os
 import shutil
 import sys
+import tarfile
 import tempfile
 import unittest
 import zipfile
@@ -114,6 +116,38 @@ class RecordTests(unittest.TestCase):
 		for field in ("msvc-packages", "sdk-installers", "architectures"):
 			changed = dict(kit, **{field: kit[field][:-1]})
 			self.assertNotEqual(kit["fingerprint"], setup.kit_fingerprint(changed), f"another {field} is another install")
+
+	def test_what_a_linux_package_leaves_out_or_installs_for_is_part_of_its_record(self):
+		packages = setup.load_packages()
+		python, tor, wheels, windows = packages["python-linux"], packages["tor-linux"], packages["searxng-packages-linux"], packages["searxng-packages"]
+		self.assertEqual(setup.choice_fingerprint([python["sha256"], python["skip"]]), python["fingerprint"])
+		self.assertNotEqual(python["fingerprint"], setup.choice_fingerprint([python["sha256"], python["skip"][1:]]))
+		self.assertNotEqual(tor["sha256"], tor["fingerprint"], "a skip list is part of it")
+		self.assertNotEqual(wheels["sha256"], wheels["fingerprint"], "so is the platform")
+		self.assertEqual(windows["sha256"], windows["fingerprint"], "Windows' own wheels are recorded by the requirements alone")
+		self.assertEqual([], setup.foreign_platform(windows))
+		options = setup.foreign_platform(wheels)
+		self.assertEqual(["--python-version", "3.12", "--implementation", "cp", "--abi", "cp312"], options[:6])
+		self.assertEqual(["manylinux_2_28_x86_64", "manylinux_2_17_x86_64", "manylinux2014_x86_64"], options[7::2])
+		self.assertEqual({"linux"}, {python["group"], tor["group"], wheels["group"]}, "never installed by default")
+
+
+class SkipTests(KitTest):
+	def test_skipped_paths_are_left_out_of_an_archive(self):
+		archive = self.path("python.tar.gz")
+		with tarfile.open(archive, "w:gz") as tar:
+			for name in ("python/bin/python3.12", "python/lib/libpython3.12.so.1.0", "python/lib/python3.12/os.py", "python/include/Python.h", "python/includes.txt"):
+				data = name.encode()
+				info = tarfile.TarInfo(name)
+				info.size = len(data)
+				tar.addfile(info, io.BytesIO(data))
+			link = tarfile.TarInfo("python/bin/python3")
+			link.type, link.linkname = tarfile.SYMTYPE, "python3.12"
+			tar.addfile(link)
+		staging = self.path("staging")
+		setup._extract_tar(archive, staging, 1, "r:gz", [["include"], ["lib", "libpython3.12.so.1.0"]])
+		found = sorted(os.path.relpath(os.path.join(base, name), staging).replace("\\", "/") for base, _, names in os.walk(staging) for name in names)
+		self.assertEqual(["bin/python3.12", "includes.txt", "lib/python3.12/os.py"], found, "a folder with all it holds, a file, never a name that only begins alike; links are left out")
 
 
 if __name__ == "__main__":
