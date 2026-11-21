@@ -303,21 +303,24 @@ straight from the module in memory).
   not link `LLVM-C.lib`, whose import of `LLVM-C.dll` would bind those functions to the DLL's own copy of LLVM.
 - Runtime objects are compiled on demand (`Compiler/RuntimeObjects`) from every `.c` / `.cpp` under the
   install's `C4Runtime/` ([../tools/01-compiler-cli.md](../tools/01-compiler-cli.md#4-the-install)) into
-  `%TEMP%/c4_runtime/<hash of the runtime folder>/O2` (at `-O2 -Werror`), so two installs never share
+  `%TEMP%/c4_runtime/<hash of the runtime folder>/<the target's folder>` (`O2`, `linux-x64-O2`; at `-O2 -Werror`), so two installs never share
   objects. Each object is named for the bytes of its source and of every runtime header (`GC_GCHeap-<key>.obj`),
   so a changed file builds a new object whatever the files' times say, and the older versions are removed. All
   are linked into every executable: the collector (`GC/`), threads, memory helpers, reflection (`Reflect/`), IO,
   testing, static storage (`StaticStorageRuntimeC.c` + `StaticStorageShim.cpp`: once guards and exit-time
   destruction) and EH (`EHRuntime.cpp`).
-- `LinkWithLLD`: `lld-link` with the main object, runtimes, interop objects, libraries and the `-l` / `-L` /
+- The link is the target's (`TargetAbi::Link`, [04](04-codegen-and-abi.md#targets-targetabi)). On Windows: `lld-link`
+  with the main object, runtimes, interop objects, libraries and the `-l` / `-L` /
   `-Wl,` arguments as clang's driver would hand them over (`LinkerArguments`), `libcmt`, `oldnames` and clang's
   runtime libraries, `/SUBSYSTEM:CONSOLE`; with `-g`, `/DEBUG` (the `.pdb` beside the exe). lld-link takes the MSVC
   and Windows SDK libraries from `setup.bat`'s kit (`Toolchain::WindowsSysroot`, `/winsysroot`), else finds an
-  installed Visual Studio's itself (or through `LIB` when it is set), so no clang process starts for the link.
+  installed Visual Studio's itself (or through `LIB` when it is set), so no clang process starts for the link. On
+  Linux (D-86): clang's g++ driver with ld.lld, a PIE against the Linux sysroot's glibc, the runtime's objects linked
+  only when used (`--start-lib`).
 - clang, lld, the runtime sources, CBind and Bedrock come from the install `C4.exe` runs from
   (`Compiler/Toolchain`, [../tools/01-compiler-cli.md](../tools/01-compiler-cli.md#4-the-install)).
 
-**Planned:** the target is fixed to Windows x64; Linux is B31.
+The target is Windows x64 or Linux x64 (`--target`, D-86); another one is a `TargetAbi` implementation (R11).
 
 ## Include visibility
 

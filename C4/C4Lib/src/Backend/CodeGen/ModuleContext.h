@@ -4,7 +4,7 @@
 #include "Model/SymbolTable.h"
 #include "Backend/CodeGen/Abi.h"
 #include "Backend/CodeGen/AliasTags.h"
-#include "Compiler/TargetSystem.h"
+#include "Target/TargetAbi.h"
 #include <llvm/IR/DataLayout.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
@@ -30,11 +30,13 @@ namespace Scripting
 	class ModuleContext
 	{
 	public:
-		/// A module of a program for `system` (D-86): its triple, data layout and calling convention.
+		/// A module of a program for `system` (D-86): its target (R11) gives its triple, data layout and calling convention.
 		ModuleContext(llvm::LLVMContext& ctx, TargetSystem system);
 		~ModuleContext();
 
-		TargetSystem System() const { return m_System; }
+		TargetSystem System() const { return m_Target.System(); }
+		/// What the target decides of the code emitted: emitters ask it instead of branching on the system.
+		const TargetAbi& Target() const { return m_Target; }
 		llvm::Module& module() { return *m_Module; }
 		/// The module, which the caller then owns; nothing may use this context after it (BUG-240: it owns it otherwise).
 		std::unique_ptr<llvm::Module> TakeModule() { return std::move(m_OwnedModule); }
@@ -112,14 +114,14 @@ namespace Scripting
 
 		// The extern _CxxThrowException(ptr value, ptr throwinfo): noreturn; performs the OS-level SEH raise.
 		llvm::Function* GetCxxThrowException();
-		// The personality routine every catching function installs: the extern __CxxFrameHandler3(...) on Windows, the
-		// C4 runtime's __c4_personality_v0(...) on Linux, which reads the same catchable types (D-86).
+		// The personality routine every catching function installs (TargetAbi::Personality): the extern
+		// __CxxFrameHandler3(...) on Windows, the C4 runtime's __c4_personality_v0(...) on Linux (D-86).
 		llvm::Function* Personality();
 
-		// Where `rec`'s hidden parameters (this, sret) sit in its LLVM signature (MSVC x64 order).
+		// Where `rec`'s hidden parameters (this, sret) sit in its LLVM signature (in the target's order).
 		Abi::Signature SignatureOf(const FunctionRecord& rec) const;
 
-		// The MSVC RTTI, vtables and EH tables of the program (docs/compiler/04).
+		// The RTTI, vtables and EH tables of the program, MSVC-shaped on every target (docs/compiler/04).
 		RttiEmitter& rtti() { return *m_Rtti; }
 		VtableEmitter& vtables() { return *m_Vtables; }
 		EhTables& eh() { return *m_Eh; }
@@ -172,7 +174,7 @@ namespace Scripting
 		const ProgramModel* m_Model = nullptr;
 		const std::unordered_map<const SymbolInfo*, const FunctionRecord*>* m_FunctionPointerStarts = nullptr;
 		llvm::LLVMContext& m_Context;
-		TargetSystem m_System;
+		const TargetAbi& m_Target;
 		std::unique_ptr<llvm::Module> m_OwnedModule;
 		llvm::Module* m_Module = nullptr;
 		llvm::DataLayout m_DataLayout;

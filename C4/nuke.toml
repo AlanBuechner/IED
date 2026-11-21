@@ -55,6 +55,11 @@ to = "toolchain/bin/lld-link.exe"
 systems = ["windows"]
 
 [[project.copy]]
+from = "${cpp.llvm}/bin/ld.lld.exe"     # links a --target linux-x64 program (BUG-484)
+to = "toolchain/bin/ld.lld.exe"
+systems = ["windows"]
+
+[[project.copy]]
 from = "${cpp.llvm}/bin/llvm-rc.exe"
 to = "toolchain/bin/llvm-rc.exe"
 systems = ["windows"]

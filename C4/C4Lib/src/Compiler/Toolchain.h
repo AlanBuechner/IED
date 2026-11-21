@@ -21,6 +21,9 @@ namespace Scripting::Toolchain
 	/// lld-link (lld-link.exe on Windows) beside Clang. Empty when there is none.
 	fs::path LldLink();
 
+	/// ld.lld (ld.lld.exe on Windows) beside Clang, which links a Linux program (`-fuse-ld=lld`). Empty when there is none.
+	fs::path LdLld();
+
 	/// clang's own runtime libraries (`clang_rt.builtins` and the like), which clang's driver hands every link:
 	/// lib/clang/<version>/lib/windows above Clang's folder. Empty when there are none.
 	fs::path ClangRuntimeLibraries();
@@ -38,7 +41,7 @@ namespace Scripting::Toolchain
 	/// The Linux x64 sysroot programs for Linux compile and link against (D-86): glibc's and the kernel's headers and
 	/// libraries and GCC's runtime, from Debian 11. <home>/sysroots/linux-x64, or the checkout's vendor/sysroots/linux-x64
 	/// (tools/setup/linux_sysroot.py makes it), found as WindowsSysroot is. Empty when there is none: a compiler that runs
-	/// on Linux then builds against the system's own glibc (BuildUtils' LinuxSysrootForBuild).
+	/// on Linux then builds against the system's own glibc (the Linux TargetAbi's Sysroot).
 	fs::path LinuxSysroot();
 
 	/// The runtime's C and C++ sources: <home>/C4Runtime, or a development build's repository copy. Empty when

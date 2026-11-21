@@ -45,7 +45,7 @@ public:
 	bool Write(const std::vector<llvm::Module*>& partitions, const Scripting::KeyedModule& image = {});
 
 	/// Whether the program's partitions are optimized each alone, after the split, and verified as they are assembled
-	/// (so lowering leaves the module unverified: CodeGenDriver::VerifyLater).
+	/// (so lowering leaves the module unverified: ProgramBackend::VerifyLater).
 	static bool OptimizesPartitions(const Scripting::CompileOptions& options);
 
 private:

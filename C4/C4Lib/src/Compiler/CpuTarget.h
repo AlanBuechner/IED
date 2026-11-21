@@ -7,6 +7,8 @@
 
 namespace Scripting
 {
+	class TargetAbi;
+
 	/// The machine a build compiles for: the processor (D-62), an LLVM x86-64 CPU and the features enabled on it
 	/// once the `-m` / `-mno-` flags and everything they imply are applied, and the operating system (D-86). One per
 	/// build: every function of the program, its foreign C/C++ sources and its scripts are compiled for it, so they
@@ -33,6 +35,8 @@ namespace Scripting
 		/// This target on `system`: what `--target` selects.
 		CpuTarget On(TargetSystem system) const;
 		TargetSystem System() const { return m_System; }
+		/// What the system decides of the build's code and its link (R11): picked here, once per build.
+		const TargetAbi& Abi() const;
 
 		const std::string& Cpu() const { return m_Cpu; }
 		/// An LLVM feature name: `avx2`, `fma`, `sse4.1`.

@@ -63,26 +63,6 @@ namespace Scripting
 				[](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); });
 		}
 
-		// The objects and libraries a link takes, one quoted argument a line, in a response file at `path`; forward slashes,
-		// which neither quoting convention escapes. lld-link's arguments for Windows; for Linux the clang driver's, which
-		// reads -l, -L and -Wl as they are written.
-		bool WriteLinkInputs(const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& libraries, const std::string& path,
-			TargetSystem system)
-		{
-			std::string text;
-			auto add = [&text](std::string argument) {
-				std::replace(argument.begin(), argument.end(), '\\', '/');
-				text += "\"" + argument + "\"\n";
-			};
-			for (const Core::String& object : objects) add(object.c_str());
-			for (const Core::String& library : libraries)
-				if (system == TargetSystem::Linux) add(LinuxLinkerArgument(library.c_str()));
-				else for (const std::string& argument : LinkerArguments(library.c_str())) add(argument);
-			if (WriteFileBytes(path, text)) return true;
-			std::cerr << "error: cannot write the link's inputs to " << path << std::endl;
-			return false;
-		}
-
 		const std::vector<Option>& Options()
 		{
 			static const std::vector<Option> options = {
@@ -185,7 +165,7 @@ namespace Scripting
 				return;
 			}
 			opts.target = target->On(system);
-			if (opts.outputFile.empty()) opts.outputFile = Core::String("output") + ExecutableExtension(system);
+			if (opts.outputFile.empty()) opts.outputFile = Core::String("output") + opts.target.Abi().ExecutableExtension();
 			// A Linux script host links the script host library built for Linux, which only a compiler running there has.
 			if (system == TargetSystem::Linux && opts.scriptHost && HostSystem() != TargetSystem::Linux)
 				opts.error = "--script-host for linux-x64 needs the Linux script host library: build the program with the compiler on Linux";
@@ -242,27 +222,6 @@ namespace Scripting
 		return clang.string();
 	}
 
-	std::vector<std::string> WindowsSysrootFlags(const std::string& sysroot)
-	{
-		if (sysroot.empty()) return {};
-		return { "-Xmicrosoft-windows-sys-root", sysroot };
-	}
-
-	std::optional<fs::path> LinuxSysrootForBuild()
-	{
-		const fs::path sysroot = Toolchain::LinuxSysroot();
-		if (!sysroot.empty() || HostSystem() == TargetSystem::Linux) return sysroot;
-		std::cerr << "error: the Linux sysroot was not found: C4 looks in <C4 home>/sysroots/linux-x64 (the IED checkout's "
-			"tools/setup/linux_sysroot.py makes vendor/sysroots/linux-x64)" << std::endl;
-		return std::nullopt;
-	}
-
-	std::vector<std::string> LinuxSysrootFlags(const fs::path& sysroot)
-	{
-		if (sysroot.empty()) return {};
-		return { "--sysroot=" + sysroot.generic_string() };
-	}
-
 	std::vector<std::string> LinkerArguments(const std::string& argument)
 	{
 		if (argument.rfind("-Wl,", 0) == 0)
@@ -302,21 +261,12 @@ namespace Scripting
 		const std::string clangPath = ClangPath();
 		if (clangPath.empty()) return false;
 
-		std::vector<std::string> args = { clangPath, "-c", "-target", TargetTriple(system), "-MD", "-MF", std::string(objPath.c_str()) + ".d" };
-		if (system == TargetSystem::Linux)
-		{
-			const std::optional<fs::path> sysroot = LinuxSysrootForBuild();
-			if (!sysroot) return false;
-			const std::vector<std::string> flags = LinuxSysrootFlags(*sysroot);
-			args.push_back("-fPIC");
-			args.insert(args.end(), flags.begin(), flags.end());
-		}
-		else
-		{
-			args.push_back("-mstackrealign");
-			const std::vector<std::string> sysroot = WindowsSysrootFlags(Toolchain::WindowsSysroot().string());
-			args.insert(args.end(), sysroot.begin(), sysroot.end());
-		}
+		const TargetAbi& target = TargetAbi::For(system);
+		const std::optional<fs::path> sysroot = target.Sysroot();
+		if (!sysroot) return false;
+		std::vector<std::string> args = { clangPath, "-c", "-target", target.Triple(), "-MD", "-MF", std::string(objPath.c_str()) + ".d" };
+		const std::vector<std::string> flags = target.ForeignSourceFlags(*sysroot);
+		args.insert(args.end(), flags.begin(), flags.end());
 		args.insert(args.end(), targetFlags.begin(), targetFlags.end());
 		args.insert(args.end(), compileFlags.begin(), compileFlags.end());
 		args.push_back(language == "c++" ? "-std=c++20" : "-std=c11");
@@ -350,77 +300,6 @@ namespace Scripting
 		}
 
 		return RunTool(args);
-	}
-
-	bool LinkWithLLD(const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& libraries,
-		const Core::String& outputPath, Subsystem subsystem, bool verbose)
-	{
-		const fs::path lld = Toolchain::LldLink();
-		if (lld.empty())
-		{
-			std::cerr << "error: lld-link.exe was not found beside clang.exe (" << ClangPath() << ")" << std::endl;
-			return false;
-		}
-		// lld-link itself, as clang's driver would run it: it takes the MSVC and Windows SDK libraries from setup.bat's kit
-		// (Toolchain::WindowsSysroot), else finds them on its own (or through LIB when that is set), and one process less starts. The objects and libraries go in a response file:
-		// a split program's object paths outgrow a Windows command line (32,767 characters).
-		const std::string inputs = std::string(outputPath.c_str()) + ".link.rsp";
-		if (!WriteLinkInputs(objects, libraries, inputs, TargetSystem::Windows)) return false;
-		std::vector<std::string> args = { lld.string(), "-nologo", "-out:" + std::string(outputPath.c_str()), "-defaultlib:libcmt",
-			"-defaultlib:oldnames" };
-		if (const fs::path builtins = Toolchain::ClangRuntimeLibraries(); !builtins.empty()) args.push_back("-libpath:" + builtins.string());
-		if (const fs::path sysroot = Toolchain::WindowsSysroot(); !sysroot.empty()) args.push_back("/winsysroot:" + sysroot.string());
-		args.push_back("@" + inputs);
-		if (subsystem == Subsystem::Windows)
-		{
-			args.push_back("/SUBSYSTEM:WINDOWS");
-			args.push_back("/ENTRY:mainCRTStartup"); // the C runtime's console entry, which calls main, not WinMain
-		}
-		else args.push_back("/SUBSYSTEM:CONSOLE");
-
-		if (verbose)
-		{
-			std::cout << "Linking: ";
-			for (const auto& a : args) std::cout << a << " ";
-			std::cout << std::endl;
-		}
-
-		const bool linked = RunTool(args);
-		RemoveFile(inputs);
-		return linked;
-	}
-
-	bool LinkElf(const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& runtime, const Core::Vector<Core::String>& libraries,
-		const Core::String& outputPath, bool verbose)
-	{
-		const std::string clang = ClangPath();
-		if (clang.empty()) return false;
-		const std::optional<fs::path> sysroot = LinuxSysrootForBuild();
-		if (!sysroot) return false;
-		// clang's driver as g++ links: glibc's startup files and libraries from the sysroot (or the system's), GCC's C++
-		// runtime linked in, ld.lld beside clang. The unwinder is GCC's shared one (libgcc_s.so.1, which every glibc system
-		// has: glibc itself loads it), one for the program, the libraries it loads and the script frames a script host
-		// registers with it, so an exception unwinds through all of them.
-		const std::string inputs = std::string(outputPath.c_str()) + ".link.rsp";
-		Core::Vector<Core::String> lazy = objects;
-		lazy.Push("-Wl,--start-lib");
-		for (const Core::String& object : runtime) lazy.Push(object);
-		lazy.Push("-Wl,--end-lib");
-		if (!WriteLinkInputs(lazy, libraries, inputs, TargetSystem::Linux)) return false;
-		std::vector<std::string> args = { clang, "--driver-mode=g++", "--target=" + std::string(TargetTriple(TargetSystem::Linux)) };
-		const std::vector<std::string> sysrootFlags = LinuxSysrootFlags(*sysroot);
-		args.insert(args.end(), sysrootFlags.begin(), sysrootFlags.end());
-		args.insert(args.end(), { "-fuse-ld=lld", "-pie", "-static-libstdc++", "-shared-libgcc",
-			"-o", outputPath.c_str(), "@" + inputs, "-Wl,--as-needed", "-lpthread", "-ldl", "-lm" });
-		if (verbose)
-		{
-			std::cout << "Linking: ";
-			for (const auto& a : args) std::cout << a << " ";
-			std::cout << std::endl;
-		}
-		const bool linked = RunTool(args);
-		RemoveFile(inputs);
-		return linked;
 	}
 
 	void RemoveIfExists(const std::string& path) { RemoveFile(path); }

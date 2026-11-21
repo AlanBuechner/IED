@@ -1,5 +1,5 @@
 #pragma once
-#include "Compiler/TargetSystem.h"
+#include "Target/TargetAbi.h"
 #include "Model/Types.h"
 #include <llvm/IR/DataLayout.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -11,17 +11,18 @@ namespace Scripting
 {
 	/// THE calling-convention brick (doc 04). Every "how does this type cross a call boundary" answer in
 	/// the whole backend goes through here, so the aggregate rules of the target's convention exist in exactly one
-	/// place and cannot drift between call emitters, return emitters, and global emitters: the Windows x64
-	/// convention, or System V's on Linux (D-86). The model is the size authority (Type::GetSize); this brick only
-	/// decides register-vs-memory and sret from that size and, on System V, the scalars the aggregate holds.
+	/// place and cannot drift between call emitters, return emitters, and global emitters. What differs between
+	/// conventions (Windows x64, System V on Linux, D-86) it asks the build's TargetAbi (R11). The model is the size
+	/// authority (Type::GetSize); this brick only decides register-vs-memory and sret from that size and, on System V,
+	/// the scalars the aggregate holds.
 	class Abi
 	{
 	public:
 		/// `lower` gives a type's LLVM storage type, whose scalars System V classifies, laid out by `layout`;
 		/// `vectorBytes` the widest vector register the target's processor has (16, 32 with AVX, 64 with AVX-512F).
-		Abi(llvm::LLVMContext& ctx, TargetSystem system, const llvm::DataLayout& layout, std::function<llvm::Type*(const Type*)> lower,
+		Abi(llvm::LLVMContext& ctx, const TargetAbi& target, const llvm::DataLayout& layout, std::function<llvm::Type*(const Type*)> lower,
 			std::function<uint64_t()> vectorBytes)
-			: m_Ctx(ctx), m_System(system), m_Layout(layout), m_Lower(std::move(lower)), m_VectorBytes(std::move(vectorBytes)) {}
+			: m_Ctx(ctx), m_Target(target), m_Layout(layout), m_Lower(std::move(lower)), m_VectorBytes(std::move(vectorBytes)) {}
 
 		// --- classification (pure over model types) -------------------------------------
 		// A by-value aggregate is an object, union, or array (after alias/reference unwrapping). These are
@@ -47,7 +48,7 @@ namespace Scripting
 		/// System V passes such an aggregate to a C function on the stack, which the hidden pointer marked `byval`
 		/// does (the callee gets a copy). C4's own functions take the hidden pointer as it is, so a C function a
 		/// function pointer reaches takes one only up to 16 bytes (D-86).
-		bool PassesOnStack(const Type* t) const { return m_System == TargetSystem::Linux && PassesByHiddenPtr(t); }
+		bool PassesOnStack(const Type* t) const { return m_Target.MemoryArgumentsOnStack() && PassesByHiddenPtr(t); }
 
 		// How a function receives its object: none (a free or static function), as a member function's `this`
 		// (MSVC member convention), or as an extension method's receiver, which is a leading argument of a
@@ -87,11 +88,8 @@ namespace Scripting
 		llvm::Type* CoercionSlot(llvm::Type* object, llvm::Type* registers) const;
 
 	private:
-		llvm::Type* WindowsRegisterType(const Type* t) const;
-		llvm::Type* SystemVRegisterType(const Type* t) const;
-
 		llvm::LLVMContext& m_Ctx;
-		TargetSystem m_System;
+		const TargetAbi& m_Target;
 		const llvm::DataLayout& m_Layout;
 		std::function<llvm::Type*(const Type*)> m_Lower;
 		std::function<uint64_t()> m_VectorBytes;

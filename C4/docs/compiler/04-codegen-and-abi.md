@@ -18,7 +18,8 @@ Every component is a 1:1 `.h/.cpp` pair; `CodeGen.h` is the umbrella.
 | `ReflectionEmitter` | one compile | The thunks made locals only the image names, each reflected function's invoke entry and each type's, the reflection image (in partition 0, or a split program's module of its own, D-82) and `__c4_reflect_init`. |
 | `ImportEmitter` | one compile | Each partition's `available_externally` copies of the small functions it calls from the others (`ImportPlanner`). |
 | `ModuleContext` | one module | The module; the single C4 -> LLVM type map (`Lower`); struct creation/filling (`StructFor`, `FillStruct`); function signatures (`GetOrCreateFunction`, `SignatureOf`); global storage (`GlobalAddress`); runtime entry points (`RuntimeFunction`). Owns the `Abi` brick and the object-model emitters below. |
-| `Abi` | one compile | THE calling-convention brick: which types are by-value aggregates, register vs hidden pointer, sret, the LLVM param/return types at a boundary. |
+| `Abi` | one compile | THE calling-convention brick: which types are by-value aggregates, register vs hidden pointer, sret, the LLVM param/return types at a boundary. What differs between conventions it asks the module's `TargetAbi`. |
+| `TargetAbi` (`C4Lib/src/Target/`) | the process | What the target decides (R11, see [Targets](#targets-targetabi)): one immutable implementation per system, picked once per build (`CpuTarget::Abi`, `ModuleContext::Target`). |
 | `IRContext` | one function | The `IRBuilder`, slot allocas, `this`, entry-block temporaries, the `CleanupStack`, the unwind-target query, and the ONE call brick (`Call`: funclet bundle + invoke). Truthiness rule. |
 | `CleanupStack` | one function | The scope-exit obligations (cleanups), try scopes and catch handlers between the entry and the current point, in nesting order. |
 | `FunctionEmitter` | one function | Entry block, slot allocas, parameter binding, runs the region walker, terminates leftover blocks, emits nested functions as siblings. |
@@ -118,10 +119,39 @@ between normalized types by value, and clamps an integer into the encoding range
 NumberConstant` encodes normalized constants the same way. Arithmetic never reaches codegen on the encoding:
 the usual arithmetic conversions make it float arithmetic in HIR.
 
+## Targets (`TargetAbi`)
+
+Everything that differs between the targets a build can have is one question to the build's `TargetAbi`
+(`Target/TargetAbi.h`, R11), an interface with one implementation per system: `WindowsX64Target` (MSVC-shaped, the
+built-in shape of the object model) and `LinuxX64Target` (D-86), in `Target/WindowsX64Target.cpp` and
+`Target/LinuxX64Target.cpp`. `TargetAbi::For(system)` gives the one instance of each; a build picks it once from its
+`CpuTarget` (`--target`, `CpuTarget::Abi`), a module from the system it is made for (`ModuleContext::Target`). An
+emitter asks it instead of branching on the system, so another target (ARM64) is one more implementation.
+
+| Question | Asked by | Windows x64 | Linux x64 |
+|---|---|---|---|
+| `Triple`, `DataLayout`, `ConfigureModule` | `ModuleContext`, foreign and runtime compiles | `x86_64-pc-windows-msvc`, `m:w` | `x86_64-unknown-linux-gnu`, `m:e`, PIC and PIE levels |
+| `Convention` | `ExprEmitter::EmitVa` (the `va_arg` expansion) | `Win64` | `SystemV` |
+| `AggregateRegisters` (`Target/AggregateRegisters`) | `Abi::RegisterType` | 1, 2, 4 or 8 bytes as one integer | eightbyte classes up to 16 bytes |
+| `VectorPassesInMemory`, `MemberReturnsObjectsInMemory`, `SretBeforeThis`, `MemoryArgumentsOnStack` | `Abi` | no, yes, no, no | wider than a register, no, yes, yes (`byval`) |
+| `Exceptions` | `IRContext::Funclets` (and so `RegionEmitter`) | `Funclets` | `LandingPads` (`RegionLandingPads.cpp`) |
+| `Personality` | `ModuleContext::Personality` | `__CxxFrameHandler3` | `__c4_personality_v0` |
+| `AnchorTables` | a finished partition, a script module | nothing (image-relative) | `PeTables::AnchorAtFields` |
+| `DebugInfoFormat`, `SeparateDebugFile`, `DebugFileLinkArguments` | `DebugInfo`, `ProgramOutput::Link` | CodeView, a `.pdb` (`/DEBUG /PDB /PDBALTPATH`) | DWARF 5 in the program |
+| `ConstructorsInInitArray`, `Relocation` | `ObjectEmission` (the target machine) | no, default | `.init_array`, `PIC_` |
+| `ExecutableExtension`, `SharedLibraryExtension` | the default `-o`, `Toolchain`, the script host library | `.exe`, `.dll` | none, `.so` |
+| `Sysroot`, `SysrootRecord`, `ForeignSourceFlags`, `RuntimeSourceFlags`, `BuildsRuntimeSource`, `RuntimeObjectFolder` | `CompileForeignSource`, `RuntimeObjects` | the MSVC and SDK kit, `-mstackrealign` | the Linux sysroot, `-fPIC` |
+| `ScriptHostLinkArguments`, `Link` | `ProgramOutput::Link` | `C4Script.lib` delay-loaded; lld-link against libcmt | `C4Script.so` with `$ORIGIN`; clang's g++ driver and ld.lld against glibc, the runtime lazily |
+
+The RTTI and EH tables and their names (`RttiEmitter`, `EhTables`, `MsvcNames`, `PeTables`) are MSVC's on both
+targets: the Linux runtime reads the same tables (only their references are anchored differently), so a clause catches
+the same types everywhere. C4Testing `Target.Abi` and `Target.Aggregates` check each answer.
+
 ## Windows x64 ABI
 
-The target is fixed to `x86_64-pc-windows-msvc`, and the rules must match clang byte for byte so C4 objects
-link with clang-compiled C/C++ in both directions. All of it lives in `Abi`:
+On Windows (`WindowsX64Target`) the triple is `x86_64-pc-windows-msvc`, and the rules must match clang byte for byte
+so C4 objects link with clang-compiled C/C++ in both directions. All of it lives in `Abi` (the register sizes in
+`Win64AggregateRegisters`):
 
 - Scalars (ints, floats, pointers, funcptrs) pass and return in their own register.
 - A by-value aggregate (object, union or array) of exactly **1, 2, 4 or 8 bytes** passes and returns as one
@@ -162,10 +192,11 @@ init lists, COM) are the oracle for this section.
 
 ## System V ABI (Linux, D-86)
 
-Under `--target linux-x64` the triple is `x86_64-unknown-linux-gnu` (`TargetSystem`, carried by the build's
+Under `--target linux-x64` the triple is `x86_64-unknown-linux-gnu` (`LinuxX64Target`, the TargetAbi of the build's
 `CpuTarget`), and `Abi` follows the System V x86-64 convention as clang does, so C4 objects link with clang's C:
 
-- An aggregate of up to 16 bytes is classified an eightbyte at a time from its LLVM storage type: an eightbyte
+- An aggregate of up to 16 bytes is classified an eightbyte at a time from its LLVM storage type
+  (`SystemVAggregateRegisters`): an eightbyte
   holding only floats is SSE (`float`, `<2 x float>` or `double`), any other INTEGER (an integer of the bytes it
   holds); `RegisterType` is that one type or a struct of the two, which LLVM passes in one or two registers.
   An unaligned field, an x87 or 128-bit float, or more than 16 bytes puts it in memory: a hidden pointer, marked
@@ -353,9 +384,9 @@ runtime's personality `__c4_personality_v0` (`C4Runtime/ExceptionsPosix.c`); the
 - `throw v` stores the value in an exception `c4_eh_allocate` makes (the stack unwinds before a handler runs,
   so it cannot stay in the frame; the collector scans it as a root) and raises it with `c4_eh_throw(object,
   ThrowInfo)`. With no handler the report holds the stack of the throw, as on Windows.
-- An ELF image has no `__ImageBase`: once a partition is assembled, `PeTables::AnchorAtFields` makes each 32-bit
-  table reference relative to its own field, and the runtime reads both forms through `c4_table_ref`
-  (`RttiTablesC.h`).
+- An ELF image has no `__ImageBase`: once a partition is assembled, the target's `AnchorTables`
+  (`PeTables::AnchorAtFields`) makes each 32-bit table reference relative to its own field, and the runtime reads both
+  forms through `c4_table_ref` (`RttiTablesC.h`).
 - A C++ exception (libstdc++'s) is caught by C4 only with `catch (...)`, and a C4 exception by C++ likewise:
   the two personalities do not share types, unlike MSVC's on Windows.
 
@@ -465,7 +496,8 @@ an object return always goes through sret). `MakeFunc` builds the pair:
 `ProgramBackend::EnableDebugInfo` makes each `ModuleContext` own a `DebugInfo` (`CodeGen/DebugInfo`) for the compile;
 without it nothing below is emitted.
 
-- **Module.** The `CodeView` and `Debug Info Version` module flags and one compile unit (producer `C4 x.y.z`).
+- **Module.** The target's format (`TargetAbi::DebugInfoFormat`: the `CodeView` and `CodeViewGHash` module flags, or
+  `Dwarf Version` 5 on Linux), the `Debug Info Version` flag and one compile unit (producer `C4 x.y.z`).
   Each source unit is a `DIFile` from its absolute path (`ProgramModel::SourcePaths`; an in-memory source uses
   its display name).
 - **Functions.** A function written in C4 (its record has a body) gets a subprogram named as the program
@@ -497,8 +529,8 @@ without it nothing below is emitted.
   also has another one, or whose constants disagree: it keeps its register and stack ranges, and the stretches
   where it was a constant read as optimized away. A variable that is one constant throughout stays `S_CONSTANT`.
 
-The object is compiled from IR with the metadata, and the link passes `/DEBUG`, so lld writes the `.pdb`
-beside the exe. C4Testing `Semantic.DebugInfo` checks the metadata and `Compiler.CodeViewLocations` the
+The object is compiled from IR with the metadata, and on Windows the link passes the target's
+`DebugFileLinkArguments` (`/DEBUG`), so lld writes the `.pdb` beside the exe; a Linux program keeps its DWARF. C4Testing `Semantic.DebugInfo` checks the metadata and `Compiler.CodeViewLocations` the
 constant locations; `Dap.Optimized` debugs an `-O3` program; ToolsTest `DebugInfoFlag` reads a real
 `.pdb`; IsolatedTest `-DebugInfo` builds the corpus with `-g`.
 
@@ -525,4 +557,4 @@ allowed (unions, bytes, `memcpy`, bit casts) where the optimizer cannot see that
 ## Not implemented here yet
 
 - Any C4-side optimization pass (deliberately none; revisit only if a benchmark shows C4 slower than C++).
-- Additional targets (Linux, ARM) - **Planned**.
+- Additional targets (ARM64): one more `TargetAbi` implementation, with its convention's `AggregateRegisters` - **Planned**.

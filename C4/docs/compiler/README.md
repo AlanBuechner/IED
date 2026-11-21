@@ -46,7 +46,8 @@ design gives every question exactly one home.
    per-function and transient. Nothing process-global is mutated during compilation.
 8. **One brick per concept.** The moment two call sites need the same answer (calling convention,
    pointer adjustment, truthiness, GC-correct store), it becomes one named function and both call it.
-   Examples: `Abi` for calling convention, `ExprEmitter::GcStore` for barrier-guarded stores,
+   Examples: `Abi` for calling convention, `TargetAbi` for what differs between targets (an emitter never branches
+   on the system), `ExprEmitter::GcStore` for barrier-guarded stores,
    `ObjectType::GetPointerAdjustment` for base-subobject deltas, `LoweringContext::LoadIfNeeded` for
    lvalue-to-rvalue.
 9. **Files are 1:1 `.h`/`.cpp` pairs of at most ~600 lines**, organized by subsystem. A class too large for
@@ -72,7 +73,8 @@ emission, so its body diagnostics are the build's by construction.
 | `Interop/` | `InteropPass`: finds `extern "c"/"c++" include|source` directives, runs CBind to generate C4 declarations, compiles foreign sources, collects libs and foreign objects |
 | `Lexer/` | `Token` (kinds, keyword promotion), `Lexer` (atomic tokens; compound operators formed on request, template-aware `>>` splitting), `TokenArena`, `LexerRecovery` (save/restore for speculative parses), `BraceRecovery` (a file whose braces do not pair up is mended by its indentation before the parse, R7) |
 | `Parser/` | `PrattParser` (expressions, binding powers), `ParserState`, `AstNode`; `Nodes/Declarations`, `Nodes/Expressions`, `Nodes/Statements` (one node type per `.h/.cpp`, `TryParse` + `ParseBody` pattern), `Nodes/ErrorNode` (what a declaration, member or statement that did not parse leaves); `Recovery` (skipping a broken piece to the next one, R7); `Consumer/` (AST walker, pretty printer) |
-| `Compiler/` | `CompilerInstance` (owns one compilation: units, parallel parse scheduler, include closures, the model), `CompilationUnit`, `CompilerMessageQueue`, `ErrorTracker` (diagnostics + speculative-parse suppression frames), `DiagnosticReporter` (rendering), `BuildUtils` (CLI parsing, clang/lld invocation, runtime object build) |
+| `Compiler/` | `CompilerInstance` (owns one compilation: units, parallel parse scheduler, include closures, the model), `CompilationUnit`, `CompilerMessageQueue`, `ErrorTracker` (diagnostics + speculative-parse suppression frames), `DiagnosticReporter` (rendering), `BuildUtils` (CLI parsing, foreign source compiles, tool runs), `TargetSystem` + `CpuTarget` (the build's system and processor), `RuntimeObjects` (the runtime's objects), `ObjectEmission` (optimize, assemble) |
+| `Target/` | `TargetAbi` (R11): the one answer to every question that differs between targets - calling convention facts, exception scheme and personality, table anchoring, debug format, object options, sysroot, runtime files, the link - with `WindowsX64Target` and `LinuxX64Target`, and `AggregateRegisters` (the Win64 and System V aggregate classifications) |
 | `Model/` | The `ProgramModel` and its subsystems: `SymbolTable` (scope tree), `TypeStore` (owns every type), `TypeResolver`, `SymbolQueries`, `TemplateInstantiator`, `OverloadResolution`, `OperatorTable` + `OperatorAnnotations`, `ConstEvaluator`, `LoweringScopes`, `TypeHandle`, `QueryResult`, reflection C emission (`ProgramModel.cpp`) |
 | `Model/Builder/` | `ModelBuilder` (pass 1 register + orchestration), `DeclarationQueries` (pass 2: each pending declaration resolved on demand, once; cycles), `ModelResolver` (how a variable, enum, alias, union and an object's members resolve; the body-reference walk), `FreeFunctionResolver` (free functions, extension methods, out-of-line definitions) |
 | `Model/Types/` | One class per type kind: Primitive, Pointer, Reference, Array, FunPtr, Function, Object, Union, Enum, Alias, Swizzle (packed sub-vector), InitList, TemplateParam, TemplateSpecialization, Invalid |

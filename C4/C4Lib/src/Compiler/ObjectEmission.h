@@ -21,7 +21,7 @@ namespace Scripting
 		const CpuTarget* target = nullptr;
 		unsigned threads = 1; // how many partitions are assembled at once
 		bool optimizePartitions = false; // incremental (D-76): each partition is optimized alone, after the split
-		bool verify = false; // each partition assembled is verified first (CodeGenDriver::VerifyLater)
+		bool verify = false; // each partition assembled is verified first (ProgramBackend::VerifyLater)
 	};
 
 	/// An error the backend reports. `cookie` is the inline-asm location cookie (AsmEmitter::LocationCookie) of the

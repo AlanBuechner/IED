@@ -92,8 +92,9 @@ namespace Scripting
 		CleanupStack& Cleanups() { return m_Cleanups; }
 		void SetRegionServices(RegionServices* region) { m_Region = region; }
 		void EmitNestedBlock(const BlockNode* block) { m_Region->EmitNestedBlock(block); }
-		// Windows lowers exceptions to funclets (cleanuppad, catchswitch, catchpad); Linux to landing pads (D-86).
-		bool Funclets() const { return m_MCtx.System() == TargetSystem::Windows; }
+		// Whether the target lowers exceptions to funclets (cleanuppad, catchswitch, catchpad), as Windows does, rather than
+		// landing pads (Linux, D-86).
+		bool Funclets() const { return m_MCtx.Target().Exceptions() == ExceptionScheme::Funclets; }
 		// Where an exception raised at the current point goes: the innermost cleanup's pad or try's
 		// catchswitch above the floor (with landing pads, the landingpad of the innermost entry an exception
 		// passes), or null (unwind to the caller).

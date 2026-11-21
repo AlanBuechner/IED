@@ -1,4 +1,5 @@
 #include "Compiler/CpuTarget.h"
+#include "Target/TargetAbi.h"
 #include <llvm/ADT/StringMap.h>
 #include <llvm/TargetParser/Host.h>
 #include <llvm/TargetParser/X86TargetParser.h>
@@ -154,6 +155,8 @@ namespace Scripting
 		target.m_System = system;
 		return target;
 	}
+
+	const TargetAbi& CpuTarget::Abi() const { return TargetAbi::For(m_System); }
 
 	bool CpuTarget::IsTargetFlag(const std::string& arg)
 	{

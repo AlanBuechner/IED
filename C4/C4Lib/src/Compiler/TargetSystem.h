@@ -4,9 +4,9 @@
 
 namespace Scripting
 {
-	/// The operating system a build's program runs on (D-86): it decides the object format, the calling convention,
-	/// how exceptions unwind, the C library the program links against and which runtime files it gets. Every target
-	/// is x86-64.
+	/// The operating system a build's program runs on (D-86). What it decides - the object format, the calling
+	/// convention, how exceptions unwind, the C library the program links against and which runtime files it gets - is
+	/// its TargetAbi's (Target/TargetAbi.h). Every target is x86-64.
 	enum class TargetSystem
 	{
 		Windows, // PE/COFF, the MSVC x64 ABI and C runtime, funclet exceptions
@@ -23,14 +23,4 @@ namespace Scripting
 	std::optional<TargetSystem> TargetFromName(const std::string& name);
 	/// Every name TargetFromName reads, for a message.
 	std::string TargetNames();
-
-	/// The LLVM triple of a program built for `system`.
-	const char* TargetTriple(TargetSystem system);
-	/// The data layout clang uses for that triple: C4's sizes and alignments agree with C's on it.
-	const char* TargetDataLayout(TargetSystem system);
-
-	/// `.obj` or `.o`.
-	const char* ObjectExtension(TargetSystem system);
-	/// `.exe` or nothing.
-	const char* ExecutableExtension(TargetSystem system);
 } // namespace Scripting

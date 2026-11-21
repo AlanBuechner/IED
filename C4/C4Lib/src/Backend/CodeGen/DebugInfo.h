@@ -1,6 +1,7 @@
 #pragma once
 #include "Backend/HIR/HIRNodes.h"
 #include "Model/Types/ObjectType.h"
+#include "Target/TargetAbi.h"
 #include <llvm/IR/DIBuilder.h>
 #include <llvm/IR/Module.h>
 #include <string>
@@ -12,14 +13,14 @@ namespace Scripting
 	class SignatureType;
 	class UnionType;
 
-	/// The debug information of one module (B28), as CodeView for the Windows debuggers: a compile unit, the source
-	/// files, a subprogram per function written in C4, the C4 types, the parameters and locals, and a line for every
-	/// statement. Compiler-written functions get none.
+	/// The debug information of one module (B28), in the target's format (CodeView for the Windows debuggers, DWARF on
+	/// Linux): a compile unit, the source files, a subprogram per function written in C4, the C4 types, the parameters
+	/// and locals, and a line for every statement. Compiler-written functions get none.
 	class DebugInfo
 	{
 	public:
 		/// `sourcePaths`: each unit's absolute path.
-		DebugInfo(llvm::Module& module, std::unordered_map<uint32, std::string> sourcePaths);
+		DebugInfo(llvm::Module& module, DebugFormat format, std::unordered_map<uint32, std::string> sourcePaths);
 
 		/// The subprogram of `record`'s body, attached to `fn`; null for a function the compiler wrote.
 		llvm::DISubprogram* Describe(llvm::Function& fn, const FunctionRecord& record);

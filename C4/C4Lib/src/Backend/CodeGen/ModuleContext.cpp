@@ -20,21 +20,15 @@
 namespace Scripting
 {
 	ModuleContext::ModuleContext(llvm::LLVMContext& ctx, TargetSystem system)
-		: m_Context(ctx), m_System(system), m_Abi(ctx, system, m_DataLayout, [this](const Type* t) { return Lower(t); },
+		: m_Context(ctx), m_Target(TargetAbi::For(system)), m_Abi(ctx, m_Target, m_DataLayout, [this](const Type* t) { return Lower(t); },
 			[this] { return m_Model ? uint64_t(m_Model->Target().FloatLanes()) * sizeof(float) : uint64_t(16); }), m_AliasTags(ctx, [this](const Type* t) { return m_Vtables->HasVptrs(t); })
 	{
 		m_OwnedModule = std::make_unique<llvm::Module>("c4_program", m_Context);
 		m_Module = m_OwnedModule.get();
 		// The target and the layout clang uses for it, so our struct sizes and aggregate passing agree with C/C++ at
 		// every boundary (doc 04).
-		m_Module->setTargetTriple(llvm::Triple(TargetTriple(system)));
-		m_DataLayout = llvm::DataLayout(TargetDataLayout(system));
-		if (system == TargetSystem::Linux)
-		{
-			// A position-independent executable: what it defines it reaches directly, the rest through the GOT and PLT.
-			m_Module->setPICLevel(llvm::PICLevel::BigPIC);
-			m_Module->setPIELevel(llvm::PIELevel::Large);
-		}
+		m_Target.ConfigureModule(*m_Module);
+		m_DataLayout = llvm::DataLayout(m_Target.DataLayout());
 		m_Module->setDataLayout(m_DataLayout);
 		m_Rtti = std::make_unique<RttiEmitter>(*m_Module);
 		m_Vtables = std::make_unique<VtableEmitter>(*this, *m_Rtti);
@@ -563,7 +557,7 @@ namespace Scripting
 
 	llvm::Function* ModuleContext::Personality()
 	{
-		const char* name = m_System == TargetSystem::Linux ? "__c4_personality_v0" : "__CxxFrameHandler3";
+		const char* name = m_Target.Personality();
 		auto* f = m_Module->getFunction(name);
 		if (!f)
 			f = llvm::Function::Create(llvm::FunctionType::get(llvm::Type::getInt32Ty(m_Context), {}, true),
@@ -573,6 +567,6 @@ namespace Scripting
 
 	void ModuleContext::EnableDebugInfo(std::unordered_map<uint32, std::string> sourcePaths)
 	{
-		m_Debug = std::make_unique<DebugInfo>(*m_Module, std::move(sourcePaths));
+		m_Debug = std::make_unique<DebugInfo>(*m_Module, m_Target.DebugInfoFormat(), std::move(sourcePaths));
 	}
 } // namespace Scripting

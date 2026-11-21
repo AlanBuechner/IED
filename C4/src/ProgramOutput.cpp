@@ -29,8 +29,8 @@ namespace fs = std::filesystem;
 
 namespace
 {
-	// The script host library's file for a target system, as Nuke's C/C++ driver names the shared libraries it builds.
-	std::string ScriptHostLibrary(Scripting::TargetSystem system) { return system == Scripting::TargetSystem::Linux ? "C4Script.so" : "C4Script.dll"; }
+	// The script host library's file, as Nuke's C/C++ driver names the shared libraries it builds for the target.
+	std::string ScriptHostLibrary(const Scripting::TargetAbi& target) { return target.SharedLibrary("C4Script"); }
 }
 
 bool ProgramOutput::Write(const std::vector<llvm::Module*>& partitions, const Scripting::KeyedModule& image)
@@ -248,9 +248,9 @@ bool ProgramOutput::Link(const std::vector<std::string>& programObjects, const s
 	Core::Vector<Core::String> objects;
 	for (const std::string& object : programObjects) objects.Push(Core::String(object.c_str()));
 	// The C4 runtime linked into every executable (Compiler/RuntimeObjects.h).
-	const Scripting::TargetSystem system = m_In.options.target.System();
+	const Scripting::TargetAbi& target = m_In.options.target.Abi();
 	Core::Vector<Core::String> runtime;
-	if (!Scripting::EnsureRuntimeObjects(m_In.options.verbose, system, runtime))
+	if (!Scripting::EnsureRuntimeObjects(m_In.options.verbose, target, runtime))
 	{
 		m_In.result.AddBackendError("the C4 runtime could not be built");
 		return false;
@@ -265,45 +265,27 @@ bool ProgramOutput::Link(const std::vector<std::string>& programObjects, const s
 	for (const auto& lib : m_In.interop.libraries) libraries.Push(Core::String(lib.c_str()));
 	for (const auto& argument : m_In.options.linkArguments) libraries.Push(argument);
 	const DebugInfoPaths debugInfo = DebugInfoPathsFor(out);
-	const bool pdb = m_In.options.debugInfo && system == Scripting::TargetSystem::Windows; // DWARF stays in a Linux program
+	const bool pdb = m_In.options.debugInfo && target.SeparateDebugFile();
+	// Linked under another name, so a link that fails keeps the old program's .pdb; the program names the final one.
 	if (pdb)
-	{
-		// Linked under another name, so a link that fails keeps the old program's .pdb; the program names the final one.
-		libraries.Push("-Wl,/DEBUG");
-		libraries.Push(Core::String(("-Wl,/PDB:" + debugInfo.partial.string()).c_str()));
-		libraries.Push(Core::String(("-Wl,/PDBALTPATH:" + debugInfo.final.string()).c_str()));
-	}
+		for (const std::string& argument : target.DebugFileLinkArguments(debugInfo.partial, debugInfo.final)) libraries.Push(Core::String(argument.c_str()));
 	const fs::path scriptHost = m_In.options.scriptHost ? Scripting::Toolchain::ScriptHost() : fs::path();
 	if (m_In.options.scriptHost)
 	{
 		if (scriptHost.empty())
 		{
-			m_In.result.AddBackendError(Core::String(("--script-host needs the script host library, " + ScriptHostLibrary(system) +
+			m_In.result.AddBackendError(Core::String(("--script-host needs the script host library, " + ScriptHostLibrary(target) +
 				", which this install does not have").c_str()));
 			return false;
 		}
-		if (system == Scripting::TargetSystem::Linux)
-		{
-			// Linked by its file and found beside the program as it starts ($ORIGIN): Linux has no delay-loading.
-			libraries.Push(Core::String((scriptHost / ScriptHostLibrary(system)).string().c_str()));
-			libraries.Push("-Wl,-rpath,$ORIGIN");
-		}
-		else
-		{
-			libraries.Push(Core::String((scriptHost / "C4Script.lib").string().c_str()));
-			// Loaded on the first call, so a program without the DLL beside it starts and Host::Open says so.
-			libraries.Push("-Wl,/DELAYLOAD:C4Script.dll");
-			libraries.Push("-ldelayimp");
-		}
+		for (const std::string& argument : target.ScriptHostLinkArguments(scriptHost)) libraries.Push(Core::String(argument.c_str()));
 	}
 	const LinkStamp stamp = StampFor(base, all, libraries, debugInfo);
 	if (stamp.Current()) CORE_INFO("{0} is up to date: its link would read what it read", out);
 	else
 	{
 		stamp.Forget();
-		const bool linked = system == Scripting::TargetSystem::Linux ? Scripting::LinkElf(objects, runtime, libraries, out, m_In.options.verbose)
-			: Scripting::LinkWithLLD(all, libraries, out, m_In.options.subsystem, m_In.options.verbose);
-		if (!linked)
+		if (!target.Link({ objects, runtime, libraries, out, m_In.options.subsystem, m_In.options.verbose }))
 		{
 			Scripting::RemoveFile(debugInfo.partial.string());
 			m_In.result.AddBackendError("failed to link " + Core::String(out.c_str()));
@@ -358,9 +340,9 @@ LinkStamp ProgramOutput::StampFor(const std::string& base, const Core::Vector<Co
 	if (const char* lib = std::getenv("LIB")) arguments.push_back(lib);
 	arguments.push_back(Scripting::Toolchain::WindowsSysroot().string());   // the MSVC and SDK libraries lld-link takes
 	arguments.push_back(Scripting::TargetName(m_In.options.target.System()));
-	if (m_In.options.target.System() == Scripting::TargetSystem::Linux) arguments.push_back(Scripting::Toolchain::LinuxSysroot().string());
+	arguments.push_back(Scripting::Toolchain::LinuxSysroot().string()); // the glibc a Linux link takes
 	std::vector<std::string> outputs = { m_In.options.outputFile };
-	if (m_In.options.debugInfo && m_In.options.target.System() == Scripting::TargetSystem::Windows) outputs.push_back(debugInfo.final.string());
+	if (m_In.options.debugInfo && m_In.options.target.Abi().SeparateDebugFile()) outputs.push_back(debugInfo.final.string());
 	return LinkStamp(base + ".link", inputs, arguments, std::move(outputs));
 }
 
@@ -549,7 +531,7 @@ bool ProgramOutput::WriteScriptInterface()
 // The script host library goes beside the program, which loads it as it starts.
 bool ProgramOutput::ShipScriptHost(const fs::path& scriptHost)
 {
-	const std::string library = ScriptHostLibrary(m_In.options.target.System());
+	const std::string library = ScriptHostLibrary(m_In.options.target.Abi());
 	const fs::path target = fs::path(m_In.options.outputFile.c_str()).parent_path() / library;
 	const std::error_code ec = Scripting::UpdateFile((scriptHost / library).string(), target.string());
 	if (!ec) return true;

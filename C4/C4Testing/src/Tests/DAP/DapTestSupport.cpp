@@ -1,6 +1,6 @@
 #include "DapTestSupport.h"
 #include "Compiler/BuildUtils.h"
-#include "Compiler/TargetSystem.h"
+#include "Target/TargetAbi.h"
 #include "Compiler/Toolchain.h"
 #include "Json/JsonReader.h"
 #include <chrono>
@@ -20,7 +20,7 @@ namespace Testing::Dap
 		constexpr auto kReplyWait = std::chrono::seconds(30);
 
 		// A program's file name where the tests run: `.exe` on Windows.
-		std::string ProgramName(const char* name) { return name + std::string(Scripting::ExecutableExtension(Scripting::HostSystem())); }
+		std::string ProgramName(const char* name) { return name + std::string(Scripting::TargetAbi::For(Scripting::HostSystem()).ExecutableExtension()); }
 
 		// The compiler of this build: C4Testing runs from bin/<config>/C4Testing, C4.exe is in bin/<config>/C4.
 		fs::path Compiler() { return Scripting::Toolchain::Home().parent_path() / "C4" / ProgramName("C4"); }

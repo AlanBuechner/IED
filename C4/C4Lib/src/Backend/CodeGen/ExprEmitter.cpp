@@ -285,7 +285,7 @@ namespace Scripting
 	llvm::Value* ExprEmitter::EmitVa(const VaNode* n)
 	{
 		llvm::Value* list = Emit(n->list);
-		if (m_Ctx.mctx().System() == TargetSystem::Linux) return EmitSystemVVa(n, list);
+		if (m_Ctx.mctx().Target().Convention() == CallConvention::SystemV) return EmitSystemVVa(n, list);
 		switch (n->op)
 		{
 		case VaNode::Op::Start: return VaIntrinsic("llvm.va_start.p0", { list });

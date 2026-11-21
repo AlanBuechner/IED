@@ -1,6 +1,6 @@
 #include "Compiler/Toolchain.h"
 #include "Compiler/FileIo.h"
-#include "Compiler/TargetSystem.h"
+#include "Target/TargetAbi.h"
 #include <cstdlib>
 #include <system_error>
 #ifdef _WIN32
@@ -48,10 +48,10 @@ namespace Scripting::Toolchain
 		}
 
 		// A program's file name where the compiler runs: `clang.exe` on Windows, `clang` on Linux.
-		fs::path ProgramName(const char* name) { return fs::path(std::string(name) + ExecutableExtension(HostSystem())); }
+		fs::path ProgramName(const char* name) { return fs::path(std::string(name) + TargetAbi::For(HostSystem()).ExecutableExtension()); }
 
 		// A shared library's file name where the compiler runs, as Nuke's C/C++ driver names the ones it builds.
-		fs::path LibraryName(const char* name) { return fs::path(std::string(name) + (HostSystem() == TargetSystem::Windows ? ".dll" : ".so")); }
+		fs::path LibraryName(const char* name) { return fs::path(TargetAbi::For(HostSystem()).SharedLibrary(name)); }
 
 #ifndef _WIN32
 		// The clang of an LLVM release outside C4's home, for a compiler that runs on Linux (the checkout's vendor/llvm is
@@ -104,6 +104,13 @@ namespace Scripting::Toolchain
 	{
 		const fs::path clang = Clang();
 		const fs::path lld = clang.empty() ? fs::path() : clang.parent_path() / ProgramName("lld-link");
+		return !lld.empty() && IsFile(lld) ? lld : fs::path();
+	}
+
+	fs::path LdLld()
+	{
+		const fs::path clang = Clang();
+		const fs::path lld = clang.empty() ? fs::path() : clang.parent_path() / ProgramName("ld.lld");
 		return !lld.empty() && IsFile(lld) ? lld : fs::path();
 	}
 

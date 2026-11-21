@@ -4,8 +4,8 @@
 #include "Core/String.h"
 #include "Core/Vector.h"
 #include "Macro/PredefinedMacros.h"
+#include "Target/TargetAbi.h"
 #include <filesystem>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -13,10 +13,6 @@ namespace fs = std::filesystem;
 
 namespace Scripting
 {
-	/// The Windows subsystem an executable runs in: a console program, or a windowed one that gets no console (its
-	/// entry is still `main`).
-	enum class Subsystem { Console, Windows };
-
 	// Common CLI options for the C4 compiler
 	struct CompileOptions
 	{
@@ -70,18 +66,6 @@ namespace Scripting
 	// The toolchain's clang.exe (Toolchain::Clang), or empty after printing where it was looked for.
 	std::string ClangPath();
 
-	// clang's driver arguments that take the MSVC runtime's and Windows SDK's headers and libraries from `sysroot`
-	// (Toolchain::WindowsSysroot) instead of an installed Visual Studio; none when it is empty.
-	std::vector<std::string> WindowsSysrootFlags(const std::string& sysroot);
-
-	// The sysroot a build for Linux compiles and links against: Toolchain::LinuxSysroot, else, for a compiler that runs on
-	// Linux, an empty path (clang's driver takes the system's own glibc). Nothing, after printing where it was looked for,
-	// for a compiler that runs on Windows without one.
-	std::optional<fs::path> LinuxSysrootForBuild();
-
-	// clang's driver argument for `sysroot` (LinuxSysrootForBuild): --sysroot, or none for the system's own.
-	std::vector<std::string> LinuxSysrootFlags(const fs::path& sysroot);
-
 	/// What clang's driver would hand lld-link for one argument of a link's libraries: `-l<name>` is `<name>.lib`,
 	/// `-L<dir>` a search folder, `-Wl,a,b` its arguments; an object, a library or a resource file goes as it is.
 	std::vector<std::string> LinkerArguments(const std::string& argument);
@@ -90,8 +74,8 @@ namespace Scripting
 	/// path, as Nuke gives a C++ dependency's `.a`) is that file, which ld would look up as a name and not find.
 	std::string LinuxLinkerArgument(const std::string& argument);
 
-	// Compile a foreign C/C++ source file to an object file for `system` using the bundled clang (for Linux against the
-	// Linux sysroot, position independent).
+	// Compile a foreign C/C++ source file to an object file for `system` using the bundled clang, with its target's flags
+	// (TargetAbi::ForeignSourceFlags: for Linux against the Linux sysroot, position independent).
 	// language is "c" or "c++"; defines/includeDirs are passed as -D / -I flags, targetFlags (D-62) and compileFlags (the
 	// build's -O and -g, BUG-285) as written. clang also writes the headers it read to `<objPath>.d`.
 	bool CompileForeignSource(const Core::String& srcPath, const Core::String& objPath,
@@ -102,18 +86,6 @@ namespace Scripting
 	// Run an external tool directly (no shell), inheriting stdout/stderr so its output streams live.
 	bool RunTool(const std::vector<std::string>& args);
 
-
-	// Link the objects (the program's, the runtime's and foreign ones) and the libraries (.lib and .res paths, bare names
-	// or -l / -L arguments) into an executable for `subsystem` with clang and lld.
-	bool LinkWithLLD(const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& libraries,
-		const Core::String& outputPath, Subsystem subsystem, bool verbose);
-
-	// Link the objects, the runtime's objects and the libraries (paths, -l / -L / -Wl arguments) into a Linux x64
-	// executable (D-86): a position-independent program against the Linux sysroot's glibc, with GCC's runtime linked in,
-	// by clang and ld.lld. A runtime object is linked only when the program uses it (as an archive's member is), and a
-	// system library only when something links against it.
-	bool LinkElf(const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& runtime, const Core::Vector<Core::String>& libraries,
-		const Core::String& outputPath, bool verbose);
 
 	// Remove a file if it exists (no-op on failure)
 	void RemoveIfExists(const std::string& path);

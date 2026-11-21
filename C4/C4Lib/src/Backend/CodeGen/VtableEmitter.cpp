@@ -1,5 +1,6 @@
 #include "Backend/CodeGen/VtableEmitter.h"
 #include "Backend/CodeGen/ModuleContext.h"
+#include "Backend/Lowering/VtableEntries.h"
 #include "Model/ProgramModel.h"
 #include "Model/TypeHandle.h"
 #include "Model/Types/ClassHierarchy.h"
@@ -110,10 +111,11 @@ namespace Scripting
 
 	llvm::Constant* VtableEmitter::Entry(const ObjectType* complete, const VirtualTables::VptrLocation& location, const VirtualTables::Slot& slot)
 	{
-		VirtualTables::Overrider ov = VirtualTables::FinalOverrider(complete, location, slot);
-		const FunctionRecord* rec = m_MCtx.model() ? m_MCtx.model()->RecordForMethod(ov.owner, ov.method) : nullptr;
-		if (!rec || !(rec->bodyNode || rec->isLinked || rec->isHostDefined)) return PureCall();
-		int64 delta = ov.ownerOffset - location.offset; // the overrider's `this` relative to this vptr's sub-object
+		// The entry lowering planned for (D-16), so the two cannot drift.
+		const FunctionRecord* rec = m_MCtx.model() ? VtableEntry(*m_MCtx.model(), complete, location, slot) : nullptr;
+		if (!rec) return PureCall();
+		// The overrider's `this` relative to this vptr's sub-object.
+		const int64 delta = VirtualTables::FinalOverrider(complete, location, slot).ownerOffset - location.offset;
 		if (delta == 0) return m_MCtx.GetOrCreateFunction(*rec);
 		return Thunk(*rec, delta);
 	}

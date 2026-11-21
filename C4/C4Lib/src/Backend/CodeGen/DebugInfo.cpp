@@ -49,17 +49,20 @@ namespace Scripting
 		const SourceLocation* DeclaredAt(const AstNode* node) { return node ? &node->startLocation : nullptr; }
 	}
 
-	DebugInfo::DebugInfo(llvm::Module& module, std::unordered_map<uint32, std::string> sourcePaths)
+	DebugInfo::DebugInfo(llvm::Module& module, DebugFormat format, std::unordered_map<uint32, std::string> sourcePaths)
 		: m_Module(module), m_Builder(module), m_SourcePaths(std::move(sourcePaths))
 	{
-		if (module.getTargetTriple().isOSLinux())
-			module.addModuleFlag(llvm::Module::Warning, "Dwarf Version", kDwarfVersion); // ELF: DWARF in the program (D-86)
-		else
+		switch (format)
 		{
+		case DebugFormat::Dwarf:
+			module.addModuleFlag(llvm::Module::Warning, "Dwarf Version", kDwarfVersion); // ELF: DWARF in the program (D-86)
+			break;
+		case DebugFormat::CodeView:
 			module.addModuleFlag(llvm::Module::Warning, "CodeView", 1);
 			// Each object carries its types' global hashes (`.debug$H`), made once when a partition is assembled, which the
 			// link would otherwise compute for every object on every build.
 			module.addModuleFlag(llvm::Module::Warning, "CodeViewGHash", 1);
+			break;
 		}
 		module.addModuleFlag(llvm::Module::Warning, "Debug Info Version", llvm::DEBUG_METADATA_VERSION);
 		uint32 first = 0;

@@ -11,10 +11,13 @@ namespace Testing
 		return std::find(args.begin(), args.end(), arg) != args.end();
 	}
 
+	static const TargetAbi& Windows() { return TargetAbi::For(TargetSystem::Windows); }
+	static const TargetAbi& Linux() { return TargetAbi::For(TargetSystem::Linux); }
+
 	void RuntimeObjectsTest::SourcesCompileOptimizedWithWarningsAsErrors()
 	{
 		// BUG-044 (runtime built at -O0) and BUG-098 (warnings printed on every build).
-		const std::vector<std::string> args = RuntimeCompileCommand("clang.exe", "C:/rt", "C:/rt/GC/GCHeap.c", "C:/obj/GC_GCHeap.obj", TargetSystem::Windows, "");
+		const std::vector<std::string> args = RuntimeCompileCommand("clang.exe", "C:/rt", "C:/rt/GC/GCHeap.c", "C:/obj/GC_GCHeap.obj", Windows(), "");
 		TEST_ASSERT(Has(args, "-O2"));
 		TEST_ASSERT(Has(args, "-Werror"));
 		TEST_ASSERT(Has(args, "-I") && Has(args, "C:/rt"));
@@ -24,25 +27,25 @@ namespace Testing
 
 	void RuntimeObjectsTest::CppSourcesCompileAsCpp20()
 	{
-		const std::vector<std::string> args = RuntimeCompileCommand("clang.exe", "C:/rt", "C:/rt/GC/GCCallbacks.cpp", "C:/obj/x.obj", TargetSystem::Windows, "");
+		const std::vector<std::string> args = RuntimeCompileCommand("clang.exe", "C:/rt", "C:/rt/GC/GCCallbacks.cpp", "C:/obj/x.obj", Windows(), "");
 		TEST_ASSERT(Has(args, "-std=c++20") && Has(args, "-O2"));
 	}
 
 	// The MSVC runtime and SDK of setup.bat's kit, not a Visual Studio's (or none on a machine without one).
 	void RuntimeObjectsTest::SourcesTakeTheWindowsSysroot()
 	{
-		const std::vector<std::string> kit = RuntimeCompileCommand("clang.exe", "C:/rt", "C:/rt/GC/GCHeap.c", "C:/obj/x.obj", TargetSystem::Windows, "C:/IED/vendor/msvc");
+		const std::vector<std::string> kit = RuntimeCompileCommand("clang.exe", "C:/rt", "C:/rt/GC/GCHeap.c", "C:/obj/x.obj", Windows(), "C:/IED/vendor/msvc");
 		const auto flag = std::find(kit.begin(), kit.end(), "-Xmicrosoft-windows-sys-root");
 		TEST_ASSERT(flag != kit.end() && flag + 1 != kit.end() && *(flag + 1) == "C:/IED/vendor/msvc");
 		TEST_ASSERT(kit.back() == "C:/obj/x.obj");
-		const std::vector<std::string> none = RuntimeCompileCommand("clang.exe", "C:/rt", "C:/rt/GC/GCHeap.c", "C:/obj/x.obj", TargetSystem::Windows, "");
+		const std::vector<std::string> none = RuntimeCompileCommand("clang.exe", "C:/rt", "C:/rt/GC/GCHeap.c", "C:/obj/x.obj", Windows(), "");
 		TEST_ASSERT(!Has(none, "-Xmicrosoft-windows-sys-root"));
 	}
 
 	// A Linux program's runtime (D-86): glibc's headers from the sysroot, position independent, for the Linux triple.
 	void RuntimeObjectsTest::LinuxSourcesTakeTheLinuxSysroot()
 	{
-		const std::vector<std::string> args = RuntimeCompileCommand("clang.exe", "C:/rt", "C:/rt/GC/GCHeap.c", "C:/obj/x.obj", TargetSystem::Linux, "C:/IED/vendor/sysroots/linux-x64");
+		const std::vector<std::string> args = RuntimeCompileCommand("clang.exe", "C:/rt", "C:/rt/GC/GCHeap.c", "C:/obj/x.obj", Linux(), "C:/IED/vendor/sysroots/linux-x64");
 		TEST_ASSERT(Has(args, "--sysroot=C:/IED/vendor/sysroots/linux-x64"));
 		TEST_ASSERT(Has(args, "x86_64-unknown-linux-gnu") && Has(args, "-fPIC"));
 		TEST_ASSERT(!Has(args, "x86_64-pc-windows-msvc") && !Has(args, "-Xmicrosoft-windows-sys-root"));
@@ -52,15 +55,15 @@ namespace Testing
 	// Each system's own platform files; the rest are both systems'.
 	void RuntimeObjectsTest::EachSystemCompilesItsOwnPlatformFiles()
 	{
-		TEST_ASSERT(RuntimeSourceIsFor("GC/GCPlatformWin32.c", TargetSystem::Windows));
-		TEST_ASSERT(!RuntimeSourceIsFor("GC/GCPlatformWin32.c", TargetSystem::Linux));
-		TEST_ASSERT(RuntimeSourceIsFor("GC/GCPlatformPosix.c", TargetSystem::Linux));
-		TEST_ASSERT(!RuntimeSourceIsFor("GC/GCPlatformPosix.c", TargetSystem::Windows));
-		TEST_ASSERT(!RuntimeSourceIsFor("FileSystem/WatchLinux.c", TargetSystem::Windows));
-		TEST_ASSERT(RuntimeSourceIsFor("GC/GCHeap.c", TargetSystem::Windows) && RuntimeSourceIsFor("GC/GCHeap.c", TargetSystem::Linux));
-		TEST_ASSERT(RuntimeSourceIsFor("Script/ScriptExitsC.c", TargetSystem::Windows));
-		TEST_ASSERT(RuntimeSourceIsFor("Script/ScriptExitsC.c", TargetSystem::Linux)); // a Linux script host's too
-		TEST_ASSERT(!RuntimeSourceIsFor("Script/ScriptThrowWin32.c", TargetSystem::Linux));
+		TEST_ASSERT(RuntimeSourceIsFor("GC/GCPlatformWin32.c", Windows()));
+		TEST_ASSERT(!RuntimeSourceIsFor("GC/GCPlatformWin32.c", Linux()));
+		TEST_ASSERT(RuntimeSourceIsFor("GC/GCPlatformPosix.c", Linux()));
+		TEST_ASSERT(!RuntimeSourceIsFor("GC/GCPlatformPosix.c", Windows()));
+		TEST_ASSERT(!RuntimeSourceIsFor("FileSystem/WatchLinux.c", Windows()));
+		TEST_ASSERT(RuntimeSourceIsFor("GC/GCHeap.c", Windows()) && RuntimeSourceIsFor("GC/GCHeap.c", Linux()));
+		TEST_ASSERT(RuntimeSourceIsFor("Script/ScriptExitsC.c", Windows()));
+		TEST_ASSERT(RuntimeSourceIsFor("Script/ScriptExitsC.c", Linux())); // a Linux script host's too
+		TEST_ASSERT(!RuntimeSourceIsFor("Script/ScriptThrowWin32.c", Linux()));
 	}
 
 	// BUG-231: an object is found by its source's bytes, never by the files' times.
