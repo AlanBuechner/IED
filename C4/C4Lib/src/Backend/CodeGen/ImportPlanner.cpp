@@ -10,7 +10,7 @@ namespace Scripting
 {
 	namespace
 	{
-		// The limits of PartitionImports (ThinLTO's): a direct callee's instructions, and what each level further allows.
+		// ThinLTO's limits: a direct callee's instructions, and what each level further allows.
 		constexpr uint32 kImportInstructions = 100;
 		constexpr uint32 kImportDecayPercent = 70;
 		constexpr int kImportLevels = 3;

@@ -129,8 +129,10 @@ Adding a test:
   and fails its case.
 - `-DebugInfo` builds every folder with `-g`, so the debug information is checked against the whole corpus
   (it must verify, link and change nothing the program does).
-- `-Partitions <n>` (TestCode too) assembles every program into `<n>` objects (`--partitions`), so the parallel
-  code generation path runs the whole corpus: run it when touching codegen, linkage or `ModulePartitions`.
+- `-Partitions <n>` (TestCode too) emits every program into `<n>` partitions and assembles it into `<n>` objects
+  (`--partitions`), so the partition merge (D-90) and the parallel code generation path run the whole corpus: run it
+  when touching codegen, linkage, `PartitionMerge` or `ModulePartitions`. Without it a program of 48 functions or more
+  is merged from its partitions too.
 - Manifests next to the runner:
   - `NegativeTests.json` - folders that must fail to compile, with expected diagnostics;
   - `ExpectedExit.json` - folders that must compile and exit with a given code (for example uncaught

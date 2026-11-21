@@ -15,12 +15,17 @@ namespace Scripting
 {
 	class ProgramModel;
 
+	/// Which functions a partition copies from the others (`available_externally`, ImportEmitter) for its optimizer to
+	/// inline: none when the partitions are merged before they are optimized (a whole-program build, R12), only `inline`
+	/// ones at -O0, the small ones otherwise (an incremental build, D-76).
+	enum class PartitionCopies { None, Inline, Small };
+
 	/// How a lowered program is emitted, beyond what it holds.
 	struct EmitSettings
 	{
 		ModuleSettings modules;
 		bool verifyLater = false;          // each partition is verified as it is assembled (ObjectSettings::verify)
-		bool onlyAlwaysInline = false;     // -O0: a partition copies only `inline` functions from the others
+		PartitionCopies copies = PartitionCopies::None; // what a split program's partitions copy from the others
 		Core::String entryName;            // the function `@main` calls; empty for none (a library, a script)
 		const TestHarnessOptions* tests = nullptr; // a -test build: a program with tests gets the harness as its main
 		Core::String reflectionTag;        // `-reflect-tag`: what the program's reflection registers under

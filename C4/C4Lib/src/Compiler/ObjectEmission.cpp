@@ -261,30 +261,18 @@ namespace Scripting
 			partition.assembled.seconds = SecondsSince(start);
 		}
 
-		// A module kept whole is its own partition, and its extracts are built from it here.
-		SplitBitcode Whole(llvm::Module& module, const Extracts& extracts)
+		// A module kept whole is its own partition.
+		std::vector<Partition> CachedPartitions(llvm::Module& module, const ObjectSettings& settings, unsigned count, const ObjectCache& cache)
 		{
-			SplitBitcode whole;
-			whole.partitions.push_back(ModuleBitcode(module));
-			for (const std::vector<const llvm::GlobalValue*>& group : extracts.groups)
-				whole.extracted.push_back(extracts.finish(*ExtractDefinitions(module, group)));
-			return whole;
-		}
-
-		std::vector<Partition> CachedPartitions(llvm::Module& module, const ObjectSettings& settings, unsigned count, const ObjectCache& cache,
-			const Extracts& extracts, std::vector<std::string>& extracted)
-		{
-			const PartitionOptimization optimization = !settings.optimizePartitions ? PartitionOptimization::Before
-				: settings.optLevel == 0 ? PartitionOptimization::AfterAtO0 : PartitionOptimization::After;
-			SplitBitcode split = count == 1 ? Whole(module, extracts) : SplitModuleAndExtract(module, count, optimization, settings.threads, extracts);
-			std::vector<Partition> partitions(split.partitions.size());
-			for (size_t i = 0; i < split.partitions.size(); ++i)
+			std::vector<std::string> split = count == 1 ? std::vector<std::string>{ ModuleBitcode(module) }
+				: SplitModuleToBitcode(module, count, settings.threads);
+			std::vector<Partition> partitions(split.size());
+			for (size_t i = 0; i < split.size(); ++i)
 			{
-				partitions[i].objPath = cache.ObjectFor(split.partitions[i]).string();
-				partitions[i].bitcode = std::move(split.partitions[i]);
+				partitions[i].objPath = cache.ObjectFor(split[i]).string();
+				partitions[i].bitcode = std::move(split[i]);
 				cache.Claim(partitions[i].objPath); // before it is looked for, so another build's pruning spares it (BUG-443)
 			}
-			extracted = std::move(split.extracted);
 			return partitions;
 		}
 
@@ -394,7 +382,7 @@ namespace Scripting
 	}
 
 	CachedObjects WriteCachedObjects(llvm::Module& module, const ObjectSettings& settings, unsigned partitions,
-		const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics, const Extracts& extracts)
+		const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics)
 	{
 		InitializeX86(); // the bitcode that names an object lists its file-scope assembly's symbols only once X86 is in
 		const std::error_code ec = llvm::sys::fs::create_directories(cache.Folder().string());
@@ -404,14 +392,12 @@ namespace Scripting
 			return {};
 		}
 		const auto start = std::chrono::steady_clock::now();
-		std::vector<std::string> extracted;
-		std::vector<Partition> parts = CachedPartitions(module, settings, partitions, cache, extracts, extracted);
+		std::vector<Partition> parts = CachedPartitions(module, settings, partitions, cache);
 		const double splitSeconds = SecondsSince(start);
 		const std::vector<Partition*> assembled = AssembleMissing(module, parts, settings);
 		AssembleVanished(parts, settings);
 		CachedObjects objects = Collected(parts, assembled, cache, diagnostics);
 		objects.splitSeconds = splitSeconds;
-		objects.extracted = std::move(extracted);
 		return objects;
 	}
 

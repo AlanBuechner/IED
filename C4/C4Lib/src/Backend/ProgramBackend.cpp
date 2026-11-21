@@ -3,11 +3,11 @@
 
 namespace Scripting
 {
-	void ProgramBackend::SplitInto(unsigned count, bool onlyAlwaysInline)
+	void ProgramBackend::SplitInto(unsigned count, PartitionCopies copies)
 	{
 		m_Partitions = std::max(count, 1u);
 		m_Emitter.SplitInto(m_Partitions);
-		m_Emit.onlyAlwaysInline = onlyAlwaysInline;
+		m_Emit.copies = copies;
 	}
 
 	bool ProgramBackend::Lower(ProgramModel& model, const Core::String& entryName, std::string* errorMessage, const TestHarnessOptions* tests)

@@ -30,9 +30,8 @@ namespace Scripting
 	/// The facts of each function `module` defines whose record `recordOf` knows.
 	FactsByRecord FactsOf(const llvm::Module& module, const RecordOfFunction& recordOf);
 
-	/// The functions a partition of a split program (D-81) copies, as `available_externally`, from the others: the
-	/// rule Compiler/PartitionImports applies to a split module (D-76) - a direct callee of at most 100 unoptimized
-	/// instructions, 70% of that a level further, three levels; an `inline` one whatever its size; with
+	/// The functions a partition of a split program (D-81) optimized alone (D-76) copies, as `available_externally`, from
+	/// the others, as ThinLTO imports - a direct callee of at most 100 unoptimized instructions, 70% of that a level further, three levels; an `inline` one whatever its size; with
 	/// `onlyAlwaysInline` (-O0) only those - over `facts`, `own` being the partition's functions and `home` where each
 	/// function is defined. Sorted by name, so the order does not depend on where the calls are.
 	std::vector<const FunctionRecord*> ImportsOf(unsigned partition, const std::vector<const FunctionRecord*>& own, const FactsByRecord& facts,

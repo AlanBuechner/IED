@@ -52,7 +52,8 @@ namespace Scripting
 		Timed("reflection", step);
 		m_Partitions.DefineCensusCounters(pool); // what the startup code and the harness allocate
 		if (!EverythingNamedLowered(program, error)) return false;
-		if (m_Partitions.Split()) EmitImports(m_Partitions, model, program, settings.onlyAlwaysInline, pool);
+		if (m_Partitions.Split() && settings.copies != PartitionCopies::None)
+			EmitImports(m_Partitions, model, program, settings.copies == PartitionCopies::Inline, pool);
 		Timed("imports", step);
 		InferNoUnwind(m_Partitions.Modules(), pool);
 		Timed("nounwind", step);

@@ -1,9 +1,12 @@
 #include "ProgramOutput.h"
 #include "Core/Core.h"
 #include "Compiler/FileIo.h"
+#include "Compiler/IrVerification.h"
+#include "Compiler/ModulePartitions.h"
 #include "Compiler/ObjectCache.h"
 #include "Compiler/ObjectEmission.h"
 #include "Compiler/ParallelFor.h"
+#include "Compiler/PartitionMerge.h"
 #include "Compiler/Version.h"
 #include "Compiler/RuntimeObjects.h"
 #include "Compiler/Toolchain.h"
@@ -16,6 +19,7 @@
 #include "Script/InlineBodyCache.h"
 #include "Script/InterfaceBuilder.h"
 #include <llvm/Bitcode/BitcodeWriter.h>
+#include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
 #include <algorithm>
@@ -38,46 +42,87 @@ bool ProgramOutput::Write(const std::vector<llvm::Module*>& partitions, const Sc
 	if (!MakeOutputFolder()) return false;
 	const std::string base = IntermediateBase();
 	if (base.empty()) return false;
-	llvm::Module& module = *partitions.front();
 	if (!PrepareScriptHost(partitions)) return false;
-	if (partitions.size() > 1 ? !WriteSplitProgram(partitions, image, base) : !WriteProgram(module, base)) return false;
-	return !m_Interface || WriteScriptInterface(); // only beside the program it describes: a failed link keeps the old pair
+	const bool written = !Links(m_In.options) ? WriteModule(*partitions.front(), base)
+		: m_In.options.incremental ? WritePartitions(partitions, image, base) : WriteWholeProgram(partitions, image, base);
+	return written && (!m_Interface || WriteScriptInterface()); // only beside the program it describes: a failed link keeps the old pair
 }
 
-bool ProgramOutput::WriteProgram(llvm::Module& module, const std::string& base)
+bool ProgramOutput::Links(const Scripting::CompileOptions& options)
+{
+	return !options.emitIR && !options.emitBitcode && !options.compileOnly;
+}
+
+// -S, -bc, -c: the program's one module as text, bitcode or one object, and nothing else.
+bool ProgramOutput::WriteModule(llvm::Module& module, const std::string& base)
 {
 	if (m_In.options.emitBitcode) return WriteBitcode(module, base + ".bc");
-	if (m_In.options.emitIR) return WriteIR(module, base + ".ll"); // -S: the module as text, and nothing else
-	const bool optimizePartitions = OptimizesPartitions(m_In.options);
-	const Scripting::ObjectSettings settings{ m_In.options.optLevel, &m_In.options.target, m_In.options.threads, optimizePartitions,
-		optimizePartitions };
-	if (!optimizePartitions && !Optimize(module, settings)) return false;
-	if (m_In.options.compileOnly) return WriteCompiledObject(module, settings, base + ".obj"); // -c: the object is the output
-	std::vector<std::string> objects = Assemble(module, settings, Scripting::ObjectCache(base + ".objects", CacheSalt(settings)));
+	if (m_In.options.emitIR) return WriteIR(module, base + ".ll");
+	const Scripting::ObjectSettings settings{ m_In.options.optLevel, &m_In.options.target, m_In.options.threads };
+	return Optimize(module, settings) && WriteCompiledObject(module, settings, base + ".obj");
+}
+
+// A whole-program build (Dist): the partitions merged into one module (R12), which is optimized whole, then split again
+// for code generation on the output's threads, its objects kept by their code, then the link. A program of one partition
+// is its module already.
+bool ProgramOutput::WriteWholeProgram(const std::vector<llvm::Module*>& partitions, const Scripting::KeyedModule& image, const std::string& base)
+{
+	const Scripting::ObjectSettings settings{ m_In.options.optLevel, &m_In.options.target, m_In.options.threads };
+	std::unique_ptr<llvm::Module> merged;
+	if (partitions.size() > 1 && !(merged = Merged(partitions, image, base, settings))) return false;
+	llvm::Module& program = merged ? *merged : *partitions.front();
+	if (!Verified(program) || !Optimize(program, settings)) return false;
+	std::vector<std::string> objects = Assemble(program, settings, Scripting::ObjectCache(base + ".objects", CacheSalt(settings)));
 	if (objects.empty()) return false;
-	if (m_HostBuild && !FinishScriptHost(module, settings, base, objects)) return false;
+	if (merged && m_HostBuild && !FinishScriptHost(program, settings, base, objects)) return false;
 	return Link(objects, base);
 }
 
-// Incremental (D-76): at -O0 too, whose always-inliner and aggregate copies then run on the partitions' threads.
-bool ProgramOutput::OptimizesPartitions(const Scripting::CompileOptions& options)
+// The partitions' bitcode, written on the output's threads, gives a script host its inline bodies (from the inline body
+// cache, as an incremental build's do) and is read back into one module with the reflection image and the script table
+// (PartitionMerge). Its context is never freed, like the backend's: the process ends with the build.
+std::unique_ptr<llvm::Module> ProgramOutput::Merged(const std::vector<llvm::Module*>& partitions, const Scripting::KeyedModule& image,
+	const std::string& base, const Scripting::ObjectSettings& settings)
 {
-	return options.incremental && !options.emitIR && !options.emitBitcode && !options.compileOnly;
+	auto start = std::chrono::steady_clock::now();
+	std::vector<std::string> bitcode(partitions.size());
+	Scripting::ParallelFor(partitions.size(), settings.threads, [&](size_t i) {
+		bitcode[i] = Scripting::PartitionBitcode(*partitions[i], Scripting::PartitionOptimization::Whole);
+	});
+	Timed("bitcode", start);
+	if (m_HostBuild && !CollectInlineBodies(partitions, bitcode, base, settings)) return nullptr;
+	start = std::chrono::steady_clock::now();
+	std::vector<Scripting::KeyedModule::Builder> beside;
+	if (!image.key.empty()) beside.push_back(image.build);
+	if (m_HostBuild) beside.push_back(HostTable(*partitions.front()).build);
+	std::string error;
+	std::unique_ptr<llvm::Module> merged = Scripting::MergePartitions(*new llvm::LLVMContext, bitcode, beside, error);
+	if (!merged) m_In.result.AddBackendError(Core::String(error.c_str()));
+	Timed("merge", start);
+	return merged;
 }
 
-// A program emitted in partitions (D-81): each partition's bitcode, its object reused or assembled on the thread that
-// wrote the bitcode (an edit's partitions start while the others' bitcode is written), the inline bodies, then the link.
-bool ProgramOutput::WriteSplitProgram(const std::vector<llvm::Module*>& partitions, const Scripting::KeyedModule& image, const std::string& base)
+bool ProgramOutput::Verified(const llvm::Module& module)
+{
+	const std::optional<std::string> invalid = Scripting::InvalidIr(module);
+	if (invalid) m_In.result.AddBackendError(Core::String(invalid->c_str()));
+	return !invalid;
+}
+
+// An incremental build (D-76): each partition optimized alone, its object reused or assembled on the thread that wrote its
+// bitcode (an edit's partitions start while the others' bitcode is written), the inline bodies, then the link.
+bool ProgramOutput::WritePartitions(const std::vector<llvm::Module*>& partitions, const Scripting::KeyedModule& image, const std::string& base)
 {
 	const Scripting::ObjectSettings settings{ m_In.options.optLevel, &m_In.options.target, m_In.options.threads, true, true };
 	const auto start = std::chrono::steady_clock::now();
-	const Scripting::PartitionOptimization optimization = settings.optLevel == 0 ? Scripting::PartitionOptimization::AfterAtO0
-		: Scripting::PartitionOptimization::After;
+	const bool split = partitions.size() > 1;
+	// One partition is the whole program: no other one needs its linkonce definitions kept.
+	const Scripting::PartitionOptimization optimization = split ? Scripting::PartitionOptimization::Alone : Scripting::PartitionOptimization::Whole;
 	std::vector<Scripting::ObjectDiagnostic> diagnostics;
 	const Scripting::ObjectCache cache(base + ".objects", CacheSalt(settings));
 	std::vector<Scripting::KeyedModule> keyed;
 	if (!image.key.empty()) keyed.push_back(image);
-	if (m_HostBuild) keyed.push_back(HostTable(*partitions.front()));
+	if (m_HostBuild && split) keyed.push_back(HostTable(*partitions.front()));
 	const unsigned count = static_cast<unsigned>(partitions.size() + keyed.size());
 	std::vector<std::string> bitcode;
 	Scripting::CachedObjects objects = Scripting::WriteCachedObjects(partitions.size(),
@@ -92,8 +137,8 @@ bool ProgramOutput::WriteSplitProgram(const std::vector<llvm::Module*>& partitio
 		ReportObjects(instructions, count, objects.reused, settings.threads, cache);
 	}
 	if (objects.paths.empty()) return false;
-	if (m_HostBuild && !CollectInlineBodies(partitions, bitcode, base, settings)) return false;
-	if (m_HostBuild && !FinishScriptHost(*partitions.front(), settings, base, objects.paths)) return false;
+	if (m_HostBuild && split && !CollectInlineBodies(partitions, bitcode, base, settings)) return false;
+	if (m_HostBuild && split && !FinishScriptHost(*partitions.front(), settings, base, objects.paths)) return false;
 	return Link(objects.paths, base);
 }
 
@@ -197,12 +242,10 @@ std::vector<std::string> ProgramOutput::Assemble(llvm::Module& module, const Scr
 	const auto start = std::chrono::steady_clock::now();
 	const unsigned partitions = PartitionsFor(module, settings);
 	std::vector<Scripting::ObjectDiagnostic> diagnostics;
-	Scripting::CachedObjects objects = Scripting::WriteCachedObjects(module, settings, partitions, cache, diagnostics, m_InlineBodies);
+	Scripting::CachedObjects objects = Scripting::WriteCachedObjects(module, settings, partitions, cache, diagnostics);
 	Report(diagnostics);
-	if (m_HostBuild) m_HostBuild->inlineBodies = std::move(objects.extracted);
 	m_In.compiler.AddPhaseTime("split", objects.splitSeconds);
-	m_In.compiler.AddPhaseTime(settings.optimizePartitions ? "optimize+codegen" : "codegen",
-		std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() - objects.splitSeconds);
+	m_In.compiler.AddPhaseTime("codegen", std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() - objects.splitSeconds);
 	if (m_In.options.timePhases) ReportPartitions(objects, partitions, settings.threads);
 	if (m_In.options.verbose) ReportObjects(Scripting::InstructionCount(module), partitions, objects.reused, settings.threads, cache);
 	return objects.paths;
@@ -363,9 +406,9 @@ bool ProgramOutput::PlaceDebugInfo(const DebugInfoPaths& paths)
 
 // --script-host (docs/runtime/04 section 3): the thread_local accessors, the symbol table, and the interface that goes
 // beside the program once it is built. The interface's build id covers the inline bodies: a program emitted in
-// partitions takes them from the inline body cache with the partitions' bitcode (CollectInlineBodies), a build that
-// splits its module before optimizing it extracts them on the split's threads (FinishScriptHost), any other here. A
-// program that uses the scripting API without it has no table to link against: an error that says what to do.
+// partitions takes them from the inline body cache with the partitions' bitcode (CollectInlineBodies), a program of one
+// partition here. A program that uses the scripting API without it has no table to link against: an error that says
+// what to do.
 bool ProgramOutput::PrepareScriptHost(const std::vector<llvm::Module*>& partitions)
 {
 	llvm::Module& module = *partitions.front();
@@ -414,15 +457,14 @@ bool ProgramOutput::PrepareScriptHost(const std::vector<llvm::Module*>& partitio
 			return false;
 		}
 	}
-	const bool whileSplitting = OptimizesPartitions(m_In.options);
-	if (partitions.size() == 1)
+	if (partitions.size() > 1)
 	{
-		const Scripting::HostNames hostNames(m_HostBuild->symbols);
-		if (whileSplitting) m_InlineBodies = { Scripting::InlineBodyGroups(module, hostNames, kInlineBodyChunks), Scripting::InlineBodyBitcode };
-		else m_HostBuild->inlineBodies = Scripting::InlineBodies(module, hostNames);
+		Timed("script host", start);
+		return true; // the interface waits for the inline bodies (CollectInlineBodies, FinishScriptHost)
 	}
+	m_HostBuild->inlineBodies = Scripting::InlineBodies(module, Scripting::HostNames(m_HostBuild->symbols));
 	Timed("script host", start);
-	return whileSplitting || FinishInterface(module);
+	return FinishInterface(module);
 }
 
 // A script host's inline bodies, each partition's from the inline body cache (D-81): an edit extracts only those of the

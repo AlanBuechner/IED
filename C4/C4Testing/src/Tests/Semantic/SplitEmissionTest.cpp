@@ -52,7 +52,7 @@ namespace Testing
 			llvm::LLVMContext context;
 			ProgramBackend driver(context);
 			driver.LowerOn(3);
-			driver.SplitInto(count, false);
+			driver.SplitInto(count, PartitionCopies::Small);
 			std::string error;
 			if (!driver.Lower(compiler.GetProgramModelForLowering(), "main", &error))
 			{

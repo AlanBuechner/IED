@@ -141,12 +141,11 @@ namespace Testing
 			return llvm::parseAssemblyString(text, error, context);
 		}
 
-		std::vector<std::string> Split(const std::string& text, PartitionOptimization optimization = PartitionOptimization::Before,
-			unsigned threads = 1)
+		std::vector<std::string> Split(const std::string& text, unsigned threads = 1)
 		{
 			llvm::LLVMContext context;
 			std::unique_ptr<llvm::Module> module = Parse(text, context);
-			return module ? SplitModuleToBitcode(*module, kPartitions, optimization, threads) : std::vector<std::string>();
+			return module ? SplitModuleToBitcode(*module, kPartitions, threads) : std::vector<std::string>();
 		}
 
 		std::unique_ptr<llvm::Module> ReadBack(const std::string& bitcode, llvm::LLVMContext& context)
@@ -413,11 +412,30 @@ namespace Testing
 			"define void @f() {\n call void @used()\n ret void\n}\n", context);
 		TEST_ASSERT(partition != nullptr);
 		llvm::LLVMContext other;
-		std::unique_ptr<llvm::Module> back = ReadBack(PartitionBitcode(*partition, PartitionOptimization::After), other);
+		std::unique_ptr<llvm::Module> back = ReadBack(PartitionBitcode(*partition, PartitionOptimization::Alone), other);
 		TEST_ASSERT(back != nullptr);
 		TEST_ASSERT(back->getFunction("used") != nullptr && back->getFunction("f") != nullptr);
 		TEST_ASSERT(back->getFunction("unused") == nullptr);
 		TEST_ASSERT(back->getNamedGlobal("unusedData") == nullptr);
+	}
+
+	// A partition optimized alone keeps its linkonce definitions for the others (its optimizer would drop one only they
+	// use); one merged into the whole program first leaves them as they are.
+	void ObjectCacheTest::APartitionOptimizedAloneKeepsItsLinkOnceDefinitions()
+	{
+		const char* text = "target triple = \"x86_64-pc-windows-msvc\"\n"
+			"define linkonce_odr i32 @shared(i32 %v) { ret i32 %v }\n@table = linkonce_odr global i32 1\n";
+		for (PartitionOptimization optimization : { PartitionOptimization::Alone, PartitionOptimization::Whole })
+		{
+			llvm::LLVMContext context, other;
+			std::unique_ptr<llvm::Module> partition = Parse(text, context);
+			TEST_ASSERT(partition != nullptr);
+			std::unique_ptr<llvm::Module> back = ReadBack(PartitionBitcode(*partition, optimization), other);
+			TEST_ASSERT(back != nullptr);
+			const bool alone = optimization == PartitionOptimization::Alone;
+			TEST_ASSERT_EQ(back->getFunction("shared")->getLinkage(), alone ? llvm::GlobalValue::WeakODRLinkage : llvm::GlobalValue::LinkOnceODRLinkage);
+			TEST_ASSERT_EQ(back->getNamedGlobal("table")->getLinkage(), alone ? llvm::GlobalValue::WeakODRLinkage : llvm::GlobalValue::LinkOnceODRLinkage);
+		}
 	}
 
 	void ObjectCacheTest::EveryPartitionReadsBackAndVerifies()
@@ -561,14 +579,13 @@ namespace Testing
 	void ObjectCacheTest::SeveralThreadsSplitAsOneDoes()
 	{
 		for (const std::string& text : { ProgramText(""), DescribedProgramText(4), TwoFileProgramText(0) })
-			for (PartitionOptimization optimization : { PartitionOptimization::Before, PartitionOptimization::After })
-			{
-				const std::vector<std::string> one = Split(text, optimization, 1);
-				TEST_ASSERT_EQ(one.size(), static_cast<size_t>(kPartitions));
-				for (const std::string& bitcode : one) TEST_ASSERT(!bitcode.empty());
-				TEST_ASSERT(Split(text, optimization, 3) == one);
-				TEST_ASSERT(Split(text, optimization, 8) == one);
-			}
+		{
+			const std::vector<std::string> one = Split(text, 1);
+			TEST_ASSERT_EQ(one.size(), static_cast<size_t>(kPartitions));
+			for (const std::string& bitcode : one) TEST_ASSERT(!bitcode.empty());
+			TEST_ASSERT(Split(text, 3) == one);
+			TEST_ASSERT(Split(text, 8) == one);
+		}
 	}
 
 	// The reflection image is such data: an edit that changes it reassembles no code with it.
@@ -583,29 +600,19 @@ namespace Testing
 		for (int i = 0; i < 4; ++i) TEST_ASSERT(DefinedIn(described, "g" + std::to_string(i)) > 0); // a file names it
 	}
 
-	// What the split's threads extract besides the partitions (a script host's inline bodies) has the names and linkage
-	// the program gave it, whatever the threads; the partitions are what the split alone makes.
-	void ObjectCacheTest::ExtractsSeeTheProgramAsItWas()
+	// What leaves the program (a script host's inline bodies, ExtractDefinitions) has the names and linkage the program
+	// gave it, and declarations of what it reaches.
+	void ObjectCacheTest::ExtractedDefinitionsKeepTheProgramsNames()
 	{
-		for (unsigned threads : { 1u, 3u })
-		{
-			llvm::LLVMContext context;
-			std::unique_ptr<llvm::Module> module = Parse(ProgramText(""), context);
-			TEST_ASSERT(module != nullptr);
-			Extracts extracts;
-			extracts.groups = { { module->getNamedGlobal("only"), module->getFunction("f0") }, { module->getFunction("helper") } };
-			extracts.finish = [](llvm::Module& group) { return ModuleBitcode(group); };
-			const SplitBitcode split = SplitModuleAndExtract(*module, kPartitions, PartitionOptimization::After, threads, extracts);
-			TEST_ASSERT(split.partitions == Split(ProgramText(""), PartitionOptimization::After, threads));
-			TEST_ASSERT_EQ(split.extracted.size(), size_t(2));
-			llvm::LLVMContext readContext;
-			std::unique_ptr<llvm::Module> first = ReadBack(split.extracted[0], readContext);
-			TEST_ASSERT(first != nullptr && first->getFunction("f0") && !first->getFunction("f0")->isDeclaration());
-			TEST_ASSERT(first->getNamedGlobal("only") != nullptr && first->getNamedGlobal("only")->hasPrivateLinkage());
-			std::unique_ptr<llvm::Module> second = ReadBack(split.extracted[1], readContext);
-			TEST_ASSERT(second != nullptr && second->getFunction("helper") && second->getFunction("helper")->hasInternalLinkage());
-			TEST_ASSERT(module->getFunction("helper.local") != nullptr); // the module itself is split afterwards
-		}
+		llvm::LLVMContext context;
+		std::unique_ptr<llvm::Module> module = Parse(ProgramText(""), context);
+		TEST_ASSERT(module != nullptr);
+		std::unique_ptr<llvm::Module> first = ExtractDefinitions(*module, { module->getNamedGlobal("only"), module->getFunction("f0") });
+		TEST_ASSERT(first != nullptr && first->getFunction("f0") && !first->getFunction("f0")->isDeclaration());
+		TEST_ASSERT(first->getNamedGlobal("only") != nullptr && first->getNamedGlobal("only")->hasPrivateLinkage());
+		std::unique_ptr<llvm::Module> second = ExtractDefinitions(*module, { module->getFunction("helper") });
+		TEST_ASSERT(second != nullptr && second->getFunction("helper") && second->getFunction("helper")->hasInternalLinkage());
+		TEST_ASSERT(module->getFunction("helper") != nullptr); // the program itself is left as it was
 	}
 
 	void ObjectCacheTest::AddingAFunctionLeavesTheOtherPartitionsUnchanged()

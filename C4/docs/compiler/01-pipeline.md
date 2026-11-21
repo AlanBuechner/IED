@@ -268,8 +268,13 @@ straight from the module in memory).
   parity with C++ - see [../tools/05-test-suites.md](../tools/05-test-suites.md)). An error the assembler reports
   for an `asm` block comes back with the block's `!srcloc` cookie (`AsmEmitter::LocationCookie`) and is reported at
   the C4 line: `main.cf (4:2) error: invalid operand for instruction: 'mov rax, ecx'`.
-- Partitions (`Compiler/ModulePartitions`): after the whole module is optimized (inlining across the program is
-  unchanged), it is split into partitions that link back into the same program. Where a definition goes
+- Whole-program builds (Nuke's Dist; D-90): the partitions the program was emitted into, as every linked build emits it
+  (D-81), are merged into one module (`Compiler/PartitionMerge`: read back into one context and linked, with the
+  reflection image and a script host's table, the locals local again under their program names;
+  [05-partitioned-emission.md](05-partitioned-emission.md#the-whole-program-builds-merge-d-90)), which is verified and
+  optimized whole, so inlining across the program is what it was when the program was emitted as one module.
+- Partitions for code generation (`Compiler/ModulePartitions`): the optimized module of a whole-program build is split
+  into partitions that link back into the same program. Where a definition goes
   (`Compiler/PartitionPlacement`): data no source file names (the reflection image and its rows, the GC roots table)
   in the first partition, alone, so an edit that changes it reassembles no code with it (the IED server's reflection
   is 13 MB of data); anything else in the others: with debug info, by the source file it names, so a file's code
@@ -284,11 +289,10 @@ straight from the module in memory).
   first partition. How many: `--partitions <n>`, else about one per 1,000 instructions (3,000 at `-O0`,
   where an instruction is cheaper to assemble) rounded down to a power of two, from 1 to 64, so the count changes
   only when the program doubles or halves. Partitions are built and assembled on up to `-j` threads (default: the
-  processors): the module is written once as bitcode as the program made it, each thread reads a copy of it
-  lazily into a context of its own, builds what else was asked of the split from it (a script host's inline bodies,
-  `SplitModuleAndExtract`), then makes its locals hidden globals and builds its share of the partitions (a definition
-  found by its place in the module's lists), so a partition's bitcode is the same whatever the thread count. `-c`
-  always writes one object. `-ftime` shows the split as a phase of its own and a line on the partitions: how many
+  processors): the module is written once as bitcode, each thread reads a copy of it lazily into a context of its own,
+  makes its locals hidden globals and builds its share of the partitions (a definition found by its place in the
+  module's lists), so a partition's bitcode is the same whatever the thread count. `-S`, `-bc` and `-c` emit the program
+  as one module and write it as one file. `-ftime` shows the split as a phase of its own and a line on the partitions: how many
   were reused, and of those assembled the longest, the total and the largest.
 - The object cache (`Compiler/ObjectCache`, roadmap 5.3): a linked build keeps its objects in
   `<int>/<out name>.objects/`, each named after the hash of its partition's bitcode and of the compiler (its version,
@@ -316,8 +320,8 @@ straight from the module in memory).
   still inline; its bitcode, and with it the cache key, includes those copies. At `-O0` only the always-inliner and
   the aggregate copies run, so a partition copies only the `inline` functions it calls. Lowering leaves the
   partitions unverified and each is verified as it is assembled; a script host's inline bodies are extracted per
-  partition. A program of one partition (under 48 functions) takes the module path above, with the split and
-  `Compiler/PartitionImports`. Linkonce definitions become weak in this mode, since a partition's optimizer would drop one that only another
+  partition. A program of one partition (under 48 functions) is that one object, optimized whole. Linkonce definitions
+  of a split program become weak in this mode, since a partition's optimizer would drop one that only another
   partition uses. The cache salt says `incremental`, so its objects never mix with a whole-program build's. On the
   60k-line ScaleTest at `-O2` (32 partitions, `-j 3`): a cold build 9.1 s (the whole-program build: 12.5 s), an
   unchanged rebuild 2.0 s (front end 1.1 s, split and hash 0.8 s), a one-module edit 2.6 s (31 objects reused); the

@@ -31,9 +31,9 @@ namespace Scripting
 		void ShareVtables() { m_Lowering.everyVtable = true; }
 		/// The modules are left unverified: the build verifies each partition as it assembles it, on its threads.
 		void VerifyLater() { m_Emit.verifyLater = true; }
-		/// The program is emitted into `count` partitions (D-81), each copying the small functions it calls from the
-		/// others (only `inline` ones with `onlyAlwaysInline`, -O0).
-		void SplitInto(unsigned count, bool onlyAlwaysInline);
+		/// The program is emitted into `count` partitions (D-81), each with `copies` of the functions it calls from the
+		/// others.
+		void SplitInto(unsigned count, PartitionCopies copies);
 		/// A script (docs/runtime/04 section 4.2), with no entry point: the host's definitions and storage win, the host's
 		/// globals are not started, the script's start from `__c4_script_init`, the reflection image registers through
 		/// the loader, and exits and throws go through the script runtime.

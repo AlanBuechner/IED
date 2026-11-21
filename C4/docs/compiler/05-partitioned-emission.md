@@ -1,10 +1,43 @@
-# 05 - Partitioned emission (D-81)
+# 05 - Partitioned emission (D-81, D-90)
 
-An incremental build (`--incremental`, D-76: Nuke's Debug and Development) emits the program straight into its
-partitions, each a module of its own in an LLVM context of its own, the partitions on as many threads as `-j` allows.
-A whole-program build (`Dist`), `-S`, `-bc`, `-c` and a script compile emit one partition, the program's module, and
-do what they always did (a whole-program build optimizes it whole and splits it for parallel code generation,
-`SplitModuleToBitcode`, [01-pipeline.md](01-pipeline.md)).
+Every build that links a program emits it straight into its partitions, each a module of its own in an LLVM context of
+its own, the partitions on as many threads as `-j` allows. What differs is the optimization after (D-90, one emission
+path):
+
+- **An incremental build** (`--incremental`, D-76: Nuke's Debug and Development) optimizes each partition alone; a
+  partition copies the small functions it calls from the others so they still inline (Imports, below).
+- **A whole-program build** (Nuke's Dist) merges the partitions into one module first (`Compiler/PartitionMerge`), with
+  the reflection image and a script host's table, optimizes that module whole, and splits it again for code generation
+  on the output's threads (`SplitModuleToBitcode`, [01-pipeline.md](01-pipeline.md)). Its partitions copy nothing.
+- `-S`, `-bc`, `-c` and a script compile emit one partition, the program's module, and write it as text, bitcode or one
+  object (a script: the JIT takes it).
+
+## The whole-program build's merge (D-90)
+
+`ProgramOutput::WriteWholeProgram` writes each partition's bitcode on the output's threads (`PartitionBitcode` with
+`PartitionOptimization::Whole`: no linkonce definition made weak), takes a script host's inline bodies from the inline
+body cache with it as an incremental build does, then `MergePartitions` reads the partitions back into one context in
+partition order and links them (LLVM's `Linker`), then the reflection image's and the script table's modules
+(`KeyedModule::Builder`s, built straight into that context). Every local the emission made a hidden `.local` global so
+another partition could name it (a file-static function, a static local, a once guard, an invoke thunk) is local again
+under the name the program gave it (`ProgramName`), so the optimizer sees what it saw when the program was emitted as one
+module: it may inline a static function into its one caller and drop it, promote its arguments, and change its
+convention. What each partition keeps a copy of (a vtable, an RTTI locator, a string, a census record) is linked in once
+per partition, the copies local, as two C++ files' would be. The merged module is verified, optimized at `-O<n>` and split
+for the object cache and parallel code generation as before. A program of one partition is its module already: no merge.
+
+A whole-program build emits at most 16 partitions (`c_MergedPartitions`, `C4/src/Source.cpp`; `--partitions` still
+sets the number): each partition carries every type the program lays out, so linking the IED server's 128 took 2.8 s
+where 16 take 0.6 s (with reading them back 0.5 s and the reflection image 0.5 s), and 16 still emit on every thread.
+The number is fixed, not `-j`, so the merged module and the objects split from it are the same on any machine. On the
+IED server (`-O3 --script-host`, 16 threads) the work before the optimizer is 2.0 s against the single module's 2.4 s,
+a cold build about 57 s against 56 s (the runs spread 2 s), a one-line edit 52.7 s against 54.1 s, and the program 0.2%
+larger (the partitions' local copies of vtables, strings and census records stay apart); the benchmarks run at the
+single module's speed.
+
+Chosen over a ThinLTO-style summary and import, which keeps each partition's own optimizer: that is the incremental
+build's rule (copies of the small callees), and it costs run-time speed where a hot callee is too large to copy (the
+math benchmarks' `batch_pointers`, 60% slower); a shipping build keeps whole-program optimization.
 
 ## Why
 
@@ -89,7 +122,8 @@ the IED server the image is a 6.4 MB constant whose bitcode alone took 0.1 s of 
 
 ## Imports (`Backend/CodeGen/ImportEmitter`, `ImportPlanner`)
 
-Each partition gathers, on its thread, the facts of the functions it defines (size of their unoptimized IR, direct
+Only an incremental build's partitions copy (`PartitionCopies::Small`, `Inline` at -O0; a whole-program build's merge
+needs none, `None`). Each partition gathers, on its thread, the facts of the functions it defines (size of their unoptimized IR, direct
 callees, `inline`, `noinline`, `minsize`); the coordinator picks each partition's copies by D-76's rule (a direct
 callee of at most 100 instructions, 70% of that a level further, three levels; an `inline` one whatever its size;
 at `-O0` only those); each partition emits its copies from their HIR trees as `available_externally`
@@ -121,5 +155,11 @@ C4Testing `Semantic.SplitEmission` (each function and global defined in one part
 hidden globals, the program's own code in partition 0, one partition keeping locals local, no storage for nameless
 constants, the reflection image in a module of its own that declares only what the partitions define); `Lowering.Program`
 (a census counter lowered once and defined in each partition that allocates the type; the lowering order the same on
-one thread and on eight; codegen refusing to name what lowering did not lower); TestCode with `-Incremental`
-(e2e-incremental) builds TestCode split; the IED server's own tests build it split.
+one thread and on eight; codegen refusing to name what lowering did not lower); `Semantic.PartitionCopies` (a small
+callee copied `available_externally` into its callers' partitions, a large one declared, copies reaching through small
+callees, only `inline` ones at -O0, none when the partitions are merged, every partition verifying); `Compiler.PartitionMerge`
+(each definition once in the merged module, the locals local again under their program names, the reflection image in
+it with its invoke thunks local, one partition as the program, an unreadable partition an error); `Compiler.ObjectCache`
+(the split of an optimized module, linkonce definitions kept weak only for a partition optimized alone); TestCode
+with `-Incremental` (e2e-incremental) builds TestCode split and optimized alone, the other e2e runs build it
+partitioned and merged; the IED server's own tests build it split.

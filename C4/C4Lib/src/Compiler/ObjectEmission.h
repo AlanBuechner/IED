@@ -20,7 +20,7 @@ namespace Scripting
 		int optLevel = 0;
 		const CpuTarget* target = nullptr;
 		unsigned threads = 1; // how many partitions are assembled at once
-		bool optimizePartitions = false; // incremental (D-76): each partition is optimized alone, after the split
+		bool optimizePartitions = false; // incremental (D-76): each partition is optimized alone, as it is assembled
 		bool verify = false; // each partition assembled is verified first (ProgramBackend::VerifyLater)
 	};
 
@@ -63,17 +63,13 @@ namespace Scripting
 		double splitSeconds = 0;       // splitting the module into partitions and writing each one's bitcode
 		struct Assembled { uint64_t instructions = 0; double seconds = 0; };
 		std::vector<Assembled> assembled;   // each partition assembled (not reused): its size and how long it took
-		std::vector<std::string> extracted; // the bitcode of each group of the extracts asked for, in order
 	};
 
-	/// The module as `partitions` objects kept in `cache` (ModulePartitions splits it): a partition whose code is
-	/// unchanged since a build that kept it reuses its object, the others are assembled (and with
-	/// `settings.optimizePartitions`, optimized first) on up to `settings.threads` threads. No paths, with diagnostics,
-	/// when the optimizer or the assembler fails.
-	/// With `extracts`, their groups are built on the split's threads too (SplitModuleAndExtract), or here when the
-	/// module is kept whole.
+	/// An optimized module (a whole-program build's) as `partitions` objects kept in `cache` (SplitModuleToBitcode splits
+	/// it for code generation): a partition whose code is unchanged since a build that kept it reuses its object, the
+	/// others are assembled on up to `settings.threads` threads. No paths, with diagnostics, when the assembler fails.
 	CachedObjects WriteCachedObjects(llvm::Module& module, const ObjectSettings& settings, unsigned partitions,
-		const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics, const Extracts& extracts = {});
+		const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics);
 
 	/// The objects of a program emitted in partitions (D-81), from each partition's bitcode (PartitionBitcode), as
 	/// above: an unchanged partition reuses its object. The `keyed` modules' objects follow, each built and assembled

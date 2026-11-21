@@ -13,6 +13,7 @@
 #include <chrono>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -20,10 +21,10 @@
 
 namespace llvm { class Module; }
 
-/// The last stage of a build (docs/tools/01-compiler-cli.md): the finished module as IR (`-S`), bitcode (`-bc`) or
-/// objects the compiler optimizes and assembles itself (in parallel for a large module), then linked with the C4
-/// runtime into the program. A script host
-/// also gets its symbol table, its `.c4i` interface and C4Script.dll beside it.
+/// The last stage of a build (docs/tools/01-compiler-cli.md): the program's module as IR (`-S`), bitcode (`-bc`) or one
+/// object (`-c`); else its partitions (D-81) optimized each alone (an incremental build) or merged and optimized whole (a
+/// whole-program build, R12), assembled inside the compiler on several threads and linked with the C4 runtime into the
+/// program. A script host also gets its symbol table, its `.c4i` interface and C4Script.dll beside it.
 class ProgramOutput
 {
 public:
@@ -39,14 +40,14 @@ public:
 
 	explicit ProgramOutput(const Inputs& inputs) : m_In(inputs) {}
 
-	/// The program's output from its module, or, emitted in partitions (D-81), its partitions' (the first holding the
-	/// program's own code and data) and its reflection image's (D-82): an object of its own after theirs, built only
-	/// when none of its key is kept (no key: no image).
+	/// The program's output from its partitions (D-81; the first holds the program's own code and data, the only one
+	/// unless the build links) and its reflection image (D-82): a module of its own, built only when no object of its
+	/// key is kept (no key: the image is in the first partition).
 	bool Write(const std::vector<llvm::Module*>& partitions, const Scripting::KeyedModule& image = {});
 
-	/// Whether the program's partitions are optimized each alone, after the split, and verified as they are assembled
-	/// (so lowering leaves the module unverified: ProgramBackend::VerifyLater).
-	static bool OptimizesPartitions(const Scripting::CompileOptions& options);
+	/// Whether the build links a program (not `-S`, `-bc` or `-c`, which write the one module): then it is emitted in
+	/// partitions, and each is verified as the output reads it (so lowering leaves it unverified: ProgramBackend::VerifyLater).
+	static bool Links(const Scripting::CompileOptions& options);
 
 private:
 	// The .pdb a link writes, and the name it is written under until the program is in place.
@@ -58,8 +59,12 @@ private:
 
 	bool MakeOutputFolder();
 	std::string IntermediateBase();
-	bool WriteProgram(llvm::Module& module, const std::string& base);
-	bool WriteSplitProgram(const std::vector<llvm::Module*>& partitions, const Scripting::KeyedModule& image, const std::string& base);
+	bool WriteModule(llvm::Module& module, const std::string& base);
+	bool WriteWholeProgram(const std::vector<llvm::Module*>& partitions, const Scripting::KeyedModule& image, const std::string& base);
+	std::unique_ptr<llvm::Module> Merged(const std::vector<llvm::Module*>& partitions, const Scripting::KeyedModule& image,
+		const std::string& base, const Scripting::ObjectSettings& settings);
+	bool Verified(const llvm::Module& module);
+	bool WritePartitions(const std::vector<llvm::Module*>& partitions, const Scripting::KeyedModule& image, const std::string& base);
 	bool WriteIR(const llvm::Module& module, const std::string& path);
 	bool WriteBitcode(const llvm::Module& module, const std::string& path);
 	bool Optimize(llvm::Module& module, const Scripting::ObjectSettings& settings);
@@ -88,14 +93,11 @@ private:
 	bool ShipScriptHost(const std::filesystem::path& scriptHost);
 	void Timed(const char* phase, std::chrono::steady_clock::time_point since);
 
-	/// At most this many chunks of inline bodies, extracted on the split's threads.
-	static constexpr unsigned kInlineBodyChunks = 64;
-	/// Of a program emitted in partitions, at most this many of each partition's.
+	/// Of a program emitted in partitions, at most this many chunks of each partition's inline bodies.
 	static constexpr unsigned kInlineBodyChunksPerPartition = 4;
 
 	Inputs m_In;
 	std::optional<Scripting::HostBuild> m_HostBuild;       // a script host's, until its inline bodies are in
-	Scripting::Extracts m_InlineBodies;                    // the inline bodies the split extracts for it
 	std::vector<Scripting::HostEntry> m_HostEntries;       // a program in partitions: what its table lists
 	std::vector<std::string> m_AlwaysListed;               // and the names every table lists beside the runtime's
 	std::optional<Scripting::HostInterface> m_Interface;   // what goes beside the program

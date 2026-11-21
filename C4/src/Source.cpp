@@ -19,6 +19,7 @@
 #include "Backend/CodeGen/TestHarnessEmitter.h"
 #include "Backend/ProgramBackend.h"
 #include "Backend/Reflection/RegistrationEmitter.h"
+#include <algorithm>
 #include <optional>
 #include <unordered_map>
 
@@ -120,13 +121,27 @@ namespace
 		}
 
 	private:
-		// How many partitions the program is emitted into (D-81): one unless an incremental build links it; then
-		// `--partitions`, or as many as its size is worth.
+		// A whole-program build's partitions are merged again before they are optimized (D-90): enough to emit on every
+		// thread, few enough that the merge stays short (each partition carries every type the program lays out). A fixed
+		// number, so the merged module, and the objects split from it, do not depend on -j.
+		static constexpr unsigned c_MergedPartitions = 16;
+
+		// How many partitions the program is emitted into (D-81, D-90): one for -S, -bc and -c, which write the module;
+		// else `--partitions`, or as many as its size is worth - at most c_MergedPartitions when they are merged.
 		unsigned EmittedPartitions()
 		{
-			if (!ProgramOutput::OptimizesPartitions(m_Options)) return 1;
+			if (!ProgramOutput::Links(m_Options)) return 1;
 			if (m_Options.partitions) return m_Options.partitions;
-			return Scripting::ProgramPlacement::CountFor(m_Compiler.GetProgramModel());
+			const unsigned worth = Scripting::ProgramPlacement::CountFor(m_Compiler.GetProgramModel());
+			return m_Options.incremental ? worth : std::min(worth, c_MergedPartitions);
+		}
+
+		// What a partition copies from the others to inline: nothing when the partitions are merged before they are
+		// optimized (a whole-program build), only `inline` functions at -O0.
+		Scripting::PartitionCopies CopiesBetweenPartitions() const
+		{
+			if (!m_Options.incremental) return Scripting::PartitionCopies::None;
+			return m_Options.optLevel == 0 ? Scripting::PartitionCopies::Inline : Scripting::PartitionCopies::Small;
 		}
 
 		// -w drops the warnings; -Werror makes each one an error (B22).
@@ -174,8 +189,8 @@ namespace
 			if (m_Options.debugInfo) driver.EnableDebugInfo();
 			if (!m_Options.strictAliasing) driver.DisableStrictAliasing();
 			if (m_Options.scriptHost) driver.ShareVtables();
-			if (ProgramOutput::OptimizesPartitions(m_Options)) driver.VerifyLater();
-			if (const unsigned count = EmittedPartitions(); count > 1) driver.SplitInto(count, m_Options.optLevel == 0);
+			if (ProgramOutput::Links(m_Options)) driver.VerifyLater();
+			if (const unsigned count = EmittedPartitions(); count > 1) driver.SplitInto(count, CopiesBetweenPartitions());
 			driver.SetReflectionTag(m_Options.reflectTag);
 			driver.LowerOn(m_Options.threads);
 			auto phaseStart = std::chrono::steady_clock::now();

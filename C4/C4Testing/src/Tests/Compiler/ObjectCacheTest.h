@@ -61,8 +61,10 @@ namespace Testing
 		TEST_FUNC(Compiler.ModulePartitions)
 		void DataNoFileNamesHasTheFirstPartitionAlone();
 		TEST_FUNC(Compiler.ModulePartitions)
-		void ExtractsSeeTheProgramAsItWas();
+		void ExtractedDefinitionsKeepTheProgramsNames();
 		TEST_FUNC(Compiler.ModulePartitions)
 		void APartitionKeepsOnlyTheDeclarationsItUses();
+		TEST_FUNC(Compiler.ObjectCache)
+		void APartitionOptimizedAloneKeepsItsLinkOnceDefinitions();
 	};
 } // namespace Testing

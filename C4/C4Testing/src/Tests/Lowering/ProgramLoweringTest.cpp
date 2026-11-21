@@ -182,7 +182,7 @@ namespace Testing
 		ProgramModel& splitModel = MakeModel(split, source);
 		llvm::LLVMContext context;
 		ProgramBackend backend(context);
-		backend.SplitInto(4, false);
+		backend.SplitInto(4, PartitionCopies::Small);
 		TEST_ASSERT(backend.Lower(splitModel, "main"));
 		unsigned defining = 0;
 		for (unsigned i = 0; i < backend.PartitionCount(); ++i)

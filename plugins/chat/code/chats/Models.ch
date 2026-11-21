@@ -20,7 +20,7 @@ namespace Ai
 	// Whether this build offers Claude through a Pro or Max login (docs/04 "Distributed builds"): the owner's own builds do;
 	// a Dist build only once it defines CLAUDE_SUBSCRIPTION_APPROVED (Anthropic's approval of claude.ai login in IED).
 #if defined(DIST) && !defined(CLAUDE_SUBSCRIPTION_APPROVED)
-	const bool kClaudeSubscriptionOffered = false;
+	const bool c_ClaudeSubscriptionOffered = false;
 #else
 	const bool c_ClaudeSubscriptionOffered = true;
 #endif
