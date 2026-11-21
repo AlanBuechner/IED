@@ -48,5 +48,7 @@ namespace Testing
 		void BodiesOfInstancesAreOpenedHoweverDeepTheChain();
 		TEST_FUNC(Semantic.DeclarationResolution)
 		void AnInstancesExtentFoldsAConstantOfItsTemplatesScope();
+		TEST_FUNC(Semantic.DeclarationResolution)
+		void AnInstancesStaticConstantFolds();
 	};
 } // namespace Testing

@@ -339,4 +339,29 @@ namespace Testing
 		TEST_ASSERT_EQ(sizeOfGlobal("g_Row"), int64(16));
 		TEST_PASSED();
 	}
+
+	// BUG-481: a static constant named through a template instance folds in the instance - qualified, inherited, in a
+	// global's extent, a field's and a constant's - and a static that is not const says so.
+	void DeclarationResolutionTest::AnInstancesStaticConstantFolds()
+	{
+		Program program(std::string(
+			"namespace Ns { template<T> struct Holder { public T value; public static const int32 Size = sizeof(T); } }\n"
+			"template<T> struct Derived : Ns::Holder<T> { public int32 extra; }\n"
+			"struct Pair { public uint16 a; public uint16 b; }\n"
+			"struct Table { public int32[Ns::Holder<int64>::Size] cells; }\n"
+			"int32[Ns::Holder<Pair>::Size] g_Global;\n"
+			"int32[Derived<int16>::Size] g_Inherited;\n"
+			"const int32 kTwice = Ns::Holder<Pair>::Size * 2;\n") + c_Main);
+		TEST_ASSERT_EQ(program.Diagnostics(), std::string());
+		TEST_ASSERT_EQ(program.Extent("g_Global"), int64(4));
+		TEST_ASSERT_EQ(program.Extent("g_Inherited"), int64(2));
+		TEST_ASSERT_EQ(program.SizeOf("Table"), int64(32));
+		TEST_ASSERT_EQ(program.Constant("kTwice"), int64(8));
+		Program variable(std::string(
+			"template<T> struct Counter { public static int32 s_count; }\n"
+			"int32[Counter<int32>::s_count] g_Bad;\n") + c_Main);
+		TEST_ASSERT_MSG(variable.Reports("'Counter<int32>::s_count' is a static variable: only a const with a constant initializer folds"),
+			variable.Diagnostics().c_str());
+		TEST_PASSED();
+	}
 } // namespace Testing

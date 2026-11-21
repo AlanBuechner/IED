@@ -17,6 +17,7 @@ namespace Scripting
 	struct CastExpressionNode;
 	struct FunctionCallNode;
 	struct FunctionRecord;
+	struct NamespaceQualifiedNameNode;
 	class ICompileTimeCalls;
 
 	/// Folds compile-time constant expressions to a value (doc 02 pass 3). Handles literals,
@@ -93,6 +94,10 @@ namespace Scripting
 		QueryResult<ConstantValue> InOperandType(const ConstantValue& value, const AstNode* operand, uint32 unitId) const;
 		QueryResult<const Type*> LiteralType(const LiteralNode& literal) const;
 		QueryResult<ConstantValue> EvaluateNamed(const Core::String& name, uint32 unitId, Visiting& visiting, Scope* bindingScope) const;
+		/// A static constant of a template instance (`Holder<Pair>::Size`, BUG-481): the qualifier resolved as a type, the
+		/// constant read in the instance's class layer (or its bases').
+		QueryResult<ConstantValue> FoldInstanceStatic(const Ref<NamespaceQualifiedNameNode>& qualifier, const Core::String& member, uint32 unitId,
+			Visiting& visiting, Scope* bindingScope) const;
 		QueryResult<ConstantValue> FoldSymbol(const Core::String& name, const SymbolInfo& symbol, uint32 unitId, Visiting& visiting) const;
 		QueryResult<void> TypeKnown(const SymbolInfo& symbol) const;
 		/// While the model resolves: an enum's underlying type is resolved before a constant converts to it.

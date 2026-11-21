@@ -6,6 +6,8 @@
 #include "Model/Literals.h"
 #include "Model/ProgramModel.h"
 #include "Model/TypeHandle.h"
+#include "Model/TypeResolver.h"
+#include "Parser/Nodes/Declarations/QualTypeNode.h"
 #include "Model/Types/ObjectType.h"
 #include "Parser/Nodes/Expressions/LiteralNode.h"
 #include "Parser/Nodes/Expressions/BinaryExpressionNode.h"
@@ -60,6 +62,43 @@ namespace Scripting
 			return path;
 		}
 		return "";
+	}
+
+	// A static member named through a template instance (`Holder<Pair>::Size`, BUG-481): the qualifier, written with its
+	// arguments, and the member's name. False for a name whose qualifier has no template arguments (QualifiedConstantPath's).
+	static bool InstanceMemberName(const AstNode* expr, Ref<NamespaceQualifiedNameNode>& qualifier, Core::String& member)
+	{
+		auto hasArguments = [](const Core::Vector<NamespaceQualifiedNameNode::Segment>& segments, uint32 count) {
+			for (uint32 s = 0; s < count; ++s)
+				if (segments[s].templateArgs) return true;
+			return false;
+		};
+		if (const auto* sa = dynamic_cast<const StaticAccessNode*>(expr))
+		{
+			const auto* base = dynamic_cast<const NamespaceQualifiedNameNode*>(sa->GetBaseType().Get());
+			if (!base || !hasArguments(base->GetSegments(), base->SegmentCount())) return false;
+			qualifier = NamespaceQualifiedNameNode::FromSegments(base->GetSegments());
+			member = sa->GetMemberNameToken().GetText();
+			return true;
+		}
+		const auto* name = dynamic_cast<const NamespaceQualifiedNameNode*>(expr);
+		if (!name || name->SegmentCount() < 2 || !hasArguments(name->GetSegments(), name->SegmentCount() - 1)) return false;
+		Core::Vector<NamespaceQualifiedNameNode::Segment> outer;
+		for (uint32 s = 0; s + 1 < name->SegmentCount(); ++s) outer.Push(name->GetSegments()[s]);
+		qualifier = NamespaceQualifiedNameNode::FromSegments(outer);
+		member = name->GetLastIdentifierToken().GetText();
+		return true;
+	}
+
+	// A static data member `owner` declares or inherits, nearest first; null for none.
+	static const SymbolInfo* StaticMember(const ProgramModel& model, const ObjectType* owner, const Core::String& member)
+	{
+		if (const Scope* scope = model.TypeScope(owner))
+			for (const auto& entry : scope->Entries(member))
+				if (entry->kind == SymbolKind::Variable) return entry.get();
+		for (const ObjectType* base : owner->GetBaseTypes())
+			if (const SymbolInfo* found = StaticMember(model, base, member)) return found;
+		return nullptr;
 	}
 
 	// The namespace or class a template's bindings hang under; null for none and for the program's root, which a
@@ -261,9 +300,13 @@ namespace Scripting
 			return FoldBinary("||", disjunction->GetLeftOperand().Get(), disjunction->GetRightOperand().Get(), unitId, visiting, bindingScope);
 		if (const auto* fold = dynamic_cast<const FoldExpressionNode*>(expr)) return FoldPack(*fold, unitId, visiting, bindingScope);
 
-	// Identifier: resolve through the model as a constant (with cycle detection).
-	if (const auto* ident = dynamic_cast<const IdentifierExpressionNode*>(expr))
-		return EvaluateNamed(ident->GetName(), unitId, visiting, bindingScope);
+		// Identifier: resolve through the model as a constant (with cycle detection).
+		if (const auto* ident = dynamic_cast<const IdentifierExpressionNode*>(expr))
+			return EvaluateNamed(ident->GetName(), unitId, visiting, bindingScope);
+
+		Ref<NamespaceQualifiedNameNode> instance;
+		if (Core::String member; InstanceMemberName(expr, instance, member))
+			return FoldInstanceStatic(instance, member, unitId, visiting, bindingScope);
 
 		// Qualified constant: a qualified enum member (`E::X`) or namespaced const used as a value
 		// (e.g. an array size `int32[E::X] g;`). In expression position the parser yields a
@@ -279,6 +322,25 @@ namespace Scripting
 
 		return QueryResult<ConstantValue>::Fail(QueryError::NotAValue, "'" + expr->ToString() + "' is not one of the forms a constant folds from "
 			"(literals, constants, enum members, sizeof and alignof, operators on them, and calls of [compile_time] functions)");
+	}
+
+	QueryResult<ConstantValue> ConstEvaluator::FoldInstanceStatic(const Ref<NamespaceQualifiedNameNode>& qualifierName, const Core::String& member,
+		uint32 unitId, Visiting& visiting, Scope* bindingScope) const
+	{
+		const NamespaceQualifiedNameNode& qualifier = *qualifierName;
+		const Ref<QualTypeNode> written = QualTypeNode::FromParts(qualifierName, Ref<AstNode>(), {}, false);
+		auto resolved = TypeResolver().ResolveTypeInternal(m_Model, *written, unitId, bindingScope, m_Context);
+		if (!resolved.Ok()) return QueryResult<ConstantValue>::Fail(resolved.error, resolved.message);
+		const auto* owner = dynamic_cast<const ObjectType*>(TypeHandle::UnwrapToValue(resolved.value));
+		const Core::String name = qualifier.ToString() + "::" + member;
+		if (!owner) return QueryResult<ConstantValue>::Fail(QueryError::NotAValue, "'" + qualifier.ToString() + "' is not a class: '" + name + "' names no constant");
+		if (DeclarationQueries* pending = m_Model.Pending())
+			if (auto complete = pending->Complete(owner); !complete.Ok()) return QueryResult<ConstantValue>::Fail(complete.error, complete.message);
+		const SymbolInfo* symbol = StaticMember(m_Model, owner, member);
+		if (!symbol) return QueryResult<ConstantValue>::Fail(QueryError::NotFound, "no static constant '" + member + "' in '" + qualifier.ToString() + "'");
+		if (!symbol->isConst) return QueryResult<ConstantValue>::Fail(QueryError::NotAValue, "'" + name + "' is a static variable: only a const with a constant initializer folds");
+		if (!symbol->constValue.IsNone()) return QueryResult<ConstantValue>::Success(symbol->constValue);
+		return FoldSymbol(name, *symbol, unitId, visiting);
 	}
 
 	QueryResult<ConstantValue> ConstEvaluator::PackLength(const Core::String& name, Scope* bindingScope) const
