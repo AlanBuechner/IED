@@ -59,9 +59,10 @@ static bool IsRunning(uint32 id) {
 
 static bool WaitUntilGone(uint32 id, int64 timeoutMs) {
 	const int64 start = clock_now_ns();
-	while (IsRunning(id))
+	while (IsRunning(id)) {
 		if (MillisecondsSince(start) > timeoutMs) return false;
-		else Threading::Thread::Sleep((int64)50000000);
+		Threading::Thread::Sleep((int64)50000000);
+	}
 	return true;
 }
 
@@ -312,7 +313,8 @@ class ProcessChildTests {
 		ping.Close();
 		assert_true(!ping.IsOpen() && ping.Id() == 0, "closed");
 		assert_true(WaitUntilGone(id, 5000), "closing the Child ended the process");
-		Process::StartInfo info = Cmd("ping -n 2 127.0.0.1");
+		// About 5 s: listing it with tasklist takes most of a second on a busy machine, longer than `ping -n 2` lived (BUG-488).
+		Process::StartInfo info = Cmd("ping -n 6 127.0.0.1");
 		info.killOnClose = false;
 		Process::Child kept = Process::Child::Start(info);
 		const uint32 keptId = kept.Id();
