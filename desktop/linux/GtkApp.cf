@@ -1,0 +1,387 @@
+// The Linux app (GtkApp.ch): desktop/App.cf's behaviour - windows, the server reached off the UI thread, the watch,
+// relaunch - with Shell.h for the windows and shell_post for what other threads hand over.
+#if defined(PLATFORM_LINUX)
+include "App.ch"
+
+namespace Desktop
+{
+	static void Delivered(void* context) {
+		Window* window = (Window*)context;
+		if (window->IsOpen()) window->m_App->DeliverResolved(window);
+	}
+
+	static void ServerBackNow(void* context) { ((App*)context)->ReconnectAll(); }
+	static void ServerFailedNow(void* context) { ((App*)context)->ShowServerFailure(); }
+	static void RelaunchNow(void* context) { ((App*)context)->Relaunch(); }
+	static void AlertNow(void* context) { ((App*)context)->ShowPendingAlert(); }
+
+	// The icon beside the program (the install has it), else none: the theme's "ied" (DesktopEntry.ch).
+	static FS::Path IconFile() { return Platform::ExecutablePath().Parent() / "ied.png"; }
+
+	int32 App::OpenInBrowserInstead(Core::StringView why) {
+		m_Log.Write((Core::String("no desktop window: ") + why).View());
+		Platform::WriteError((Core::String("ied-desktop: ") + why + "\nOpening IED in your default browser instead.\n").View());
+		Core::String error;
+		Net::LocalStream stream = EnsureServer(error);
+		if (!stream.IsOpen()) {
+			Platform::WriteError((Core::String("ied-desktop: ") + error.View() + "\n").View());
+			return 1;
+		}
+		Launch::Reply reply = m_Options.m_Path.IsEmpty() ? Launch::Ask(stream, Core::StringView("url"), Core::StringView(""))
+			: Launch::Ask(stream, Core::StringView("open"), Launch::OpenParams(OpenRequestOf(m_Options)).View());
+		if (!reply.m_Ok) return 1;
+		Core::String url = Launch::ResultField(reply, "url");
+		if (Launch::OpenExternal(url.View())) return 0;
+		Platform::WriteOutput((url + "\n").View());
+		return 0;
+	}
+
+	void App::Report(Core::StringView what) {
+		m_Log.Write((Core::String("failed: ") + what).View());
+		Core::String text = Core::String("IED's desktop window failed: ") + what;
+		shell_window_alert(null, text.CStr());
+	}
+
+	Window* App::NewWindow() { return NewWindowAt(NextPlacement()); }
+
+	Placement App::NextPlacement() {
+		return m_Windows.IsEmpty() ? LoadPlacement(m_Data) : Cascaded(m_Windows[m_Windows.Count() - 1]->CurrentPlacement());
+	}
+
+	Placement App::PlacementFor(Core::StringView url, bool atCursor) {
+		Core::String docked = DockWindowOf(url);
+		if (docked.IsEmpty()) return NextPlacement();
+		Placement kept = LoadDockedPlacement(m_Data, docked.View());
+		if (kept.m_Known && !atCursor) return kept;
+		Placement from = kept.m_Known ? kept : NextPlacement();
+		from.m_Maximized = false;
+		if (!atCursor) return from;
+		int32 x = 0;
+		int32 y = 0;
+		shell_pointer(&x, &y);
+		return GrabbedAt(from, x, y);
+	}
+
+	Window* App::NewWindowAt(const Placement& placement) {
+		App* self = this;
+		Window* window = new Window(self);
+		m_Made.Push(window);
+		if (!window->Create(placement)) return null;
+		m_Windows.Push(window);
+		return window;
+	}
+
+	void App::OpenHome() {
+		Window* window = NewWindow();
+		if (window != null) Resolve(window, Core::StringView("url"), Core::StringView(""), Arrival::StartPage);
+	}
+
+	void App::OpenLocation(const Launch::OpenRequest& request) {
+		Window* window = NewWindow();
+		if (window != null) Resolve(window, Core::StringView("open"), Launch::OpenParams(request).View(), Arrival::First);
+	}
+
+	void App::OpenFolder(Window* window) {
+		char[4096] picked;
+		if (shell_pick_folder(window->m_Shell, &picked[0], 4096) == 0) return;
+		Core::String folder = Core::String((const char*)&picked[0]);
+		Resolve(window, Core::StringView("open"), Launch::OpenParams(Launch::OpenOf(folder.View())).View(), Arrival::Folder);
+	}
+
+	void App::OpenUrl(Core::StringView url, bool atCursor) {
+		Window* window = NewWindowAt(PlacementFor(url, atCursor));
+		if (window != null) window->Show(url);
+	}
+
+	Net::LocalStream App::EnsureServer(Core::String& error) {
+		Threading::LockGuard guard(m_StartLock);
+		Process::Child started;
+		Net::LocalStream stream = Launch::Reach(m_Options.m_Control.View(), error, &started);
+		if (started.IsOpen()) {
+			Core::StringBuilder line;
+			line.Append("started ied-server, pid ");
+			line.AppendInt((int64)started.Id());
+			m_Log.Write(line.View());
+			m_Server = take(started);
+		}
+		else if (!stream.IsOpen()) m_Log.Write((Core::String("the server could not be reached: ") + error.View()).View());
+		return stream;
+	}
+
+	void App::ServerGone() {
+		Threading::LockGuard guard(m_StartLock);
+		if (!m_Server.IsOpen()) {
+			m_Log.Write(Core::StringView("the server stopped answering; another program started it, so how it ended is not known here"));
+			return;
+		}
+		Core::StringBuilder line;
+		line.Append("the server (pid ");
+		line.AppendInt((int64)m_Server.Id());
+		line.Append(") stopped answering: ");
+		const int64 code = m_Server.Wait(c_ServerEndWaitMs);
+		if (code < 0) line.Append("it still runs, but nobody listens on its control pipe");
+		else {
+			line.Append("it exited with ");
+			line.Append(Launch::ExitCodeText(code).View());
+		}
+		if (code > 0) {
+			line.Append("; its log says why: ");
+			line.Append((Launch::LogsFolder() / "server.log").View());
+		}
+		m_Log.Write(line.View());
+		m_Server.Close();
+	}
+
+	void App::Resolve(Window* window, Core::StringView method, Core::StringView params, Arrival arrival) {
+		App* self = this;
+		Core::String asked = Core::String(method);
+		Core::String with = Core::String(params);
+		Threading::Thread::Run([self, window, asked, with, arrival]() {
+			Core::String url;
+			Core::String error;
+			Net::LocalStream stream = self->EnsureServer(error);
+			if (stream.IsOpen()) {
+				Launch::Reply reply = Launch::Ask(stream, asked.View(), with.View());
+				if (reply.m_Ok) url = Launch::ResultField(reply, "url");
+				else error = reply.m_Error;
+			}
+			{
+				Threading::LockGuard guard(self->m_Lock);
+				window->m_ResolvedUrl = url;
+				window->m_ResolveError = error;
+				window->m_ResolveArrival = arrival;
+			}
+			shell_post(Delivered, (void*)window);
+		}).Detach();
+	}
+
+	void App::DeliverResolved(Window* window) {
+		Core::String url;
+		Core::String error;
+		Arrival arrival = Arrival::First;
+		{
+			Threading::LockGuard guard(m_Lock);
+			url = window->m_ResolvedUrl;
+			error = window->m_ResolveError;
+			arrival = window->m_ResolveArrival;
+			window->m_ResolvedUrl = Core::String();
+			window->m_ResolveError = Core::String();
+		}
+		window->Resolved(url.View(), error.View(), arrival);
+		if (!url.IsEmpty()) m_Watch.Start(this);
+	}
+
+	void App::Closing(Window* window) {
+		Placement placement = window->CurrentPlacement();
+		if (!placement.m_Known) return;
+		Core::String docked = DockWindowOf(window->CurrentUrl().View());
+		if (docked.IsEmpty()) SavePlacement(m_Data, placement);
+		else SaveDockedPlacement(m_Data, docked.View(), placement);
+	}
+
+	void App::Closed(Window* window) {
+		Core::Array<Window*> open;
+		for (int64 i = 0; i < m_Windows.Count(); ++i)
+			if (m_Windows[i] != window) open.Push(m_Windows[i]);
+		m_Windows = open;
+		if (m_Windows.IsEmpty() && !m_Quitting) {
+			m_Quitting = true;
+			shell_quit();
+		}
+	}
+
+	void App::OpenInWeb(Core::StringView root) {
+		App* self = this;
+		Core::String path = Core::String(root);
+		Threading::Thread::Run([self, path]() {
+			Core::String error;
+			Net::LocalStream stream = self->EnsureServer(error);
+			if (stream.IsOpen()) {
+				Launch::Reply reply = Launch::Ask(stream, Core::StringView("open"), Launch::OpenParams(Launch::OpenOf(path.View())).View());
+				if (reply.m_Ok && Launch::OpenExternal(Launch::ResultField(reply, "url").View())) return;
+				error = reply.m_Ok ? Core::String("no browser could be started (xdg-open)") : reply.m_Error;
+			}
+			{
+				Threading::LockGuard guard(self->m_Lock);
+				self->m_PendingAlert = Core::String("IED could not open this workspace in the browser: ") + error.View();
+			}
+			shell_post(AlertNow, (void*)self);
+		}).Detach();
+	}
+
+	void App::ShowPendingAlert() {
+		Core::String text;
+		{
+			Threading::LockGuard guard(m_Lock);
+			text = m_PendingAlert;
+			m_PendingAlert = Core::String();
+		}
+		if (!text.IsEmpty()) shell_window_alert(m_Windows.IsEmpty() ? null : m_Windows[0]->m_Shell, text.CStr());
+	}
+
+	// The windows and the workspace each shows go into <data>/relaunch.json, as on Windows (desktop/App.cf).
+	void App::Relaunch() {
+		Core::String error;
+		Net::LocalStream stream = EnsureServer(error);
+		Core::String status;
+		if (stream.IsOpen()) {
+			Launch::Reply reply = Launch::Ask(stream, Core::StringView("status"), Core::StringView(""));
+			if (reply.m_Ok) status = reply.m_Result;
+		}
+		Core::Array<RelaunchWindow> kept;
+		for (Window* window : m_Windows) {
+			RelaunchWindow entry;
+			entry.m_Placement = window->CurrentPlacement();
+			entry.m_Root = RootOf(status.View(), WorkspaceOf(window->CurrentUrl().View()).View());
+			entry.m_DockQuery = DockQueryOf(window->CurrentUrl().View());
+			kept.Push(entry);
+		}
+		FS::Path file = m_Data / "relaunch.json";
+		Core::String json = RelaunchJson((int64)Platform::ProcessId(), kept);
+		FS::MakeDirectories(m_Data.CStr());
+		m_Watch.Stop();
+		if (stream.IsOpen()) Launch::Ask(stream, Core::StringView("stop"), Core::StringView(""));
+		Launch::AwaitGone(m_Options.m_Control.View());
+		if (!FS::WriteFileAtomically(file.CStr(), (const void*)json.View().Data(), json.View().ByteLength()) || !StartAgain(file, error)) {
+			Report((Core::String("IED could not relaunch: ") + error.View()).View());
+			m_Watch.Start(this);
+			return;
+		}
+		m_Quitting = true;
+		Core::Array<Window*> closing = m_Windows;
+		for (Window* window : closing) window->Close();
+		shell_quit();
+	}
+
+	bool App::StartAgain(const FS::Path& file, Core::String& error) {
+		Process::StartInfo info;
+		info.program = Core::String(Platform::ExecutablePath().View());
+		info.arguments.Push(Core::String("--relaunch"));
+		info.arguments.Push(Core::String(file.View()));
+		if (!m_Options.m_Control.IsEmpty()) {
+			info.arguments.Push(Core::String("--control"));
+			info.arguments.Push(m_Options.m_Control);
+		}
+		if (!m_Options.m_DataDir.IsEmpty()) {
+			info.arguments.Push(Core::String("--data"));
+			info.arguments.Push(m_Options.m_DataDir);
+		}
+		if (m_Options.m_DebugPort > 0) {
+			Core::StringBuilder port;
+			port.AppendInt(m_Options.m_DebugPort);
+			info.arguments.Push(Core::String("--debug-port"));
+			info.arguments.Push(port.ToString());
+		}
+		info.input = Process::Redirect::Null;
+		info.output = Process::Redirect::Null;
+		info.errors = Process::Redirect::Null;
+		info.killOnClose = false;
+		Process::Child child = Process::Child::Start(info);
+		if (!child.IsOpen()) error = Core::String(child.Error());
+		return child.IsOpen();
+	}
+
+	Core::Array<RelaunchWindow> App::TakeRelaunch() {
+		Core::Array<RelaunchWindow> relaunched;
+		if (m_Options.m_Relaunch.IsEmpty() || !FS::FileExists(m_Options.m_Relaunch.CStr())) return relaunched;
+		FS::File opened = FS::File(m_Options.m_Relaunch.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		opened.Close();
+		FS::RemoveFile(m_Options.m_Relaunch.CStr());
+		int64 pid = 0;
+		if (!ParseRelaunch(text.View(), pid, relaunched)) return Core::Array<RelaunchWindow>();
+		AwaitExit(pid, c_OldProcessWaitMs);
+		return relaunched;
+	}
+
+	void App::OpenRelaunched(const Core::Array<RelaunchWindow>& relaunched) {
+		for (const RelaunchWindow& entry : relaunched) {
+			Window* window = NewWindowAt(entry.m_Placement.m_Known ? entry.m_Placement : LoadPlacement(m_Data));
+			if (window == null) continue;
+			window->m_DockQuery = entry.m_DockQuery;
+			if (entry.m_Root.IsEmpty()) Resolve(window, Core::StringView("url"), Core::StringView(""), Arrival::StartPage);
+			else Resolve(window, Core::StringView("open"), Launch::OpenParams(Launch::OpenOf(entry.m_Root.View())).View(), Arrival::First);
+		}
+	}
+
+	void App::Retry() {
+		m_Watch.Reset();
+		for (int64 i = 0; i < m_Windows.Count(); ++i) Reconnect(m_Windows[i], Arrival::First);
+	}
+
+	void App::ServerBack() {
+		m_Log.Write(Core::StringView("the server is back"));
+		shell_post(ServerBackNow, (void*)this);
+	}
+
+	void App::ServerAsksRelaunch() {
+		m_Log.Write(Core::StringView("the server asked to be relaunched onto the newest install"));
+		shell_post(RelaunchNow, (void*)this);
+	}
+
+	void App::Remember(Core::StringView status) {
+		Threading::LockGuard guard(m_Lock);
+		m_LastStatus = Core::String(status);
+	}
+
+	void App::Reconnect(Window* window, Arrival arrival) {
+		Core::String status;
+		{
+			Threading::LockGuard guard(m_Lock);
+			status = m_LastStatus;
+		}
+		Core::String root = RootOf(status.View(), WorkspaceOf(window->CurrentUrl().View()).View());
+		window->m_DockQuery = DockQueryOf(window->CurrentUrl().View());
+		if (root.IsEmpty()) Resolve(window, Core::StringView("url"), Core::StringView(""), arrival);
+		else Resolve(window, Core::StringView("open"), Launch::OpenParams(Launch::OpenOf(root.View())).View(), Arrival::Reopened);
+	}
+
+	void App::ReconnectAll() {
+		for (int64 i = 0; i < m_Windows.Count(); ++i) Reconnect(m_Windows[i], Arrival::ServerBack);
+	}
+
+	void App::ServerFailed(Core::StringView why) {
+		m_Log.Write((Core::String("the server could not be started again: ") + why).View());
+		{
+			Threading::LockGuard guard(m_Lock);
+			m_WatchError = Core::String(why);
+		}
+		shell_post(ServerFailedNow, (void*)this);
+	}
+
+	void App::ShowServerFailure() {
+		Core::String why;
+		{
+			Threading::LockGuard guard(m_Lock);
+			why = m_WatchError;
+		}
+		for (int64 i = 0; i < m_Windows.Count(); ++i) m_Windows[i]->ShowStatus(Core::StringView("The IED server stopped"), why.View());
+	}
+
+	int32 App::Run() {
+		m_Log.Open(LogFilePath(m_Options).View());
+		Platform::SetCrashLog(m_Log.File().View());
+		m_Log.Write((((Core::String("start: ied-desktop ") + c_DesktopVersion) + " (") + Platform::ExecutablePath().View() + "), data " + m_Data.View()).View());
+		if (m_Options.m_DebugPort > 0) {
+			// WebKit's own inspector protocol on loopback (a browser at that address shows each page's inspector).
+			Core::StringBuilder address;
+			address.Append("127.0.0.1:");
+			address.AppendInt(m_Options.m_DebugPort);
+			Platform::SetEnvironmentVariable("WEBKIT_INSPECTOR_HTTP_SERVER", address.ToString().CStr());
+		}
+		FS::MakeDirectories(m_Data.CStr());
+		char[1024] failure;
+		Core::String icon = Core::String(IconFile().View());
+		if (shell_start(m_Data.CStr(), icon.CStr(), &failure[0], c_ErrorBytes) == 0) return OpenInBrowserInstead(Core::StringView((const char*)&failure[0]));
+		Core::Array<RelaunchWindow> relaunched = TakeRelaunch();
+		if (!relaunched.IsEmpty()) OpenRelaunched(relaunched);
+		else if (m_Options.m_Path.IsEmpty()) OpenHome();
+		else OpenLocation(OpenRequestOf(m_Options));
+		if (m_Windows.IsEmpty()) return 1;
+		shell_run();
+		m_Watch.Stop();
+		m_Log.Write(Core::StringView("exit: the last window closed"));
+		return 0;
+	}
+}
+#endif

@@ -17,7 +17,8 @@ namespace Desktop
 	// path shows, even while workspaces are open on the server.
 	Core::String StartPageUrl(Core::StringView url);
 
-	// The script added before every document's own: window.iedDesktop, carried by chrome.webview.postMessage.
+	// The script added before every document's own: window.iedDesktop, carried by chrome.webview.postMessage (WebView2)
+	// or window.webkit.messageHandlers.ied.postMessage (WebKitGTK).
 	Core::String BridgeScript(Core::StringView version);
 	// A page in IED's colors saying what is happening, with `detail` (escaped) under it and a Retry button when `retry`.
 	Core::String StatusPage(Core::StringView title, Core::StringView detail, bool retry);

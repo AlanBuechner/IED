@@ -1,3 +1,5 @@
+// Windows: Win32 and WebView2. The Linux app is desktop/linux (docs/27 "Linux").
+#if defined(PLATFORM_WINDOWS)
 include "Com.ch"
 
 namespace Desktop
@@ -68,3 +70,4 @@ namespace Desktop
 		return callback;
 	}
 }
+#endif

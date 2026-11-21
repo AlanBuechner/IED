@@ -1,3 +1,5 @@
+// Windows: Win32 and WebView2. The Linux app is desktop/linux (docs/27 "Linux").
+#if defined(PLATFORM_WINDOWS)
 // Win32, COM, DWM and the WebView2 SDK, bound from native/webview.h by CBind (C4/docs/language/13-interop.md); the
 // SDK's folder is an include folder of the project (nuke.toml).
 
@@ -10,3 +12,4 @@ namespace Desktop
 	const int32 c_NoInterface = -2147467262;   // E_NOINTERFACE
 	const int32 c_Cancelled = -2147023673;     // HRESULT_FROM_WIN32(ERROR_CANCELLED): the person closed a dialog
 }
+#endif

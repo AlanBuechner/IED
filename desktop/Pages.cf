@@ -41,8 +41,11 @@ namespace Desktop
 	Core::String BridgeScript(Core::StringView version) {
 		Core::StringBuilder script;
 		script.Append("(() => {\n");
-		script.Append("\tif (!window.chrome || !window.chrome.webview || window.iedDesktop) return;\n");
-		script.Append("\tconst post = (type, extra) => window.chrome.webview.postMessage(JSON.stringify(Object.assign({ type }, extra || {})));\n");
+		// WebView2 (Windows) or WebKitGTK's script message handler "ied" (Linux, desktop/linux/Shell.c).
+		script.Append("\tconst channel = window.chrome && window.chrome.webview ? window.chrome.webview\n");
+		script.Append("\t\t: window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ied;\n");
+		script.Append("\tif (!channel || window.iedDesktop) return;\n");
+		script.Append("\tconst post = (type, extra) => channel.postMessage(JSON.stringify(Object.assign({ type }, extra || {})));\n");
 		script.Append("\tObject.defineProperty(window, \"iedDesktop\", { value: Object.freeze({\n");
 		script.Append("\t\tversion: ");
 		Serialization::WriteJsonString(version, &script);

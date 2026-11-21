@@ -1,7 +1,7 @@
 # desktop/ - `ied-desktop`, the desktop app
 
-IED's web client in native windows (`docs/27`): WebView2 (the Edge engine Windows ships) shows the same UI a browser
-gets, with the keys a browser keeps (Ctrl+W/T/N, F5, Ctrl+R, F12) going to IED. It starts the user's `ied-server` when
+IED's web client in native windows (`docs/27`): WebView2 (the Edge engine Windows ships), on Linux WebKitGTK
+(`linux/`, `docs/27` "Linux"), shows the same UI a browser gets, with the keys a browser keeps (Ctrl+W/T/N, F5, Ctrl+R, F12) going to IED. It starts the user's `ied-server` when
 none runs, and again if it dies while windows are open. Written in C4: Win32 and WebView2 are bound from their headers
 through CBind, and the COM callbacks WebView2 makes are C4 structs.
 
@@ -34,6 +34,7 @@ opens it in that window.
 | `Native.ch`, `native/webview.h` | what CBind binds: `<windows.h>`, COM, DWM, the WebView2 SDK (`vendor/webview2`, from `setup.bat`) |
 | `resources/` | the icon (`ied.svg`, rendered to `ied.ico` by `make_icon.py`), version and manifest, compiled into the exe |
 | `tests/` | the parts that need no window (`nuke test ied-desktop`) |
+| `linux/` | the Linux app: `GtkApp`, `GtkWindow` (what `App.ch` and `Window.ch` are there), `Shell.h`/`Shell.c` (GTK and WebKitGTK, loaded at start), `DesktopEntry` (the applications menu's entry, icon and file types: `--register` on Linux) |
 
 The finding and starting of the server, and the control channel, are the `launcher` module's (`launcher/`), shared with
 `ied`.

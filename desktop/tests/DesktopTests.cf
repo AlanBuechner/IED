@@ -2,8 +2,11 @@
 // own pages and script, and how often the server is started again.
 
 include "App.ch"
+include "linux/DesktopEntry.ch"
+#if defined(PLATFORM_WINDOWS)
 include "Shortcut.ch"
 include "FileTypes.ch"
+#endif
 
 static Desktop::Options Parsed(const char* first, const char* second, const char* third, bool& ok, Core::String& error) {
 	Core::Array<Core::String> arguments;
@@ -54,6 +57,7 @@ class DesktopTests {
 		assert_true(!ok && error.View().Contains(Core::StringView("needs a path")), "a workspace with nothing to open in it");
 	}
 
+#if defined(PLATFORM_WINDOWS)
 	[test("start_menu")]
 	public static void TestStartMenu() {
 		bool ok = false;
@@ -95,6 +99,7 @@ class DesktopTests {
 		RegDeleteKeyW((HKEY__*)(void*)(int64)(int32)0x80000001, root.Data());
 		assert_true(kept, "an extension another program took is left to it");
 	}
+#endif
 
 	[test("relaunch")]
 	public static void TestRelaunch() {
@@ -203,6 +208,46 @@ class DesktopTests {
 		assert_true(script.View().Contains(Core::StringView("focus: () => post(\"focus\")")), "a notification's click brings the window to the front");
 		assert_true(script.View().Contains(Core::StringView("closeWindow: () => post(\"closeWindow\")")), "a window that gave away its activities closes");
 		assert_true(script.View().Contains(Core::StringView("atCursor")), "a window dropped at the pointer");
+		assert_true(script.View().Contains(Core::StringView("window.chrome.webview")) && script.View().Contains(Core::StringView("window.webkit.messageHandlers.ied")),
+			"WebView2's channel, else WebKitGTK's (Linux)");
+	}
+
+	// The Linux applications menu's entry (desktop/linux/DesktopEntry.ch): plain files, checked on every system under a
+	// scratch folder standing for ~/.local/share and ~/.config.
+	[test("menu_entry")]
+	public static void TestMenuEntry() {
+		Core::String entry = Desktop::DesktopEntryText(FS::Path(Core::StringView("/home/me/.local/opt/ied/ied-desktop")), Core::StringView("/x/ied.svg"));
+		assert_true(entry.View().StartsWith(Core::StringView("[Desktop Entry]\nType=Application\nName=IED\n")), entry.CStr());
+		assert_true(entry.View().Contains(Core::StringView("\nExec=\"/home/me/.local/opt/ied/ied-desktop\" %f\n")), "starts the program, a file passed");
+		assert_true(entry.View().Contains(Core::StringView("\nIcon=/x/ied.svg\n")) && entry.View().Contains(Core::StringView("\nStartupWMClass=ied\n")), "its icon, its windows");
+		assert_true(entry.View().Contains(Core::StringView("MimeType=application/x-ied-solution;application/x-ied-federation;")), "IED's files");
+		assert_true(Desktop::DesktopEntryText(FS::Path(Core::StringView("/p/ied-desktop")), Core::StringView("")).View().Contains(Core::StringView("\nIcon=ied\n")), "the theme's icon without a file");
+		assert_se("\"/a b/\\\\$x\\\\\\\\y\"", Desktop::ExecArgument(Core::StringView("/a b/$x\\y")).CStr(), "quoted as the spec says, then escaped");
+		Core::String xml = Desktop::MimePackageXml();
+		assert_true(xml.View().Contains(Core::StringView("<glob pattern=\"*.iedsln\"/>")) && xml.View().Contains(Core::StringView("<glob pattern=\"*.iedfed\"/>")), "both types");
+
+		Core::String set = Desktop::WithDefaults(Core::StringView("[Added Associations]\ntext/plain=gedit.desktop;\n\n[Default Applications]\ntext/html=firefox.desktop;\napplication/x-ied-solution=old.desktop;\n"), true);
+		assert_se("[Added Associations]\ntext/plain=gedit.desktop;\n\n[Default Applications]\napplication/x-ied-solution=ied.desktop;\napplication/x-ied-federation=ied.desktop;\ntext/html=firefox.desktop;\n",
+			set.CStr(), "IED's defaults set, the others kept");
+		assert_se("[Added Associations]\ntext/plain=gedit.desktop;\n\n[Default Applications]\ntext/html=firefox.desktop;\n", Desktop::WithDefaults(set.View(), false).CStr(), "and taken out");
+		assert_se("[Default Applications]\napplication/x-ied-solution=ied.desktop;\napplication/x-ied-federation=ied.desktop;\n", Desktop::WithDefaults(Core::StringView(""), true).CStr(), "a new file");
+
+		Core::StringBuilder scratch;
+		scratch.Append((FS::TempDirectory() / "ied-menu-entry-").View());
+		scratch.AppendInt((int64)Platform::ProcessId());
+		FS::Path root = FS::Path(scratch.ToString().View());
+		FS::Path data = root / "share";
+		FS::Path config = root / "config";
+		FS::Path program = root / "opt" / "ied-desktop";
+		FS::MakeDirectories(program.Parent().CStr());
+		FS::WriteFileAtomically((program.Parent() / "ied.svg").CStr(), (const void*)"<svg/>", 6);
+		Core::String error;
+		assert_true(Desktop::RegisterDesktopEntry(program, data, config, error), error.CStr());
+		assert_true(FS::FileExists((data / "applications/ied.desktop").CStr()) && FS::FileExists((data / "icons/hicolor/scalable/apps/ied.svg").CStr()), "entry and icon");
+		assert_true(FS::FileExists((data / "mime/packages/ied.xml").CStr()) && FS::FileExists((config / "mimeapps.list").CStr()), "types and defaults");
+		assert_true(Desktop::UnregisterDesktopEntry(data, config, error), error.CStr());
+		assert_true(!FS::FileExists((data / "applications/ied.desktop").CStr()) && !FS::FileExists((data / "mime/packages/ied.xml").CStr()), "gone again");
+		FS::RemoveAll(root.CStr());
 	}
 
 	[test("restart_budget")]

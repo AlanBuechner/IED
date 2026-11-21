@@ -1,3 +1,6 @@
+#if defined(PLATFORM_LINUX)
+include "linux/GtkWindow.ch"
+#else
 // One IED window (docs/27 "The window"): a Win32 top-level window and the WebView2 in it showing the web client.
 // Its methods run on the app's UI thread; the window procedure finds the object in GWLP_USERDATA, the app's list keeps
 // it alive.
@@ -88,3 +91,4 @@ namespace Desktop
 	// "<what> (HRESULT <n>)".
 	Core::String Failure(Core::StringView what, int32 hresult);
 }
+#endif

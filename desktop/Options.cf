@@ -88,7 +88,7 @@ namespace Desktop
 
 	FS::Path DataFolder(const Options& options) {
 		if (!options.m_DataDir.IsEmpty()) return FS::Path(FS::AbsolutePath(options.m_DataDir.CStr()).View());
-		return FS::Path(Platform::GetEnvironmentVariable("LOCALAPPDATA").View()) / "IED" / "desktop";
+		return Launch::StateFolder() / "desktop";
 	}
 
 	FS::Path LogFilePath(const Options& options) {

@@ -1,0 +1,204 @@
+// The Linux window (GtkWindow.ch): Shell.h's events turned into the decisions Windows' window makes (desktop/View.cf):
+// where navigations go, the page's messages, a page that did not load, a crashed web process.
+#if defined(PLATFORM_LINUX)
+include "GtkWindow.ch"
+include "App.ch"
+
+namespace Desktop
+{
+	const int32 c_UrlBytes = 8192;
+
+	static Window* Of(void* context) { return (Window*)context; }
+
+	static void OnMessage(void* context, const char* source, const char* text) {
+		Of(context)->Message(Core::StringView(source), Core::StringView(text));
+	}
+
+	static int32 OnNavigation(void* context, const char* url, int32 newWindow, int32 gesture) {
+		return Of(context)->Navigation(Core::StringView(url), newWindow != 0, gesture != 0) ? 1 : 0;
+	}
+
+	static void OnTitle(void* context, const char* title) { Of(context)->TitleChanged(Core::StringView(title)); }
+
+	static int32 OnFailed(void* context, const char* url, const char* why) {
+		return Of(context)->Failed(Core::StringView(url), Core::StringView(why)) ? 1 : 0;
+	}
+
+	static void OnClosing(void* context) { Of(context)->Closing(); }
+
+	static void OnClosed(void* context) { Of(context)->Closed(); }
+
+	static void OnCrashed(void* context) { Of(context)->Crashed(); }
+
+	// Work the window posts to itself, out of WebKit's signal: the folder picker is modal, a page loads after a failed
+	// one's signal.
+	static void OpenFolderLater(void* context) {
+		Window* window = Of(context);
+		if (window->IsOpen()) window->m_App->OpenFolder(window);
+	}
+
+	static void RelaunchLater(void* context) { Of(context)->m_App->Relaunch(); }
+
+	static void StatusLater(void* context) {
+		Window* window = Of(context);
+		if (!window->IsOpen() || window->m_PendingStatus.IsEmpty()) return;
+		Core::String html = window->m_PendingStatus;
+		window->m_PendingStatus = Core::String();
+		shell_window_load_html(window->m_Shell, html.CStr());
+	}
+
+	bool Window::Create(const Placement& placement) {
+		ShellEvents events;
+		events.context = (void*)this;
+		events.message = OnMessage;
+		events.navigation = OnNavigation;
+		events.title = OnTitle;
+		events.failed = OnFailed;
+		events.closing = OnClosing;
+		events.closed = OnClosed;
+		events.crashed = OnCrashed;
+		ShellPlacement at;
+		at.known = placement.m_Known ? 1 : 0;
+		at.x = placement.m_X;
+		at.y = placement.m_Y;
+		at.width = placement.m_Known ? placement.m_Width : c_DefaultWidth;
+		at.height = placement.m_Known ? placement.m_Height : c_DefaultHeight;
+		at.maximized = placement.m_Maximized ? 1 : 0;
+		Core::String script = BridgeScript(Core::StringView(c_DesktopVersion));
+		m_Shell = shell_window_new(&events, script.CStr(), &at, c_MinWidth, c_MinHeight);
+		return m_Shell != null;
+	}
+
+	void Window::Show(Core::StringView url) {
+		if (m_Shell == null) return;
+		m_Origin = OriginOf(url);
+		m_ShowingStatus = false;
+		Core::String text = Core::String(url);
+		shell_window_load(m_Shell, text.CStr());
+	}
+
+	void Window::ShowStatus(Core::StringView title, Core::StringView detail) {
+		if (m_Shell == null) return;
+		m_ShowingStatus = true;
+		Core::String html = StatusPage(title, detail, true);
+		shell_window_load_html(m_Shell, html.CStr());
+	}
+
+	void Window::Resolved(Core::StringView url, Core::StringView error, Arrival arrival) {
+		Core::String docked = m_DockQuery;
+		m_DockQuery = Core::String();
+		if (!url.IsEmpty() && arrival == Arrival::ServerBack && !m_ShowingStatus && OriginOf(url).View() == m_Origin.View()) return;
+		Core::String shown = arrival == Arrival::StartPage ? StartPageUrl(url) : WithDockWindow(url, docked.View());
+		if (!url.IsEmpty()) Show(shown.View());
+		else if (arrival == Arrival::Folder) Alert((Core::String("IED could not open the folder: ") + error).View());
+		else ShowStatus(Core::StringView("IED could not start its server"), error);
+	}
+
+	void Window::Alert(Core::StringView text) {
+		Core::String message = Core::String(text);
+		shell_window_alert(m_Shell, message.CStr());
+	}
+
+	void Window::BringToFront() {
+		if (m_Shell != null) shell_window_present(m_Shell);
+	}
+
+	Placement Window::CurrentPlacement() const {
+		Placement placement;
+		if (m_Shell == null) return placement;
+		ShellPlacement now;
+		shell_window_placement(m_Shell, &now);
+		placement.m_Known = now.known != 0;
+		placement.m_X = now.x;
+		placement.m_Y = now.y;
+		placement.m_Width = now.width;
+		placement.m_Height = now.height;
+		placement.m_Maximized = now.maximized != 0;
+		return placement;
+	}
+
+	Core::String Window::CurrentUrl() const {
+		if (!m_PageUrl.IsEmpty()) return m_PageUrl;
+		if (m_Shell == null) return Core::String();
+		char[8192] url;
+		shell_window_uri(m_Shell, &url[0], c_UrlBytes);
+		return Core::String((const char*)&url[0]);
+	}
+
+	void Window::Close() {
+		if (m_Shell != null) shell_window_close(m_Shell);
+	}
+
+	void Window::TitleChanged(Core::StringView title) {
+		// The app's own pages are titled "IED"; the web client names its workspace.
+		Core::String shown = Core::String(title.IsEmpty() ? Core::StringView("IED") : title);
+		shell_window_set_title(m_Shell, shown.CStr());
+	}
+
+	// Where a navigation goes (Pages.ch): the server's pages and the app's own stay; a page of another origin the person
+	// asked for (a link clicked) opens in the default browser; one no one asked for (a frame of the page loading its own
+	// content) stays, as WebKit tells frames apart from the page no other way here; anything else is refused.
+	bool Window::Navigation(Core::StringView url, bool newWindow, bool gesture) {
+		if (newWindow) {
+			Destination where = NewWindowTarget(url, m_Origin.View());
+			if (where == Destination::NewWindow) m_App->OpenUrl(url, false);
+			else if (where == Destination::External) Launch::OpenExternal(url);
+			return false;
+		}
+		Destination where = NavigationTarget(url, m_Origin.View());
+		if (where == Destination::Here) return true;
+		if (where == Destination::Refused) return false;
+		if (!gesture) return true;
+		Launch::OpenExternal(url);
+		return false;
+	}
+
+	// A page of the server that cannot be reached: the server went away between asking for the URL and loading it.
+	bool Window::Failed(Core::StringView url, Core::StringView why) {
+		if (m_ShowingStatus || OriginOf(url).IsEmpty() || OriginOf(url).View() != m_Origin.View()) return false;
+		m_ShowingStatus = true;
+		m_PendingStatus = StatusPage(Core::StringView("IED could not reach its server"),
+			(Core::String("The page did not load (") + why + "). Retry starts the server again if it is not running.").View(), true);
+		shell_post(StatusLater, (void*)this);
+		return true;
+	}
+
+	void Window::Message(Core::StringView source, Core::StringView text) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult parsed = Serialization::ReadJson(text, *doc);
+		if (!parsed.Ok()) return;
+		Core::StringView type = parsed.root.Member("type").AsView();
+		// The app's own status page may only ask to retry; everything else must come from the server's pages.
+		if (type == "retry") {
+			m_App->Retry();
+			return;
+		}
+		if (NavigationTarget(source, m_Origin.View()) != Destination::Here || OriginOf(source).IsEmpty()) return;
+		if (type == "devTools") shell_window_inspect(m_Shell);
+		else if (type == "openFolder") shell_post(OpenFolderLater, (void*)this);
+		else if (type == "openInWeb") m_App->OpenInWeb(parsed.root.Member("path").AsView());
+		else if (type == "location") m_PageUrl = Core::String(parsed.root.Member("url").AsView());
+		else if (type == "relaunch") shell_post(RelaunchLater, (void*)this);
+		else if (type == "focus") BringToFront();
+		else if (type == "openExternal") Launch::OpenExternal(parsed.root.Member("url").AsView());
+		else if (type == "newWindow") {
+			Core::StringView url = parsed.root.Member("url").AsView();
+			if (url.IsEmpty()) m_App->OpenHome();
+			else if (NewWindowTarget(url, m_Origin.View()) == Destination::NewWindow) m_App->OpenUrl(url, parsed.root.Member("atCursor").AsBool());
+		}
+		// A window that gave away its last activity (docs/15 "Windows"): the page cannot close what no script opened.
+		else if (type == "closeWindow") Close();
+	}
+
+	void Window::Closing() { m_App->Closing(this); }
+
+	void Window::Closed() {
+		m_Shell = null;
+		m_App->Closed(this);
+	}
+
+	void Window::Crashed() {
+		if (m_Shell != null) shell_window_reload(m_Shell);
+	}
+}
+#endif

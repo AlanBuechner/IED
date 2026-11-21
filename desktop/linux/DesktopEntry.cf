@@ -1,0 +1,202 @@
+include "DesktopEntry.ch"
+
+namespace Desktop
+{
+	static FS::Path XdgHome(const char* variable, const char* fallback) {
+		Core::String base;
+		if (Platform::TryGetEnvironmentVariable(variable, base) && !base.IsEmpty()) return FS::Path(base.View());
+		return FS::Path(Platform::GetEnvironmentVariable("HOME").View()) / fallback;
+	}
+
+	FS::Path DataHome() { return XdgHome("XDG_DATA_HOME", ".local/share"); }
+
+	FS::Path ConfigHome() { return XdgHome("XDG_CONFIG_HOME", ".config"); }
+
+	static FS::Path EntryPath(const FS::Path& dataHome) { return dataHome / "applications" / c_EntryName; }
+	static FS::Path SvgIconPath(const FS::Path& dataHome) { return dataHome / "icons/hicolor/scalable/apps/ied.svg"; }
+	static FS::Path PngIconPath(const FS::Path& dataHome) { return dataHome / "icons/hicolor/256x256/apps/ied.png"; }
+	static FS::Path MimePackagePath(const FS::Path& dataHome) { return dataHome / "mime/packages/ied.xml"; }
+
+	Core::String ExecArgument(Core::StringView argument) {
+		// Inside the quotes `"`, `` ` ``, `$` and `\` take a backslash; then the entry's string escape doubles each
+		// backslash.
+		Core::StringBuilder quoted;
+		quoted.AppendByte('"');
+		for (int64 i = 0; i < argument.ByteLength(); ++i) {
+			const int32 c = argument.ByteAt(i);
+			if (c == '"' || c == '`' || c == '$') quoted.Append("\\\\");
+			if (c == '\\') quoted.Append("\\\\\\");
+			quoted.AppendByte((char8)c);
+		}
+		quoted.AppendByte('"');
+		return quoted.ToString();
+	}
+
+	Core::String DesktopEntryText(const FS::Path& program, Core::StringView icon) {
+		Core::StringBuilder text;
+		text.Append("[Desktop Entry]\n");
+		text.Append("Type=Application\n");
+		text.Append("Name=IED\n");
+		text.Append("GenericName=Integrated Development Environment\n");
+		text.Append("Comment=Write, build and debug C4 and C++ with IED\n");
+		text.Append("Exec=");
+		text.Append(ExecArgument(program.View()).View());
+		text.Append(" %f\n");
+		text.Append("TryExec=");
+		text.Append(program.View());
+		text.Append("\n");
+		text.Append("Icon=");
+		text.Append(icon.IsEmpty() ? Core::StringView("ied") : icon);
+		text.Append("\n");
+		text.Append("Terminal=false\n");
+		text.Append("Categories=Development;IDE;\n");
+		text.Append("Keywords=ied;c4;nuke;code;editor;\n");
+		text.Append("MimeType=");
+		text.Append(c_SolutionType);
+		text.Append(";");
+		text.Append(c_FederationType);
+		text.Append(";\n");
+		// The windows' class (X11) and app id (Wayland) are "ied" (Shell.c), so the dock shows them under this entry.
+		text.Append("StartupWMClass=ied\n");
+		text.Append("StartupNotify=true\n");
+		return text.ToString();
+	}
+
+	Core::String MimePackageXml() {
+		Core::StringBuilder xml;
+		xml.Append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+		xml.Append("<mime-info xmlns=\"http://www.freedesktop.org/standards/shared-mime-info\">\n");
+		xml.Append("\t<mime-type type=\"");
+		xml.Append(c_SolutionType);
+		xml.Append("\">\n\t\t<comment>IED solution</comment>\n\t\t<sub-class-of type=\"application/json\"/>\n\t\t<glob pattern=\"*.iedsln\"/>\n\t</mime-type>\n");
+		xml.Append("\t<mime-type type=\"");
+		xml.Append(c_FederationType);
+		xml.Append("\">\n\t\t<comment>IED federation</comment>\n\t\t<sub-class-of type=\"application/json\"/>\n\t\t<glob pattern=\"*.iedfed\"/>\n\t</mime-type>\n");
+		xml.Append("</mime-info>\n");
+		return xml.ToString();
+	}
+
+	static bool IsOurs(Core::StringView line) {
+		return line.StartsWith(Core::StringView(c_SolutionType)) || line.StartsWith(Core::StringView(c_FederationType));
+	}
+
+	Core::String WithDefaults(Core::StringView text, bool set) {
+		Core::Array<Core::String> lines;
+		int64 start = 0;
+		for (int64 i = 0; i <= text.ByteLength(); ++i) {
+			if (i < text.ByteLength() && text.ByteAt(i) != '\n') continue;
+			Core::StringView line = text.Substring(start, i - start);
+			if (line.ByteLength() > 0 && line.ByteAt(line.ByteLength() - 1) == '\r') line = line.Substring(0, line.ByteLength() - 1);
+			if (i < text.ByteLength() || line.ByteLength() > 0) lines.Push(Core::String(line));
+			start = i + 1;
+		}
+		Core::Array<Core::String> kept;
+		bool inDefaults = false;
+		int64 defaultsAt = -1;
+		for (const Core::String& line : lines) {
+			Core::StringView view = line.View();
+			if (view.StartsWith(Core::StringView("["))) inDefaults = view == "[Default Applications]";
+			if (inDefaults && IsOurs(view)) continue;
+			kept.Push(line);
+			if (view == "[Default Applications]") defaultsAt = kept.Count();
+		}
+		if (set) {
+			Core::Array<Core::String> ours;
+			ours.Push(Core::String(c_SolutionType) + "=" + c_EntryName + ";");
+			ours.Push(Core::String(c_FederationType) + "=" + c_EntryName + ";");
+			Core::Array<Core::String> merged;
+			if (defaultsAt < 0) {
+				for (const Core::String& line : kept) merged.Push(line);
+				if (!merged.IsEmpty() && !merged[merged.Count() - 1].IsEmpty()) merged.Push(Core::String());
+				merged.Push(Core::String("[Default Applications]"));
+				for (const Core::String& line : ours) merged.Push(line);
+			}
+			else {
+				for (int64 i = 0; i < kept.Count(); ++i) {
+					merged.Push(kept[i]);
+					if (i + 1 == defaultsAt)
+						for (const Core::String& line : ours) merged.Push(line);
+				}
+			}
+			kept = merged;
+		}
+		Core::StringBuilder out;
+		for (const Core::String& line : kept) {
+			out.Append(line.View());
+			out.AppendByte('\n');
+		}
+		return out.ToString();
+	}
+
+	static bool Write(const FS::Path& path, Core::StringView text, Core::String& error) {
+		FS::MakeDirectories(path.Parent().CStr());
+		if (FS::WriteFileAtomically(path.CStr(), (const void*)text.Data(), text.ByteLength())) return true;
+		error = Core::String("could not write ") + path.View();
+		return false;
+	}
+
+	static Core::String ReadIfThere(const FS::Path& path) {
+		if (!FS::FileExists(path.CStr())) return Core::String();
+		FS::File file = FS::File(path.CStr(), "rb");
+		Core::String text = file.ReadText();
+		file.Close();
+		return text;
+	}
+
+	bool RegisterDesktopEntry(const FS::Path& program, const FS::Path& dataHome, const FS::Path& configHome, Core::String& error) {
+		// The icon from beside the program (the install has both), else the theme's name.
+		Core::String icon;
+		FS::Path svg = program.Parent() / "ied.svg";
+		FS::Path png = program.Parent() / "ied.png";
+		if (FS::FileExists(svg.CStr())) {
+			FS::MakeDirectories(SvgIconPath(dataHome).Parent().CStr());
+			if (!FS::CopyFile(svg.CStr(), SvgIconPath(dataHome).CStr())) {
+				error = Core::String("could not copy the icon to ") + SvgIconPath(dataHome).View();
+				return false;
+			}
+			icon = Core::String(SvgIconPath(dataHome).View());
+		}
+		if (FS::FileExists(png.CStr())) {
+			FS::MakeDirectories(PngIconPath(dataHome).Parent().CStr());
+			FS::CopyFile(png.CStr(), PngIconPath(dataHome).CStr());
+			if (icon.IsEmpty()) icon = Core::String(PngIconPath(dataHome).View());
+		}
+		if (!Write(MimePackagePath(dataHome), MimePackageXml().View(), error)) return false;
+		FS::Path defaults = configHome / "mimeapps.list";
+		if (!Write(defaults, WithDefaults(ReadIfThere(defaults).View(), true).View(), error)) return false;
+		return Write(EntryPath(dataHome), DesktopEntryText(program, icon.View()).View(), error);
+	}
+
+	bool UnregisterDesktopEntry(const FS::Path& dataHome, const FS::Path& configHome, Core::String& error) {
+		Core::Array<FS::Path> files;
+		files.Push(EntryPath(dataHome));
+		files.Push(SvgIconPath(dataHome));
+		files.Push(PngIconPath(dataHome));
+		files.Push(MimePackagePath(dataHome));
+		for (const FS::Path& file : files) {
+			if (FS::FileExists(file.CStr()) && !FS::RemoveFile(file.CStr())) {
+				error = Core::String("could not remove ") + file.View();
+				return false;
+			}
+		}
+		FS::Path defaults = configHome / "mimeapps.list";
+		if (FS::FileExists(defaults.CStr())) return Write(defaults, WithDefaults(ReadIfThere(defaults).View(), false).View(), error);
+		return true;
+	}
+
+	static void RunIfThere(const char* program, const FS::Path& folder) {
+		Process::StartInfo info;
+		info.program = Core::String(program);
+		info.arguments.Push(Core::String(folder.View()));
+		info.input = Process::Redirect::Null;
+		info.output = Process::Redirect::Null;
+		info.errors = Process::Redirect::Null;
+		Process::Child child = Process::Child::Start(info);
+		if (child.IsOpen()) child.Wait(30000);
+	}
+
+	void DesktopEntriesChanged(const FS::Path& dataHome) {
+		RunIfThere("update-mime-database", dataHome / "mime");
+		RunIfThere("update-desktop-database", dataHome / "applications");
+	}
+}

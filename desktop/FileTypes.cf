@@ -1,3 +1,5 @@
+// Windows: Win32 and WebView2. The Linux app is desktop/linux (docs/27 "Linux").
+#if defined(PLATFORM_WINDOWS)
 include "FileTypes.ch"
 
 namespace Desktop
@@ -103,3 +105,4 @@ namespace Desktop
 	// SHCNE_ASSOCCHANGED with SHCNF_IDLIST.
 	void AssociationsChanged() { SHChangeNotify(0x08000000, 0, null, null); }
 }
+#endif

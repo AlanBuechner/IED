@@ -1,3 +1,5 @@
+// Windows: Win32 and WebView2. The Linux app is desktop/linux (docs/27 "Linux").
+#if defined(PLATFORM_WINDOWS)
 // COM callbacks written in C4: WebView2 reports each completion and event through an object whose one method past
 // IUnknown is Invoke(This, a, b). A Callback is such an object, laid out as COM expects (its vtable first), carrying a
 // C4 function to run. Its owner keeps it (CallbackSet) for as long as WebView2 may call it.
@@ -41,3 +43,4 @@ namespace Desktop
 	int32 Hresult(void* argument);
 	bool SameGuid(const _GUID* a, const _GUID* b);
 }
+#endif

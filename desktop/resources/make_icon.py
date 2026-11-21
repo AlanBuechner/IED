@@ -1,4 +1,5 @@
-"""Renders ied.svg at the sizes Windows asks for and packs them into ied.ico (PNG entries).
+"""Renders ied.svg at the sizes Windows asks for and packs them into ied.ico (PNG entries); the 256-pixel one is also
+ied.png, the Linux window's and applications menu's icon (desktop/linux/DesktopEntry.ch).
 
 	python desktop/resources/make_icon.py        (needs Playwright's Chromium, as tests/e2e does)
 """
@@ -40,8 +41,10 @@ def pack(images):
 
 def main():
 	svg = (HERE / "ied.svg").read_text(encoding="ascii")
-	(HERE / "ied.ico").write_bytes(pack(asyncio.run(render(svg))))
-	print("wrote", HERE / "ied.ico")
+	images = asyncio.run(render(svg))
+	(HERE / "ied.ico").write_bytes(pack(images))
+	(HERE / "ied.png").write_bytes(images[SIZES.index(256)])
+	print("wrote", HERE / "ied.ico", "and", HERE / "ied.png")
 
 
 if __name__ == "__main__":

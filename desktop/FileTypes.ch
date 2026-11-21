@@ -1,3 +1,5 @@
+// Windows: Win32 and WebView2. The Linux app is desktop/linux (docs/27 "Linux").
+#if defined(PLATFORM_WINDOWS)
 // IED's files in Explorer (docs/27): a solution (.iedsln) and a federation (.iedfed) open in this program on a double
 // click, for this user only (keys under HKEY_CURRENT_USER: no admin, no other user touched). The classes key is a
 // parameter, so a test registers under a scratch key of its own.
@@ -19,3 +21,4 @@ namespace Desktop
 	// Explorer is told that associations changed, so icons and types show at once.
 	void AssociationsChanged();
 }
+#endif

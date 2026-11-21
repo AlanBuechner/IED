@@ -1,3 +1,5 @@
+// Windows: Win32 and WebView2. The Linux app is desktop/linux (docs/27 "Linux").
+#if defined(PLATFORM_WINDOWS)
 // IED in the Start menu (docs/21 "Install shape"): `ied-desktop --register` writes a shortcut to this program into the
 // user's Start menu (%APPDATA%\Microsoft\Windows\Start Menu\Programs\IED.lnk), so the Windows key and "ied" start it;
 // `--unregister` takes it out. Per user, no administrator.
@@ -14,3 +16,4 @@ namespace Desktop
 	// No shortcut afterwards (none before is fine); false with `error`.
 	bool Unregister(Core::StringView appData, Core::String& error);
 }
+#endif

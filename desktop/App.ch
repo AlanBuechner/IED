@@ -1,3 +1,6 @@
+#if defined(PLATFORM_LINUX)
+include "linux/GtkApp.ch"
+#else
 // The desktop app (docs/27): one process with many windows, one WebView2 environment for them, the server reached
 // (and started) off the UI thread, and the watch that starts it again. Everything but the resolver threads and the
 // watch runs on the UI thread; what those threads hand over goes through `lock` and a posted message.
@@ -103,3 +106,4 @@ namespace Desktop
 	int64 WindowProcedure(HWND__* hwnd, uint32 message, uint64 wParam, int64 lParam);
 	int64 MessageProcedure(HWND__* hwnd, uint32 message, uint64 wParam, int64 lParam);
 }
+#endif

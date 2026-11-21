@@ -1,3 +1,5 @@
+// Windows: Win32 and WebView2. The Linux app is desktop/linux (docs/27 "Linux").
+#if defined(PLATFORM_WINDOWS)
 // The Win32 side of a window: creation, placement, the dark frame, and the messages it answers.
 
 include "Window.ch"
@@ -196,3 +198,4 @@ namespace Desktop
 		return DefWindowProcW(hwnd, message, wParam, lParam);
 	}
 }
+#endif

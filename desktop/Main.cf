@@ -2,8 +2,12 @@
 // ied-server is started when none runs, and again when it dies while windows are open.
 
 include "App.ch"
+#if defined(PLATFORM_WINDOWS)
 include "Shortcut.ch"
 include "FileTypes.ch"
+#else
+include "linux/DesktopEntry.ch"
+#endif
 
 static Core::Array<Core::String> Arguments(int32 argc, char8** argv) {
 	Core::Array<Core::String> arguments;
@@ -11,11 +15,17 @@ static Core::Array<Core::String> Arguments(int32 argc, char8** argv) {
 	return arguments;
 }
 
-// A windowed program has no console to print to, so usage and errors go to a message box.
+// A windowed program has no console to print to, so usage and errors go to a message box; on Linux, where the menu's
+// entry or a terminal starts it, to the standard streams.
 static int32 Tell(Core::StringView text, bool failed) {
+#if defined(PLATFORM_WINDOWS)
 	Core::Array<char16> body = Desktop::Wide(text);
 	Core::Array<char16> caption = Desktop::Wide(Core::StringView("IED"));
 	MessageBoxW(null, body.Data(), caption.Data(), (uint32)(failed ? MB_ICONERROR : MB_ICONINFORMATION));
+#else
+	if (failed) Platform::WriteError((Core::String(text) + "\n").View());
+	else Platform::WriteOutput((Core::String(text) + "\n").View());
+#endif
 	return failed ? 2 : 0;
 }
 
@@ -23,12 +33,20 @@ static int32 Tell(Core::StringView text, bool failed) {
 // a script runs these, and gets the exit code and, on a stderr it handed over, why.
 static int32 Registered(const Desktop::Options& options) {
 	Core::String error;
+#if defined(PLATFORM_WINDOWS)
 	Core::String appData = Platform::GetEnvironmentVariable("APPDATA");
 	Core::StringView classes = Core::StringView(Desktop::c_UserClasses);
 	const bool done = options.m_Registering
 		? Desktop::Register(Platform::ExecutablePath(), appData.View(), error) && Desktop::RegisterFileTypes(Platform::ExecutablePath(), classes, error)
 		: Desktop::Unregister(appData.View(), error) && Desktop::UnregisterFileTypes(classes, error);
 	Desktop::AssociationsChanged();
+#else
+	// The applications menu's entry, the icon and IED's file types, for this user (~/.local/share).
+	FS::Path data = Desktop::DataHome();
+	const bool done = options.m_Registering ? Desktop::RegisterDesktopEntry(Platform::ExecutablePath(), data, Desktop::ConfigHome(), error)
+		: Desktop::UnregisterDesktopEntry(data, Desktop::ConfigHome(), error);
+	if (done) Desktop::DesktopEntriesChanged(data);
+#endif
 	if (!done) Platform::WriteError((Core::String("ied-desktop: ") + error.View() + "\n").View());
 	return done ? 0 : 1;
 }

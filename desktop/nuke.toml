@@ -2,17 +2,22 @@
 # ships), the user's ied-server started when none runs. The WebView2 SDK is the pinned `webview2` download of
 # tools/setup/deps.toml; its static loader is linked in, and the icon, version and manifest are resources of the exe,
 # so the exe is all that ships.
+#
+# On Linux (desktop/linux, docs/27 "Linux") the windows are GTK 3 with WebKitGTK, loaded when the app starts
+# (linux/Shell.c): nothing extra to link, and the icon goes beside the program for the window and the menu's entry.
 [project]
 name = "ied-desktop"
 kind = "executable"
 subsystem = "windows"
-description = "IED's desktop app: the web client in a native WebView2 window, starting the user's ied-server when needed"
+description = "IED's desktop app: the web client in a native window (WebView2, WebKitGTK on Linux), starting the user's ied-server when needed"
 depends = ["launcher"]
 sources = ["."]
 includes = ["../vendor/webview2/build/native/include"]
+working-dir = ".."
+
+[project.system.windows]
 links = ["user32", "gdi32", "ole32", "dwmapi", "advapi32", "shell32", "version", "${workspace.dir}/vendor/webview2/build/native/x64/WebView2LoaderStatic.lib"]
 compiler-args = ["-l", "${int}/ied.res"]
-working-dir = ".."
 
 [[project.steps]]
 name = "resources"
@@ -21,3 +26,12 @@ description = "Compile the icon, version and manifest (resources/ied.rc) into ie
 run = ["${toolchain.dir}/toolchain/bin/llvm-rc.exe", "-fo", "${int}/ied.res", "resources/ied.rc"]
 inputs = ["resources/ied.rc", "resources/ied.ico", "resources/ied-desktop.manifest"]
 outputs = ["${int}/ied.res"]
+systems = ["windows"]
+
+[[project.copy]]
+from = "resources/ied.png"
+systems = ["linux"]
+
+[[project.copy]]
+from = "resources/ied.svg"
+systems = ["linux"]

@@ -1,10 +1,14 @@
 include "Relaunch.ch"
+#if defined(PLATFORM_WINDOWS)
 include "Native.ch"
+#endif
 
 namespace Desktop
 {
+#if defined(PLATFORM_WINDOWS)
 	const uint32 c_Synchronize = 0x00100000;   // SYNCHRONIZE
 	const uint32 c_WaitTimeout = 0x102;        // WAIT_TIMEOUT
+#endif
 	const int64 c_DockIdMaxBytes = 120;
 
 	Core::String RelaunchJson(int64 pid, const Core::Array<RelaunchWindow>& windows) {
@@ -102,6 +106,21 @@ namespace Desktop
 		return read.Ok() && read.root.Member("result").Member(name).AsBool();
 	}
 
+#if defined(PLATFORM_LINUX)
+	// The process is gone once /proc has no folder of its id.
+	bool AwaitExit(int64 pid, int32 ms) {
+		Core::StringBuilder folder;
+		folder.Append("/proc/");
+		folder.AppendInt(pid);
+		Core::String path = folder.ToString();
+		const int64 deadline = clock_now_ns() + (int64)ms * 1000000;
+		while (FS::IsDirectory(path.CStr())) {
+			if (clock_now_ns() > deadline) return false;
+			Threading::Thread::Sleep(50000000);
+		}
+		return true;
+	}
+#else
 	bool AwaitExit(int64 pid, int32 ms) {
 		void* process = OpenProcess(c_Synchronize, 0, (uint32)pid);
 		if (process == null) return true;
@@ -109,4 +128,5 @@ namespace Desktop
 		CloseHandle(process);
 		return waited != c_WaitTimeout;
 	}
+#endif
 }

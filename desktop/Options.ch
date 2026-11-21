@@ -30,7 +30,8 @@ namespace Desktop
 	// What the control pipe's `open` is asked for the path the options name.
 	Launch::OpenRequest OpenRequestOf(const Options& options);
 	const char* Usage();
-	// Where the app keeps its window placement and WebView2 profile.
+	// Where the app keeps its window placement and web profile: <LOCALAPPDATA>\IED\desktop, on Linux
+	// $XDG_STATE_HOME/ied/desktop (~/.local/state/ied/desktop).
 	FS::Path DataFolder(const Options& options);
 	// The app's log: %LOCALAPPDATA%\IED\logs\desktop.log beside the server's, or desktop.log in --data's folder.
 	FS::Path LogFilePath(const Options& options);

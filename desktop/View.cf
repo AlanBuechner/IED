@@ -1,3 +1,5 @@
+// Windows: Win32 and WebView2. The Linux app is desktop/linux (docs/27 "Linux").
+#if defined(PLATFORM_WINDOWS)
 // The WebView2 side of a window (docs/27 "The page and its keys"): its controller and settings, where navigations
 // go, the page's messages, permissions, and recovering from a crashed renderer.
 
@@ -241,3 +243,4 @@ namespace Desktop
 		return c_Ok;
 	}
 }
+#endif
