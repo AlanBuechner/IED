@@ -47,6 +47,7 @@ namespace Serialization
 
 	// The next whole value of `json` read into `value`, `doc` holding it while it arrives (clear it after a Value): Value,
 	// NeedMore, or the event that stands where a value would. A value that does not fit T ends the stream with an Error.
+	[reflects("T")]
 	template<T> JsonEvent ReadStreamed(JsonStream& json, DomDoc& doc, T& value) {
 		DomNode node;
 		JsonEvent event = json.ReadValue(doc, node);

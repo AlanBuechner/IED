@@ -178,7 +178,16 @@ namespace Scripting
 				if (key == "sources") { for (const auto& v : values) project.sources.push_back(Path(v)); return ""; }
 				if (key == "includes") { for (const auto& v : values) project.includes.push_back(Path(v)); return ""; }
 				if (key == "depends") { project.depends = values; return ""; }
-				return "'" + key + "' is not a key of a project (name, sources, includes, depends, [project.defines])";
+				if (key == "reflect") return StoreReflect(project, values, isArray);
+				return "'" + key + "' is not a key of a project (name, sources, includes, depends, reflect, [project.defines])";
+			}
+
+			// Whether the project's declarations are in reflection's scope (D-89), as [reflect(...)] says it of one.
+			static std::string StoreReflect(Project& project, const std::vector<std::string>& values, bool isArray)
+			{
+				if (isArray || (values[0] != "on" && values[0] != "off")) return "reflect is \"on\" or \"off\"";
+				project.reflect = values[0] == "on";
+				return "";
 			}
 
 			fs::path Path(const std::string& written) const

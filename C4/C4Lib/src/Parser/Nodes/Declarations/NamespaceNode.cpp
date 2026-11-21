@@ -51,11 +51,37 @@ namespace Scripting
 		}
 	}
 
+	bool NamespaceNode::ParseAnnotations(ParserState& state, Core::Vector<Ref<AnnotationNode>>& annotations)
+	{
+		Lexer& lexer = state.GetLexer();
+		ErrorTracker& errorTracker = state.GetErrorTracker();
+		if (lexer.PeekCompound().GetType() != TokenType::OpenBracket) return true;
+		errorTracker.SuppressErrors();
+		const TokenType after = AnnotationNode::PeekPastAnnotations(state);
+		errorTracker.DiscardSuppressedErrors();
+		if (after != TokenType::Namespace || lexer.PeekCompound().GetType() != TokenType::OpenBracket) return false;
+		while (lexer.PeekCompound().GetType() == TokenType::OpenBracket)
+		{
+			auto annotation = CreateRef<AnnotationNode>();
+			annotation->ParseBody(state);
+			if (annotation->GetBracketGroups().Empty()) break;
+			for (const auto& group : annotation->GetBracketGroups())
+				for (const auto& item : group.annotations)
+					if (item && item->GetName() != "reflect")
+						errorTracker.AddError(item->startLocation, Core::StringFormat::Format("[{0}] cannot go on a namespace: only "
+							"[reflect(...)] does, since reflection registers no namespace (docs/language/12 section 1)", item->GetName()), ErrorSeverity::Error);
+			annotations.Push(annotation);
+		}
+		return lexer.PeekCompound().GetType() == TokenType::Namespace;
+	}
+
 	Ref<NamespaceNode> NamespaceNode::TryParse(ParserState& state)
 	{
 		Lexer& lexer = state.GetLexer();
 		ErrorTracker& errorTracker = state.GetErrorTracker();
 
+		Core::Vector<Ref<AnnotationNode>> annotations;
+		if (!ParseAnnotations(state, annotations)) return nullptr;
 		Token token = lexer.PeekCompound();
 		if (token.GetType() != TokenType::Namespace)
 			return nullptr;
@@ -64,6 +90,7 @@ namespace Scripting
 
 		auto node = CreateRef<NamespaceNode>();
 		node->m_IsRoot = false;
+		node->m_Annotations = std::move(annotations);
 
 		Token nameToken = lexer.PeekCompound();
 		bool nameWasMissing = false;

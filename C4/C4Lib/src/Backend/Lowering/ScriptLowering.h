@@ -24,5 +24,8 @@ namespace Scripting
 		bool IsHostStorage(const SymbolInfo& variable) const;
 		/// The host's reflection registered `type`: the script's image leaves it out.
 		bool HostRegisters(const ObjectType& type) const;
+		/// `type` is declared in the host's files and is no template instance (a script makes its own instances): the
+		/// host's, registered by the host or, out of its reflection scope (D-89), by no one - never by a script.
+		bool HostDeclares(const ObjectType& type) const;
 	};
 } // namespace Scripting

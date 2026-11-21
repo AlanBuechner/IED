@@ -14,6 +14,8 @@ namespace Testing
 		TEST_FUNC(Compiler.Projects)
 		void ReadsADescription();
 		TEST_FUNC(Compiler.Projects)
+		void AProjectCanLeaveReflection();
+		TEST_FUNC(Compiler.Projects)
 		void AnErrorNamesItsLine();
 		TEST_FUNC(Compiler.Projects)
 		void NamesAndDependenciesAreChecked();

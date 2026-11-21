@@ -1,5 +1,6 @@
 """The build description C4.exe reads with --projects (C4/docs/language/15-projects.md): the root program and
-every C4 module it depends on, each with its sources, include folders, defines and dependencies. A module's sources and
+every C4 module it depends on, each with its sources, include folders, defines and dependencies, and `reflect = "off"`
+for one whose declarations stay out of runtime reflection (C4 D-89). A module's sources and
 include folders expand its ${variables}, as every manifest string does (${toolchain.dir}/C4Api: a toolchain's headers).
 A module's include folders also hold those of the native libraries it depends on (native.py), for its extern headers."""
 
@@ -16,6 +17,7 @@ class Module:
 	includes: tuple      # absolute folders
 	depends: tuple
 	defines: dict
+	reflect: bool = True # its declarations registered with runtime reflection
 
 
 def _unexpanded(project, text):
@@ -46,6 +48,7 @@ def module_for(workspace, project, configuration, expand=_unexpanded, test=False
 		includes=tuple(_absolute(project.dir, expand(project, i)) for i in project.includes) + tuple(native_includes(project)),
 		depends=depends,
 		defines=defines,
+		reflect=project.reflect != "off",
 	)
 
 
@@ -77,8 +80,10 @@ def render(root_name, modules):
 			f"sources = {_list(module.sources)}",
 			f"includes = {_list(module.includes)}",
 			f"depends = {_list(module.depends)}",
-			"[project.defines]",
 		]
+		if not module.reflect:
+			lines.append('reflect = "off"') # written only when off, so every other description reads as before
+		lines += ["[project.defines]"]
 		lines += [f"{name} = {_quote(value)}" for name, value in module.defines.items()]
 		lines.append("")
 	return "\n".join(lines)

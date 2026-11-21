@@ -25,6 +25,7 @@
 namespace Scripting
 {
 	struct AsmStatementNode;
+	struct NamespaceNode;
 	class DeclarationQueries;     // the pending declarations of a model being built (Model/Builder)
 	class TemplateDefinitionNode; // template parameter list (parser node)
 	class ObjectDefinitionNode;    // object template body
@@ -288,6 +289,14 @@ namespace Scripting
 		const Core::Vector<const UnionType*>& UnionTypes() const { return m_UnionTypes; }
 		/// The `asm` blocks written at file scope (docs/language/16 section 2), in the order the program declares them.
 		const Core::Vector<const AsmStatementNode*>& FileAssembly() const { return m_FileAssembly; }
+		/// The namespace blocks written with annotations (`[reflect("off")] namespace Detail { }`, D-89) and their units,
+		/// outer blocks before the ones they hold: reflection's scope finds the blocks around a declaration by its place.
+		struct AnnotatedNamespace
+		{
+			const NamespaceNode* node = nullptr;
+			uint32 unit = 0;
+		};
+		const Core::Vector<AnnotatedNamespace>& AnnotatedNamespaces() const { return m_AnnotatedNamespaces; }
 		/// A source file's name as diagnostics print it (relative to its folder or library root); empty for an
 		/// unknown id.
 		Core::String SourceName(uint32 unitId) const { auto it = m_SourceNames.find(unitId); return it != m_SourceNames.end() ? it->second : Core::String(); }
@@ -309,6 +318,12 @@ namespace Scripting
 		{
 			m_Projects = projects;
 			m_ProjectOfUnit = std::move(projectOfUnit);
+		}
+		/// The project a unit is a file of; null for the default library's and for a build without projects.
+		const Project* ProjectOfUnit(uint32 unit) const
+		{
+			const auto found = m_ProjectOfUnit.find(unit);
+			return m_Projects && found != m_ProjectOfUnit.end() ? &m_Projects->At(found->second) : nullptr;
 		}
 		/// Why `symbol`, written in a declaration of the unit being resolved, belongs to a project that unit's project
 		/// does not depend on; "" when it may name it (docs/language/15-projects.md, rule 4).
@@ -406,6 +421,7 @@ namespace Scripting
 		mutable Core::Vector<const EnumType*> m_EnumTypes; // mutable: a class template instance's nested enums join lazily
 		Core::Vector<const UnionType*> m_UnionTypes;
 		Core::Vector<const AsmStatementNode*> m_FileAssembly;
+		Core::Vector<AnnotatedNamespace> m_AnnotatedNamespaces;
 		std::unordered_map<uint32, Core::String> m_SourceNames;
 		CpuTarget m_Target;
 		uint32 m_PreludeUnit = 0;

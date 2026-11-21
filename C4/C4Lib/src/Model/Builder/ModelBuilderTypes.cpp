@@ -40,6 +40,7 @@ namespace Scripting
 	{
 		const Core::String& name = ns.Name();
 		if (name.empty() || ns.IsRoot()) return; // the implicit file root has no name
+		if (!ns.GetAnnotations().Empty()) ctx.model->m_AnnotatedNamespaces.Push({ &ns, ctx.unitId }); // reflection's scope (D-89)
 
 		Scope* parent = ctx.scope;
 		Scope* target = nullptr;

@@ -1,0 +1,9 @@
+// D-89: a namespace block takes only [reflect(...)]: reflection registers no namespace, so any other annotation there
+// would be lost.
+[Component]
+namespace Parts
+{
+	int32 Count() { return 1; }
+}
+
+int32 main() { return Parts::Count() - 1; }

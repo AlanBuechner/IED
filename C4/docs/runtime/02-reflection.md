@@ -2,7 +2,9 @@
 
 C4 has built-in runtime reflection: types, global variables and functions are entities in a registry
 that a program can query by name or index at run time. Reflection is on for every build - there is no
-opt-in flag - and is the base for serialization, tooling, scripting bridges and hot reload.
+opt-in flag - and is the base for serialization, tooling, scripting bridges and hot reload. A program can take
+parts of itself out of it (a namespace of internals, a project that is never reflected) with `[reflect("off")]` or
+a project's `reflect = "off"` (section 1.1, D-89); what nothing opts out stays as it is.
 
 Sources:
 - Compiler emission: `C4Lib/src/Backend/Reflection/RegistrationEmitter.cpp` (what is registered) and
@@ -44,6 +46,65 @@ writes (`__c4_delete` for a type that needs one, BUG-238) are not the program's 
 
 Every registration carries a **source tag** (`-reflect-tag <tag>` on the C4.exe command line; empty
 for the main executable). The tag is the unit of hot reload.
+
+### 1.1 The reflection scope (D-89)
+
+Everything above is registered unless a setting takes it out. A setting is the compiler annotation `[reflect("off")]`
+or `[reflect("on")]` ([annotations 2](../language/12-annotations.md#2-annotations-the-compiler-acts-on)) or a project's
+`reflect = "off"` ([projects](../language/15-projects.md#151-what-a-project-is)), and the nearest one decides:
+
+1. the declaration's own `[reflect]` (a type, an enum, a union, a function or method, a global or static member);
+2. for a member (a method, a static member, a nested type), its type's;
+3. for a template instance, its template's (the annotation is on the template's declaration);
+4. the namespace blocks around the declaration, from the innermost out (`[reflect("off")] namespace Detail { ... }`: what
+   that block declares, not another block of the same namespace);
+5. the project of the file that declares it; the default library's files are in.
+
+```c4
+[reflect("off")]
+namespace Render::Detail
+{
+	struct Batch { ... }                    // not registered
+	[reflect("on")] struct Stats { ... }    // registered: its own setting is the nearest
+}
+```
+
+An entity out of scope is not in the image (no row, no name lookup finds it), has no invoke thunk and no construct,
+destroy or copy thunk (so their code is not part of the program for reflection's sake), and a global gets storage only
+when code names it or it may hold a managed pointer (a script host gives every global storage: its scripts may name
+any). A type's method rows leave out its out-of-scope methods. What the
+runtime needs besides reflection does not change: the census records of the types `new` makes, the collector's roots, the
+vtables and RTTI. A field or parameter whose type is out of scope still names that type, which then resolves to no
+handle (as a primitive's does).
+
+**What reflection needs is checked.** A function template that reads a type argument through reflection says so with
+`[reflects("T")]` (Bedrock's serializers do: `Serialization::ToJson<T>`, `FromJson<T>`, `ToYaml<T>`, `FromYaml<T>`,
+`ReadStreamed<T>`); an instance of it the program uses whose `T` is out of scope, or holds a field whose type is
+(through its fields, array elements and template arguments, as the serializer walks it), is a compile error at the
+type that is out: `error: 'Secret' is out of reflection's scope (its [reflect("off")] at main.cf (5:2)), but
+ToJson<Save> reads it through reflection (Save.secret): bring it back with [reflect("on")], or do not pass it there`. A
+member function template (`JsonFile::ReadNext<T>`) is not checked yet. A lookup by name at run time (`Reflection::FindType("Game::Secret")`) cannot be
+checked: it finds no entity, as for a name the program never had.
+
+**A script host.** The interface lists the types the host registers (section 1); a script registers its own types and
+instances and never a type its host declares, so a host type out of the host's scope is registered by no one. A host
+project's `reflect = "off"` is not in the interface: a script that makes an instance of such a project's template
+registers that instance (it is the script's), unless the template's own `[reflect("off")]` says otherwise.
+
+**What it saves.** The IED server (`-O3 -g --incremental --script-host`) with its own project opted out, as an example
+(it is not shipped that way: it reads its types at run time): the reflection image's object 15.9 MB to 12.0 MB (Bedrock's
+types and their template instances stay in), the program 24.6 MB to 21.8 MB, the link 0.58 s to 0.55 s.
+
+**Where it is decided** (`Backend/Reflection/ReflectionScope`): the type thunk plan and the invoke thunk plan (so the
+language server lowers what the build lowers), the image's description, the interface's list of registered types, and
+the globals codegen gives storage for reflection's sake. `[reflect]` with anything but `"on"` or `"off"`, `[reflects]`
+naming no type parameter, and any annotation but `[reflect]` on a namespace are errors.
+
+Tests: C4Testing `Semantic.ReflectionScope` (the settings, the namespace blocks, the thunks and the image, an
+out-of-scope global's storage across partitions, the `[reflects]` error, a wrong argument) and `Compiler.Projects`
+(the description's `reflect`); IsolatedTest `Reflection/ReflectionScope` (what a program finds at run time);
+NegativeTest `ReflectsOutOfScope`, `ReflectBadArgument`, `NamespaceTakesOnlyReflect`; Nuke's `test_manifest` and
+`test_c4` (the project key into the description).
 
 ---
 

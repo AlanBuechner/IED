@@ -151,6 +151,15 @@ class C4BuildTests(WorkspaceTest):
 		self.assertEqual(engine["defines"]["PROJECT_DIR"], '"' + self.path("Engine").replace("\\", "/") + '"', "each project's own folder")
 		self.assertEqual(engine["sources"], [self.path("Engine", "src").replace("\\", "/")])
 		self.assertEqual(engine["includes"], [self.path("Engine", "third").replace("\\", "/")])
+		self.assertNotIn("reflect", game, "a project in reflection's scope says nothing")
+
+	def test_a_project_out_of_reflections_scope_says_so_in_the_description(self):
+		self.files({"Engine/nuke.toml": "[project]\nkind = \"module\"\nreflect = \"off\"\n"})
+		code, out = self.nuke("build")
+		self.assertEqual(code, 0, out)
+		game, engine = tomllib.loads(read(self.int("Game", "projects.toml")))["project"]
+		self.assertEqual(engine["reflect"], "off")
+		self.assertNotIn("reflect", game)
 
 	def test_copies_and_ide_options(self):
 		self.nuke("build")

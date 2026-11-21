@@ -1,7 +1,9 @@
 #pragma once
 #include "Backend/HIR/TypeOperations.h"
 #include "Backend/Lowering/ScriptLowering.h"
+#include "Backend/Reflection/ReflectionScope.h"
 #include <deque>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -9,7 +11,7 @@ namespace Scripting
 {
 	class ProgramModel;
 
-	/// The object types reflection registers (docs/runtime/02 section 2), each with its flags (`reflect_TYPE_*`) and the
+	/// The object types reflection registers (docs/runtime/02 section 2; those in its scope, D-89), each with its flags (`reflect_TYPE_*`) and the
 	/// thunks that construct, destroy and copy one: planned for the types the model has made, in its order, as lowering
 	/// goes on making more.
 	class TypeThunkPlan
@@ -54,6 +56,7 @@ namespace Scripting
 		void Without(const ObjectType* type, TypeOperation op);
 
 		const ScriptLowering* m_Script = nullptr;
+		mutable std::optional<ReflectionScope> m_Scope; // made on the first question, from the model
 		std::unordered_map<const ObjectType*, Entry> m_Entries;
 		uint32 m_TypesPlanned = 0; // the model's object types looked at so far
 	};

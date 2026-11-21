@@ -12,11 +12,12 @@ namespace Scripting
 	std::vector<const FunctionRecord*> InvokeThunkPlan::NewTargets(const ProgramModel& model, const std::function<bool(const FunctionRecord&)>& defined)
 	{
 		const Core::Vector<std::unique_ptr<FunctionRecord>>& records = model.Symbols()->Records();
+		if (!m_Scope) m_Scope.emplace(model);
 		for (; m_RecordsScanned < records.Count(); ++m_RecordsScanned)
 		{
 			const FunctionRecord* record = records[m_RecordsScanned].get();
 			const bool hosts = m_Script && m_Script->HostHas(record->mangledName.c_str());
-			if (ReflectedFunction(*record) && Invokable(*record) && !hosts) m_Candidates.push_back(record);
+			if (ReflectedFunction(*record) && Invokable(*record) && !hosts && m_Scope->Has(*record)) m_Candidates.push_back(record);
 		}
 		std::vector<const FunctionRecord*> targets;
 		std::vector<const FunctionRecord*> waiting;

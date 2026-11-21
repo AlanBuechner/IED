@@ -6,6 +6,7 @@
 #include "Backend/CodeGen/UnwindInference.h"
 #include "Backend/CodeGen/VectorAlignment.h"
 #include "Backend/CodeGen/VtableEmitter.h"
+#include "Backend/Reflection/ReflectionScope.h"
 #include "Backend/HIR/GlobalInit.h"
 #include "Model/ProgramModel.h"
 #include "Parser/Nodes/Statements/AsmStatementNode.h"
@@ -45,7 +46,7 @@ namespace Scripting
 		if (!EmitEntry(model, settings, error)) return false;
 		Timed("emit", step);
 		if (!m_Startup.EmitStarts(program.units, model, error)) return false;
-		MaterializeGlobals(model);
+		MaterializeGlobals(model, settings.everyGlobal);
 		Timed("starts", step);
 		m_Reflection.FinishThunks(program, pool);
 		if (!m_Reflection.Emit(model, program, settings.reflectionTag, m_Errors, pool)) return false;
@@ -54,6 +55,7 @@ namespace Scripting
 		if (!EverythingNamedLowered(program, error)) return false;
 		if (m_Partitions.Split() && settings.copies != PartitionCopies::None)
 			EmitImports(m_Partitions, model, program, settings.copies == PartitionCopies::Inline, pool);
+		MaterializeNamedGlobals();
 		Timed("imports", step);
 		InferNoUnwind(m_Partitions.Modules(), pool);
 		Timed("nounwind", step);
@@ -110,15 +112,38 @@ namespace Scripting
 	}
 
 	// Each in the partition that defines it, described there. A constant with no symbol (an unscoped enum's member)
-	// has none: code uses its value, and reflection lists no nameless variable.
-	void ProgramEmitter::MaterializeGlobals(const ProgramModel& model)
+	// has none: code uses its value, and reflection lists no nameless variable. One out of reflection's scope (D-89) waits
+	// for MaterializeNamedGlobals: it has storage only where code names it (or the collector's roots need it), unless
+	// `every` (a script host, whose table lists every global for its scripts).
+	void ProgramEmitter::MaterializeGlobals(const ProgramModel& model, bool every)
 	{
+		const ReflectionScope scope(model);
 		model.Symbols()->ForEachGlobalVariable([&](const SymbolInfo& info, const Scope& declaredIn) {
 			if (info.kind != SymbolKind::Variable || !info.type || info.mangledName.empty()) return;
-			ModuleContext& home = m_Partitions.Partition(m_Partitions.Of(info));
-			llvm::GlobalVariable* storage = home.GlobalAddress(info);
-			if (DebugInfo* debug = home.Debug()) debug->DescribeGlobal(*storage, info, declaredIn);
+			if (every || scope.Has(info)) Materialize(info, declaredIn);
+			else m_OutOfScope.push_back({ &info, &declaredIn });
 		});
+	}
+
+	// A global out of reflection's scope that a partition's code (or a copy) names: its home partition defines it, though
+	// only another partition may have named it.
+	void ProgramEmitter::MaterializeNamedGlobals()
+	{
+		for (const auto& [info, declaredIn] : m_OutOfScope)
+			for (unsigned i = 0; i < m_Partitions.Count(); ++i)
+				if (m_Partitions.Partition(i).module().getNamedGlobal(info->mangledName.c_str()))
+				{
+					Materialize(*info, *declaredIn);
+					break;
+				}
+		m_OutOfScope.clear();
+	}
+
+	void ProgramEmitter::Materialize(const SymbolInfo& info, const Scope& declaredIn)
+	{
+		ModuleContext& home = m_Partitions.Partition(m_Partitions.Of(info));
+		llvm::GlobalVariable* storage = home.GlobalAddress(info);
+		if (DebugInfo* debug = home.Debug()) debug->DescribeGlobal(*storage, info, declaredIn);
 	}
 
 	bool ProgramEmitter::EverythingNamedLowered(const LoweredProgram& program, std::string* error)

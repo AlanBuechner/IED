@@ -1,0 +1,83 @@
+// D-89: [reflect("off")] takes a declaration, a type with its members or a namespace block out of reflection's scope;
+// [reflect("on")] brings one back; the nearest setting decides. What is out is not registered, and still works as code.
+include "bedrock.ch"
+
+[reflect("off")]
+struct Hidden
+{
+	public int32 value;
+	public int32 Twice() const { return value * 2; }
+	public static int32 s_count;
+}
+
+struct Shown
+{
+	public int32 value;
+	[reflect("off")] public int32 Secret() const { return value; }
+	public int32 Open() const { return value + 1; }
+}
+
+[reflect("off")]
+namespace Internals
+{
+	struct Detail { public int32 x; }
+	int32 Helper(int32 v) { return v + 1; }
+	int32 g_internal = 5;
+	[reflect("on")] struct Exposed { public int32 y; }
+	[reflect("on")] int32 Visible(int32 v) { return v * 3; }
+}
+
+namespace Internals
+{
+	struct Elsewhere { public int32 z; } // another block of the namespace: in scope
+}
+
+[reflect("off")] int32 g_hidden = 7;
+int32 g_shown = 8;
+
+[reflect("off")]
+template<T> struct Box { public T item; }
+
+int32 Check(bool ok, const char* what)
+{
+	if (ok) return 0;
+	printf("FAIL %s\n", what);
+	return 1;
+}
+
+int32 main()
+{
+	int32 failures = 0;
+	failures += Check(!Reflection::FindType("Hidden").IsValid(), "a type off is not registered");
+	failures += Check(Reflection::FindType("Shown").IsValid(), "a type nothing opts out is registered");
+	failures += Check(!Reflection::FindType("Internals::Detail").IsValid(), "a type in an off namespace block is not registered");
+	failures += Check(Reflection::FindType("Internals::Exposed").IsValid(), "[reflect(\"on\")] brings a type back");
+	failures += Check(Reflection::FindType("Internals::Elsewhere").IsValid(), "another block of the namespace is in");
+	failures += Check(!Reflection::FindFunction("Internals::Helper").IsValid(), "a function in an off block is not registered");
+	failures += Check(Reflection::FindFunction("Internals::Visible").IsValid(), "[reflect(\"on\")] brings a function back");
+	failures += Check(!Reflection::FindVariable("Internals::g_internal").IsValid(), "a global in an off block is not registered");
+	failures += Check(!Reflection::FindVariable("g_hidden").IsValid(), "a global off is not registered");
+	failures += Check(Reflection::FindVariable("g_shown").IsValid(), "a global nothing opts out is registered");
+	failures += Check(!Reflection::FindVariable("Hidden::s_count").IsValid(), "an off type's static member is not registered");
+	Box<int32> box;
+	box.item = 2;
+	failures += Check(!Reflection::FindType("Box<int32>").IsValid(), "an off template's instance is not registered");
+
+	Reflection::Type shown = Reflection::FindType("Shown");
+	bool secretListed = false, openListed = false;
+	for (int64 i = 0; shown.IsValid() && i < shown.MethodCount(); i++)
+	{
+		const char* name = shown.MethodAt(i).Name();
+		if (strcmp((void*)name, (void*)"Secret") == 0) secretListed = true;
+		if (strcmp((void*)name, (void*)"Open") == 0) openListed = true;
+	}
+	failures += Check(!secretListed && openListed, "an off method leaves its type's rows");
+
+	// Out of scope is out of reflection only: the code is the program's.
+	Hidden hidden;
+	hidden.value = 4;
+	Internals::Detail detail;
+	detail.x = Internals::Helper(1);
+	failures += Check(hidden.Twice() + detail.x + box.item + g_hidden + Internals::g_internal == 8 + 2 + 2 + 7 + 5, "out-of-scope code runs");
+	return failures;
+}

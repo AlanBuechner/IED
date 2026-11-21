@@ -57,7 +57,8 @@ qualified_name: identifier ('::' identifier)*
   below are unqualified.
 - Placement: before objects (`class`/`struct`/`interface`), functions and methods (including
   extension methods and out-of-line definitions), variables and fields, parameters, enums, unions
-  and aliases. For templates the annotations go before `template<...>`.
+  and aliases. For templates the annotations go before `template<...>`. A namespace block takes only `[reflect]`
+  (reflection registers no namespace): `[reflect("off")] namespace Detail { ... }`.
 - **On an access label** (`public:`, `private:`, `protected:`, [05 section 5.7](05-objects.md#57-visibility)): every
   field and method under the label, up to the next one, takes its annotations - after its own, and only where each goes
   (a field-only annotation skips the methods). A member's own annotation of the same name is the one it keeps. Nested
@@ -94,6 +95,8 @@ qualified_name: identifier ('::' identifier)*
 | `[group("name")]` | types, functions, variables | adds the entity to a named reflection group. See [runtime/02-reflection.md](../runtime/02-reflection.md) | **Implemented** |
 | `[link("symbol")]` | function and variable declarations (a variable without an initializer), function definitions | a declaration binds to the foreign symbol of that name; a function definition is emitted under it. See [13](13-interop.md) | **Implemented** |
 | `[target("avx2", ...)]` | functions and methods | builds the function for the program's processor with these features on as well (names a `-m` flag takes, [11 section 8](11-vectors-and-swizzling.md#8-the-simd-target)): its body uses them, and no caller built without them inlines it. Call it only where `Platform::HasProcessorFeature` says the processor has them | **Implemented** |
+| `[reflect("off")]`, `[reflect("on")]` | namespace blocks, types, enums, unions, functions and methods, global variables and static members | takes the declaration, and what it holds, out of runtime reflection's scope (`"off"`), or brings one back into it (`"on"`); the nearest setting decides, a project's `reflect = "off"` the farthest (D-89, [runtime/02-reflection.md](../runtime/02-reflection.md#11-the-reflection-scope-d-89)) | **Implemented** |
+| `[reflects("T")]` | function templates (a member function template's is not checked yet) | the function reads its template parameter `T` through reflection (a serializer): an instance whose `T` is out of reflection's scope, or holds a field whose type is, is a compile error (D-89) | **Implemented** |
 | `[uuid("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")]` | types | attaches a COM GUID, read by `__uuidof(T)`; CBind emits it from `__declspec(uuid(...))`. A type without one gets a calculated one (the name-based UUID of its qualified name, [14](14-builtins.md)), so `__uuidof` works for every type | **Implemented** |
 
 Details worth knowing:

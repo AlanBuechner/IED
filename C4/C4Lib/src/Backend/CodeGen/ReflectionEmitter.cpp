@@ -1,5 +1,7 @@
 #include "Backend/CodeGen/ReflectionEmitter.h"
+#include "Backend/Reflection/ReflectionScope.h"
 #include "Backend/Reflection/ReflectionTables.h"
+#include "Backend/Reflection/ReflectsCheck.h"
 #include "Model/ProgramModel.h"
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/Transforms/Utils/ModuleUtils.h>
@@ -48,6 +50,7 @@ namespace Scripting
 		const InvokeThunks invokes = InvokeEntries(program, pool);
 		const TypeThunks types = TypeEntries(model, program);
 		ImageDescription description = DescribeReflectionImage(m_Partitions.Partition(0), model, invokes, types, host, errors);
+		CheckReflectedArguments(model, program, ReflectionScope(model), errors);
 		if (errors.HasErrors()) return false;
 		if (description.Empty()) return true;
 		llvm::GlobalVariable* image = m_Partitions.Split() ? KeepImageApart(std::move(description)) : BuildImageHere(description);

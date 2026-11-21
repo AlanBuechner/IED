@@ -1,4 +1,5 @@
 #include "Backend/Reflection/RegistrationEmitter.h"
+#include "Backend/Reflection/ReflectionScope.h"
 #include "Backend/CodeGen/ModuleContext.h"
 #include "Backend/HIR/InvokeThunk.h"
 #include "Backend/HIR/TypeOperations.h"
@@ -62,8 +63,9 @@ namespace Scripting
 		class ImageWriter
 		{
 		public:
-			ImageWriter(ModuleContext& module, const ProgramModel& model, const InvokeThunks& thunks, const TypeThunks& types, ErrorTracker& errors)
-				: m_Module(module), m_Model(model), m_Thunks(thunks), m_TypeThunks(types), m_Errors(errors) {}
+			ImageWriter(ModuleContext& module, const ProgramModel& model, const InvokeThunks& thunks, const TypeThunks& types,
+				const ReflectionScope& scope, ErrorTracker& errors)
+				: m_Module(module), m_Model(model), m_Thunks(thunks), m_TypeThunks(types), m_Scope(scope), m_Errors(errors) {}
 
 			void AddType(const ObjectType& object)
 			{
@@ -358,6 +360,7 @@ namespace Scripting
 				for (const auto& method : object.GetMethods())
 				{
 					const FunctionRecord* record = m_Model.RecordForMethod(&object, &method);
+					if (record && !m_Scope.Has(*record)) continue; // [reflect("off")] on the method (D-89)
 					const Table params = Params(record, method.m_ParameterTypes);
 					const Table annotations = RecordAnnotations(record);
 					const InvokeEntry* entry = ThunkEntry(record);
@@ -373,6 +376,7 @@ namespace Scripting
 			const ProgramModel& m_Model;
 			const InvokeThunks& m_Thunks;
 			const TypeThunks& m_TypeThunks;
+			const ReflectionScope& m_Scope;
 			ErrorTracker& m_Errors;
 			std::set<std::tuple<uint32, uint32, uint32>> m_Reported; // annotation failures already reported, by location
 			std::unordered_map<const FunctionRecord*, Table> m_RecordAnnotations;
@@ -392,13 +396,14 @@ namespace Scripting
 
 	std::vector<std::string> ReflectedTypeNames(const ProgramModel& model)
 	{
+		const ReflectionScope scope(model);
 		std::vector<std::string> names;
 		for (const ObjectType* object : model.ObjectTypes())
-			if (ReflectedType(model, object)) names.push_back(QualifiedName(object).c_str());
+			if (ReflectedType(model, object) && scope.Has(*object)) names.push_back(QualifiedName(object).c_str());
 		for (const EnumType* en : model.EnumTypes())
-			if (en && !en->GetName().empty()) names.push_back(QualifiedName(en).c_str());
+			if (en && !en->GetName().empty() && scope.Has(*en)) names.push_back(QualifiedName(en).c_str());
 		for (const UnionType* un : model.UnionTypes())
-			if (un && !un->GetName().empty()) names.push_back(QualifiedName(un).c_str());
+			if (un && !un->GetName().empty() && scope.Has(*un)) names.push_back(QualifiedName(un).c_str());
 		return names;
 	}
 
@@ -408,22 +413,27 @@ namespace Scripting
 		auto hostType = [&](const Type* type) { return host.types && host.types->Has(QualifiedName(type).c_str()); };
 		auto hostSymbol = [&](const Core::String& symbol) { return host.symbols && host.symbols->Has(symbol.c_str()); };
 		auto hostUnit = [&](uint32 unit) { return unit >= 1 && unit <= host.interfaceUnits; };
-		ImageWriter writer(module, model, thunks, types, errors);
+		// A script registers none of the types its host declares, but the instances it makes itself (D-89).
+		auto hostDeclares = [&](const ObjectType* type) {
+			return type->GetTemplateArguments().Empty() && type->GetDeclNode() && hostUnit(type->GetDeclNode()->startLocation.sourceId);
+		};
+		const ReflectionScope scope(model);
+		ImageWriter writer(module, model, thunks, types, scope, errors);
 		// By index: an annotation naming a template instance nothing made before (the model checks them all, D-42) makes it here.
 		const Core::Vector<const ObjectType*>& objects = model.ObjectTypes();
 		for (uint32 i = 0; i < objects.Count(); ++i)
-			if (ReflectedType(model, objects[i]) && !hostType(objects[i])) writer.AddType(*objects[i]);
+			if (ReflectedType(model, objects[i]) && !hostType(objects[i]) && !hostDeclares(objects[i]) && scope.Has(*objects[i])) writer.AddType(*objects[i]);
 		for (const EnumType* en : model.EnumTypes())
-			if (en && !en->GetName().empty() && !hostType(en)) writer.AddEnum(*en);
+			if (en && !en->GetName().empty() && !hostType(en) && scope.Has(*en)) writer.AddEnum(*en);
 		for (const UnionType* un : model.UnionTypes())
-			if (un && !un->GetName().empty() && !hostType(un)) writer.AddUnion(*un);
+			if (un && !un->GetName().empty() && !hostType(un) && scope.Has(*un)) writer.AddUnion(*un);
 
 		// A thread_local has no one address, so it is not registered. A name can register twice (a declaration
 		// and its definition): the symbol is the identity.
 		Names variables; // the symbols' own names, which the model keeps
 		model.Symbols()->CollectGlobalVariables([&](const SymbolInfo& variable) {
 			if (variable.kind != SymbolKind::Variable || !variable.type || variable.isThreadLocal || variable.mangledName.empty()) return;
-			if (hostSymbol(variable.mangledName) || hostUnit(variable.definingUnit)) return;
+			if (hostSymbol(variable.mangledName) || hostUnit(variable.definingUnit) || !scope.Has(variable)) return;
 			if (variables.insert(variable.mangledName.c_str()).second) writer.AddVariable(variable);
 		});
 
@@ -432,9 +442,10 @@ namespace Scripting
 		Names functions;
 		functions.reserve(records.Count());
 		for (const FunctionRecord* function : records)
-			if (ReflectedFunction(*function) && !hostSymbol(function->mangledName) && !hostUnit(function->declUnit) &&
+			if (ReflectedFunction(*function) && !hostSymbol(function->mangledName) && !hostUnit(function->declUnit) && scope.Has(*function) &&
 				functions.insert(function->mangledName.c_str()).second)
 				writer.AddFunction(*function);
+		errors.Append(scope.Errors());
 		return writer.Finish();
 	}
 } // namespace Scripting

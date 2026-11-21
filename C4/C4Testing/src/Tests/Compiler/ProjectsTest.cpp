@@ -79,13 +79,27 @@ namespace Testing
 		TEST_ASSERT_EQ((int)engine.sources.size(), 2);
 		TEST_ASSERT_EQ(engine.includes[0].generic_string(), Here("C:/Work/Engine/third_party"));
 		TEST_ASSERT(engine.depends.empty() && engine.defines.empty());
+		TEST_ASSERT(game.reflect && engine.reflect); // in reflection's scope unless the description says otherwise (D-89)
+		TEST_PASSED();
+	}
+
+	// D-89: `reflect = "off"` takes a project's declarations out of reflection's scope; "on" is the default.
+	void ProjectsTest::AProjectCanLeaveReflection()
+	{
+		const ProjectList list = Parsed("root = \"Game\"\n[[project]]\nname = \"Game\"\nsources = [\"C:/Work/Game/src\"]\nreflect = \"on\"\n"
+			"[[project]]\nname = \"Engine\"\nsources = [\"C:/Work/Engine/src\"]\nreflect = \"off\"\n");
+		TEST_ASSERT_EQ((int)list.projects.size(), 2);
+		TEST_ASSERT(list.projects[0].reflect);
+		TEST_ASSERT(!list.projects[1].reflect);
 		TEST_PASSED();
 	}
 
 	void ProjectsTest::AnErrorNamesItsLine()
 	{
 		TEST_ASSERT_EQ(ParseError("root = \"A\"\n[[project]]\nname = \"A\"\nsoruces = [\"x\"]\n"),
-			std::string("line 4: 'soruces' is not a key of a project (name, sources, includes, depends, [project.defines])"));
+			std::string("line 4: 'soruces' is not a key of a project (name, sources, includes, depends, reflect, [project.defines])"));
+		TEST_ASSERT_EQ(ParseError("[[project]]\nreflect = \"no\"\n"), std::string("line 2: reflect is \"on\" or \"off\""));
+		TEST_ASSERT_EQ(ParseError("[[project]]\nreflect = [\"off\"]\n"), std::string("line 2: reflect is \"on\" or \"off\""));
 		TEST_ASSERT_EQ(ParseError("root = \"A\nname = \"B\"\n"), std::string("line 1: a string ends at the end of its line"));
 		TEST_ASSERT_EQ(ParseError("[tools]\n"), std::string("line 1: '[tools]' is not a table of a build description"));
 		TEST_ASSERT_EQ(ParseError("[project.defines]\n"), std::string("line 1: [project.defines] comes after the [[project]] it belongs to"));

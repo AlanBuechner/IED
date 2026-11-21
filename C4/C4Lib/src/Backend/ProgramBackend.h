@@ -27,8 +27,13 @@ namespace Scripting
 		/// `-reflect-tag`: the program's reflection registers under `tag` (a hot-reload source) instead of "".
 		void SetReflectionTag(const Core::String& tag) { m_Emit.reflectionTag = tag; }
 		/// `--script-host` (docs/runtime/04 section 3.1): every class with virtual methods gets its vtables whether or not
-		/// the program makes one, so a script's objects of the program's classes use the program's, which outlive it.
-		void ShareVtables() { m_Lowering.everyVtable = true; }
+		/// the program makes one, so a script's objects of the program's classes use the program's, which outlive it; and
+		/// every global has storage, out of reflection's scope too (D-89), since a script may name it.
+		void ShareVtables()
+		{
+			m_Lowering.everyVtable = true;
+			m_Emit.everyGlobal = true;
+		}
 		/// The modules are left unverified: the build verifies each partition as it assembles it, on its threads.
 		void VerifyLater() { m_Emit.verifyLater = true; }
 		/// The program is emitted into `count` partitions (D-81), each with `copies` of the functions it calls from the

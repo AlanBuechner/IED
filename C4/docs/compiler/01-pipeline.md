@@ -239,8 +239,10 @@ Emission, in order (details in [04-codegen-and-abi.md](04-codegen-and-abi.md)):
    not fold to a constant starts there, in declaration order, and each that needs destruction is registered for
    exit. A start that only stores constants (a table) becomes the global's initial data instead (`ConstantImage`),
    so a program whose globals are all such starts has no rounds.
-7. Materialize every global (reflection registers each, whether or not code names it), then describe the
-   reflection image from the model (`Backend/Reflection/RegistrationEmitter`) and emit `__c4_reflect_init`, a
+7. Materialize every global in reflection's scope (reflection registers each, whether or not code names it; D-89,
+   `Backend/Reflection/ReflectionScope`), then describe the reflection image from the model
+   (`Backend/Reflection/RegistrationEmitter`, the entities in scope) and check every `[reflects("T")]` instance
+   lowering made (`ReflectsCheck`) and emit `__c4_reflect_init`, a
    static constructor that registers it under the `-reflect-tag` tag before every other one. The image's constants
    (`Backend/Reflection/ReflectionTables`) go into the module; a split program's go into a module of their own,
    built only when the object cache keeps no object of the image's key (D-82,

@@ -145,7 +145,9 @@ defines = { GAME_EDITOR = "1" }    # this project's own macros (modules keep the
 links = ["user32", "winmm.lib"]    # system libraries; a module's links reach every program it is compiled into
 compiler-args = ["-march=x86-64-v3"]
 subsystem = "console"              # a C4 executable: "console", or "windows" for a windowed program (no console window;
-                                   # C4.exe --subsystem; test harnesses stay console)
+# C4.exe --subsystem; test harnesses stay console)
+reflect = "on"                     # a C4 project: "off" keeps its declarations out of runtime reflection (C4 D-89; the build
+# description says reflect = "off"); a [reflect("on")] brings one back
 tests = "auto"                     # "auto": a tests/ folder with .cf/.ch under a source folder; or true/false
 test-filter = "anime.*"            # the cases `nuke test` runs without a --filter (a harness runs only its own project's tests
                                    # already: those of what it depends on run in their own harnesses)

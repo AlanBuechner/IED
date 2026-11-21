@@ -1,5 +1,6 @@
 #pragma once
 #include "Parser/AstNode.h"
+#include "Parser/Nodes/Declarations/AnnotationNode.h"
 #include "Parser/ParserState.h"
 #include "Lexer/Token.h"
 #include "Core/Core.h"
@@ -23,6 +24,8 @@ namespace Scripting
 		const Token& GetNameToken() const { return m_NameToken; }
 		bool IsRoot() const { return m_IsRoot; }
 		void SetIsRoot(bool value) { m_IsRoot = value; }
+		/// What is written before `namespace`: only `[reflect(...)]` goes there (D-89); of `namespace A::B`, the outer node's.
+		const Core::Vector<Ref<AnnotationNode>>& GetAnnotations() const { return m_Annotations; }
 
 		static Ref<NamespaceNode> TryParse(ParserState& state);
 
@@ -43,9 +46,12 @@ namespace Scripting
 		static Core::Vector<Ref<NamespaceNode>> ParseNestedNames(ParserState& state);
 		// The declaration at the lexer's position; null when none starts there.
 		Ref<AstNode> ParseDeclaration(ParserState& state) const;
+		// The annotations before `namespace`, each but [reflect] an error; false when no `namespace` follows them.
+		static bool ParseAnnotations(ParserState& state, Core::Vector<Ref<AnnotationNode>>& annotations);
 
 		Token m_NameToken;                        // namespace identifier token (default-constructed for root)
 		bool m_IsRoot = false;                    // true for implicit file-level namespace
 		Core::Vector<Ref<AstNode>> m_ChildNodes;  // nested declarations
+		Core::Vector<Ref<AnnotationNode>> m_Annotations;
 	};
 }

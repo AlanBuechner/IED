@@ -1,0 +1,13 @@
+// D-89: [reflect] takes "on" or "off".
+[reflect("maybe")]
+struct Unsure
+{
+	public int32 value;
+}
+
+int32 main()
+{
+	Unsure unsure;
+	unsure.value = 0;
+	return unsure.value;
+}

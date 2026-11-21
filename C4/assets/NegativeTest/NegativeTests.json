@@ -1,4 +1,16 @@
 {
+    "ReflectsOutOfScope": {
+        "expect": ["'Secret' is out of reflection's scope (its [reflect(\"off\")] at main.cf (5:2))", "ToJson<Save> reads it through reflection (Save.secret)"],
+        "reason": "D-89: a serializer reads its T through reflection ([reflects(\"T\")]); a type out of reflection's scope that the value holds would be skipped at run time, so it is an error at that type."
+    },
+    "ReflectBadArgument": {
+        "expect": ["main.cf (2:2) error: [reflect] takes \"on\" or \"off\""],
+        "reason": "D-89: [reflect] takes one \"on\" or \"off\"; anything else would silently decide nothing."
+    },
+    "NamespaceTakesOnlyReflect": {
+        "expect": ["main.cf (3:2) error: [Component] cannot go on a namespace: only [reflect(...)] does"],
+        "reason": "D-89: a namespace block takes [reflect(...)]; reflection registers no namespace, so another annotation there would be lost."
+    },
     "MissingMainWithWarning": {
         "expect": ["main.cf (5:17) warning: the conversion from 'int64' to 'int32' may change the value", "No entry point: the program has no 'main' function"],
         "reason": "A warning beside a backend failure (no entry point) must not hide the failure: C4.exe reported the backend's message only when lowering had no diagnostic at all, so it printed the warning and 'Compilation Succeeded' and exited 1."

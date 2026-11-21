@@ -14,6 +14,7 @@ include "yamlreader.ch"
 namespace Serialization
 {
 	// `value` as JSON (`indent` 0: on one line).
+	[reflects("T")]
 	template<T> Core::String ToJson(const T& value, int32 indent = 0) {
 		DomDoc doc;
 		DomNode root = WriteValue(doc, DescribeValue(nameof(T)), (const void*)&value);
@@ -23,12 +24,14 @@ namespace Serialization
 	}
 
 	// JSON read into `value`; false when the text is not JSON or does not fit T.
+	[reflects("T")]
 	template<T> bool FromJson(Core::StringView text, T& value) {
 		DomDoc doc;
 		ReadResult read = ReadJson(text, doc);
 		return read.Ok() && ReadValue(read.root, DescribeValue(nameof(T)), (void*)&value);
 	}
 
+	[reflects("T")]
 	template<T> Core::String ToYaml(const T& value, int32 indent = 2) {
 		DomDoc doc;
 		DomNode root = WriteValue(doc, DescribeValue(nameof(T)), (const void*)&value);
@@ -37,6 +40,7 @@ namespace Serialization
 		return text.ToString();
 	}
 
+	[reflects("T")]
 	template<T> bool FromYaml(Core::StringView text, T& value) {
 		DomDoc doc;
 		ReadResult read = ReadYaml(text, doc);

@@ -81,6 +81,7 @@ class ProjectSpec:
 	links: tuple = ()
 	compiler_args: tuple = ()
 	subsystem: str = "console"      # a C4 executable's: "console", or "windows" for a windowed program (no console)
+	reflect: str = "on"             # a C4 project's: "off" takes its declarations out of runtime reflection (C4 D-89)
 	tests: object = "auto"          # "auto", True or False
 	test_filter: str = ""            # the cases `nuke test` runs of its harness without a --filter: its own, when a dependency brings many
 	output: str = None              # custom kind: the file `nuke run` starts
@@ -562,6 +563,7 @@ def _project(t, folder, path, dependencies=(), dev_dependencies=()):
 		links=t.strings("links"),
 		compiler_args=t.strings("compiler-args"),
 		subsystem=t.string("subsystem", "console"),
+		reflect=t.string("reflect", "on"),
 		tests=tests,
 		test_filter=t.string("test-filter", ""),
 		output=t.string("output"),
@@ -583,6 +585,10 @@ def _project(t, folder, path, dependencies=(), dev_dependencies=()):
 		raise NukeError(f"{path}: project.subsystem must be one of {', '.join(SUBSYSTEMS)} (got '{spec.subsystem}')")
 	if spec.subsystem != "console" and not (kind == "executable" and spec.language == "c4"):
 		raise NukeError(f"{path}: project.subsystem is for C4 executables (a {kind} in {spec.language or 'no language'} links no program)")
+	if spec.reflect not in ("on", "off"):
+		raise NukeError(f"{path}: project.reflect is \"on\" or \"off\" (got '{spec.reflect}')")
+	if spec.reflect != "on" and not spec.is_c4:
+		raise NukeError(f"{path}: project.reflect is for C4 projects (runtime reflection is C4's)")
 	if kind == "module" and spec.language != "c4":
 		raise NukeError(f"{path}: a module is C4 source; a library in {spec.language} is kind = \"library\"")
 	if kind == "library" and spec.language in ("", "c4"):

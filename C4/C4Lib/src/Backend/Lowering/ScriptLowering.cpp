@@ -1,5 +1,7 @@
 #include "Backend/Lowering/ScriptLowering.h"
+#include "Model/Types/ObjectType.h"
 #include "Model/Types/QualifiedName.h"
+#include "Parser/AstNode.h"
 #include "Script/ScriptModulePasses.h"
 
 namespace Scripting
@@ -18,5 +20,11 @@ namespace Scripting
 	bool ScriptLowering::HostRegisters(const ObjectType& type) const
 	{
 		return hostTypes && hostTypes->Has(QualifiedName(&type).c_str());
+	}
+
+	bool ScriptLowering::HostDeclares(const ObjectType& type) const
+	{
+		const AstNode* declaration = type.GetDeclNode();
+		return declaration && type.GetTemplateArguments().Empty() && IsHostUnit(declaration->startLocation.sourceId);
 	}
 } // namespace Scripting

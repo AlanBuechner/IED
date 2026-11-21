@@ -63,11 +63,14 @@ namespace Scripting
 		}
 	}
 
-	// A template's own definition is no type of its own; a script's host registers its own types.
+	// A template's own definition is no type of its own; a script's host registers its own types, and a script none of
+	// the types its host declares (one out of the host's reflection scope is registered by no one, D-89).
 	bool TypeThunkPlan::Registers(const ProgramModel& model, const ObjectType* type) const
 	{
 		if (!ReflectedType(model, type) || type->GetTemplateParameterCount() != 0) return false;
-		return !m_Script || !m_Script->HostRegisters(*type);
+		if (m_Script && (m_Script->HostRegisters(*type) || m_Script->HostDeclares(*type))) return false;
+		if (!m_Scope) m_Scope.emplace(model);
+		return m_Scope->Has(*type);
 	}
 
 	TypeThunkPlan::Job TypeThunkPlan::JobFor(ProgramModel& model, const ObjectType* type, TypeOperation op, std::deque<FunctionRecord>& records)

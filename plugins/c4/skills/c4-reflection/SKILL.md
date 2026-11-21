@@ -14,6 +14,11 @@ triggers:
 
 C4 has a runtime reflection system: types, variables and functions are first-class registry entities queryable by name or index. The compiler emits registration code for the program's declarations into **every build** (not just tests), so no opt-in compile flag is needed - you only need `include "bedrock.ch"` to use it from C4 source. Full reference: `docs/runtime/02-reflection.md` in the toolchain.
 
+## Opting out (D-89)
+- `[reflect("off")]` on a type, function, global or static member, or on a namespace block, takes it (and what it holds) out of the registry: no registration, no invoke/construct thunks. `[reflect("on")]` brings one back; a project's `reflect = "off"` (nuke.toml `[project]`) takes a whole project out. The nearest setting wins: own, owner type, template, enclosing namespace blocks, project.
+- An out-of-scope entity is simply not found at run time (`FindType` gives an invalid handle). Serializing one is a compile error: Bedrock's `ToJson/FromJson/ToYaml/FromYaml/ReadStreamed` carry `[reflects("T")]`, and the compiler reports a `T` (or a field type of it) that is out of scope. Mark your own reflection-reading function templates `[reflects("T")]` the same way.
+- Only opt out what nothing reads through reflection (internals, generated code); scripts, serialization and annotation readers need their types in scope.
+
 ## Architecture
 - Low level: a global registry implemented in C (C4Runtime/ReflectABI.h + ReflectRuntimeC.c). Everything is an opaque **handle** (`void*`); acquire one by name or index, then query the handle as much as you want - there is no repeated owner+index re-lookup. Name accessors return `const char*`.
 - High level: the Bedrock wrappers in `Bedrock/Reflection/reflect.ch`, namespace `Reflection`. Every entity class (`Type`, `Field`, `Method`, `Param`, `EnumValue`, `Variable`, `Function`) is a thin handle wrapper with named accessors; member queries are handle-based, so you can drill type -> field -> the field's TYPE.

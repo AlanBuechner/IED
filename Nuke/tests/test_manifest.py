@@ -104,6 +104,14 @@ class ProjectManifestTests(unittest.TestCase):
 		with self.assertRaisesRegex(NukeError, "subsystem is for C4 executables"):
 			parse({"project": {"kind": "custom", "subsystem": "windows"}})
 
+	def test_reflect_is_on_or_off_for_c4_projects(self):
+		self.assertEqual(parse({"project": {}}).project.reflect, "on")
+		self.assertEqual(parse({"project": {"kind": "module", "reflect": "off"}}).project.reflect, "off")
+		with self.assertRaisesRegex(NukeError, 'project.reflect is "on" or "off"'):
+			parse({"project": {"reflect": "no"}})
+		with self.assertRaisesRegex(NukeError, "project.reflect is for C4 projects"):
+			parse({"project": {"kind": "custom", "reflect": "off"}})
+
 	def test_needs_a_table(self):
 		with self.assertRaisesRegex(NukeError, r"needs a \[workspace\], \[project\] or \[package\]"):
 			parse({})

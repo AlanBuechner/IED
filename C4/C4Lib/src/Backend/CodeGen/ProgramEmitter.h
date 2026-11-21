@@ -26,6 +26,7 @@ namespace Scripting
 		ModuleSettings modules;
 		bool verifyLater = false;          // each partition is verified as it is assembled (ObjectSettings::verify)
 		PartitionCopies copies = PartitionCopies::None; // what a split program's partitions copy from the others
+		bool everyGlobal = false;          // `--script-host`: every global has storage, in reflection's scope or not (a script may name it)
 		Core::String entryName;            // the function `@main` calls; empty for none (a library, a script)
 		const TestHarnessOptions* tests = nullptr; // a -test build: a program with tests gets the harness as its main
 		Core::String reflectionTag;        // `-reflect-tag`: what the program's reflection registers under
@@ -67,8 +68,11 @@ namespace Scripting
 		/// the program's classes use the program's).
 		void EmitSharedVtables(const LoweredProgram& program);
 		bool EmitEntry(ProgramModel& model, const EmitSettings& settings, std::string* error);
-		/// The storage of every global and static member, whether or not code names it: reflection registers each.
-		void MaterializeGlobals(const ProgramModel& model);
+		/// The storage of every global and static member in reflection's scope (D-89), whether or not code names it:
+		/// reflection registers each.
+		void MaterializeGlobals(const ProgramModel& model, bool every);
+		void MaterializeNamedGlobals();
+		void Materialize(const SymbolInfo& info, const Scope& declaredIn);
 		bool EverythingNamedLowered(const LoweredProgram& program, std::string* error);
 		void FinishModules(const ProgramModel& model, const EmitSettings& settings, WorkerPool& pool);
 		/// The script-mode passes over the finished module (Script/ScriptModulePasses).
@@ -80,5 +84,6 @@ namespace Scripting
 		ReflectionEmitter m_Reflection;
 		ErrorTracker m_Errors;
 		std::vector<std::pair<const char*, double>> m_StepSeconds;
+		std::vector<std::pair<const SymbolInfo*, const Scope*>> m_OutOfScope; // globals out of reflection's scope, not yet defined
 	};
 } // namespace Scripting

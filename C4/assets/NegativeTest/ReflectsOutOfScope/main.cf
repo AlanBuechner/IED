@@ -1,0 +1,23 @@
+// D-89: Serialization::ToJson reads its T through reflection ([reflects("T")]): a type out of reflection's scope that a
+// serialized value holds is an error at that type, naming the instance and the field that holds it.
+include "bedrock.ch"
+
+[reflect("off")]
+struct Secret
+{
+	public int32 code;
+}
+
+struct Save
+{
+	public int32 level;
+	public Secret secret;
+}
+
+int32 main()
+{
+	Save save;
+	save.level = 3;
+	Core::String text = Serialization::ToJson(save);
+	return text.IsEmpty() ? 1 : 0;
+}

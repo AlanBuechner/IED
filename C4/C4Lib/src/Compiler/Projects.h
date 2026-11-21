@@ -18,6 +18,7 @@ namespace Scripting
 		std::vector<fs::path> includes; // folders its includes also search, absolute
 		std::map<std::string, std::string> defines;
 		std::vector<std::string> depends;
+		bool reflect = true; // `reflect = "off"`: its declarations are out of reflection's scope (D-89) unless one says [reflect("on")]
 	};
 
 	/// A build's projects as written: the projects and the name of the root.

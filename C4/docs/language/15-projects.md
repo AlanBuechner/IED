@@ -18,6 +18,7 @@ description for every build, and the language server reads the same file.
 | includes | further folders its `include` lines search (C4 headers and `extern "c"` headers) |
 | defines | macros for the project's files, on top of the predefined ones and the command line's `-D` |
 | depends | the projects it uses |
+| reflect | `"on"` (the default) or `"off"`: `"off"` takes its declarations out of runtime reflection's scope, unless one of them (or a namespace block around it) says `[reflect("on")]` (D-89, [runtime/02 1.1](../runtime/02-reflection.md#11-the-reflection-scope-d-89)) |
 
 One project is the **root**: the program. The build is the root and every project it depends on, directly or
 through another. Bedrock is not a project of the build: every project may include it, and the prelude is in
@@ -47,6 +48,7 @@ name = "Engine"
 sources = ["C:/Work/Engine/src"]
 includes = ["C:/Work/Engine/third_party"]
 depends = []
+reflect = "off"
 
 [project.defines]
 PROJECT_NAME = "Engine"
@@ -57,7 +59,7 @@ ENGINE_EDITOR = "1"
   too), `[[project]]` and `[project.defines]` tables. Anything else is an error with its line.
 - Paths are absolute, or relative to the description's folder.
 - Nuke writes it into the program's intermediate folder for every compile, from each project's `nuke.toml`
-  (`sources`, `includes`, `defines`, `depends`), and names the same file in the language server's options, so
+  (`sources`, `includes`, `defines`, `depends`, and `reflect` when it is `"off"`), and names the same file in the language server's options, so
   the editor sees the build the compiler sees ([../tools/02-nuke.md](../tools/02-nuke.md#2-how-a-program-is-compiled)).
 - A command line without `--projects` builds as it always did: its inputs and every `-I <dir>` are one project,
   and `-D` applies to every file. Boundaries and per-project defines need a description. `--projects` with inputs is

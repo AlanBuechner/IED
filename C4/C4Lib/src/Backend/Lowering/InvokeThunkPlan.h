@@ -1,9 +1,11 @@
 #pragma once
 #include "Backend/Lowering/LoweredProgram.h"
 #include "Backend/Lowering/ScriptLowering.h"
+#include "Backend/Reflection/ReflectionScope.h"
 #include "Compiler/WorkerPool.h"
 #include <deque>
 #include <functional>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -52,6 +54,7 @@ namespace Scripting
 		bool HasCallableCode(const ProgramModel& model, const FunctionRecord& record, const std::function<bool(const FunctionRecord&)>& defined) const;
 
 		const ScriptLowering* m_Script = nullptr;
+		std::optional<ReflectionScope> m_Scope;                     // which functions reflection registers (D-89)
 		uint32 m_RecordsScanned = 0;                                // the model's records looked at so far
 		std::vector<const FunctionRecord*> m_Candidates;            // reflected and callable, without code to call yet
 		std::unordered_set<const FunctionRecord*> m_Planned;        // considered for a thunk (one that failed too: no retry)
