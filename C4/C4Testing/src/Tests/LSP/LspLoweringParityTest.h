@@ -44,5 +44,9 @@ namespace Testing
 		void ACompileTimeBodyIsCheckedAlikeInBoth();
 		TEST_FUNC(Lsp.LoweringParity)
 		void AConstantCallIsFoldedAlikeInBoth();
+
+		// BUG-487: a call of a member the type does not have, in a file-static function, is the build's error in both.
+		TEST_FUNC(Lsp.LoweringParity)
+		void AMissingMemberIsReportedByBoth();
 	};
 } // namespace Testing

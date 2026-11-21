@@ -206,4 +206,17 @@ namespace Testing
 			"}\n");
 		TEST_ASSERT(diagnostics.empty());
 	}
+
+	void LspLoweringParityTest::AMissingMemberIsReportedByBoth()
+	{
+		const std::vector<std::string> diagnostics = SameInBoth(
+			"namespace Core { struct StringView { public int64 ByteLength() const { return 0; } public bool StartsWith(StringView other) const { return false; } } }\n"
+			"namespace Ai\n"
+			"{\n"
+			"\tstatic bool OutsideWorkspace(Core::StringView path) { return path.StartsWith(path) || path.Length() > 1; }\n"
+			"\tbool Own(Core::StringView path) { return !OutsideWorkspace(path); }\n"
+			"}\n"
+			"int32 main() { Core::StringView path; return Ai::Own(path) ? 1 : 0; }\n");
+		TEST_ASSERT(AnyMentions(diagnostics, "no member 'Length' in 'Core::StringView'"));
+	}
 } // namespace Testing
