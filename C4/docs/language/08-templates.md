@@ -35,7 +35,7 @@ template<T, ...int32 Ns>    // a value pack after a type parameter
   constant (usable in expressions, array sizes and `sizeof`). A comparison in an argument needs
   parentheses (`Flag<(A > B)>`), as in C++, and so does a call of a `[compile_time]` function
   (`Arr<(Square(3))>`, [07 section 7.13](07-functions-and-lambdas.md#713-compile-time-functions)): `Square(3)` alone reads as a
-  function signature, as in `funcptr<int32(int32)>`.
+  function signature, as in `funcptr<int32(int32)>`; the error says to parenthesize it.
 - Arguments bind to parameters **by position**, whatever the mix of kinds. A type where a value parameter
   is (or the reverse) is an error naming the parameter: `template parameter 'N' of 'Arr' takes a constant
   value`. More arguments than parameters: `template 'Box' takes 1 argument(s), got 2`.

@@ -11,6 +11,7 @@
 #include "AnnotationDeclarationNode.h"
 #include "../Statements/CodeBlockNode.h"
 #include "Parser/Recovery.h"
+#include "Parser/UnexpectedToken.h"
 #include "Core/StringFormat.h"
 
 namespace Scripting
@@ -659,6 +660,7 @@ namespace Scripting
 	Core::String ObjectDefinitionNode::BrokenMemberMessage(const Lexer& lexer) const
 	{
 		if (Core::String lifecycle = CppLifecycleMessage(lexer, m_NameToken.GetText()); !lifecycle.empty()) return lifecycle;
+		if (Core::String call = UnparenthesizedCallMessage(lexer); !call.empty()) return call;
 		if (Core::String field = FieldMessage(lexer); !field.empty()) return field;
 		return Core::StringFormat::Format("Unexpected token '{0}' in type body", lexer.PeekCompound().GetText());
 	}

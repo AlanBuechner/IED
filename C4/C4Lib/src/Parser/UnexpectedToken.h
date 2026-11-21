@@ -8,6 +8,10 @@ namespace Scripting
 	/// (`int32 asm = 1;`) says so; anything else is an unexpected token.
 	Core::String UnexpectedTokenMessage(const Lexer& lexer);
 
+	/// A declaration from the next token that writes a call as a template argument (`Fixed<Square(3)> f;`), where it
+	/// reads as a function signature: says to parenthesize it, `Fixed<(Square(3))>` (D-91). Empty for any other.
+	Core::String UnparenthesizedCallMessage(const Lexer& lexer);
+
 	/// Whether the next token is a keyword naming a variable after its type: `Core::String alias = ...;`, `T* asm;`.
 	bool KeywordNamesAVariable(const Lexer& lexer);
 

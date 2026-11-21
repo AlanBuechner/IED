@@ -3151,5 +3151,13 @@
     "FunctionOnlyASourceFileDeclares": {
         "expect": ["no function named Twice is visible here: it is declared in helper.cf, a source file no file can include: declare it in a header"],
         "reason": "BUG-476: a template written in another source file was callable; the error says where a declaration belongs."
+    },
+    "CallAsTemplateArgumentInField": {
+        "expect": ["main.cf (4:2) error: a call in a template argument is written in parentheses: '(Square(3))', not 'Square(3)' - there it reads as a function signature, as in 'funcptr<int32(int32)>' (docs/language/08)"],
+        "reason": "D-91: a field's type with an unparenthesized call as a value argument said 'Unexpected token 'public' in type body'."
+    },
+    "CallAsTemplateArgumentInGlobal": {
+        "expect": ["a call in a template argument is written in parentheses: '(Ns::Square(2, 1))', not 'Ns::Square(2, 1)'"],
+        "reason": "D-91: the same at namespace scope, with a qualified callee and two arguments."
     }
 }

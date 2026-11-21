@@ -376,7 +376,9 @@ Fixed<(Square(2))> four;                      // a template value argument (temp
 ```
 
 A call in a template argument is written in parentheses, `Fixed<(Square(2))>`: there `Square(2)` alone reads as a
-function signature, as `int32(int32)` does in `funcptr<int32(int32)>`.
+function signature, as `int32(int32)` does in `funcptr<int32(int32)>`. Written without them, a call whose first
+argument is a literal, a `-` or a `(` is an error saying so: `a call in a template argument is written in parentheses:
+'(Square(3))', not 'Square(3)'`.
 
 - **What it may do.** Arithmetic and comparisons on numbers, bools and characters (integers wrap in their
   width, as at run time), locals of any value type including fixed arrays and structs, their methods, loops,

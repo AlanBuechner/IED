@@ -1,0 +1,7 @@
+template<int32 N> struct Arr { public int32[N] items; }
+[compile_time] int32 Square(int32 x) { return x * x; }
+struct Grid {
+	public Arr<Square(3)> cells;
+	public int32 count;
+}
+int32 main() { Grid g; return g.count; }

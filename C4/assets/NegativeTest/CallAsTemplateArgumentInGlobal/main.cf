@@ -1,0 +1,4 @@
+template<int32 N, int32 M> struct Table { public int32[N] items; }
+namespace Ns { [compile_time] int32 Square(int32 x, int32 y) { return x * x + y; } }
+Table<Ns::Square(2, 1), 4> g_Table;
+int32 main() { return 0; }
