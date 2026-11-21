@@ -34,6 +34,9 @@ namespace Ai
 		// The harness note `name` with each {key} replaced by its value in `values` ("key", "value", "key", ...).
 		public Core::String Note(const char* name, const Core::Array<Core::String>& values) const;
 		public Core::String Note(const char* name) const;
+		// `text`, a message `sent` while a turn ran, as that turn reads it: the owner's under the note "steering", another
+		// chat's under "steering_chat" - it is not the owner's, and the count of chats messaging each other goes on.
+		public Core::String Steering(const OwnerMessage& sent, const Core::String& text) const;
 
 		private Core::String m_Base;
 		private Core::String m_Style;

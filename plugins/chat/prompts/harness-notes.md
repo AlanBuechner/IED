@@ -61,6 +61,9 @@ The call {tool} ({call_id}) was interrupted by a restart; its effect is unknown.
 ## steering
 [Message from the user, sent while you were working]: {text}
 
+## steering_chat
+[Sent by another chat while you were working - not the owner's message: the count of chats messaging each other goes on]: {text}
+
 ## budget_warning
 You have used {percent}% of this run's {budget} budget. Wrap up: finish the current task, verify, and report.
 

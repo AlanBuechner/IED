@@ -3,6 +3,23 @@
 
 include "chats/Chat.ch"
 include "aitools/ChatTools.ch"
+include "prompts/Prompts.ch"
+
+// Prompts whose harness notes are `notes`, read from a temporary folder as the server reads its own.
+static Ai::Prompts NotesFrom(const char* notes) {
+	FS::Path root = FS::TempDirectory() / "ied-steering-notes";
+	FS::RemoveAll(root.CStr());
+	FS::MakeDirectories(root.CStr());
+	{
+		FS::File opened = FS::File((root / "harness-notes.md").CStr(), "wb");
+		opened.Write((const void*)notes, Core::StringView(notes).ByteLength());
+	}
+	Ai::Prompts prompts;
+	Core::Array<Core::String> problems;
+	prompts.Load(root, problems);
+	FS::RemoveAll(root.CStr());
+	return prompts;
+}
 
 static Ai::ChatTask* NewTask(const char* id, const char* title, const char* status) {
 	Ai::ChatTask* task = new Ai::ChatTask();
@@ -46,6 +63,30 @@ class ChatTasksTests {
 		assert_true(early.View().Contains(Core::StringView("message 2 of at most 3")) && !early.View().Contains(Core::StringView("cannot chat_send")), early.CStr());
 		Core::String last = Ai::SentNote(3);
 		assert_true(last.View().Contains(Core::StringView("message 3 of at most 3")) && last.View().Contains(Core::StringView("cannot chat_send an answer back")), last.CStr());
+	}
+
+	// Past the chain's most, chat_send and chat_create refuse - and say that only the owner restarts the count, so a chat
+	// does not take an IED note in its turn for a new start and try again.
+	[test("the_refusal_says_only_the_owner_restarts_the_count")]
+	public static void TestTooDeep() {
+		Core::String refusal = Ai::TooDeep();
+		assert_true(refusal.View().Contains(Core::StringView("messaged each other 3 times in a row")), refusal.CStr());
+		assert_true(refusal.View().Contains(Core::StringView("Only the owner's next message starts the count again")), refusal.CStr());
+		assert_true(refusal.View().Contains(Core::StringView("a chat's reply")) && refusal.View().Contains(Core::StringView("end the turn")), refusal.CStr());
+	}
+
+	// A message that reaches a running turn is labeled by who sent it: another chat's is not the owner's.
+	[test("a_message_mid_turn_is_labeled_by_its_sender")]
+	public static void TestSteering() {
+		Ai::Prompts prompts = NotesFrom("## steering\n[owner]: {text}\n\n## steering_chat\n[chat]: {text}\n");
+		Ai::OwnerMessage owner;
+		owner.m_Text = Core::String("stop");
+		assert_se("[owner]: stop", prompts.Steering(owner, owner.m_Text).CStr(), "the owner's message gets the user note");
+		Ai::OwnerMessage fromChat;
+		fromChat.m_Text = Core::String("done");
+		fromChat.m_FromChatId = Core::String("c1");
+		fromChat.m_Hops = 2;
+		assert_se("[chat]: done", prompts.Steering(fromChat, fromChat.m_Text).CStr(), "another chat's gets the chat note");
 	}
 
 	[test("lines_name_id_title_and_status")]

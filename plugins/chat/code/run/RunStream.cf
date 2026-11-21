@@ -139,7 +139,7 @@ namespace Ai
 
 	int64 TurnRun::ExpectedRead(int64 promptTokens, int64 head) const {
 		const bool sameFront = !m_Chat->m_PromptRewritten && m_Chat->m_PromptHead == head && m_Chat->m_LastPromptTokens > 0
-		&& m_Chat->m_EstimateModel.View() == m_Candidates[m_Candidate]->m_Name.View();
+			&& m_Chat->m_EstimateModel.View() == m_Candidates[m_Candidate]->m_Name.View();
 		if (!sameFront) return promptTokens;
 		const int64 added = CalibratedTokens() - m_Chat->m_LastPromptTokens;
 		if (added < 0) return 0;
@@ -302,12 +302,7 @@ namespace Ai
 			ModelMessage* message = new ModelMessage();
 			message->m_Role = Core::String("user");
 			message->m_Content = ModelText(m_Chat, *sent) + MessageExtras(sent->m_Mentions, sent->m_Attachments, message->m_Images).View();
-			if (inResult) {
-				Core::Array<Core::String> values;
-				values.Push(Core::String("text"));
-				values.Push(message->m_Content);
-				message->m_Content = m_Chats->m_Prompts.Note("steering", values);
-			}
+			if (inResult) message->m_Content = m_Chats->m_Prompts.Steering(*sent, message->m_Content);
 			messages.Push(message);
 		}
 		IED::HostLock guard(*m_Context);
@@ -343,7 +338,7 @@ namespace Ai
 
 	static int64 MessageTokens(const ModelMessage* message) {
 		return BytesToTokens(message->SentText().ByteLength() + message->m_Note.ByteLength() + message->m_ToolCalls.ByteLength() + message->m_Reasoning.ByteLength())
-		+ (message->SendsImages() ? message->m_Images.Count() * c_ToolImageTokens : 0);
+			+ (message->SendsImages() ? message->m_Images.Count() * c_ToolImageTokens : 0);
 	}
 
 	int64 TurnRun::EstimateTokens() const {
@@ -408,7 +403,7 @@ namespace Ai
 		// nothing: the meter keeps the last step's count.
 		if (completion->m_PromptTokens <= 0 && result->m_Text.IsEmpty() && result->m_Thinking.IsEmpty() && result->m_Calls.IsEmpty()) return;
 		const int64 output = completion->m_CompletionTokens > 0 ? completion->m_CompletionTokens
-		: BytesToTokens(result->m_Text.ByteLength() + result->m_Thinking.ByteLength());
+			: BytesToTokens(result->m_Text.ByteLength() + result->m_Thinking.ByteLength());
 		if (completion->m_PromptTokens > 0) {
 			m_Turn->m_TokensIn = completion->m_PromptTokens;
 			m_Chat->m_EstimateOffset = completion->m_PromptTokens - estimateBefore;

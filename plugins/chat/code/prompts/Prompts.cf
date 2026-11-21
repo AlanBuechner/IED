@@ -105,4 +105,11 @@ namespace Ai
 	}
 
 	Core::String Prompts::Note(const char* name) const { return Note(name, Core::Array<Core::String>()); }
+
+	Core::String Prompts::Steering(const OwnerMessage& sent, const Core::String& text) const {
+		Core::Array<Core::String> values;
+		values.Push(Core::String("text"));
+		values.Push(text);
+		return Note(sent.m_FromChatId.IsEmpty() ? "steering" : "steering_chat", values);
+	}
 }

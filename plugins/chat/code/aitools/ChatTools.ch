@@ -24,6 +24,9 @@ namespace Ai
 	// What the sender of a message `hops` long is told of it (chat_send, chat_create): ChainNote, and when it is the chain's last,
 	// that the other chat cannot message this one back - so a hand-off that asks to be told when it is done is not left waiting.
 	Core::String SentNote(int64 hops);
+	// Why chat_send and chat_create refuse a message past c_ChatHopsMost, and that only the owner's next message - not a
+	// note IED adds to the turn - starts the count again.
+	Core::String TooDeep();
 	// Whether a wait tool of `chat`'s running turn stops now: a message came for the turn - the owner's or another chat's
 	// (docs/04 "Chats waiting on each other"). What it waited on goes on. Inside the host lock.
 	bool WaitInterrupted(const Chat* chat);
