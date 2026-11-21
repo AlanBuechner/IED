@@ -304,6 +304,38 @@ namespace Testing
 		TEST_PASSED();
 	}
 
+	// BUG-421: Nuke rewrites a program's projects.toml when a package is added (a project the engine now depends on) and IED
+	// tells the server its programs again, the same files: the server reads them again, so the engine's include of the new
+	// project resolves, and its declarations are the new project's, not the root's.
+	void LspProgramsTest::TestAProjectAddedToAProgramIsReadAgain()
+	{
+		const Workspace ws = MakeWorkspace("c4lsp_programs_project_added");
+		const char* logHeader = "namespace Log { struct Logger { public int32 level; } }\n";
+		const char* usesLog = "include \"Runtime/module.ch\"\ninclude \"Log/log.ch\"\n\nnamespace Engine\n{\n\tstruct Desc { public Log::Logger log; }\n}\n";
+		WriteFile(ws.root / "Log/src/Log/log.ch", logHeader);
+		WriteFile(ws.root / "Engine/src/Runtime/desc.ch", usesLog);
+		const std::string desc = FileUri(ws.root / "Engine/src/Runtime/desc.ch");
+		ServerHarness server(FileUri(ws.root));
+		server.Initialize(ws.WithPrograms());
+		server.Open(desc, usesLog);
+		TEST_ASSERT(Contains(server.MessagesFor(desc), "include not found")); // no project holds Log yet
+		const std::string log = "[[project]]\nname = \"Log\"\nsources = [\"" + (ws.root / "Log/src").generic_string() + "\"]\n";
+		const std::string engine = "[[project]]\nname = \"Engine\"\nsources = [\"" + (ws.root / "Engine/src").generic_string() + "\"]\ndepends = [\"Log\"]\n";
+		const std::string game = "[[project]]\nname = \"Game\"\nsources = [\"" + (ws.root / "Game/src").generic_string() + "\"]\ndepends = [\"Engine\"]\n";
+		WriteFile(ws.root / "build/Client/projects.toml", "root = \"Client\"\n[[project]]\nname = \"Client\"\nsources = [\"" + (ws.root / "Client/src").generic_string() +
+			"\"]\ndepends = [\"Game\"]\n" + game + engine + log);
+		WriteFile(ws.root / "build/Tool/projects.toml", "root = \"Tool\"\n[[project]]\nname = \"Tool\"\nsources = [\"" + (ws.root / "Tool/src").generic_string() +
+			"\"]\ndepends = [\"Engine\"]\n" + engine + log);
+		Value settings = Value::MakeObject();
+		settings.SetMember("programs", ws.Programs());
+		Value params = Value::MakeObject();
+		params.SetMember("settings", settings);
+		server.Notify("workspace/didChangeConfiguration", params);
+		TEST_ASSERT_EQ(server.MessagesFor(desc), std::string());
+		fs::remove_all(ws.root);
+		TEST_PASSED();
+	}
+
 	void LspProgramsTest::TestMalformedProgramsAreLeftOut()
 	{
 		const Workspace ws = MakeWorkspace("c4lsp_programs_malformed");

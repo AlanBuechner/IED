@@ -66,6 +66,10 @@ Next ID: **BUG-491**
 - **Notes:** a frame limiter sleeping on the tick would cap a game well under its target, so this matters beyond the
   test: find whether the precise timer is lost under load (a waitable timer refused, a resolution request dropped),
   or whether the case asks more than a loaded machine can give.
+  2026-11-21 (chat J): not reproduced - the case (now the fastest of up to ten runs) passed in two full `nuke gates`
+  runs and 8 of 8 times alone under a full server-checks run (26-29 ms for ten 2 ms sleeps: the high-resolution timer
+  held). Still open: `c4_thread_sleep_ns` falls back to `Sleep` without a word when the high-resolution timer cannot be
+  made, which would explain the tick-length sleeps; make that fallback visible before closing this.
 
 ### BUG-435 Intermittent internal compiler error (0xC0000005) or corrupt partition bitcode compiling a large split program
 - **Area:** Codegen
@@ -107,6 +111,9 @@ Next ID: **BUG-491**
   2026-11-15: seen again in a smaller program - Claymore's root `nuke test`, compiling the `ModelFiles` test harness,
   `exception 0xc0000005 at C4.exe+0x15ae9ad`, while IED's `nuke test ied-server` compiled beside it (memory load);
   `nuke test ModelFiles` alone right after passed, nothing changed between.
+  2026-11-21 (chat J): the 10-run re-test on today's compiler (partitioned emission, MIR) could not run: Claymore does not
+  compile on the tree's Bedrock since 2f462091 (`Scene/LooseValue.cf`: `Core::ResizeElementBytes takes 7 arguments,
+  not 6`). Run it once Claymore is updated (`.ied/local/jwork/b435/run.ps1` runs the repro 10 times, fresh int dirs).
 
 ## Interop, runtime and Bedrock
 
@@ -139,3 +146,8 @@ Next ID: **BUG-491**
   either the pool's `SendOptionsFilesIfChanged` did not fire for that rewrite, or C4LSP took the new programs without
   re-resolving the includes of files it had analyzed: check `LspProgramsTest`'s configuration-change case with a
   dependency added to a program that already holds the file.
+  2026-11-21 (chat J): that reduction is `Lsp.Programs TestAProjectAddedToAProgramIsReadAgain` and it passes on today's
+  server (a reused program re-reads a projects.toml whose size or time changed, `Program::Refresh`, and its next
+  analysis resolves the new project's include). Not reproduced in small: the two Claymore symptoms are still to be
+  checked in Claymore itself (it does not build on the tree's Bedrock since 2f462091 - `Core::ResizeElementBytes` takes
+  7 arguments, `Scene/LooseValue.cf` passes 6).

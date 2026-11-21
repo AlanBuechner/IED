@@ -43,6 +43,10 @@ namespace Testing
 		TEST_FUNC(Lsp.Programs)
 		void TestProgramsArriveWithAConfigurationChange();
 
+		// BUG-421: a program's projects.toml rewritten with a project added is read again when the programs come again.
+		TEST_FUNC(Lsp.Programs)
+		void TestAProjectAddedToAProgramIsReadAgain();
+
 		TEST_FUNC(Lsp.Programs)
 		void TestMalformedProgramsAreLeftOut();
 
