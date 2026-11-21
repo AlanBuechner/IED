@@ -9,17 +9,21 @@ publishes it to the owner's Gitea (docs/21 "Prebuilt releases on the owner's Git
    work and other sessions' edits must not ship) with the checkout's vendor/ as a junction and the submodules copied
    at the commits the release names.
 2. Windows: `nuke build C4` (a Development build refreshes the worktree's own toolchains/c4/dev), then `nuke build
-   ied-server ied ied-desktop flashbang`. Linux: the same two in tools/linux/builder's container with the worktree at
-   /ied, its build/ the Docker volume ied-release-linux-build and NUKE_TOOLCHAINS=/ied/build/toolchains (Linux's own
-   store, apart from Windows').
+   ied-server ied ied-desktop flashbang`. Linux: `C4`, then `ied-server ied ied-desktop`, in tools/linux/builder's
+   container with the worktree at /ied, its build/ the Docker volume ied-release-linux-build and
+   NUKE_TOOLCHAINS=/ied/build/toolchains (Linux's own store, apart from Windows').
 3. Packages in build/release/<version>/ of this checkout: per platform the install folder (tools/install's layout:
-   the programs, the web client, the plugins, Nuke with its launchers, on Windows the private Python with the web
-   search services and the C/C++ tools) and the C4 `dev` toolchain with the Linux sysroot (so C4 programs link with
-   nothing else installed and run on glibc 2.31); on Windows also the MSVC and Windows SDK kit the compiler links
-   Windows programs with (vendor/msvc), apart because it rarely changes; and release.json.
+   the programs - the desktop app with its icon on Linux too - the web client, the plugins, Nuke with its launchers,
+   the private Python with the web search services (SearXNG, its packages, Tor: setup's Windows packages, and on
+   Linux its `linux` group fetched into vendor/linux), on Windows the C/C++ tools) and the C4 `dev` toolchain with the
+   Linux sysroot (so C4 programs link with nothing else installed and run on glibc 2.31); on Windows also the MSVC and
+   Windows SDK kit the compiler links Windows programs with (vendor/msvc), apart because it rarely changes; and
+   release.json (on Linux with the desktop app's `register` and WebKitGTK as `desktopLibraries`).
 4. Published as version `<commit date>-<commit>` without moving `latest`; then each platform's installer from the
    server installs it into a scratch folder (Windows here, Linux in a clean Debian 12 container), which must start
-   the server, serve the web client, and build and run a new C4 program with Nuke; then `latest` points at it.
+   the server, serve the web client, and build and run a new C4 program with Nuke - and once more in a Debian 12 with
+   only a virtual display, where it must bring WebKitGTK, put IED in the applications menu and open the desktop app
+   signed in; then `latest` points at it.
 
 Exit code 0 when every step it ran passed.
 """
