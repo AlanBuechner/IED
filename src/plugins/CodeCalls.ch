@@ -5,6 +5,8 @@
 include "Code.ch"
 include "web/Rpc.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	// Whether `plugin`'s manifest lists `name` under bindings.consumes.

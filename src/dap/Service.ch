@@ -7,6 +7,8 @@
 include "Session.ch"
 include "Breakpoints.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	const int64 c_DebugSessionsKept = 10;

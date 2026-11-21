@@ -12,6 +12,10 @@ include "Manifest.ch"
 include "api/Plugin.ch"
 include "scripting.ch"
 include "fs/Watching.ch"
+include "Host.ch"
+include "services/Workspaces.ch"
+
+namespace Ied { class Server; }
 
 namespace Ied
 {

@@ -6,6 +6,8 @@ include "Container/array.ch"
 
 namespace Compression
 {
+	struct Symbols; // deflatewrite.ch, which includes this file
+
 	int32 LengthIndex(int32 length);
 
 	int32 DistanceSymbol(int32 distance);

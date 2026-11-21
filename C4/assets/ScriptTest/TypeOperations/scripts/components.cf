@@ -1,4 +1,6 @@
 include "counts.ch"
+include "Container/array.ch"
+include "Text/string.ch"
 
 namespace Comps
 {

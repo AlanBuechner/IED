@@ -1,0 +1,6 @@
+include "IvBox.ch"
+include "IvDetail.ch"
+
+template<T> int32 IvBox<T>::Scaled() { return IvDetailScale((int32)held); }
+
+template<T> T IvTwice(T v) { return v + v; }

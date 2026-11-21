@@ -9,14 +9,20 @@ namespace Scripting
 	class MemberTemplates
 	{
 	public:
-		/// `fn`, written in the body of `owner` whose class layer is `scope`; `binding` binds a class template
-		/// instance's parameters for it (null for a plain class).
-		static QueryResult<void> Declare(const ProgramModel& model, const ObjectType* owner, const FunctionDefinitionNode& fn,
-			const Scope* scope, Scope* binding);
-		/// An out-of-line definition of a member template of `owner` (`template<U> R P::F(U u) { ... }`); `binding`
-		/// and `ownerNames` bind the names the definition gives a class template's parameters.
+		/// Where a member template is written: its owner's class layer, the layer that binds a class template
+		/// instance's parameters for it (null for a plain class), and the file.
+		struct Site
+		{
+			const Scope* scope = nullptr;
+			Scope* binding = nullptr;
+			uint32 unit = 0;
+		};
+		/// `fn`, written in the body of `owner`.
+		static QueryResult<void> Declare(const ProgramModel& model, const ObjectType* owner, const FunctionDefinitionNode& fn, const Site& site);
+		/// An out-of-line definition of a member template of `owner` (`template<U> R P::F(U u) { ... }`), written in
+		/// `unit`; `binding` and `ownerNames` bind the names the definition gives a class template's parameters.
 		static void Define(const ProgramModel& model, const ObjectType* owner, const FunctionDefinitionNode& definition, Scope* binding,
-			const InstantiationBindings& ownerNames);
+			const InstantiationBindings& ownerNames, uint32 unit);
 		/// Attaches every out-of-line definition of a plain class's member templates; runs once all files are registered.
 		static void AttachDefinitions(const ProgramModel& model);
 		/// Whether `owner` itself declares a member template named `name`.

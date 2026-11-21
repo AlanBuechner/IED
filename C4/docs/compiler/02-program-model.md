@@ -118,8 +118,12 @@ declarations, then finalizes:
    its scope out through its namespaces and among the files its file includes, then matched against the overloads it
    finds (`Model/AnnotationOverloads`).
 
-Build-time type resolution is program-wide (unit 0). Errors (duplicate definitions, unresolved types) are
-reported through the builder's error tracker.
+A declaration resolves its names in its own unit: a field's type, a signature, a base, an alias's target and a
+constant's initializer see what their file includes (D-88, [pipeline](01-pipeline.md) "Include visibility"); a name
+declared in a file the unit does not include is `NotVisible`, with the header to include (`Model/NotIncluded`). A
+template instance's body resolves in the unit of its template (`TemplateDef::unit`), a function instance's body lowers
+in it (`FunctionRecord::templateUnit`, `LookupUnit()`); only the template arguments are resolved where the instance is
+written. Errors (duplicate definitions, unresolved types) are reported through the builder's error tracker.
 
 ### Declaration queries
 

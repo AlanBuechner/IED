@@ -1,5 +1,6 @@
 include "commands.ch"
 include "money.ch"
+include "bedrock.ch"
 
 namespace Ledger
 {

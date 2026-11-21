@@ -1,0 +1,2 @@
+include "limits.ch"
+int32[kLimit] g_Other;

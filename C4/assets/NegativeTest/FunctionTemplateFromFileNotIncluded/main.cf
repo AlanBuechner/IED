@@ -1,0 +1,1 @@
+int32 main() { float a = M::Clamp(3.4f, 0.0f, 10.0f); return (int32)a; }

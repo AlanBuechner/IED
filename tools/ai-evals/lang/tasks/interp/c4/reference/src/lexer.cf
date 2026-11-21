@@ -1,4 +1,5 @@
 include "lexer.ch"
+include "token.ch"
 
 namespace Calc
 {

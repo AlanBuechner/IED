@@ -4,6 +4,7 @@
 // its diagnostics stay in its summary and the server log.
 
 include "Code.ch"
+include "host/Server.ch"
 
 namespace Ied
 {

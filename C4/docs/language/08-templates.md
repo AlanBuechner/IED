@@ -255,6 +255,16 @@ template<U> void Box<U>::Set(float v) { ... }
   arguments is resolved (`Box<int32>` in a declaration, `F<int32>(x)` or a deduced `F(x)` in a call, a
   template base). Instantiations are cached by definition and resolved arguments and shared
   program-wide: `Box<int32>` written in two files is one type, and so are `Buf<>` and `Buf<int32, 4>`.
+- **Named through includes, built from its own file (D-88).** A template is named like any name: the file
+  that writes `Box<int32>` or calls `Clamp(x, a, b)` includes a file that declares the template
+  ([program model 1.4](01-program-model.md#14-visibility-one-rule)). The instance is the template's and its
+  arguments' alone: its fields, signatures and bodies see what the template's file includes (a method defined
+  out of line in `box.cf` what `box.cf` includes), and the arguments are resolved where they are written. So
+  a template's header includes what its body names; what only its users include is not visible to it. Which
+  specialization and which out-of-line definition an instance takes does not depend on includes.
+- **An instance that needs a larger instance of itself** (`template<T> struct W { W<W<T>>* next; }`) has no
+  last instance: past 100 instances built inside one another the compiler stops with `instantiating 'W' goes
+  more than 100 instances deep`.
 - **Members are compiled when used (D-16).** An instance's member function is lowered and type-checked
   only when something uses it: a call, its address, or - for a virtual member - the instance's vtable. Reflection
   can make every type it registers, an instance the program only names too ([runtime/02](../runtime/02-reflection.md)

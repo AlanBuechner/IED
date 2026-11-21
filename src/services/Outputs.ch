@@ -5,6 +5,9 @@
 // empties one. Members run with the server lock held.
 
 include "web/Rpc.ch"
+include "Workspaces.ch"
+
+namespace Ied { class Server; }
 
 namespace Ied
 {

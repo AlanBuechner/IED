@@ -4,6 +4,7 @@
 // /config/ is 404. Runs on a connection's thread; takes the server lock only to read the server plugins' state.
 
 include "ConfigServer.ch"
+include "host/Server.ch"
 
 namespace Ied
 {

@@ -5,6 +5,8 @@
 include "Json.ch"
 include "auth/Devices.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	class AuthGate

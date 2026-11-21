@@ -65,6 +65,14 @@ namespace Scripting
 		return m_Parent ? m_Parent->Find(name) : nullptr;
 	}
 
+	const SymbolInfo* Scope::FindBound(const Core::String& name) const
+	{
+		if (HoldsFileStatics()) return nullptr;
+		if (m_Symbols)
+			if (auto it = m_Symbols->find(name); it != m_Symbols->end() && !it->second.Empty()) return it->second[0].get();
+		return m_Parent ? m_Parent->FindBound(name) : nullptr;
+	}
+
 	void Scope::SetFunctionVisibilityUnit(const Core::String& name, uint32 unit)
 	{
 		if (!m_Symbols) return;
@@ -98,7 +106,7 @@ namespace Scripting
 
 	// --- ScopeCursor ---
 
-	ScopeCursor::ScopeCursor(SymbolTable& table) : m_Table(table), m_Outer(t_Cursor), m_Position(table.Current())
+	ScopeCursor::ScopeCursor(SymbolTable& table, uint32 unit) : m_Table(table), m_Outer(t_Cursor), m_Unit(unit), m_Position(table.Current())
 	{
 		t_Cursor = this;
 	}
@@ -150,6 +158,12 @@ namespace Scripting
 	{
 		const ScopeCursor* cursor = ActiveCursor();
 		return cursor ? cursor->m_Position : m_Current;
+	}
+
+	uint32 SymbolTable::CurrentUnit() const
+	{
+		const ScopeCursor* cursor = ActiveCursor();
+		return cursor ? cursor->m_Unit : 0;
 	}
 
 	ScopeGuard SymbolTable::PushScope(Scope::Kind kind, const Core::String& name)

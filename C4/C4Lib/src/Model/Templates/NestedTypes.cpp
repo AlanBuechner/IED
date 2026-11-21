@@ -16,6 +16,7 @@ namespace Scripting
 		def.objectBody = &nested;
 		def.declScope = owner.scope;
 		def.bindingParent = owner.binding;
+		def.unit = owner.unitId;
 		if (nested.IsTemplated())
 		{
 			model.Writes().Ask("a nested template");

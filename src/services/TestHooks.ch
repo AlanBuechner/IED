@@ -5,6 +5,8 @@
 
 include "web/Rpc.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	class TestTopic

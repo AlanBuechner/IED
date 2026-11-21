@@ -10,6 +10,11 @@
 include "Manifest.ch"
 include "Languages.ch"
 include "web/Rpc.ch"
+include "services/Workspaces.ch"
+
+namespace Ied { class CodeInstance; }
+
+namespace Ied { class Server; }
 
 namespace Ied
 {

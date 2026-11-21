@@ -11,6 +11,8 @@ include "solutions/Model.ch"
 include "LocalState.ch"
 include "ReadOnly.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	// Whether a master that starts opens again the workspaces that were open when it last ran (docs/10 "Workspaces").

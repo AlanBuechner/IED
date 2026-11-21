@@ -4,6 +4,8 @@
 
 include "Workspaces.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	const int64 c_TrashCapBytes = 4294967296;

@@ -12,6 +12,8 @@ include "tasks/Model.ch"
 include "services/Workspaces.ch"
 include "web/Rpc.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	enum class DebugState { Building, Starting, Running, Stopped, Ended, Failed }

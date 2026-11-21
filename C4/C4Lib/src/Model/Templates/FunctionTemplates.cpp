@@ -1,4 +1,5 @@
 #include "Model/Templates/FunctionTemplates.h"
+#include "Model/NotIncluded.h"
 #include "Model/Types/SignatureType.h"
 #include "Model/Templates/TemplateArguments.h"
 #include "Model/Templates/TemplateDeduction.h"
@@ -62,6 +63,19 @@ namespace Scripting
 		CollectFrom(model, call, Visible(model, call), out, reasons);
 	}
 
+	uint32 FunctionTemplates::UnseenUnit(const ProgramModel& model, const TemplateCall& call)
+	{
+		std::vector<uint32> units;
+		for (const ProgramModel::TemplateDef* def : Named(model, call))
+			if (!IsNameable(model, *def, call.unitId)) units.push_back(def->unit);
+		return IncludableUnit(model, units);
+	}
+
+	bool FunctionTemplates::IsNameable(const ProgramModel& model, const ProgramModel::TemplateDef& def, uint32 unitId)
+	{
+		return def.memberOf || IsExtension(def.functionBody) || model.m_Symbols->IsVisible(def.unit, unitId);
+	}
+
 	void FunctionTemplates::CollectMembers(const ProgramModel& model, const TemplateCall& call, const ObjectType* owner,
 		Core::Vector<OverloadCandidate>& out, Core::Vector<Core::String>& reasons)
 	{
@@ -122,7 +136,7 @@ namespace Scripting
 			target.GetName() + "'" + (reasons.Empty() ? Core::String() : ": " + reasons[0]));
 	}
 
-	void FunctionTemplates::AttachExtensions(const ProgramModel& model, const ObjectType* instance, uint32 unitId)
+	void FunctionTemplates::AttachExtensions(const ProgramModel& model, const ObjectType* instance)
 	{
 		Core::Vector<const FunctionRecord*> attached;
 		for (const auto& [name, defs] : model.m_FunctionTemplates)
@@ -132,7 +146,7 @@ namespace Scripting
 				TemplateCall call;
 				call.name = name;
 				call.receiver = instance;
-				call.unitId = unitId;
+				call.unitId = def.unit;
 				auto rec = Instantiate(model, def, name, call);
 				if (!rec.Ok() || rec.value->containingType != instance || attached.Contains(rec.value)) continue;
 				attached.Push(rec.value);
@@ -140,7 +154,18 @@ namespace Scripting
 			}
 	}
 
+	// A free call sees a template as it sees a function: when its file includes a file that declares it (the
+	// definition may be in a file it does not include, as a function's body may). An extension template is a member
+	// of the type it extends, reached through the receiver like any member.
 	Core::Vector<const ProgramModel::TemplateDef*> FunctionTemplates::Visible(const ProgramModel& model, const TemplateCall& call)
+	{
+		Core::Vector<const ProgramModel::TemplateDef*> out;
+		for (const ProgramModel::TemplateDef* def : Named(model, call))
+			if (IsNameable(model, *def, call.unitId)) out.Push(def);
+		return out;
+	}
+
+	Core::Vector<const ProgramModel::TemplateDef*> FunctionTemplates::Named(const ProgramModel& model, const TemplateCall& call)
 	{
 		// A member call names extension templates (any namespace: the receiver selects them). A qualified free
 		// call names the templates of that namespace; an unqualified one, those of the innermost enclosing
@@ -223,18 +248,19 @@ namespace Scripting
 			if (const FunctionRecord* made = TemplateInstantiator().MadeFunction(model, def, name, args)) return Result::Success(made);
 		Scope* parent = def.bindingParent ? def.bindingParent : const_cast<Scope*>(def.declScope ? def.declScope : model.m_Symbols->GetRoot());
 		Scope* binding = model.m_Symbols->CreateScope(Scope::Kind::Block, "inst", parent);
-		auto complete = TemplateArgumentResolver::CompleteAndBind(model, *def.params, args, call.unitId, binding, name);
+		// A default argument and the extended type are written in the template: they resolve as its file's do.
+		auto complete = TemplateArgumentResolver::CompleteAndBind(model, *def.params, args, def.unit, binding, name);
 		if (!complete.Ok()) return Result::Fail(complete.error, complete.message);
 		args = complete.value;
 
 		const Type* receiver = nullptr;
 		if (def.functionBody->IsExtensionMethod())
 		{
-			auto extended = ExtendedType(model, def, binding, call.receiver, call.unitId);
+			auto extended = ExtendedType(model, def, binding, call.receiver);
 			if (!extended.Ok()) return Result::Fail(extended.error, extended.message);
 			receiver = extended.value;
 		}
-		return TemplateInstantiator().InstantiateFunction(model, def, name, args, binding, receiver, call.unitId);
+		return TemplateInstantiator().InstantiateFunction(model, def, name, args, binding, receiver);
 	}
 
 	bool FunctionTemplates::CouldDefine(const ProgramModel::TemplateDef& def, const ProgramModel::TemplateDef& decl)
@@ -274,11 +300,11 @@ namespace Scripting
 	}
 
 	QueryResult<const Type*> FunctionTemplates::ExtendedType(const ProgramModel& model, const ProgramModel::TemplateDef& def,
-		Scope* binding, const Type* receiver, uint32 unitId)
+		Scope* binding, const Type* receiver)
 	{
 		// The type `extends` names for these arguments; the call's receiver must be it or derive from it.
 		auto node = QualTypeNode::FromParts(def.functionBody->GetExtendsTypeName(), Ref<AstNode>(), {}, false);
-		auto extended = model.ResolveTypeInternal(*node, unitId, binding, nullptr);
+		auto extended = model.ResolveTypeInternal(*node, def.unit, binding, nullptr);
 		if (!extended.Ok()) return extended;
 		const Type* target = TypeHandle::UnwrapToValue(extended.value);
 		const Type* actual = TypeHandle::UnwrapToValue(receiver);

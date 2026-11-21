@@ -1,0 +1,2 @@
+include "vector.ch"
+int32 main() { float r = M::Round(1.5f); return (int32)r; }

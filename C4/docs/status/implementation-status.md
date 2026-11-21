@@ -22,7 +22,7 @@ DifferentialTest (150 programs against clang), the concurrent-GC step (Bedrock, 
 | Feature | Status | Notes | Page |
 |---|---|---|---|
 | Whole-program compilation, parse-once includes | **Implemented** | Parallel parse, include closure, cycle recovery | [program model](../language/01-program-model.md) |
-| Include-closure visibility for bodies | **Implemented** | Declarations (fields, signatures) resolve program-wide | [program model](../language/01-program-model.md) |
+| Include-closure visibility | **Implemented** | One rule for bodies, declarations and template instances (D-88): a name is seen through the file's includes; members of a type need none | [program model](../language/01-program-model.md) |
 | File-scope order independence | **Implemented** | A file-scope `const` folds in every position before its declaration (B24) | [program model](../language/01-program-model.md) |
 | Namespaces | **Implemented** | | [program model](../language/01-program-model.md) |
 | `#define` / function-like / variadic macros, `#undef` | **Implemented** | | [preprocessor](../language/02-preprocessor.md) |

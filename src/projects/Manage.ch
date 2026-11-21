@@ -10,6 +10,8 @@ include "Steps.ch"
 include "plugins/Host.ch"
 include "web/Rpc.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	// What a project made of a folder is, as the caller says; an empty field is left to IED or the build system.

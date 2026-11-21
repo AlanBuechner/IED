@@ -6,6 +6,8 @@
 include "fs/TextEdit.ch"
 include "Workspaces.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	const int64 c_DocumentHistoryVersions = 1000;

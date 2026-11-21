@@ -6,6 +6,8 @@ include "Model.ch"
 include "Matcher.ch"
 include "services/Workspaces.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	enum class RunStatus { Queued, Running, Succeeded, Failed, Cancelled }

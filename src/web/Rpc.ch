@@ -7,6 +7,10 @@
 include "Params.ch"
 include "Hub.ch"
 
+namespace Ied { class Session; }
+
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	// A request's cancellation (`cancel`): set once, waking a method that sleeps.

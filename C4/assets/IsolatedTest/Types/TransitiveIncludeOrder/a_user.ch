@@ -1,6 +1,8 @@
-// Uses Vec WITHOUT including z_def.ch: it relies on every includer pulling z_def.ch in FIRST,
-// exactly like a header that leans on its includer's umbrella include order. The program model
-// must preserve that include-before-use ordering across the whole program.
+// Uses Vec of z_def.ch, which sorts after this file: the program model registers every declaration before it
+// resolves any, so the order the files are met in never matters. (A header that left the include out and leaned on
+// its includers' include order is NegativeTest HeaderLeansOnItsIncluder: a declaration sees what its file includes.)
+include "z_def.ch"
+
 class User {
 public:
     public Vec v;

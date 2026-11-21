@@ -7,6 +7,8 @@ include "Outbox.ch"
 include "Rpc.ch"
 include "Frames.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	struct DeviceInfo

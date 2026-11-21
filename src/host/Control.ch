@@ -4,6 +4,7 @@
 //     {"jsonrpc":"2.0","id":1,"method":"open","params":{"path":"C:/game/src/main.cf","line":42}}
 
 include "bedrock.ch"
+include "Server.ch"
 
 namespace Ied
 {

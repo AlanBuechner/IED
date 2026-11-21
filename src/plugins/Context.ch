@@ -5,6 +5,7 @@
 // projectIcons marker for it lies in the workspace's root or a project's root.
 
 include "When.ch"
+include "host/Server.ch"
 
 namespace Ied
 {

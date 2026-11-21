@@ -1,0 +1,2 @@
+Box<int32> g_Box;
+int32 main() { return 0; }

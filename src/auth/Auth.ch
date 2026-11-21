@@ -7,6 +7,8 @@ include "Throttle.ch"
 include "host/SecurityLog.ch"
 include "web/Rpc.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	const int64 c_LaunchTokenMs = 60000;

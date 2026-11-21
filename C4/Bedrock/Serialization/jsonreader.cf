@@ -1,5 +1,6 @@
 include "jsonreader.ch"
 include "jsontokens.ch"
+include "Container/array.ch"
 
 namespace Serialization
 {

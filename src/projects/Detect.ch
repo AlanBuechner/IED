@@ -4,6 +4,7 @@
 // plugins of that language or of none, less those another of them extends. Everything comes from the plugins.
 
 include "services/Workspaces.ch"
+include "host/Server.ch"
 
 namespace Ied
 {

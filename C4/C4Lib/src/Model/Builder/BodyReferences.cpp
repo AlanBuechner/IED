@@ -28,7 +28,7 @@ namespace Scripting
 		for (uint32 i = 0; i < records.Count(); ++i)
 		{
 			const AstNode* body = records[i]->bodyNode;
-			const uint32 unit = records[i]->definingUnit;
+			const uint32 unit = records[i]->LookupUnit();
 			if (body && body->Type() == NodeType::CodeBlock && opened.emplace(body, unit).second)
 				InstantiateNamedTypes(model, body, unit);
 		}

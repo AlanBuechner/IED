@@ -28,7 +28,7 @@ in `C4Lib`.
         v
  [4] AnalyzeProgram
         |   DetectUserMain
-        |   ModelBuilder: pass 1 REGISTER shells -> pass 2 RESOLVE fixed point -> FinalizeLayouts
+        |   ModelBuilder: pass 1 REGISTER shells -> pass 2 RESOLVE on demand   -> FinalizeLayouts
         |   -> one ProgramModel; diagnostics = parse errors + model errors
         |   any front-end error stops here
         v
@@ -192,9 +192,11 @@ diagnostic there adds `note: in the expansion of the macro 'X' (file:line): ...`
    merge, no per-file re-analysis. A unit with parse errors is built like any other: every declaration it parsed
    is registered and its `ErrorNode`s are passed by, so its includers resolve what they name in it (R7).
 3. Builder passes (details in [02-program-model.md](02-program-model.md#build-passes)):
-   pass 1 registers every shell; pass 2 resolves to a fixed point (types, bases, fields, packed regions,
-   methods, free and extension functions, out-of-line bodies, constant folding); then template
-   specializations named inside bodies are instantiated and `TypeStore::FinalizeLayouts` computes layouts.
+   pass 1 registers every shell; pass 2 resolves each declaration on demand, once (`DeclarationQueries`:
+   types, bases, fields, packed regions, methods, free and extension functions, out-of-line bodies - a
+   declaration first resolves what it names, and one that depends on itself is an error with the cycle), in
+   one sweep in declaration order, and folds the constants; then template specializations named inside bodies
+   are instantiated and `TypeStore::FinalizeLayouts` computes layouts.
    The prelude (`Bedrock/Prelude/prelude.ch`, which `SourceManager::RegisterIncludedLibraryFiles` always
    registers) is visited after the program, and every unit's include closure contains it (D-43).
 4. Diagnostics from the parse and the model are one list (`GetAllDiagnostics`), reported once by
@@ -356,14 +358,19 @@ The target is Windows x64 or Linux x64 (`--target`, D-86); another one is a `Tar
 
 ## Include visibility
 
-C4 compiles one program, but name visibility still follows includes. The rules, as enforced by
-`SymbolTable::IsVisible` / `FindVisible`:
+C4 compiles one program, but name visibility follows includes, by one rule for every lookup (D-88,
+[language 1.4](../language/01-program-model.md#14-visibility-one-rule)), enforced by `SymbolTable::IsVisible` /
+`FindVisible` from the asking unit every name query carries:
 
 | Situation | Rule |
 |---|---|
-| Declaration-level resolution during the build (field types, signatures, bases) | Program-wide (unit 0 sees everything). A header may name a type from a sibling header it never includes; the model is complete regardless of include order. |
-| Body-level resolution (HIR lowering) | The defining unit of the symbol must be the asking unit, a builtin (unit 0), or in the asking unit's transitive include closure. |
+| Any name, in a declaration (pass 2: `TypeResolver::ResolveTypeInContext` with the declaration's unit) or in a body (HIR lowering with `FunctionRecord::LookupUnit`) | The defining unit of the symbol must be the asking unit, a builtin (unit 0), or in the asking unit's transitive include closure. Every declaration is registered before any is resolved, so the order of declarations and of includes never matters. |
 | Functions | Visibility comes from the record's `declUnit` (where it is DECLARED), not where the body is. Including the header that declares a function is enough, even though the body lives in a `.cf`. |
+| Templates | A class or alias template is nameable when a declaration of it (`TemplateDef::unit`) is visible (`TemplateInstantiator::VisibleTypeDefinition`); a free function template as a function is (`FunctionTemplates::Visible`). Which definition, specialization or out-of-line method body builds the instance is decided program-wide, as a function's body is found wherever it is. |
+| A template's instance | Its declarations and bodies resolve in the template's unit (`TemplateDef::unit`; a method defined out of line in its definition's unit: `FunctionRecord::templateUnit`), its arguments in the unit that writes them. An instance never depends on who asked for it first. A name in it is first one of its bindings or of the classes around it (`Scope::FindBound`: a template parameter, a member type - no include decides those), then a name of the template's namespaces seen through the template's includes. |
+| Members | Reached through the object's type: fields, methods, operators and extension methods of an object type are not looked up by name, so no unit is asked. An extension of a primitive (`extends float`) is found through the includes, like a function. |
+| A name that exists in a file not included | `no type named Widget is visible here: it is declared in widgets.ch, which this file does not include` (`Model/NotIncluded`: types, templates, functions, variables, constants); beside a mismatch of the visible overloads, `(another 'Round' is declared in ..., which this file does not include)`. A template instance's failure is reported where the instance is written and names the template's file (`NotIncludedIn`: `no type named Tag is visible in box.ch: it is declared in tag.ch, which box.ch does not include`). A declaration of a project the asking one does not depend on is that error instead (D-59: no include reaches it). |
+| Tools asking with unit 0 (the LSP's program-wide queries, internal lookups) | See everything. |
 | Bedrock | Always compiled; visible only through `include "bedrock.ch"` (or a file it reaches). |
 | File-scope `static` free functions/variables | Internal linkage: same-named statics in different files are distinct symbols; a lookup prefers the asking unit's own entry. |
 | Duplicate non-static global types/variables across files | Hard error (`redefinition of type 'X'`). There are no tentative definitions: a global in a header is defined once because the header is a unit. |

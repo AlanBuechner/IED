@@ -1,0 +1,2 @@
+include "scalar.ch"
+float Other(float x) { return M::Round(x); }

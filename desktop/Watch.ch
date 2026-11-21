@@ -5,6 +5,8 @@
 
 include "Launcher.ch"
 
+namespace Desktop { class App; }
+
 namespace Desktop
 {
 	const int32 c_ServerRestarts = 3;

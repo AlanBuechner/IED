@@ -1,4 +1,5 @@
 include "transaction.ch"
+include "bedrock.ch"
 
 namespace Ledger
 {

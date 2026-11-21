@@ -64,6 +64,7 @@ namespace Scripting
 	{
 		model.Writes().Ask("a local type");
 		Scope* layer = model.m_Symbols->Current();
+		const uint32 unit = model.m_Symbols->CurrentUnit(); // a local declaration sees what the body around it sees
 		if (!layer) return QueryResult<const Type*>::Fail(QueryError::NotFound, "no scope to register a local type in");
 
 		if (const auto* obj = dynamic_cast<const ObjectDefinitionNode*>(&decl))
@@ -75,7 +76,7 @@ namespace Scripting
 			ApplyLocalIdentity(*t, *obj, layer);
 			for (const auto& b : obj->GetBaseClasses())
 			{
-				auto bt = TypeResolver().ResolveTypeInternal(model, *b.m_Type, 0, layer, nullptr);
+				auto bt = TypeResolver().ResolveTypeInternal(model, *b.m_Type, unit, layer, nullptr);
 				if (!bt.Ok()) { delete t; return QueryResult<const Type*>::Fail(bt.error, bt.message); }
 				if (const auto* bo = dynamic_cast<const ObjectType*>(bt.value)) t->AddBaseType(bo);
 			}
@@ -85,14 +86,14 @@ namespace Scripting
 				const auto* child = member.Get();
 				if (const auto* al = dynamic_cast<const AliasDefinitionNode*>(child))
 				{
-					auto at = TypeResolver().ResolveTypeInternal(model, *al->GetAliasedType(), 0, layer, nullptr);
+					auto at = TypeResolver().ResolveTypeInternal(model, *al->GetAliasedType(), unit, layer, nullptr);
 					if (!at.Ok()) { delete t; return QueryResult<const Type*>::Fail(at.error, at.message); }
 					SymbolInfo sym; sym.kind = SymbolKind::Type; sym.type = at.value; sym.definingUnit = 0;
 					layer->Register(al->GetNameToken().GetText(), sym); // local alias usable by later members
 				}
 				else if (const auto* var = dynamic_cast<const VariableDefinitionNode*>(child))
 				{
-					auto vt = TypeResolver().ResolveTypeInternal(model, *var->GetType(), 0, layer, nullptr);
+					auto vt = TypeResolver().ResolveTypeInternal(model, *var->GetType(), unit, layer, nullptr);
 					if (!vt.Ok()) { delete t; return QueryResult<const Type*>::Fail(vt.error, vt.message); }
 					// A comma list (`int32 x, y;`) declares MULTIPLE fields - register every declarator.
 					// (The global-struct path does the same; using only GetNameToken here dropped all but
@@ -111,7 +112,7 @@ namespace Scripting
 				}
 				else if (const auto* fn = dynamic_cast<const FunctionDefinitionNode*>(child))
 				{
-					auto rt = TypeResolver().ResolveTypeInternal(model, *fn->GetReturnType(), 0, layer, nullptr);
+					auto rt = TypeResolver().ResolveTypeInternal(model, *fn->GetReturnType(), unit, layer, nullptr);
 					if (!rt.Ok()) { delete t; return QueryResult<const Type*>::Fail(rt.error, rt.message); }
 					ObjectType::MethodInfo m;
 					m.mName = fn->GetName()->GetFirstIdentifierToken().GetText();
@@ -119,7 +120,7 @@ namespace Scripting
 					Core::Vector<FunctionType::ParameterInfo> paramInfos;
 					for (const auto& p : fn->GetParameters())
 					{
-						auto pt = TypeResolver().ResolveTypeInternal(model, *p->GetType(), 0, layer, nullptr);
+						auto pt = TypeResolver().ResolveTypeInternal(model, *p->GetType(), unit, layer, nullptr);
 						if (!pt.Ok()) { delete t; return QueryResult<const Type*>::Fail(pt.error, pt.message); }
 						m.m_ParameterTypes.Push(pt.value);
 						FunctionType::ParameterInfo pi; pi.mName = p->GetNameToken().GetText(); pi.m_Type = pt.value;
@@ -142,6 +143,7 @@ namespace Scripting
 					rec.bodyNode = fn->GetBody().Get();
 					rec.declarations.Push(fn);
 					rec.definingUnit = 0;
+		rec.templateUnit = unit;
 					rec.mangledName = MethodSymbol(nullptr, *t, m.mName, *sig, rec.isConst);
 					rec.mangledName = CanonicalSymbolName(layer, rec.mangledName); // the enclosing function's path keeps local types apart
 					const FunctionRecord* stored = model.m_Symbols->AddFunctionRecord(rec);
@@ -164,7 +166,7 @@ namespace Scripting
 			const Type* underlying = model.m_Types->Builtin(TypeKind::Int32);
 			if (en->HasUnderlyingType())
 			{
-				auto ut = TypeResolver().ResolveTypeInternal(model, *en->GetUnderlyingType(), 0, layer, nullptr);
+				auto ut = TypeResolver().ResolveTypeInternal(model, *en->GetUnderlyingType(), unit, layer, nullptr);
 				if (!ut.Ok()) return QueryResult<const Type*>::Fail(ut.error, ut.message);
 				underlying = ut.value;
 			}
@@ -182,7 +184,7 @@ namespace Scripting
 				if (m->HasInitializer() && m->GetInitializer())
 				{
 					ConstEvaluator eval(model, layer);
-					auto v = eval.Evaluate(m->GetInitializer().Get(), 0, layer);
+					auto v = eval.Evaluate(m->GetInitializer().Get(), unit, layer);
 					if (!v.Ok()) { delete t; return QueryResult<const Type*>::Fail(v.error, v.message); }
 					mi.m_Value = v.value.AsInt();
 					next = mi.m_Value + 1;
@@ -208,10 +210,11 @@ namespace Scripting
 	QueryResult<const Type*> LoweringScopes::RegisterLocalAlias(ProgramModel& model, const AliasDefinitionNode& alias)
 	{
 		Scope* layer = model.m_Symbols->Current();
+		const uint32 unit = model.m_Symbols->CurrentUnit(); // a local declaration sees what the body around it sees
 		if (!layer) return QueryResult<const Type*>::Fail(QueryError::NotFound, "no scope to register a local alias in");
 
 		const Core::String name = alias.GetNameToken().GetText();
-		auto at = TypeResolver().ResolveTypeInternal(model, *alias.GetAliasedType(), 0, layer, nullptr);
+		auto at = TypeResolver().ResolveTypeInternal(model, *alias.GetAliasedType(), unit, layer, nullptr);
 		if (!at.Ok()) return QueryResult<const Type*>::Fail(at.error, at.message);
 		SymbolInfo sym; sym.kind = SymbolKind::Type; sym.type = at.value; sym.definingUnit = 0; sym.declNode = &alias;
 		if (!layer->Register(name, sym))
@@ -223,16 +226,17 @@ namespace Scripting
 	{
 		model.Writes().Ask("a local function");
 		Scope* layer = model.m_Symbols->Current();
+		const uint32 unit = model.m_Symbols->CurrentUnit(); // a local declaration sees what the body around it sees
 		if (!layer) return QueryResult<const FunctionRecord*>::Fail(QueryError::NotFound, "no scope to register a local function in");
 
 		const Core::String name = fn.GetName()->GetFirstIdentifierToken().GetText();
-		auto rt = TypeResolver().ResolveTypeInternal(model, *fn.GetReturnType(), 0, layer, nullptr);
+		auto rt = TypeResolver().ResolveTypeInternal(model, *fn.GetReturnType(), unit, layer, nullptr);
 		if (!rt.Ok()) return QueryResult<const FunctionRecord*>::Fail(rt.error, rt.message);
 		Core::Vector<FunctionType::ParameterInfo> paramInfos;
 		uint32 trailingDefaults = 0;
 		for (const auto& p : fn.GetParameters())
 		{
-			auto pt = TypeResolver().ResolveTypeInternal(model, *p->GetType(), 0, layer, nullptr);
+			auto pt = TypeResolver().ResolveTypeInternal(model, *p->GetType(), unit, layer, nullptr);
 			if (!pt.Ok()) return QueryResult<const FunctionRecord*>::Fail(pt.error, pt.message);
 			FunctionType::ParameterInfo pi;
 			pi.mName = p->HasName() ? p->GetNameToken().GetText() : "arg";
@@ -249,6 +253,7 @@ namespace Scripting
 		rec.bodyNode = fn.GetBody().Get();
 		rec.declarations.Push(&fn);
 		rec.definingUnit = 0;
+		rec.templateUnit = unit;
 		rec.mangledName = FunctionSymbol(layer, name, *sig);
 		rec.isLocal = true; // emitted as part of its parent's tree (nestedFunctions), never top-level
 		rec.minArity = paramInfos.Count() > trailingDefaults ? paramInfos.Count() - trailingDefaults : 0;

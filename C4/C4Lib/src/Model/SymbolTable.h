@@ -54,6 +54,11 @@ namespace Scripting
 		mutable uint32 definingUnit = 0;            // source id of the defining file (0 = builtin); mutable: a body attached at pass 2 re-points it to the definition's unit
 		mutable uint32 declUnit = 0;                // the unit where this record was DECLARED - stable, used for VISIBILITY. Never re-pointed at body-attach (that would hide the name from header-only includers).
 		mutable Core::Vector<uint32> declUnits;     // every unit that declares it (BUG-340): each makes the name visible to its includers
+		// A template-made record has no file of its own (definingUnit 0: it is placed by its name): the file its body is
+		// written in, the template's or its out-of-line definition's.
+		uint32 templateUnit = 0;
+		/// The unit whose includes the body's names resolve in (docs/language/01 section 1.4).
+		uint32 LookupUnit() const { return templateUnit ? templateUnit : definingUnit; }
 		Core::String mangledName;                   // unique emitted symbol for this signature
 		Core::String name;                          // plain C4-side name (not mangled) - reflection display + group queries
 		Core::Vector<Core::String> groups;          // [group("name")] annotations on the declaration (reflection, plan 14)
@@ -193,6 +198,11 @@ namespace Scripting
 		/// the name is not declared anywhere on the chain.
 		const SymbolInfo* Find(const Core::String& name) const;
 
+		/// What `name` is bound to in the layers below the first namespace or file layer: a template's parameter, a
+		/// member of the classes around. No include makes those visible - their template or type does. Null when the
+		/// name is a namespace's or the file's, which the asking file's includes decide (SymbolTable::FindVisible).
+		const SymbolInfo* FindBound(const Core::String& name) const;
+
 		/// Every symbol in THIS layer (no parent walk), for whole-tree passes (const folding).
 		void Enumerate(Core::Vector<std::pair<Core::String, SymbolInfo*>>& out) const;
 
@@ -289,11 +299,12 @@ namespace Scripting
 	/// lowerings on several threads never see each other's locals. While it lives it is its thread's lowering position
 	/// (SymbolTable::Current); a lowering inside another on the same thread (a lambda's body, a local function's)
 	/// starts where the outer one is. Its layers hang under that place without joining the tree's children, and the
-	/// table keeps them when it ends: a local function's record names the layer it was declared in.
+	/// table keeps them when it ends: a local function's record names the layer it was declared in. `unit` is the file
+	/// whose includes the lowered body sees: what it declares locally sees the same.
 	class ScopeCursor
 	{
 	public:
-		explicit ScopeCursor(SymbolTable& table);
+		explicit ScopeCursor(SymbolTable& table, uint32 unit = 0);
 		~ScopeCursor();
 		ScopeCursor(const ScopeCursor&) = delete;
 		ScopeCursor& operator=(const ScopeCursor&) = delete;
@@ -306,6 +317,7 @@ namespace Scripting
 		friend class ScopeGuard;
 		SymbolTable& m_Table;
 		ScopeCursor* m_Outer;   // the thread's cursor before this one
+		uint32 m_Unit;
 		Scope* m_Position;
 		Core::Vector<std::unique_ptr<Scope>> m_Layers;
 		std::unique_ptr<std::deque<std::vector<SymbolInfo>>> m_Packs = std::make_unique<std::deque<std::vector<SymbolInfo>>>();
@@ -368,6 +380,8 @@ namespace Scripting
 		/// The current lowering position: the calling thread's ScopeCursor's, else the innermost layer pushed on the
 		/// table's own position, or the root when none.
 		Scope* Current() const;
+		/// The unit of the calling thread's lowering (its ScopeCursor's); 0, which sees every file, when it has none.
+		uint32 CurrentUnit() const;
 
 		// --- Records ----------------------------------------------------------------------
 		/// Own a FunctionRecord for a symbol. Stable for the model's lifetime. A C4 function's symbol that

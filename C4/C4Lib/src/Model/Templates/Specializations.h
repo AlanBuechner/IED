@@ -19,16 +19,15 @@ namespace Scripting
 		/// specializations whose pattern they match (C++ partial ordering). Two matches neither more
 		/// specialized than the other are an error naming both.
 		static QueryResult<Choice> ForType(const ProgramModel& model, const ProgramModel::TemplateDef& primary, const Core::String& name,
-			const TemplateArgs& args, uint32 unitId);
+			const TemplateArgs& args);
 
 		/// The explicit specialization of the function template `primary` for `args`, or null.
 		static QueryResult<const ProgramModel::TemplateDef*> ForFunction(const ProgramModel& model, const ProgramModel::TemplateDef& primary,
-			const Core::String& name, const TemplateArgs& args, uint32 unitId);
+			const Core::String& name, const TemplateArgs& args);
 
 	private:
 		/// The arguments of `spec`'s own parameters that make its pattern exactly `args`; failure when none do.
-		static QueryResult<TemplateArgs> Match(const ProgramModel& model, const ProgramModel::TemplateDef& spec, const TemplateArgs& args,
-			uint32 unitId);
+		static QueryResult<TemplateArgs> Match(const ProgramModel& model, const ProgramModel::TemplateDef& spec, const TemplateArgs& args);
 		static bool Equal(const ProgramModel& model, const AstNode* pattern, const TemplateArg& arg, uint32 unitId, Scope* binding);
 		/// Whether the trailing expansion of `spec`'s pattern stands for exactly `args` from `from` on.
 		static bool ExpansionEqual(const ProgramModel& model, const ProgramModel::TemplateDef& spec, const TemplateArgs& args, uint32 from,

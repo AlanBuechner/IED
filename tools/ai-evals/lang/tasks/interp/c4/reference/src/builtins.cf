@@ -1,5 +1,6 @@
 include "builtins.ch"
 include "errors.ch"
+include "value.ch"
 
 namespace Calc
 {

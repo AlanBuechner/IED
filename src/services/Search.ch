@@ -6,6 +6,8 @@ include "fs/Search.ch"
 include "fs/Fuzzy.ch"
 include "Documents.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	const int64 c_SearchDefaultResults = 2000;

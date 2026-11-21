@@ -12,6 +12,9 @@ namespace Core
 	// elements are relocated, never copied.
 	template<T, F> void Sort(T* items, int64 count, F before);
 
+	// Exchanges two elements by relocating them (no copy, no create).
+	template<T> void SwapElements(T* items, int64 i, int64 j);
+
 	// The first index whose element is not before `value` (std::lower_bound), or `count`.
 	template<T, F> int64 LowerBound(const T* items, int64 count, const T& value, F before);
 	// The first index whose element `value` is before (std::upper_bound), or `count`.

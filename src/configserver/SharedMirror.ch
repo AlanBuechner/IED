@@ -9,6 +9,8 @@
 
 include "ConfigPackages.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	// What the app settings say to follow, read with the server lock held.

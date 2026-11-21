@@ -86,11 +86,11 @@ ENGINE_EDITOR = "1"
    (.../git/code/Service.ch and .../chat/code/Service.ch): rename one, or include it by a path only one of them has`).
 4. **A project uses only what it depends on.** Including a file of a project that is not the file's own and not a
    dependency of it is an error: `cannot include 'player.ch': it is a file of project 'Game', and project 'Engine'
-   does not depend on 'Game'`. Names follow the same rule: in a body a name is visible only through includes
-   ([1.4](01-program-model.md#14-visibility-declarations-vs-bodies)), which the include rule bounds; in a
-   declaration (a field's type, a base class, a signature), where names resolve program-wide, a name from a project
-   the declaration's project does not depend on is an error: `'Player' is declared in project 'Game', and project
-   'Engine' does not depend on 'Game'`. So a reusable project can never call into the project that uses it. A
+   does not depend on 'Game'`. Names follow the same rule: a name is visible only through includes
+   ([1.4](01-program-model.md#14-visibility-one-rule)), which the include rule bounds, and a declaration (a field's
+   type, a base class, a signature) that reaches a name of a project its own project does not depend on - through
+   a forward declaration or a dependency's include - is an error: `'Player' is declared in project 'Game', and
+   project 'Engine' does not depend on 'Game'`. So a reusable project can never call into the project that uses it. A
    template argument is not a name the template wrote: an engine template used with a game type works. A name C4
    builds in that another project's C bindings declare too (a header's `typedef char* va_list;`) is the built-in to a
    project out of that one's reach: the declaration it cannot use hides nothing.

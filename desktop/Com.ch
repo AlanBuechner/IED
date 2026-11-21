@@ -5,6 +5,7 @@
 //         [self](void* error, void* controller) -> int32 { return self->ControllerReady(Desktop::Hresult(error), controller); });
 
 include "Native.ch"
+include "bedrock.ch"
 
 namespace Desktop
 {

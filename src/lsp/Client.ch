@@ -7,6 +7,9 @@ include "Profiles.ch"
 include "Queue.ch"
 include "StagedProgram.ch"
 include "web/Rpc.ch"
+include "services/Workspaces.ch"
+
+namespace Ied { class Server; }
 
 namespace Ied
 {

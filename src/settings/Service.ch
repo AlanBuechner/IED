@@ -7,6 +7,8 @@ include "TierFile.ch"
 include "Merge.ch"
 include "fs/Watching.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	class Settings

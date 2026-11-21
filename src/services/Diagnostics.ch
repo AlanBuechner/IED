@@ -4,6 +4,8 @@
 
 include "Workspaces.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	class FileDiagnostics

@@ -61,6 +61,15 @@ namespace Scripting
 		return "";
 	}
 
+	// The namespace or class a template's bindings hang under; null for none and for the program's root, which a
+	// lookup without a context starts at anyway.
+	static const Scope* DeclarationScope(const Scope* bindingScope)
+	{
+		const Scope* scope = bindingScope;
+		while (scope && (scope->GetKind() == Scope::Kind::Block || scope->GetKind() == Scope::Kind::Function)) scope = scope->GetParent();
+		return scope && scope->GetParent() ? scope : nullptr;
+	}
+
 	QueryResult<ConstantValue> ConstEvaluator::EvaluateName(const Core::String& name, uint32 unitId, Scope* bindingScope) const
 	{
 		Visiting visiting;
@@ -75,10 +84,20 @@ namespace Scripting
 		auto boundValue = [](const SymbolInfo* s) {
 			return s && s->kind == SymbolKind::Variable && s->isConst && !s->constValue.IsNone();
 		};
+		// A template instance's declaration has no asking context of its own: its names are looked up from where the
+		// template is declared, so a constant of the template's namespace folds whether or not anything folded it yet.
+		if (!m_Context)
+			if (const Scope* declared = DeclarationScope(bindingScope))
+				return ConstEvaluator(m_Model, declared).EvaluateNamed(name, unitId, visiting, bindingScope);
 		if (name.find("::") == Core::String::npos && Packs::Find(m_Model, name, bindingScope))
 			return QueryResult<ConstantValue>::Fail(QueryError::NotAValue, "the pack '" + name + "' must be expanded with '...'");
 		if (bindingScope && name.find("::") == Core::String::npos)
-			if (const SymbolInfo* bound = bindingScope->Find(name); boundValue(bound)) return QueryResult<ConstantValue>::Success(bound->constValue);
+		{
+			// Past the bindings the chain reaches the template's namespaces: those names need the include (D-88).
+			const SymbolInfo* bound = bindingScope->FindBound(name);
+			if (!bound) bound = m_Model.Symbols()->FindVisible(bindingScope, name, unitId);
+			if (boundValue(bound)) return QueryResult<ConstantValue>::Success(bound->constValue);
+		}
 		// A local shadows every program constant: it folds only when it is a const bound to a value.
 		if (const SymbolInfo* local = m_Model.FindLocal(name); local && local->kind == SymbolKind::Variable)
 		{
@@ -416,7 +435,7 @@ namespace Scripting
 			if (info->kind != SymbolKind::Variable || !info->initializer || !info->constValue.IsNone())
 				return;
 			ConstEvaluator eval(model, &scope);
-			auto v = eval.EvaluateStart(info->initializer, info->type);
+			auto v = eval.EvaluateStart(info->initializer, info->type, info->definingUnit); // as its file sees the names
 			if (v.Ok() && !v.value.IsNone()) info->constValue = v.value; // mutable until the model is sealed
 		});
 	}

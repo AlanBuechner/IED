@@ -6,6 +6,8 @@
 
 include "Json.ch"
 
+namespace Ied { class Session; }
+
 namespace Ied
 {
 	// Coalescing (docs/10): an event of a coalescible topic whose data is one growing string - `field`, beside other

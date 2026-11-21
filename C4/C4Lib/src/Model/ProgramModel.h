@@ -389,6 +389,9 @@ namespace Scripting
 			const TemplateArgumentListNode* pattern = nullptr; // a specialization's arguments (`Box<T*>`, D-20); null for a primary
 			const ObjectType* memberOf = nullptr;            // a member function template's owner (BUG-117)
 			Scope* bindingParent = nullptr;                  // the layer its instances' bindings sit on (a class template instance's)
+			// The file it is written in. A use needs a declaration of the template among its file's includes; an
+			// instance's own declarations and bodies resolve as this file's do, whoever asked for the instance.
+			uint32 unit = 0;
 			InstantiationBindings ownerNames;                // an out-of-line definition's own names for the owner's parameters
 		};
 

@@ -13,7 +13,7 @@ namespace Scripting
 
 	/// Where an instance's members are declared: the layer that binds the template's parameters, the
 	/// instance's own class layer (its static data members; its members' emitted symbols are named from it),
-	/// and the asking unit.
+	/// and the unit of the file the template is written in, whose includes decide what the members name.
 	struct InstanceSite
 	{
 		Scope* binding = nullptr;
@@ -58,8 +58,14 @@ namespace Scripting
 
 		/// The out-of-line definition of `method`, with `written` parameters as declared, whose parameters resolve to
 		/// `parameters`; with the binding layer its own template parameter names resolve in (null when there is none) and
-		/// its parameters, a pack expanded under its own names.
-		struct OutOfLine { const FunctionDefinitionNode* fn = nullptr; Scope* binding = nullptr; TemplateInstantiator::Parameters parameters; };
+		/// its parameters, a pack expanded under its own names; and the unit of the file it is written in.
+		struct OutOfLine
+		{
+			const FunctionDefinitionNode* fn = nullptr;
+			Scope* binding = nullptr;
+			TemplateInstantiator::Parameters parameters;
+			uint32 unit = 0;
+		};
 		OutOfLine FindOutOfLine(const Core::String& method, uint32 written, const Core::Vector<const Type*>& parameters, bool isConst) const;
 		bool Defines(const ProgramModel::TemplateMethodDef& def) const;
 		/// Whether an out-of-line definition's qualifier (`Box<T>::` / `Box<T*>::`) names this definition.

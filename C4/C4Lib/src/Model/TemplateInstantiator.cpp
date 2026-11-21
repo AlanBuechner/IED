@@ -1,4 +1,5 @@
 #include "Model/TemplateInstantiator.h"
+#include "Model/NotIncluded.h"
 #include "Model/Templates/ObjectTemplateBody.h"
 #include "Model/Types/ValueContainment.h"
 #include "Model/Templates/FunctionTemplates.h"
@@ -107,8 +108,9 @@ namespace Scripting
 	QueryResult<const Type*> TemplateInstantiator::InstantiateTypeTemplate(const ProgramModel& model, const Core::String& name, const Scope* declScope,
 		const TemplateArgumentListNode& args, uint32 unitId, Scope* outerBinding, const Scope* argContext) const
 	{
-		const ProgramModel::TemplateDef* def = ChooseTypeDefinition(model, name, declScope);
-		if (!def) return QueryResult<const Type*>::Fail(QueryError::NotFound, "not a template: " + name);
+		auto visible = VisibleTypeDefinition(model, name, declScope, unitId);
+		if (!visible.Ok()) return QueryResult<const Type*>::Fail(visible.error, visible.message);
+		const ProgramModel::TemplateDef* def = visible.value;
 		if (!def->params) return QueryResult<const Type*>::Fail(QueryError::NotFound, "template has no parameters: " + name);
 
 		auto written = TemplateArgumentResolver::Explicit(model, *def->params, &args, unitId, outerBinding, argContext, name);
@@ -117,7 +119,9 @@ namespace Scripting
 		if (TemplateArgumentResolver::Complete(*def->params, written.value))
 			if (const Type* made = Cached(model.m_TypeInstantiations, DefinitionKey(name, def, written.value))) return QueryResult<const Type*>::Success(made);
 		Scope* binding = model.m_Symbols->CreateScope(Scope::Kind::Block, "inst", BodyParent(model, *def));
-		auto complete = TemplateArgumentResolver::CompleteAndBind(model, *def->params, written.value, unitId, binding, name);
+		// From here on the instance is the template's and its arguments' alone: a default argument, the alias's
+		// target and the body's members resolve as the template's file's declarations do, whoever asks.
+		auto complete = TemplateArgumentResolver::CompleteAndBind(model, *def->params, written.value, def->unit, binding, name);
 		if (!complete.Ok()) return QueryResult<const Type*>::Fail(complete.error, complete.message);
 
 		const Core::String key = DefinitionKey(name, def, complete.value);
@@ -129,25 +133,54 @@ namespace Scripting
 		if (def->isAlias && def->aliasTarget)
 		{
 			// An alias template is transparent: the bound target IS the answer.
-			auto target = model.ResolveTypeInternal(*def->aliasTarget, unitId, binding, nullptr);
+			auto target = model.ResolveTypeInternal(*def->aliasTarget, def->unit, binding, nullptr);
 			if (!target.Ok()) return target;
 			model.m_InstantiationBindings.emplace(target.value, BindingsFor(model, *def->params, complete.value));
 			model.m_TypeInstantiations.emplace(key, target.value);
 			return target;
 		}
-		auto chosen = Specializations::ForType(model, *def, name, complete.value, unitId);
+		auto chosen = Specializations::ForType(model, *def, name, complete.value);
 		if (!chosen.Ok()) return QueryResult<const Type*>::Fail(chosen.error, chosen.message);
 		if (!chosen.value.def)
 		{
 			if (!def->objectBody || def->objectBody->IsDeclaration())
 				return QueryResult<const Type*>::Fail(QueryError::NotFound, "'" + name + "' is declared but not defined, and no specialization of it "
 					"is for these arguments");
-			return InstantiateObject(model, *def, name, key, complete.value, complete.value, binding, unitId);
+			return InstantiateObject(model, *def, name, key, complete.value, complete.value, binding);
 		}
 		// A specialization's body binds its own parameters (`T` of `Box<T*>` for `Box<int32*>`).
 		Scope* own = model.m_Symbols->CreateScope(Scope::Kind::Block, "inst", BodyParent(model, *chosen.value.def));
 		TemplateArgumentResolver::BindAll(model, own, *chosen.value.def->params, chosen.value.args);
-		return InstantiateObject(model, *chosen.value.def, name, key, complete.value, chosen.value.args, own, unitId);
+		return InstantiateObject(model, *chosen.value.def, name, key, complete.value, chosen.value.args, own);
+	}
+
+	// A scope's templates of the name are one template (its declaration, its definition); the use sees it when it
+	// includes any of them, and the definition builds the instance wherever it is written.
+	QueryResult<const ProgramModel::TemplateDef*> TemplateInstantiator::VisibleTypeDefinition(const ProgramModel& model, const Core::String& name,
+		const Scope* declScope, uint32 unitId) const
+	{
+		using Result = QueryResult<const ProgramModel::TemplateDef*>;
+		auto it = model.m_TypeTemplates.find(name);
+		if (it == model.m_TypeTemplates.end() || it->second.empty()) return Result::Fail(QueryError::NotFound, "not a template: " + name);
+		const ProgramModel::TemplateDef* unseen = nullptr;
+		for (const Scope* s = declScope; s; s = s->GetParent())
+		{
+			bool visible = false;
+			for (const auto& candidate : it->second)
+			{
+				if (!DeclaredIn(candidate, s)) continue;
+				visible = visible || model.m_Symbols->IsVisible(candidate.unit, unitId);
+				if (!unseen) unseen = &candidate;
+			}
+			if (visible) return Result::Success(ChooseTypeDefinition(model, name, s));
+		}
+		if (!unseen)
+		{
+			unseen = &it->second[0];
+			if (model.m_Symbols->IsVisible(unseen->unit, unitId)) return Result::Success(unseen);
+		}
+		const Core::String elsewhere = DeclaredElsewhere(model, name, "type", unseen->unit);
+		return Result::Fail(QueryError::NotVisible, elsewhere.empty() ? "not a template: " + name : elsewhere);
 	}
 
 	// Where an instance's names resolve past its parameters: the template's own declaring scope (or the class
@@ -177,7 +210,7 @@ namespace Scripting
 	}
 
 	QueryResult<const Type*> TemplateInstantiator::InstantiateObject(const ProgramModel& model, const ProgramModel::TemplateDef& def, const Core::String& name,
-		const Core::String& key, const TemplateArgs& instanceArgs, const TemplateArgs& args, Scope* binding, uint32 unitId) const
+		const Core::String& key, const TemplateArgs& instanceArgs, const TemplateArgs& args, Scope* binding) const
 	{
 		model.Writes().Ask("a class template instance");
 		const Nesting nesting(model.m_InstantiationDepth);
@@ -197,12 +230,12 @@ namespace Scripting
 		// Inside its body the template's bare name is this instance (C++'s injected class name).
 		binding->Register(name, InjectedName(self, *def.objectBody));
 
-		ObjectTemplateBody body(model, *obj, def, name, args, { binding, InstanceScope(model, *obj, def, name), unitId });
+		ObjectTemplateBody body(model, *obj, def, name, args, { binding, InstanceScope(model, *obj, def, name), def.unit });
 		if (auto built = body.Build(); !built.Ok())
 		{
 			model.m_TypeInstantiations.erase(key); // a later use may retry
 			if (built.error == QueryError::CyclicDependency) return QueryResult<const Type*>::Fail(built.error, built.message);
-			return QueryResult<const Type*>::Fail(built.error, "cannot instantiate " + name + ": " + built.message);
+			return QueryResult<const Type*>::Fail(built.error, "cannot instantiate " + name + ": " + NotIncludedIn(model, def.unit, built.message));
 		}
 		if (auto cycle = ValueContainment::CheckNotSelfContaining(obj); !cycle.Ok())
 			return QueryResult<const Type*>::Fail(cycle.error, "cannot instantiate " + name + ": " + cycle.message);
@@ -211,7 +244,7 @@ namespace Scripting
 		InstantiationBindings bindings = BindingsFor(model, *def.params, args);
 		bindings.typeParams.Push({ name, self });
 		model.m_InstantiationBindings.emplace(self, bindings);
-		FunctionTemplates::AttachExtensions(model, obj, unitId);
+		FunctionTemplates::AttachExtensions(model, obj);
 		return QueryResult<const Type*>::Success(self);
 	}
 
@@ -240,7 +273,7 @@ namespace Scripting
 		InstantiationBindings bindings = site.ownerBindings;
 		bindings.typeParams.Push({ name, self });
 		model.m_InstantiationBindings.emplace(self, bindings);
-		FunctionTemplates::AttachExtensions(model, obj, site.unitId);
+		FunctionTemplates::AttachExtensions(model, obj);
 		return QueryResult<const Type*>::Success(self);
 	}
 
@@ -278,23 +311,25 @@ namespace Scripting
 	}
 
 	QueryResult<const FunctionRecord*> TemplateInstantiator::InstantiateFunction(const ProgramModel& model, const ProgramModel::TemplateDef& def,
-		const Core::String& name, const TemplateArgs& args, Scope* binding, const Type* receiver, uint32 unitId) const
+		const Core::String& name, const TemplateArgs& args, Scope* binding, const Type* receiver) const
 	{
 		const Core::String key = FunctionKey(name, def, args, receiver);
 		if (const FunctionRecord* cached = Cached(model.m_FunctionInstantiations, key)) return QueryResult<const FunctionRecord*>::Success(cached);
-		model.Writes().Ask("a function template instance", [&model, &def, name, args, binding, receiver, unitId] {
-			(void)TemplateInstantiator().InstantiateFunction(model, def, name, args, binding, receiver, unitId);
+		model.Writes().Ask("a function template instance", [&model, &def, name, args, binding, receiver] {
+			(void)TemplateInstantiator().InstantiateFunction(model, def, name, args, binding, receiver);
 		});
 
-		auto expanded = FunctionSignature(model, *def.functionBody, binding, unitId);
-		if (!expanded.Ok()) return QueryResult<const FunctionRecord*>::Fail(expanded.error, "cannot instantiate " + name + ": " + expanded.message);
+		// The signature and the body are the template's: their names resolve as its file's do.
+		auto expanded = FunctionSignature(model, *def.functionBody, binding, def.unit);
+		if (!expanded.Ok())
+			return QueryResult<const FunctionRecord*>::Fail(expanded.error, "cannot instantiate " + name + ": " + NotIncludedIn(model, def.unit, expanded.message));
 		QueryResult<const FunctionType*> sig(expanded.value.type);
 		// An explicit specialization (`template<> int32 F<int32>(int32 v)`) is the body for its arguments (D-20).
-		auto special = Specializations::ForFunction(model, def, name, args, unitId);
+		auto special = Specializations::ForFunction(model, def, name, args);
 		if (!special.Ok()) return QueryResult<const FunctionRecord*>::Fail(special.error, special.message);
 		if (special.value)
 		{
-			auto own = FunctionSignature(model, *special.value->functionBody, binding, unitId);
+			auto own = FunctionSignature(model, *special.value->functionBody, binding, special.value->unit);
 			if (!own.Ok()) return QueryResult<const FunctionRecord*>::Fail(own.error, own.message);
 			if (!SameSignature(own.value.type, sig.value))
 				return QueryResult<const FunctionRecord*>::Fail(QueryError::NotAValue, "the specialization '" + name +
@@ -313,6 +348,7 @@ namespace Scripting
 		rec.isStatic = fn.IsStatic();
 		rec.templateOrigin = TemplateOrigin::FunctionTemplate;
 		rec.definingUnit = 0;
+		rec.templateUnit = (special.value ? special.value->unit : def.unit);
 		rec.name = name;
 		rec.mangledName = CanonicalSymbolName(def.declScope, name) + "_T" + EscapedText(ArgumentsText(args)) + "_E" +
 			(receiver ? "_on_" + EscapedText(QualifiedName(receiver)) : Core::String()) + "_" + sig.value->OverloadSuffix();

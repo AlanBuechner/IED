@@ -9,6 +9,8 @@ include "Steps.ch"
 include "plugins/Host.ch"
 include "web/Rpc.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	// A template as a plugin contributes it.

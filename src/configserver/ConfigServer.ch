@@ -15,6 +15,8 @@ include "ConfigPackages.ch"
 include "fs/Watching.ch"
 include "settings/Catalog.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	// A package the state lists.

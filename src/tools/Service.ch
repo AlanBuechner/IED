@@ -10,6 +10,9 @@ include "Detect.ch"
 include "Install.ch"
 include "fs/Changes.ch"
 include "web/Rpc.ch"
+include "services/Workspaces.ch"
+
+namespace Ied { class Server; }
 
 namespace Ied
 {

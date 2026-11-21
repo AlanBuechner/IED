@@ -8,6 +8,8 @@ include "Rewrite.ch"
 include "services/Documents.ch"
 include "fs/Changes.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	const int64 c_LspTransientMost = 16;      // files open on one server for plugin code alone

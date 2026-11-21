@@ -2,6 +2,9 @@
 // server.info, server.notify, server.dismiss.
 
 include "web/Rpc.ch"
+include "web/Session.ch"
+
+namespace Ied { class Server; }
 
 namespace Ied
 {

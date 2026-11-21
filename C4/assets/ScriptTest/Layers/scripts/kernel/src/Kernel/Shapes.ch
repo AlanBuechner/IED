@@ -1,5 +1,6 @@
 // A module as a package holds one: its header names what scripts over it use. Its macros reach them too.
 include "world.ch"
+include "Container/array.ch"
 
 #define KERNEL_TWICE(x)((x) * 2)
 

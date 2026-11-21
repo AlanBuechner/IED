@@ -1,4 +1,5 @@
 include "array.ch"
+include "sort.ch"
 
 // Elements [0, count) are live objects; [count, capacity) is raw storage. Moving the buffer copies bytes:
 // objects are trivially relocatable (docs/language/06). Past 1 MiB the buffer grows in place instead.

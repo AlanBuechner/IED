@@ -83,14 +83,14 @@ namespace Scripting
 		LoweringContext ctx(&model, &errors);
 		ctx.fn = record;
 		ctx.out = &fn;
-		ctx.unitId = record->definingUnit;
+		ctx.unitId = record->LookupUnit(); // a template-made body sees what its template's file includes
 		ctx.enclosingType = record->containingType;
 		ctx.primitiveThis = record->primitiveReceiverType; // a primitive receiver (extension method) is a pointer this
 		ctx.scope = record->scope; // the function's enclosing namespace/class - unqualified type lookup context
 
 		// This lowering's own place in the scope tree, so lowerings on other threads never see its locals; then the
 		// function's layer: parameters + locals live here for the whole body.
-		ScopeCursor cursor(*model.Symbols());
+		ScopeCursor cursor(*model.Symbols(), ctx.unitId);
 		ScopeGuard fnScope = ctx.queries().PushScope(Scope::Kind::Function, record->mangledName);
 
 		// Template bindings: a body made from a template sees its parameters (T := int32, N := 4) as names in

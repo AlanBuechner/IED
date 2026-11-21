@@ -6,6 +6,9 @@
 
 include "bedrock.ch"
 include "web/Rpc.ch"
+include "services/Workspaces.ch"
+
+namespace Ied { class Server; }
 
 namespace Ied
 {

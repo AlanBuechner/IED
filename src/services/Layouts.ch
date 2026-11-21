@@ -4,6 +4,9 @@
 // retries a conflict on the new revision (last writer wins, docs/11). Members run with the server lock held.
 
 include "web/Rpc.ch"
+include "Workspaces.ch"
+
+namespace Ied { class Server; }
 
 namespace Ied
 {

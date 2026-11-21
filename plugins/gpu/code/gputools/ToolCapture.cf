@@ -2,6 +2,7 @@
 // next frame captured once the program's capture library answers (or `after_seconds` later, for a program that loads
 // its content first), the program stopped, and the new capture's events.
 include "ToolText.ch"
+include "Math/vector.ch"
 
 namespace GpuDebug
 {

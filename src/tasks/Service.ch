@@ -8,6 +8,8 @@ include "Selections.ch"
 include "solutions/Model.ch"
 include "web/Rpc.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	const int64 c_TaskRunsKept = 50;

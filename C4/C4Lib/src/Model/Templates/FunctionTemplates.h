@@ -13,7 +13,7 @@ namespace Scripting
 		const TemplateArgumentListNode* written = nullptr;  // explicit arguments (`Max<int32>`), or null
 		const Core::Vector<const Type*>* argTypes = nullptr; // the call's argument types (null entry: a braced list)
 		const Type* returnType = nullptr;                   // what a target signature returns (D-17), for no call
-		uint32 unitId = 0;
+		uint32 unitId = 0;                                  // the file the call is in: it sees the templates it includes
 		const Scope* scope = nullptr;                       // where the call is
 	};
 
@@ -31,10 +31,14 @@ namespace Scripting
 		static void CollectMembers(const ProgramModel& model, const TemplateCall& call, const ObjectType* owner,
 			Core::Vector<OverloadCandidate>& out, Core::Vector<Core::String>& reasons);
 
+		/// The file that declares a template the call's name selects but its file does not include; 0 when it includes
+		/// every one.
+		static uint32 UnseenUnit(const ProgramModel& model, const TemplateCall& call);
+
 		/// For a new object-template instance: every extension template whose receiver it is (`extends Box<T>`
 		/// for a `Box<int32>`) and whose arguments the receiver decides, instantiated and attached as the
 		/// instance's extension method, so member and operator lookups find it like any other.
-		static void AttachExtensions(const ProgramModel& model, const ObjectType* instance, uint32 unitId);
+		static void AttachExtensions(const ProgramModel& model, const ObjectType* instance);
 
 		/// `call.name` written as a value without template arguments, when it names function templates (D-17):
 		/// a TemplateNameType that finds the instance a target signature asks for; null when it names none.
@@ -44,7 +48,11 @@ namespace Scripting
 		static QueryResult<const FunctionRecord*> ForTarget(const ProgramModel& model, TemplateCall call, const SignatureType& target);
 
 	private:
+		/// The templates the call's name and scope select, whatever its file includes.
+		static Core::Vector<const ProgramModel::TemplateDef*> Named(const ProgramModel& model, const TemplateCall& call);
+		/// Those of them the call can name: declared in a file its file includes, or members of the receiver's type.
 		static Core::Vector<const ProgramModel::TemplateDef*> Visible(const ProgramModel& model, const TemplateCall& call);
+		static bool IsNameable(const ProgramModel& model, const ProgramModel::TemplateDef& def, uint32 unitId);
 		static void CollectFrom(const ProgramModel& model, const TemplateCall& call, const Core::Vector<const ProgramModel::TemplateDef*>& defs,
 			Core::Vector<OverloadCandidate>& out, Core::Vector<Core::String>& reasons);
 		/// The templates a body-less declaration's definition may be among: its owner's members, or the free ones.
@@ -59,7 +67,7 @@ namespace Scripting
 		static const FunctionRecord* DefinitionOf(const ProgramModel& model, const ProgramModel::TemplateDef& decl,
 			const Core::String& name, const TemplateArgs& args, const FunctionRecord* declared, const TemplateCall& call);
 		static QueryResult<const Type*> ExtendedType(const ProgramModel& model, const ProgramModel::TemplateDef& def,
-			Scope* binding, const Type* receiver, uint32 unitId);
+			Scope* binding, const Type* receiver);
 		static void AttachAsMethod(const ProgramModel& model, const ObjectType* instance, const FunctionRecord* rec,
 			const FunctionDefinitionNode& fn);
 	};

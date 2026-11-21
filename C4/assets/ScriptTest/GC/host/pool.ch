@@ -1,3 +1,5 @@
+include "Container/array.ch"
+
 namespace Pool
 {
 	class Node

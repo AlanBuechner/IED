@@ -78,7 +78,7 @@ namespace Scripting
 		if (const auto* var = dynamic_cast<const VariableDefinitionNode*>(member)) return AddFields(*var);
 		if (const auto* un = dynamic_cast<const UnionDefinitionNode*>(member)) return AddPackedRegion(*un);
 		if (const auto* fn = dynamic_cast<const FunctionDefinitionNode*>(member))
-			return fn->IsTemplated() ? MemberTemplates::Declare(m_Model, &m_Instance, *fn, m_Scope, m_Binding) : AddMethod(*fn);
+			return fn->IsTemplated() ? MemberTemplates::Declare(m_Model, &m_Instance, *fn, { m_Scope, m_Binding, m_UnitId }) : AddMethod(*fn);
 		return AddNestedType(member);
 	}
 
@@ -241,6 +241,7 @@ namespace Scripting
 		rec.declarations.Push(&fn);
 		if (ool.fn) rec.declarations.Push(ool.fn);
 		rec.definingUnit = 0;
+		rec.templateUnit = ool.fn ? ool.unit : m_UnitId; // the body's names resolve as its own file's do
 		rec.mangledName = MethodSymbol(m_Scope, m_Instance, m.mName, *sig, rec.isConst);
 		rec.name = m.mName;
 		rec.minArity = expanded.value.list.Count() - fn.TrailingDefaultCount();
@@ -283,8 +284,9 @@ namespace Scripting
 			if (def.name != method || def.arity != written || def.definition->IsConstMethod() != isConst) continue;
 			if (def.definition->GetOwnerTemplateDefinition() || !Defines(def)) continue; // a member template's definition
 			Scope* binding = BindingFor(*def.definition);
-			auto theirs = TemplateInstantiator::ExpandParameters(m_Model, *def.definition, binding, m_UnitId);
-			if (theirs.Ok() && SameParameters(theirs.value, parameters)) return { def.definition, binding, theirs.value };
+			const uint32 unit = def.unitId;
+			auto theirs = TemplateInstantiator::ExpandParameters(m_Model, *def.definition, binding, unit);
+			if (theirs.Ok() && SameParameters(theirs.value, parameters)) return { def.definition, binding, theirs.value, unit };
 		}
 		return {};
 	}
@@ -351,7 +353,7 @@ namespace Scripting
 			Scope* binding = BindingFor(*def.definition);
 			InstantiationBindings names;
 			if (binding != m_Binding) names = BindingsFor(m_Model, *ClassParameters(*def.definition), m_Args);
-			MemberTemplates::Define(m_Model, &m_Instance, *def.definition, binding, names);
+			MemberTemplates::Define(m_Model, &m_Instance, *def.definition, binding, names, def.unitId);
 		}
 	}
 

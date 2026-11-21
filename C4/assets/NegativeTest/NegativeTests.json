@@ -3055,5 +3055,41 @@
     "UsersOfAnUnresolvedAlias": {
         "expect": ["main.cf (2:16) error: unresolved type for field 'first' in 'Owner': the alias 'Handle' does not resolve"],
         "reason": "R9: what names a declaration that failed says which one; the alias's own error says why, once."
+    },
+    "HeaderLeansOnItsIncluder": {
+        "expect": ["error: unresolved type for field 'v' in 'User': no type named Vec is visible here: it is declared in z_def.ch, which this file does not include"],
+        "reason": "D-88: a header includes what it names; leaning on its includers' include order compiled (it was IsolatedTest Types/TransitiveIncludeOrder's point)."
+    },
+    "SignatureTypeFromFileNotIncluded": {
+        "expect": ["main.cf (1:1) error: unresolved signature for function 'Count': no type named Widget is visible here: it is declared in widgets.ch, which this file does not include"],
+        "reason": "D-88 (was BUG-440): a signature sees what its file includes; it compiled while another file included widgets.ch."
+    },
+    "BaseClassFromFileNotIncluded": {
+        "expect": ["error: unresolved base class for 'Square': no type named Shape is visible here: it is declared in shape.ch, which this file does not include"],
+        "reason": "D-88: a base class is named through the file's includes."
+    },
+    "ClassTemplateFromFileNotIncluded": {
+        "expect": ["main.cf (1:1) error: unresolved type for variable 'g_Box': no type named Box is visible here: it is declared in box.ch, which this file does not include"],
+        "reason": "D-88: a class template is named as a type is; it was instantiated from any file."
+    },
+    "FunctionTemplateFromFileNotIncluded": {
+        "expect": ["no function named M::Clamp is visible here: it is declared in scalar.ch, which this file does not include"],
+        "reason": "BUG-476: a function template was callable from a file that did not include its header, while the plain function beside it was not."
+    },
+    "UnseenOverloadBesideAMismatch": {
+        "expect": ["(another 'M::Round' is declared in scalar.ch, which this file does not include)"],
+        "reason": "BUG-476 as it was met: the error named a template the call never meant and said nothing of the header to include."
+    },
+    "ConstantFromFileNotIncludedInExtent": {
+        "expect": ["main.cf (1:7) error: unresolved type for variable 'g_Slots': the array size 'kLimit' is not a constant expression: no constant named kLimit is visible here: it is declared in limits.ch, which this file does not include"],
+        "reason": "D-88: a constant in a declaration is named through the file's includes."
+    },
+    "TemplateNamesWhatOnlyItsUserIncludes": {
+        "expect": ["no type named Tag is visible in box.ch: it is declared in tag.ch, which box.ch does not include"],
+        "reason": "D-88: an instance sees what its template's file includes, not what the file that names it does, so it is the same whoever names it first."
+    },
+    "FunctionOnlyASourceFileDeclares": {
+        "expect": ["no function named Twice is visible here: it is declared in helper.cf, a source file no file can include: declare it in a header"],
+        "reason": "BUG-476: a template written in another source file was callable; the error says where a declaration belongs."
     }
 }

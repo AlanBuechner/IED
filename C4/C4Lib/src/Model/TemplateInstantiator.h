@@ -17,10 +17,12 @@ namespace Scripting
 		/// Each level takes a few kilobytes of the compiler's stack.
 		static constexpr uint32 c_MaxInstantiationDepth = 100;
 
-		/// The type template `name` found from `declScope`, for the arguments a use writes. The arguments resolve
+		/// The type template `name` found from `declScope`, for the arguments a use in `unitId` writes: the use's file
+		/// includes a declaration of the template (else NotVisible, naming the file to include). The arguments resolve
 		/// in `outerBinding` (the enclosing instantiation's bindings, or null), then from `argContext`, the scope
-		/// the use is written in; the instance's body sees its parameters, then the template's declaring scope.
-		/// The result is layout-complete.
+		/// the use is written in, as the use's file sees them; the instance's body sees its parameters, then the
+		/// template's declaring scope as the template's file sees it. So an instance is its template's and its
+		/// arguments' alone, whoever asks first. The result is layout-complete.
 		QueryResult<const Type*> InstantiateTypeTemplate(const ProgramModel& model, const Core::String& name,
 			const Scope* declScope, const TemplateArgumentListNode& args, uint32 unitId, Scope* outerBinding, const Scope* argContext) const;
 
@@ -33,15 +35,20 @@ namespace Scripting
 			const Core::String& name, const MemberTypeSite& site) const;
 
 		/// The function template `def` for complete arguments already bound in `binding`: its signature and
-		/// lowering record. An extension template's record has `receiver` (the extended type) as receiver.
+		/// lowering record, resolved as the template's file's declarations are. An extension template's record has
+		/// `receiver` (the extended type) as receiver.
 		QueryResult<const FunctionRecord*> InstantiateFunction(const ProgramModel& model, const ProgramModel::TemplateDef& def,
-			const Core::String& name, const TemplateArgs& args, Scope* binding, const Type* receiver, uint32 unitId) const;
+			const Core::String& name, const TemplateArgs& args, Scope* binding, const Type* receiver) const;
 		/// The instance of the function template `def` (not an extension) for complete `args` made before, or null.
 		const FunctionRecord* MadeFunction(const ProgramModel& model, const ProgramModel::TemplateDef& def, const Core::String& name,
 			const TemplateArgs& args) const;
 
 		/// The type template `name` a use in `declScope` names: the one declared innermost on its lookup chain.
 		const ProgramModel::TemplateDef* ChooseTypeDefinition(const ProgramModel& model, const Core::String& name, const Scope* declScope) const;
+		/// That template for a use written in `unitId`: of the scopes on the chain, the innermost with a declaration of
+		/// the name the unit includes. NotVisible, naming the file to include, when it includes none.
+		QueryResult<const ProgramModel::TemplateDef*> VisibleTypeDefinition(const ProgramModel& model, const Core::String& name,
+			const Scope* declScope, uint32 unitId) const;
 
 		/// A declaration's parameters resolved in `binding`, a parameter pack (`Ts... args`) as one parameter per element
 		/// named `args#0`, `args#1`, ... (D-19); and for each, the declared parameter it comes from.
@@ -57,7 +64,7 @@ namespace Scripting
 		/// `def` is the definition whose body builds the instance (the primary or a specialization) and `args`
 		/// its parameters' arguments; `instanceArgs` are the instance's own (`Box<int32*>`).
 		QueryResult<const Type*> InstantiateObject(const ProgramModel& model, const ProgramModel::TemplateDef& def, const Core::String& name,
-			const Core::String& key, const TemplateArgs& instanceArgs, const TemplateArgs& args, Scope* binding, uint32 unitId) const;
+			const Core::String& key, const TemplateArgs& instanceArgs, const TemplateArgs& args, Scope* binding) const;
 		/// An instance's signature, and for each of its parameters the declared parameter it comes from (a
 		/// parameter pack is several).
 		struct Signature { const FunctionType* type = nullptr; std::vector<uint32> source; };

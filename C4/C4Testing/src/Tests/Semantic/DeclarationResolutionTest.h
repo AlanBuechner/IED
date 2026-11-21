@@ -46,5 +46,7 @@ namespace Testing
 		void ADeepButEndingInstantiationWorks();
 		TEST_FUNC(Semantic.DeclarationResolution)
 		void BodiesOfInstancesAreOpenedHoweverDeepTheChain();
+		TEST_FUNC(Semantic.DeclarationResolution)
+		void AnInstancesExtentFoldsAConstantOfItsTemplatesScope();
 	};
 } // namespace Testing

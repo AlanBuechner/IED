@@ -4,6 +4,8 @@
 
 include "fs/Watching.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	class AppDataWatch

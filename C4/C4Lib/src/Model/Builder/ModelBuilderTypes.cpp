@@ -73,6 +73,7 @@ namespace Scripting
 			def.params = obj.GetTemplateDefinition().Get();
 			def.objectBody = &obj;
 			def.declScope = ctx.scope;
+			def.unit = ctx.unitId;
 			def.pattern = obj.GetSpecializationArguments().Get();
 			ctx.model->m_TypeSpecializations[name].Push(def);
 			return;
@@ -97,6 +98,7 @@ namespace Scripting
 			def.params = obj.GetTemplateDefinition().Get();
 			def.objectBody = &obj;
 			def.declScope = ctx.scope;
+			def.unit = ctx.unitId;
 			ctx.model->m_TypeTemplates[name].push_back(def);
 			if (!ctx.scope->Find(name))
 			{
@@ -216,6 +218,7 @@ namespace Scripting
 			def.params = obj.GetTemplateDefinition().Get();
 			def.objectBody = &obj;
 			def.declScope = ctx.scope;
+			def.unit = ctx.unitId;
 			// Same-named templates in different scopes coexist (a global `Wedge` and `Weld::Wedge`):
 			// keep every def, selected by scope proximity at lookup. A flat map keyed by name alone
 			// would let the last registration shadow every other same-named template program-wide.
@@ -241,7 +244,7 @@ namespace Scripting
 			{
 				const auto* fn = static_cast<const FunctionDefinitionNode*>(child);
 				if (!fn->IsTemplated()) m_PendingMethodDecls.Push({ raw, fn, ctx.unitId });
-				else if (auto declared = MemberTemplates::Declare(*ctx.model, raw, *fn, classScope, nullptr); !declared.Ok()) ErrorAt(ctx, fn, declared.message);
+				else if (auto declared = MemberTemplates::Declare(*ctx.model, raw, *fn, { classScope, nullptr, ctx.unitId }); !declared.Ok()) ErrorAt(ctx, fn, declared.message);
 				break;
 			}
 			case NodeType::ObjectDefinition:   RegisterObject(memberCtx, *static_cast<const ObjectDefinitionNode*>(child)); break; // nested type
@@ -318,6 +321,7 @@ namespace Scripting
 			def.aliasTarget = alias.GetAliasedType().Get();
 			def.isAlias = true;
 			def.declScope = ctx.scope;
+			def.unit = ctx.unitId;
 			ctx.model->m_TypeTemplates[name].push_back(def); // coexist with same-named templates in other scopes
 			SymbolInfo info;
 			info.kind = SymbolKind::Type;

@@ -1,4 +1,5 @@
 include "output.ch"
+include "bedrock.ch"
 
 namespace Calc
 {

@@ -7,6 +7,8 @@
 include "AuthGate.ch"
 include "host/Servers.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	// A workspace server's socket, kept on the heap for the threads that pump it.

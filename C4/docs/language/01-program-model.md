@@ -50,8 +50,9 @@ include "bedrock.ch"                 // the default library
   includes this file (directly or through the files it includes)`); a file including itself says so.
 
 What an include does: it makes the included file's declarations (and, transitively, everything that
-file includes) visible to function bodies in the including file, and it carries the included file's
-final macro table into the includer (see [02-preprocessor](02-preprocessor.md#25-macros-and-includes)).
+file includes) visible in the including file - to its declarations and to its function bodies alike
+([1.4](#14-visibility-one-rule)) - and it carries the included file's final macro table into the includer
+(see [02-preprocessor](02-preprocessor.md#25-macros-and-includes)).
 
 ## 1.3 Program model rules
 
@@ -61,10 +62,12 @@ These rules are the core difference from C/C++ (AGENTS.md "Changes" item 1).
 
 1. **Every includer sees the same header.** A header is parsed once, on its own. Defining a macro or a
    type before an `include` does NOT change how that header is parsed.
-2. **No forward declarations for types at file scope.** Types, functions and globals may be used before
-   the point where they are declared in a file, or in a file that is never included, for declaration
-   purposes (field types, signatures). Inside a function body, statements are processed in order, so a
-   type declared locally in a body must come before its use.
+2. **Order never matters at file scope.** Types, functions and globals may be used before the point where
+   they are declared, in their own file or in a file it includes: no forward declaration is needed for
+   that. A name from a file that is not included is not visible ([1.4](#14-visibility-one-rule)); two
+   headers that name each other's types, and so cannot include each other, each declare the other's type
+   ahead (`struct Widget;`). Inside a function body, statements are processed in order, so a type declared
+   locally in a body must come before its use.
 3. **A header is a source file.** A `static` variable (or any global) defined in a `.ch` is defined
    right there - there is no separate "definition in one `.cf`" step. It exists once in the program no
    matter how many files include the header.
@@ -86,25 +89,61 @@ struct OI_B { public int32 y; };
 | `#include` pastes text; each translation unit re-parses headers | `include` is a declaration; each file is parsed once |
 | A `#define` before `#include` can change the header | It cannot |
 | `extern int g;` in the header + `int g;` in one `.cpp` | Define `int32 g;` in the header; done |
-| Forward-declare types to break cycles | Not needed at file scope |
+| Forward-declare types before their use in a file | Not needed: order never matters at file scope |
+| Forward-declare a type to break an include cycle | The same (`struct Widget;`) |
 | Templates must be defined in headers | Template bodies may be in `.cf` |
 | ODR violations are often silent | Duplicate definitions are hard errors |
 
-## 1.4 Visibility: declarations vs bodies
+## 1.4 Visibility: one rule
 
-**Status:** **Implemented**
+**Status:** **Implemented** (D-88)
 
-Two different rules apply:
+A name is visible in a file when the file that declares it is the file itself or one it includes, directly
+or through its includes. That is the whole rule, and it is the same for every use of a name:
 
-- **Declaration-level resolution is program-wide.** The type of a field, a parameter, a return type or
-  a base class resolves against the whole program. A header may name a type declared in a sibling header
-  it never includes.
-- **Body-level resolution is include-closure checked.** Inside a function body, a name is visible only if
-  the file that declares it is in the transitive include closure of the file containing the body. For a
-  function, its *declaration's* file counts, so including the header that declares it is enough even if
-  the body lives in some `.cf`.
+- **Declarations and bodies alike.** The type of a field, a parameter or a return type, a base class, an
+  alias's target, a template argument, the constant in an array size: each sees what its file includes, as
+  the statements of a function body do.
+- **Every kind of name.** Types, enums, unions, aliases, class and alias templates, functions and function
+  templates, globals and constants, annotations. For a function, its *declaration's* file counts, so
+  including the header that declares it is enough even if the body lives in some `.cf`; the same holds for a
+  template declared in a header and defined in a source file.
+- **The error names the file.** `no type named Widget is visible here: it is declared in widgets.ch, which
+  this file does not include` - the file is written as the include of it is. When a call matches none of the
+  overloads a file sees, the message adds the one it does not: `(another 'Math::Round' is declared in
+  Math/scalar.ch, which this file does not include)`.
 
-Including a header therefore matters for code inside bodies; it is not needed to make declarations line up.
+```c4
+// widgets.ch
+namespace N { struct Widget { int32 size; } }
+
+// count.cf
+include "widgets.ch"                       // without it: no type named Widget is visible here ...
+int32 Count(N::Widget& widget) { return widget.size; }
+```
+
+What follows from it:
+
+- **A header includes what it names.** A header that compiles only because every file that includes it
+  happens to include another header first is an error where the name is written, in every program.
+- **Headers that name each other** cannot include each other ([1.2](#12-include): an include cycle is an
+  error). Each declares the other's type ahead - `struct Child;` in `parent.ch`, `struct Parent;` in
+  `child.ch` - which makes the name visible there for pointers and references; the file that uses the
+  type's members or size includes its header.
+- **Members are reached through their object.** A field, a method, an operator or an extension method
+  ([05](05-objects.md)) belongs to its object's type: `widget.Size()` needs no include beyond what made
+  `widget` nameable. (An extension of a number, `extends float`, has no object type to belong to: it is
+  found like a function, through the includes.)
+- **A template's instance is its template's.** The declarations and bodies of `Box<Widget>` see what
+  `box.ch` includes, not what the file that wrote `Box<Widget>` includes; the argument `Widget` is resolved
+  where it is written. A method defined out of line in `box.cf` sees what `box.cf` includes. So an instance
+  is the same whichever file names it first ([08](08-templates.md)). When `box.ch` names a type it does not
+  include, the error is reported where `Box<Widget>` is written and names the template's file: `cannot
+  instantiate Box: field: no type named Tag is visible in box.ch: it is declared in tag.ch, which box.ch
+  does not include`.
+- **Another project's names** need the dependency first ([15](15-projects.md) rule 4): a name of a project
+  the file's project does not depend on is that error, whatever is included.
+- **File-scope `static`** names stay private to their file whatever includes it ([1.5](#15-file-scope-static)).
 
 **Planned:** private-to-file declarations beyond `static` (for example header-private symbols) are not
 part of the language today.
@@ -147,8 +186,9 @@ There are no C-style tentative definitions: a global is declared and defined in 
 **Status:** **Implemented**
 
 File-scope declarations are order independent: the compiler registers every declaration first and then
-resolves layouts, signatures and constant values to a fixed point. Constant initializers may refer to
-constants declared later, and array sizes fold regardless of order:
+resolves each one, resolving first whatever it names - an alias's target, a constant's value, the size of a
+type - however long the chain and wherever it is written. Constant initializers may refer to constants declared
+later, and array sizes fold regardless of order:
 
 ```c4
 const int32 CE_D = CE_M * 2;    // 30
@@ -159,15 +199,24 @@ const int32 CE_N = 10;
 - A name in a constant initializer, an array extent or a lane count resolves from where it is written,
   as in code: inside `namespace Math`, `TAU = PI * 2.0f` finds `Math::PI`, a class static finds its
   siblings, and `Inner::J` finds the `Inner` nested in an enclosing namespace.
-- A `const` whose initializer does not fold (it calls a function, builds an object, or reads a mutable
-  global) is set once at startup ([04](04-types.md)): it is read-only but not a compile-time constant, so
-  an array size naming it is an error at the size (`the array size 'kN' is not a constant expression: 'kN'
-  starts at runtime: 'Seed()' is not one of the forms a constant folds from`).
+- A `const` whose initializer does not fold (it calls a function not marked `[compile_time]`, builds an
+  object, or reads a mutable global) is set once at startup ([04](04-types.md)): it is read-only but not a
+  compile-time constant, so an array size naming it is an error at the size (`the array size 'kN' is not a
+  constant expression: 'kN' starts at runtime: 'Seed' is not [compile_time]: only a function marked
+  [compile_time] runs in a constant`). A call of a `[compile_time]` function folds
+  ([07](07-functions-and-lambdas.md#713-compile-time-functions)).
 - The same holds in every position a constant is needed: a parameter's array size, a default argument, an
   enum value, a template argument, an alias, a field or static member, a `case` label, a lane count, in this
   file or another, before or after the declaration. `c ? a : b` folds too.
 - Constants that refer to each other in a loop are an error at each of them: `the constant 'A' depends on
   itself: A -> B -> A`.
+- So are declarations that need each other to resolve: aliases (`alias A = B; alias B = A;` is `the alias 'A'
+  depends on itself: A -> B -> A`), enums whose values name each other, and types whose sizes do (`struct SA {
+  int32[sizeof(SB)] x; }` with `struct SB { int32[sizeof(SA)] y; }` is `the layout of 'SA' depends on itself: SA
+  -> SA::x -> SB -> SB::y -> SA`). Naming a type is no such need: `struct A { B* b; }` and `struct B { A* a; }`
+  are fine.
+- A type's fields are laid out in the order they are declared, whatever their types name. A static constant of a
+  type may be used by the fields written before it (`int32[kCount] items; static const int32 kCount = 4;`).
 
 ## 1.8 Entry point
 
@@ -243,7 +292,7 @@ int32 main() {
 | `include` with header isolation | Implemented |
 | No file-scope forward declarations | Implemented |
 | Globals/statics defined in headers | Implemented |
-| Include-closure visibility in bodies | Implemented |
+| Include visibility, one rule for declarations and bodies (D-88) | Implemented |
 | File-scope `static` internal linkage | Implemented |
 | Duplicate-definition errors | Implemented |
 | Order-independent constants | Implemented (every position, TestCode `Core/ForwardConstUse`) |

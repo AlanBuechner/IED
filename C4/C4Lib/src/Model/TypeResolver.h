@@ -17,16 +17,13 @@ namespace Scripting
 		/// Public query entry (doc 04): resolve a type as written, in unitId's visibility domain.
 		QueryResult<const Type*> ResolveType(const ProgramModel& model, const QualTypeNode& node, uint32 unitId) const;
 
-		/// Pass-2 resolution entry (doc 02): resolve a type as written in the defining file's scope.
-		/// BUILD-TIME resolution is program-wide (unitId 0 = sees everything) so the model is complete
-		/// and valid for the whole program regardless of include order.
+		/// Pass-2 resolution entry: a type as a declaration of `unitId` writes it in the scope `context`, seeing what
+		/// that file includes (D-88) and what its project may name (D-59).
 		QueryResult<const Type*> ResolveTypeInContext(const ProgramModel& model, const QualTypeNode& node, uint32 unitId, const Scope* context) const;
 
-		/// Lowering-time entry: resolve a type as written in unitId's include-closure visibility AND
-		/// `context`'s scope (the function's enclosing namespace). Unlike ResolveTypeInContext (pass 2,
-		/// program-wide unitId 0), this keeps the real unitId so per-unit include-closure still applies,
-		/// while an unqualified name declared in the function's namespace is found. This is what makes
-		/// `Counter a;` inside `namespace ExtNs { struct Counter {...} int32 f(){...} }` lower correctly.
+		/// Lowering-time entry: a type as a body of `unitId` writes it in the scope `context` (the function's
+		/// enclosing namespace), so `Counter a;` inside `namespace ExtNs { struct Counter {...} int32 f(){...} }`
+		/// finds ExtNs's Counter. The same visibility as ResolveTypeInContext, without the project check.
 		QueryResult<const Type*> ResolveTypeInUnitContext(const ProgramModel& model, const QualTypeNode& node, uint32 unitId, const Scope* context) const;
 
 		/// The full internal walk: qualified segments + template specialization + indirections.

@@ -240,13 +240,6 @@ namespace Scripting
 			CollectHiddenPrelude(model, name, candidates);
 		if (candidates.Empty() && !sym && !haveReceiver && !isOperatorName)
 			CollectInheritedStatics(model, name, ctx.unitId, ctx.scope, candidates);
-		if (!sym && name.find("::") == Core::String::npos)
-			if (const SymbolInfo* unseen = model.Symbols()->GetRoot()->Find(name); unseen && unseen->kind == SymbolKind::Function && !unseen->functions.Empty())
-				elsewhere = unseen->functions[0];
-		if (candidates.Empty() && elsewhere && !tmplArgs)
-			reasons.Push("no function named " + name + " is visible here: it is declared in " + model.SourceName(elsewhere->declUnit) +
-				", which this file does not include");
-
 		// The function templates of the name join the overload set with their written, deduced or default
 		// arguments (D-17); a call that writes template arguments names only templates.
 		if (tmplArgs) candidates.Clear();
@@ -254,8 +247,18 @@ namespace Scripting
 		if (candidates.Empty() && !haveReceiver && reasons.Empty() && !model.Annotations().Find(name.c_str(), AnnotationContext{ ctx.scope, ctx.unitId }).Empty())
 			reasons.Push("'" + name + "' declares the annotation [" + DeclaredAnnotations::OwnName(name.c_str()) + "] (docs/language/12 section 4): it is "
 				"written in brackets on a declaration, not called");
+		// A function or a template of the name in a file this one does not include is the reason when nothing visible
+		// is named, and is said beside a failure of the visible ones: the one meant may be the unseen one (BUG-476).
+		uint32 unseen = elsewhere ? IncludableUnit(model, { elsewhere->declUnits.begin(), elsewhere->declUnits.end() }) : 0;
+		if (!unseen && elsewhere) unseen = elsewhere->declUnit;
+		if (!unseen && !sym && !haveReceiver && !tmplArgs) unseen = UnseenUnit(model, name, SymbolKind::Function, ctx.scope);
+		if (!unseen && !isOperatorName) unseen = FunctionTemplates::UnseenUnit(model, templates);
 		if (candidates.Empty())
-			return QueryResult<const FunctionType*>::Fail(QueryError::NotFound, reasons.Empty() ? "no function named " + name : reasons[0]);
+		{
+			if (!reasons.Empty()) return QueryResult<const FunctionType*>::Fail(QueryError::NotFound, reasons[0] + AnotherElsewhere(model, name, unseen));
+			const Core::String elsewhereSaid = DeclaredElsewhere(model, name, "function", unseen);
+			return QueryResult<const FunctionType*>::Fail(QueryError::NotFound, elsewhereSaid.empty() ? "no function named " + name : elsewhereSaid);
+		}
 
 		// Discovery query: no argument context was supplied (LSP go-to-definition, "what is Fa's
 		// type", a member-access without a call). When exactly one signature exists for the name,
@@ -268,7 +271,9 @@ namespace Scripting
 			return QueryResult<const FunctionType*>::Success(candidates[0].sig);
 		}
 
-		return ResolveAndReturn(model, candidates, argTypes, name, outRecord);
+		auto resolved = ResolveAndReturn(model, candidates, argTypes, name, outRecord);
+		if (resolved.error == QueryError::NotFound) resolved.message += AnotherElsewhere(model, name, unseen);
+		return resolved;
 	}
 
 	QueryResult<const FunctionType*> SymbolQueries::QueryNonObjectReceiver(const ProgramModel& model, const Core::String& name, const Type* receiverType,
@@ -535,7 +540,7 @@ namespace Scripting
 		const SymbolInfo* info = model.FindVisibleQualified(name, ctx.unitId, ctx.scope);
 		if (!info || info->IsFrameVariable())
 		{
-			const Core::String elsewhere = info ? Core::String() : NotIncluded(model, name, SymbolKind::Variable, "variable");
+			const Core::String elsewhere = info ? Core::String() : NotIncluded(model, name, SymbolKind::Variable, "variable", ctx.scope);
 			return QueryResult<VariableInfo>::Fail(QueryError::NotFound, elsewhere.empty() ? "no variable named " + name : elsewhere);
 		}
 		if (info->kind != SymbolKind::Variable)
@@ -653,7 +658,8 @@ namespace Scripting
 				if (member.error != QueryError::NotFound) return member;
 			}
 		}
-		return QueryResult<ConstantValue>::Fail(QueryError::NotFound, "no constant named " + name);
+		const Core::String elsewhere = NotIncluded(model, name, SymbolKind::Variable, "constant", context);
+		return QueryResult<ConstantValue>::Fail(QueryError::NotFound, elsewhere.empty() ? "no constant named " + name : elsewhere);
 	}
 		if (info->kind != SymbolKind::Variable)
 			return QueryResult<ConstantValue>::Fail(QueryError::NotAValue, "'" + name + "' is not a value");

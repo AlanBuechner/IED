@@ -29,7 +29,10 @@ Deep subsystems have their own skills - this overview only needs to know they ex
 ## Program model & includes
 All source files of a project compile together as one program (no per-file object/link step):
 - Every file that includes a header parses the exact same header content, so defining something before an include does **not** change how that header is parsed.
-- No forward declarations of types outside function bodies - names register in order; inside a function body you may still need one.
+- Order never matters at file scope: a type, function or constant may be used before it is declared, in its own file or in a file it includes. Inside a function body, declarations register in order.
+- **One visibility rule (D-88):** a name is visible in a file only when the file that declares it is that file or one it includes (directly or through its includes) - in declarations (a field's type, a signature, a base, an alias, a template argument, an array size) exactly as in function bodies, and for templates as for plain functions and types. A header includes what it names. The error names the file: `no type named Widget is visible here: it is declared in widgets.ch, which this file does not include` - add that include. Members (fields, methods, operators, extension methods) are reached through their object and need no include of their own.
+- Two headers that name each other's types cannot include each other (an include cycle is an error): each declares the other's type ahead, `struct Child;` - enough for pointers and references; the `.cf` that uses the type's members includes its header.
+- A template's instance sees what the *template's* file includes (an out-of-line method what its own `.cf` includes), not what the file that wrote `Box<Widget>` includes: a template header includes everything its body names.
 - A `static` variable declared in a `.ch` is fully defined there (the header IS a source file) - no separate definition needed in a `.cf`.
 - Functions implemented elsewhere still need a forward declaration so includers see them. Templated functions can live in the `.cf`, not just the header.
 

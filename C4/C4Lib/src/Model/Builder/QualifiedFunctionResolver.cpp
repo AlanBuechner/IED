@@ -1,5 +1,6 @@
 #include "Model/Builder/FreeFunctionResolver.h"
 #include "Model/Builder/DeclarationQueries.h"
+#include "Model/NotIncluded.h"
 #include "Model/TypeHandle.h"
 #include "Model/Types/AliasType.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
@@ -20,7 +21,11 @@ namespace Scripting
 	QueryResult<void> FreeFunctionResolver::ResolveQualified(const ModelBuilder::PendingQualifiedFunc& f)
 	{
 		const SymbolInfo* qualifier = QualifierOf(f);
-		if (!qualifier) return QueryResult<void>::Fail(QueryError::NotFound, "no namespace or type named '" + f.prefix + "'");
+		if (!qualifier)
+		{
+			const Core::String elsewhere = NotIncluded(*m_Ctx.model, f.prefix, SymbolKind::Type, "type", f.declScope);
+			return QueryResult<void>::Fail(QueryError::NotFound, elsewhere.empty() ? "no namespace or type named '" + f.prefix + "'" : elsewhere);
+		}
 		if (qualifier->kind == SymbolKind::Namespace && qualifier->scope)
 			return ResolveFree({ const_cast<Scope*>(qualifier->scope), f.last, f.fn, f.unitId });
 		if (qualifier->kind == SymbolKind::Type && qualifier->type)
@@ -43,8 +48,9 @@ namespace Scripting
 		if (!sig.Ok()) return QueryResult<void>::Fail(sig.error, sig.message, sig.loc);
 		if (const FunctionRecord* declared = DeclaredMethod(owner, f.last, sig.value.type, f.fn->IsConstMethod()))
 			AttachDefinition(*declared, *f.fn, f.unitId, f.prefix + "::" + f.last);
-		else
+		else if (m_Queries.Methods(owner).Ok())
 			m_Builder.ErrorAt(m_Ctx, f.fn, UnmatchedDefinition(f, owner, sig.value));
+		// else a declaration of the type did not resolve: that is the error, and this may be its definition
 		return QueryResult<void>::Success();
 	}
 

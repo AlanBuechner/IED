@@ -1,0 +1,2 @@
+template<T> T Twice(T v) { return v + v; }
+int32 Helper() { return Twice(2); }

@@ -130,6 +130,7 @@ namespace Scripting
 			def.params = fn.GetTemplateDefinition().Get();
 			def.functionBody = &fn;
 			def.declScope = ctx.scope;
+			def.unit = ctx.unitId;
 			def.pattern = written.Get();
 			ctx.model->m_FunctionSpecializations[firstName].Push(def);
 			return;
@@ -140,6 +141,7 @@ namespace Scripting
 			def.params = fn.GetTemplateDefinition().Get();
 			def.functionBody = &fn;
 			def.declScope = ctx.scope;
+			def.unit = ctx.unitId;
 			ctx.model->m_FunctionTemplates[firstName].Push(def); // overloads and same-named templates in other namespaces coexist
 			SymbolInfo marker;
 			marker.kind = SymbolKind::Function;

@@ -10,8 +10,7 @@ namespace Scripting
 		return fn.GetName()->GetSegments().Back().nameToken.GetText();
 	}
 
-	QueryResult<void> MemberTemplates::Declare(const ProgramModel& model, const ObjectType* owner, const FunctionDefinitionNode& fn,
-		const Scope* scope, Scope* binding)
+	QueryResult<void> MemberTemplates::Declare(const ProgramModel& model, const ObjectType* owner, const FunctionDefinitionNode& fn, const Site& site)
 	{
 		const Core::String name = NameOf(fn);
 		if (fn.GetTemplateDefinition()->ParameterCount() == 0)
@@ -22,16 +21,17 @@ namespace Scripting
 		ProgramModel::TemplateDef def;
 		def.params = fn.GetTemplateDefinition().Get();
 		def.functionBody = &fn;
-		def.declScope = scope;
+		def.declScope = site.scope;
 		def.memberOf = owner;
-		def.bindingParent = binding;
+		def.bindingParent = site.binding;
+		def.unit = site.unit;
 		model.Writes().Ask("a member template");
 		model.m_MemberTemplates[owner].push_back(def);
 		return QueryResult<void>::Success();
 	}
 
 	void MemberTemplates::Define(const ProgramModel& model, const ObjectType* owner, const FunctionDefinitionNode& definition, Scope* binding,
-		const InstantiationBindings& ownerNames)
+		const InstantiationBindings& ownerNames, uint32 unit)
 	{
 		ProgramModel::TemplateDef def;
 		def.params = definition.GetTemplateDefinition().Get();
@@ -40,6 +40,7 @@ namespace Scripting
 		def.memberOf = owner;
 		def.bindingParent = binding;
 		def.ownerNames = ownerNames;
+		def.unit = unit;
 		model.Writes().Ask("a member template");
 		model.m_MemberTemplates[owner].push_back(def);
 	}
@@ -54,7 +55,7 @@ namespace Scripting
 		{
 			if (def.definition->GetOwnerTemplateDefinition()) continue;
 			for (const ObjectType* owner : owners)
-				if (owner->GetName() == def.owner && Declares(model, owner, def.name)) Define(model, owner, *def.definition, nullptr, {});
+				if (owner->GetName() == def.owner && Declares(model, owner, def.name)) Define(model, owner, *def.definition, nullptr, {}, def.unitId);
 		}
 	}
 

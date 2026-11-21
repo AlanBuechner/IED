@@ -1,0 +1,24 @@
+// Core - Include Visibility Tests (implementation)
+include "../Framework/Assert.ch"
+include "IncludeVisibility.ch"
+include "IvChild.ch"
+include "IvBox.ch"
+
+// Program model 1.4 (D-88): a name is visible through includes, in declarations as in bodies. This file
+// includes IvChild.ch (which includes IvParent.ch) and IvBox.ch (which includes IvTag.ch), and nothing else.
+struct IvOwner { public IvParent parent; public IvBox<int32> box; public IvTag tag; }
+
+void TestIncludeVisibility() {
+	IvOwner owner;
+	IvChild child;
+	child.value = 3;
+	child.owner = &owner.parent;
+	owner.parent.first = &child;
+	AssertIntEquals(3, owner.parent.first->value, "headers that name each other declare each other's type ahead");
+	owner.box.held = 4;
+	owner.box.tag.value = 6;
+	AssertIntEquals(7, owner.box.Tagged(), "an instance names what its template's header includes");
+	AssertIntEquals(40, owner.box.Scaled(), "a method defined out of line sees what its source file includes");
+	AssertIntEquals(10, IvTwice(5), "a template declared in a header and defined in a source file");
+	Assert(sizeof(IvOwner) == 32, "declarations through includes of includes");
+}

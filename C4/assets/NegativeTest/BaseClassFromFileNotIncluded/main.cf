@@ -1,0 +1,2 @@
+class Square : Shape { public int32 edge; }
+int32 main() { return 0; }

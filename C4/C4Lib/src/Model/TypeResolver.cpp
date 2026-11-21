@@ -27,17 +27,11 @@ namespace Scripting
 
 	QueryResult<const Type*> TypeResolver::ResolveTypeInContext(const ProgramModel& model, const QualTypeNode& node, uint32 unitId, const Scope* context) const
 	{
-		// BUILD-TIME resolution is program-wide (unitId 0 = sees everything). The model must be
-		// complete and valid for the whole program regardless of include order (doc 02
-		// order-independence; doc 03 one program-wide model): a header that names a type defined in
-		// a sibling header it does not itself include still resolves, because every declaration is
-		// registered before any type is resolved. Per-unit include-closure visibility remains a
-		// QUERY-TIME concept (LSP/DAP "what does THIS unit see?") via the public ResolveType/QueryType
-		// that take a real unitId. Cross-file duplicate type names cannot be silently mis-resolved:
-		// they are rejected at registration in pass 1, so only one definition of a name ever exists.
-		// The unit's project still bounds what it may name (D-59).
+		// A declaration sees what its file includes, as a body does (D-88): every declaration is registered before
+		// any type is resolved, so the order of declarations and of includes never matters, but a name declared in
+		// a file this one does not include is not visible here. The unit's project bounds what it may name too (D-59).
 		ProgramModel::ProjectReach reach(model, unitId);
-		return ResolveTypeInternal(model, node, 0, nullptr, context);
+		return ResolveTypeInternal(model, node, unitId, nullptr, context);
 	}
 
 	QueryResult<const Type*> TypeResolver::ResolveTypeInUnitContext(const ProgramModel& model, const QualTypeNode& node, uint32 unitId, const Scope* context) const
@@ -163,7 +157,9 @@ namespace Scripting
 			const SymbolInfo* info = nullptr;
 			if (bindingScope && i == 0)
 			{
-				const SymbolInfo* bound = bindingScope->Find(name);
+				// Past the bindings the chain reaches the template's namespaces: those names need the include (D-88).
+				const SymbolInfo* bound = bindingScope->FindBound(name);
+				if (!bound) bound = model.m_Symbols->FindVisible(bindingScope, name, unitId);
 				if (bound && bound->kind == SymbolKind::Type) info = bound;
 			}
 			// A type declared in the body being lowered (doc 06) is visible from this lowering
@@ -195,7 +191,7 @@ namespace Scripting
 				const Type* b = model.m_Types->FindBuiltin(name);
 				if (b && isFinal)
 					return ApplyIndirections(model, b, node, unitId, bindingScope, context);
-				const Core::String elsewhere = NotIncluded(model, name, SymbolKind::Type, "type");
+				const Core::String elsewhere = NotIncluded(model, name, SymbolKind::Type, "type", lookupFrom);
 				return QueryResult<const Type*>::Fail(QueryError::NotFound, elsewhere.empty() ? TypeNotFound(name) : elsewhere);
 			}
 
@@ -391,7 +387,7 @@ namespace Scripting
 		// falls back to the builtin table so QueryType("int32") matches ResolveType(int32).
 		const Type* b = model.m_Types->FindBuiltin(name);
 		if (b) return QueryResult<const Type*>::Success(b);
-		const Core::String elsewhere = NotIncluded(model, name, SymbolKind::Type, "type");
+		const Core::String elsewhere = NotIncluded(model, name, SymbolKind::Type, "type", scopeContext);
 		return QueryResult<const Type*>::Fail(QueryError::NotFound, elsewhere.empty() ? TypeNotFound(name) : elsewhere);
 	}
 

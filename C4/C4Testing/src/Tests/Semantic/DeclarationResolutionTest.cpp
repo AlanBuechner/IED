@@ -314,4 +314,29 @@ namespace Testing
 		TEST_ASSERT(lastMade);
 		TEST_PASSED();
 	}
+
+	// A global's instance is built when the global resolves, before anything folded the constants its template names:
+	// they fold then, looked up from the template's own namespace or class (a constant written after it too).
+	void DeclarationResolutionTest::AnInstancesExtentFoldsAConstantOfItsTemplatesScope()
+	{
+		Program program(std::string(
+			"namespace A {\n"
+			"\tnamespace Detail { const int32 kRows = 2; }\n"
+			"\tenum Size { Small = 2, Big = 5 }\n"
+			"\ttemplate<T> struct Box { T[kCount] slots; }\n"
+			"\ttemplate<T> struct Grid { T[Detail::kRows] rows; T[Big] wide; }\n"
+			"\tstruct Limits { static const int32 kMax = 4; template<T> struct Row { T[kMax] cells; } }\n"
+			"\tconst int32 kCount = 3;\n"
+			"}\n"
+			"A::Box<int32> g_Box;\nA::Grid<int32> g_Grid;\nA::Limits::Row<int32> g_Row;\n") + c_Main);
+		TEST_ASSERT_EQ(program.Diagnostics(), std::string());
+		auto sizeOfGlobal = [&program](const char* name) {
+			auto variable = program.Model().QueryVariable(name);
+			return variable.Ok() && variable.value.type ? static_cast<int64>(variable.value.type->GetSize()) : int64(-1);
+		};
+		TEST_ASSERT_EQ(sizeOfGlobal("g_Box"), int64(12));
+		TEST_ASSERT_EQ(sizeOfGlobal("g_Grid"), int64(28));
+		TEST_ASSERT_EQ(sizeOfGlobal("g_Row"), int64(16));
+		TEST_PASSED();
+	}
 } // namespace Testing

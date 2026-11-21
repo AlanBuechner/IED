@@ -53,7 +53,7 @@ namespace Scripting
 	Core::String Specializations::Spelled(const Core::String& name, const ProgramModel::TemplateDef& spec) { return name + spec.pattern->ToString(); }
 
 	QueryResult<Specializations::Choice> Specializations::ForType(const ProgramModel& model, const ProgramModel::TemplateDef& primary, const Core::String& name,
-		const TemplateArgs& args, uint32 unitId)
+		const TemplateArgs& args)
 	{
 		using Result = QueryResult<Choice>;
 		struct Matched { const ProgramModel::TemplateDef* def; TemplateArgs args; };
@@ -61,7 +61,7 @@ namespace Scripting
 		for (const ProgramModel::TemplateDef* spec : InScope(model.m_TypeSpecializations, name, primary.declScope))
 		{
 			if (auto shape = CheckShape(name, *spec, *primary.params); !shape.Ok()) return Result::Fail(shape.error, shape.message);
-			if (auto own = Match(model, *spec, args, unitId); own.Ok()) matches.push_back({ spec, own.value });
+			if (auto own = Match(model, *spec, args); own.Ok()) matches.push_back({ spec, own.value });
 		}
 		if (matches.empty()) return Result::Success(Choice());
 
@@ -92,16 +92,19 @@ namespace Scripting
 	}
 
 	QueryResult<const ProgramModel::TemplateDef*> Specializations::ForFunction(const ProgramModel& model, const ProgramModel::TemplateDef& primary, const Core::String& name,
-		const TemplateArgs& args, uint32 unitId)
+		const TemplateArgs& args)
 	{
 		for (const ProgramModel::TemplateDef* spec : InScope(model.m_FunctionSpecializations, name, primary.declScope))
-			if (Match(model, *spec, args, unitId).Ok()) return QueryResult<const ProgramModel::TemplateDef*>::Success(spec);
+			if (Match(model, *spec, args).Ok()) return QueryResult<const ProgramModel::TemplateDef*>::Success(spec);
 		return QueryResult<const ProgramModel::TemplateDef*>::Success(nullptr);
 	}
 
-	QueryResult<TemplateArgs> Specializations::Match(const ProgramModel& model, const ProgramModel::TemplateDef& spec, const TemplateArgs& args, uint32 unitId)
+	// The pattern is written in the specialization's file and resolves as that file's declarations do, so which
+	// specialization an instance takes never depends on who asked for the instance.
+	QueryResult<TemplateArgs> Specializations::Match(const ProgramModel& model, const ProgramModel::TemplateDef& spec, const TemplateArgs& args)
 	{
 		using Result = QueryResult<TemplateArgs>;
+		const uint32 unitId = spec.unit;
 		const TemplatePatterns patterns = PatternsOf(spec);
 		const uint32 fixed = patterns.patterns.Count();
 		if (args.Count() < fixed || (!patterns.expansion && args.Count() != fixed)) return Result::Fail(QueryError::NotFound, "argument count");

@@ -7,6 +7,8 @@
 include "services/Workspaces.ch"
 include "web/Rpc.ch"
 
+namespace Ied { class Server; }
+
 namespace Ied
 {
 	class SourceBreakpoint

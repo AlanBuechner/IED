@@ -6,6 +6,8 @@ include "Com.ch"
 include "Placement.ch"
 include "Pages.ch"
 
+namespace Desktop { class App; }
+
 namespace Desktop
 {
 	const uint32 c_ResolvedMessage = 0x8001;     // WM_APP + 1: a resolver thread left a URL or an error
