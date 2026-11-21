@@ -40,10 +40,14 @@ static Core::String DesktopLocation(const Cli::Command& command) {
 	return location.ToString();
 }
 
-// Hands the location to the desktop app beside ied; false when there is none or it did not start.
+// Hands the location to the desktop app beside ied; false when there is none or it did not start - or, on Linux, when
+// there is no desktop session for its window (an SSH shell): then the URL is printed or the browser opened.
 static bool OpenInDesktop(const Cli::Command& command) {
 	FS::Path desktop = Launch::DesktopProgram();
 	if (desktop.IsEmpty()) return false;
+#if defined(PLATFORM_LINUX)
+	if (Platform::GetEnvironmentVariable("DISPLAY").IsEmpty() && Platform::GetEnvironmentVariable("WAYLAND_DISPLAY").IsEmpty()) return false;
+#endif
 	Process::StartInfo info;
 	info.program = Core::String(desktop.View());
 	info.arguments.Push(DesktopLocation(command));

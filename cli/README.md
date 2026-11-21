@@ -7,8 +7,9 @@ workspace open already, the file is shown there and the window comes to the fron
 it opens in the desktop app when `ied-desktop.exe` sits beside `ied.exe` (`docs/27`), else in the default browser.
 
 On Linux (`nuke build ied --system linux` in `tools/linux/builder`; the prebuilt Linux install has it, `docs/21`
-"Prebuilt releases") there is no desktop app: `ied` starts `ied-server` beside it and opens the browser with
-`xdg-open`, and without a desktop session (no `DISPLAY` or `WAYLAND_DISPLAY`, e.g. over SSH) prints the URL instead.
+"Prebuilt releases") `ied` opens in the Linux desktop app (`ied-desktop` beside it, GTK and WebKitGTK, `docs/27`
+"Linux") when there is a desktop session, else the browser with `xdg-open`; without a desktop session (no `DISPLAY`
+or `WAYLAND_DISPLAY`, e.g. over SSH) it prints the URL instead.
 
 ```bat
 ied                      open this folder

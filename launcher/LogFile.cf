@@ -19,7 +19,18 @@ namespace Launch
 		if (out.IsOpen()) out.Write((const void*)text.View().Data(), text.View().ByteLength());
 	}
 
-	FS::Path LogsFolder() { return FS::Path(Platform::GetEnvironmentVariable("LOCALAPPDATA").View()) / "IED" / "logs"; }
+	FS::Path StateFolder() {
+#if defined(PLATFORM_LINUX)
+		Core::String base;
+		if (!Platform::TryGetEnvironmentVariable("XDG_STATE_HOME", base) || base.IsEmpty())
+			base = Core::String((FS::Path(Platform::GetEnvironmentVariable("HOME").View()) / ".local/state").View());
+		return FS::Path(base.View()) / "ied";
+#else
+		return FS::Path(Platform::GetEnvironmentVariable("LOCALAPPDATA").View()) / "IED";
+#endif
+	}
+
+	FS::Path LogsFolder() { return StateFolder() / "logs"; }
 
 	Core::String LogStamp(int64 unixNs, uint64 pid) {
 		Platform::CalendarTime at = Platform::LocalCalendar(unixNs);

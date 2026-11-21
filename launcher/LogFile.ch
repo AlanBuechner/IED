@@ -22,6 +22,9 @@ namespace Launch
 	}
 
 	// %LOCALAPPDATA%\IED\logs.
+	// The user's machine-local IED folder, the server's own (src/host/Config.cf DataFolder): %LOCALAPPDATA%\IED, on
+	// Linux $XDG_STATE_HOME/ied (~/.local/state/ied).
+	FS::Path StateFolder();
 	FS::Path LogsFolder();
 	// "2026-10-22 23:26:02.123 [4242] " for `unixNs` and process `pid`.
 	Core::String LogStamp(int64 unixNs, uint64 pid);
