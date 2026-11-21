@@ -47,7 +47,7 @@
 			"type": "object",
 			"x-ied-tiers": ["app"],
 			"x-ied-shared": false,
-			"description": "The config server's reader token, never in a settings file: { \"env\": \"IED_CONFIG_TOKEN\" } names the environment variable that holds it ({ \"secret\": \"<name>\" } waits for the secret store, docs/11).",
+			"description": "Where the config server's reader token is, never the token itself: { \"secret\": \"configServer\" } in IED's secret store (Settings > Environment > Config Server puts it there, docs/11), or { \"env\": \"IED_CONFIG_TOKEN\" }, the environment variable of the IED server that holds it.",
 			"additionalProperties": false,
 			"properties": {
 				"env": { "type": "string", "minLength": 1 },

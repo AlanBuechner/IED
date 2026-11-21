@@ -60,6 +60,7 @@ namespace Ied
 		if (IsMaster()) {
 			m_Servers = new WorkspaceServers(self);
 			m_Proxy = new Proxy(self);
+			m_Secrets = new Secrets(self);
 			m_SharedMirror = new SharedMirror(self);
 			if (IsConfigServer(this.m_Config)) m_ConfigServer = new ConfigServer(self, FS::Path(this.m_Config.m_ConfigRoot.View()));
 		}

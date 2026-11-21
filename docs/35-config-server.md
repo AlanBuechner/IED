@@ -86,9 +86,9 @@ in `server-plugins`' `settingsProblem` and the log. Staging left by a stop is re
 
 ## The client
 
-App setting `configServer.url` (`https://nas.lan:8780/`), `configServer.token` (`{ "env": "IED_CONFIG_TOKEN" }`: the
-environment variable of the IED server that holds the reader token; docs/07: never in a settings file - `{ "secret":
-"<name>" }` waits for the secret store, docs/11 "Secrets", and until then says so as the status) and
+App setting `configServer.url` (`https://nas.lan:8780/`), `configServer.token` (never the token itself, docs/07:
+`{ "secret": "configServer" }`, the reader token in the master's secret store, docs/11 "Secrets", which the settings
+page below puts there; or `{ "env": "IED_CONFIG_TOKEN" }`, the environment variable of the IED server that holds it) and
 `configServer.certificate` (a PEM file of CA certificates trusted for the server's https besides the system's: a NAS's
 own CA). All three are User settings a config server cannot set (`"x-ied-shared": false`). The master server (docs/01)
 follows the config server with a waiting `/config/v1/state` request (25 s, then again) on a thread of its own
@@ -103,12 +103,46 @@ the plugin, its hash and the server).
 
 While the config server cannot be followed the mirror stays as it was and IED goes on with it; IED never waits for it
 to start. The status is the `server` topic's `configServer` field (`{state, url, error?, version?, syncedMs?, plugins,
-skills}`, `configServer.changed` when it changes) - `off` (no URL), `connecting`, `following`, `unreachable` (the
+skills, served}`, `configServer.changed` when it changes) - `off` (no URL), `connecting`, `following`, `unreachable` (the
 network, or an HTTP error), `refused` (401/403, or a token the settings cannot give) or `failed` (what it served did not
 mirror) - a line in the IED output for each change, a warning notification when following stops (once, until it
-follows again), and while it is in trouble a "Config server" warning in the status bar (its tooltip says why; a phone
-has the notification). It tries again after 1 s, doubling to 30 s; a change of the app settings tries at once. Clearing
-`configServer.url` stops following and keeps the mirror (delete `<app data>/shared/` to drop it).
+follows again), and while it is in trouble a "Config server" warning in the status bar (its tooltip says why, a click
+opens the settings page below; a phone has the notification). `served` is what the mirror holds,
+`{settings: [{key, members?}], plugins: [id], skills: [name]}`: each shared setting with the member names of an object
+value (`ai.models` lists the model profiles), so a page can say what is shared without knowing any plugin's settings.
+It tries again after 1 s, doubling to 30 s; a change of the app settings or of the secret store tries at once, and so
+does `configServer.retry` (a master method, `{}`). The waiting state request runs on a thread of its own: a change that
+names another server, another token or none leaves it unanswered, so Connect and Disconnect take effect at once rather
+than after its 25 s; and it waits only while the mirror follows, so a server back after a failure is said to be at its
+first answer. Clearing `configServer.url` stops following and keeps the mirror (delete `<app data>/shared/` to drop
+it).
+
+### Settings > Environment > Config Server (2026-11-21)
+
+Owner, 2026-11-21: "we should have some ui in the settings to set the config server so settings like the local models
+will auto sync."
+
+The shell's own page (`frontend/src/shell/configserverpage.js`, its model `configservermodel.js`), beside Keyboard,
+edits the three `configServer.*` settings, always in the User tier whatever tier the window edits:
+
+- **Status**, live from the `server` topic: a dot and a word for the state (Following green, Connecting blue,
+  Cannot be reached / Refused / Could not mirror red with the error, Not following gray), the URL, when the last change
+  was mirrored and the version's first digits, and what is shared - Settings (each key, an object's members after it:
+  `ai.models 3: qwen3.8-flash-next@lan, ...`), Plugins, Skills; while not following, what IED keeps from its last
+  mirror. Retry now while it is in trouble or connecting.
+- **Connection**: Server URL (a bare host gets `http://`, the URL ends with `/`), Reader token (a password field that
+  never shows a token: it says where the token is - "Stored on this machine" with Remove, an environment variable by
+  name, or nothing yet), CA certificate, and Connect (Apply once a URL is set) and Disconnect. Connect stores a token
+  typed in with `secrets.set {name: "configServer"}`, points `configServer.token` at it (`{ "secret": "configServer" }`,
+  replacing an `{ "env" }`), writes the certificate and the URL - or, with the URL unchanged, asks `configServer.retry`.
+  Enter in a field is Connect. Disconnect resets `configServer.url` (the token and the mirror stay); Remove deletes the
+  stored token and resets `configServer.token` when it named it. A refusal shows under the buttons.
+- Under it, how a reader token is made on the config server. At phone width the label column stacks over the fields.
+
+The chain it serves, checked 2026-11-21 on the owner's machines: a model service added in SparkHub (the Spark's model
+manager) reached the NAS config server through `spark.models` in 24 s, and the owner's running IED had it in its
+settings half a second later; a change of its context window and its removal went the same way in 30 s - the time is
+`spark.models.pollSeconds` (30), how often the plugin reads SparkHub.
 
 Precedence:
 
@@ -143,10 +177,9 @@ on). `--watch` uploads again on every change: edit, save, the plugin runs on the
 
 The owner's loop for a server plugin, once: on the NAS, `ied-server --config-root /mnt/tank/ied-config --config-token
 admin deploy` (in the container: `docker run --rm -u 568:568 -v /mnt/tank/apps/ied-config:/data
-ied-config-server:latest --config-token admin deploy`), and `reader <machine>` for each IED that follows it; on the desktop, `setx IED_CONFIG_ADMIN_TOKEN
-<admin token>` and, in Settings > Environment, `configServer.url` and `configServer.token` `{ "env": "IED_CONFIG_TOKEN"
-}` with `setx IED_CONFIG_TOKEN <reader token>` (IED's server reads the environment it starts with). Then `deploy.py
-server-plugin <folder> --watch`.
+ied-config-server:latest --config-token admin deploy`), and `reader <machine>` for each IED that follows it; on the
+desktop, `setx IED_CONFIG_ADMIN_TOKEN <admin token>` for the deploy tooling, and on each IED Settings > Environment >
+Config Server: the URL, the machine's reader token, Connect. Then `deploy.py server-plugin <folder> --watch`.
 
 The config server itself deploys to TrueNAS as a custom app (`docker/config-server/compose.yaml`; the owner's
 NAS deploy tools install it) once the server builds for Linux (C4 D-86).
@@ -171,6 +204,16 @@ NAS deploy tools install it) once the server builds for Linux (C4 D-86).
   list; `IED::Shared` refused on a server that is no config server; an unreachable config server leaving the mirror as
   it was, then followed once it is up on that port; a refused token and a secret the client cannot read); screenshots of
   the status bar's warning (desktop) and the notification (phone) for a config server that cannot be reached.
+- 2026-11-21, the settings page: `src/auth/SecretStore.cf` and `Secrets.cf` (docs/11 "Secrets"), `MirrorToken` reading
+  `{ "secret" }`, `MirroredJson` (`served`), `configServer.retry`, the abandoned and non-waiting state requests in
+  `SharedMirror`; `frontend/src/shell/configserverpage.js` and `configservermodel.js`, the status bar item opening it.
+  Checks: unit `server.configserver` `client_settings` (a token from the store), `secret_store` (round trip, the file
+  never holding a value in the clear, a sealed value moved under another name refused, removal, names) and `mirrored`;
+  frontend `configserver.test.js`; server checks `test_a_stored_token_is_followed_and_never_comes_back` (Connect's
+  requests from refused to following, `served`, the token in no file, log or topic, `secret-set` in the security log,
+  Remove refused at once, bad names and values) and `test_a_change_of_server_is_followed_at_once` (Disconnect while the
+  state request waits: off within seconds; Connect again; a server back after the pause between tries grew, followed at
+  once on Retry now - before, the first request after a failure waited its 25 s); e2e `config_server_page`.
 
 ## Open items
 

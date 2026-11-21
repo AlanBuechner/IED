@@ -15,12 +15,12 @@ namespace Ied
 		return Core::String(text) + "/";
 	}
 
-	Core::String MirrorToken(Core::StringView valueJson, Core::String& problem) {
+	Core::String MirrorToken(Core::StringView valueJson, SecretStore* secrets, Core::String& problem) {
 		Serialization::DomDoc doc;
 		Serialization::ReadResult read = Serialization::ReadJson(valueJson, doc);
 		Serialization::DomNode value = read.root;
 		if (!read.Ok() || value.Kind() != Serialization::DomKind::Object) {
-			problem = Core::String("configServer.token is not set: { \"env\": \"<variable>\" } names the environment variable that holds a reader token (docs/35)");
+			problem = Core::String("configServer.token is not set: store a reader token on Settings > Environment > Config Server, or name the environment variable that holds one with { \"env\": \"<variable>\" } (docs/35)");
 			return Core::String();
 		}
 		Core::StringView variable = value.Member("env").AsView();
@@ -34,19 +34,81 @@ namespace Ied
 		}
 		Core::StringView secret = value.Member("secret").AsView();
 		if (!secret.IsEmpty()) {
-			problem = (Core::String("configServer.token: { \"secret\": \"") + secret) + "\" } needs the secret store, which IED does not have yet (docs/11 \"Secrets\"); use { \"env\": \"<variable>\" }";
+			Core::String token;
+			Core::String why;
+			if (secrets == nullptr) why = Core::String("this server has no secret store");
+			else if (secrets->Get(secret, token, why) && !token.View().Trimmed().IsEmpty()) return Core::String(token.View().Trimmed());
+			else if (why.IsEmpty()) why = Core::String("it is empty");
+			problem = (Core::String("configServer.token: the secret '") + secret) + "': " + why.View();
 			return Core::String();
 		}
 		problem = Core::String("configServer.token names neither an environment variable (env) nor a secret");
 		return Core::String();
 	}
 
+	Core::String MirroredJson(const FS::Path& shared) {
+		JsonWriter json;
+		json.BeginObject();
+		json.Key(Core::StringView("settings"));
+		json.BeginArray();
+		FS::Path file = shared / "settings.json";
+		if (FS::FileExists(file.CStr())) {
+			FS::File opened = FS::File(file.CStr(), "rb");
+			Core::String text = opened.ReadText();
+			Serialization::DomDoc doc;
+			Serialization::ReadResult read = Serialization::ReadJsonc(text.View(), doc);
+			if (read.Ok() && read.root.Kind() == Serialization::DomKind::Object) {
+				for (int64 i = 0; i < read.root.Count(); ++i) {
+					json.BeginObject();
+					json.Field("key", read.root.KeyAt(i));
+					Serialization::DomNode value = read.root.ValueAt(i);
+					if (value.Kind() == Serialization::DomKind::Object) {
+						json.Key(Core::StringView("members"));
+						json.BeginArray();
+						for (int64 m = 0; m < value.Count(); ++m) json.String(value.KeyAt(m));
+						json.EndArray();
+					}
+					json.EndObject();
+				}
+			}
+		}
+		json.EndArray();
+		const char*[2] kinds = { "plugins", "skills" };
+		for (int32 k = 0; k < 2; ++k) {
+			json.Key(Core::StringView(kinds[k]));
+			json.BeginArray();
+			FS::Path folder = shared / kinds[k];
+			Core::Array<Core::String> names;
+			if (FS::IsDirectory(folder.CStr())) {
+				FS::Directory listing = FS::Directory(folder.CStr());
+				for (FS::DirectoryEntry& entry : listing)
+					if (entry.kind == FS::EntryKind::Directory) names.Push(entry.name);
+			}
+			names.Sort();
+			for (const Core::String& name : names) json.String(name.View());
+			json.EndArray();
+		}
+		json.EndObject();
+		return json.ToString();
+	}
+
 	FS::Path SharedMirror::SharedFolder() const { return FS::Path(m_Server->m_Config.m_AppDataDir.View()) / "shared"; }
 
+	void SharedMirror::Init(Server* server) {
+		this.m_Server = server;
+		SharedMirror* self = this;
+		server->m_Rpc.Register("configServer.retry", [self](Call& call, const Params& params) -> Core::String {
+			self->Wake();
+			return Core::String("{}");
+		});
+	}
+
 	void SharedMirror::Start() {
+		Core::String served = MirroredJson(SharedFolder());
 		{
 			Threading::LockGuard guard(m_Lock);
 			m_State = Core::String("off");
+			m_Served = served;
 		}
 		FS::RemoveAll((SharedFolder() / c_StagingFolder).CStr());
 		SharedMirror* self = this;
@@ -81,6 +143,7 @@ namespace Ied
 		if (m_SyncedMs > 0) json.IntField("syncedMs", m_SyncedMs);
 		json.IntField("plugins", m_Plugins);
 		json.IntField("skills", m_Skills);
+		json.RawField("served", m_Served.IsEmpty() ? Core::StringView("{\"settings\":[],\"plugins\":[],\"skills\":[]}") : m_Served.View());
 		json.EndObject();
 		return json.ToString();
 	}
@@ -124,12 +187,14 @@ namespace Ied
 	}
 
 	void SharedMirror::Synced(Core::StringView version, int64 plugins, int64 skills) {
+		Core::String served = MirroredJson(SharedFolder());
 		{
 			Threading::LockGuard guard(m_Lock);
 			m_Version = Core::String(version);
 			m_SyncedMs = Platform::UnixTimeNs() / 1000000;
 			m_Plugins = plugins;
 			m_Skills = skills;
+			m_Served = served;
 		}
 		Core::String status = StatusJson();
 		Threading::LockGuard guard(m_Server->m_Lock);
@@ -165,7 +230,7 @@ namespace Ied
 			target.m_Url = Core::String(url.View().Trimmed());
 			return target;
 		}
-		target.m_Token = MirrorToken(token.View(), target.m_Problem);
+		target.m_Token = MirrorToken(token.View(), m_Server->m_Secrets ? m_Server->m_Secrets->Store() : nullptr, target.m_Problem);
 		if (!target.m_Problem.IsEmpty() || certificate.IsEmpty()) return target;
 		FS::File opened = FS::File(certificate.CStr(), "rb");
 		if (!opened.IsOpen()) {
@@ -198,6 +263,36 @@ namespace Ied
 			why.Append(message);
 		}
 		return why.ToString();
+	}
+
+	// A state request on a thread of its own, waited for here: true with its answer; false when a wake finds that the
+	// settings name another server, another token or none while it is out - it is left to end on its own, unheard, so
+	// Connect, Disconnect or a new token take effect at once rather than after the server's wait.
+	bool SharedMirror::Ask(const MirrorTarget& target, Core::StringView path, int32 timeoutMs, Http::FetchResult& got) {
+		MirrorAsk* ask = new MirrorAsk();
+		SharedMirror* self = this;
+		MirrorTarget sent = target;
+		Core::String asked = Core::String(path);
+		Threading::Thread::Run([self, ask, sent, asked, timeoutMs]() {
+			Http::FetchResult answer = AskConfigServer(sent, asked.View(), timeoutMs);
+			Threading::LockGuard guard(self->m_Lock);
+			ask->m_Got = answer;
+			ask->m_Done = true;
+			self->m_Wake.NotifyAll();
+		}).Detach();
+		for (;;) {
+			{
+				Threading::LockGuard guard(m_Lock);
+				while (!ask->m_Done && !m_Woken) m_Wake.WaitFor(m_Lock, 1000000000);
+				if (ask->m_Done) {
+					got = ask->m_Got;
+					return true;
+				}
+				m_Woken = false;
+			}
+			MirrorTarget now = Target();
+			if (now.m_Url.View() != target.m_Url.View() || now.m_Token.View() != target.m_Token.View() || !now.m_Problem.IsEmpty()) return false;
+		}
 	}
 
 	void SharedMirror::Run() {
@@ -233,17 +328,24 @@ namespace Ied
 	}
 
 	// One state request, and the mirror brought up to what it answers; false (the status saying why) when that could
-	// not be done, so the caller waits before it asks again.
+	// not be done, so the caller waits before it asks again. The request waits for a change only while the mirror
+	// follows: after a failure the first answer says at once that the server is back, even when nothing changed.
 	bool SharedMirror::Follow(const MirrorTarget& target, Core::String& since) {
+		bool following;
+		{
+			Threading::LockGuard guard(m_Lock);
+			following = m_State.View() == "following";
+		}
 		Core::StringBuilder path;
 		path.Append("config/v1/state");
-		if (!since.IsEmpty()) {
+		if (!since.IsEmpty() && following) {
 			path.Append("?since=");
 			path.Append(since.View());
 			path.Append("&wait=");
 			path.AppendInt(c_MirrorWaitS);
 		}
-		Http::FetchResult got = AskConfigServer(target, path.View(), (int32)(c_MirrorWaitS * 1000) + c_MirrorSlackMs);
+		Http::FetchResult got;
+		if (!Ask(target, path.View(), (int32)(c_MirrorWaitS * 1000) + c_MirrorSlackMs, got)) return true;
 		if (!got.ok) {
 			SetStatus(Core::StringView("unreachable"), target.m_Url.View(), got.error.View());
 			return false;

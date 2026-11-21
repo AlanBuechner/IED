@@ -19,6 +19,7 @@ include "services/Trash.ch"
 include "services/Search.ch"
 include "services/Diagnostics.ch"
 include "auth/Auth.ch"
+include "auth/Secrets.ch"
 include "plugins/Host.ch"
 include "plugins/CodeCalls.ch"
 include "Trust.ch"
@@ -102,6 +103,7 @@ namespace Ied
 		public MasterLink* m_Master;          // a workspace server's; null in the master
 		public ConfigServer* m_ConfigServer;  // the master's with --config-root (docs/35); null otherwise
 		public SharedMirror* m_SharedMirror;  // the master's: follows the config server configServer.url names
+		public Secrets* m_Secrets;            // the master's: the secret store (docs/11 "Secrets")
 		public int64 m_StartedMs;
 	}
 

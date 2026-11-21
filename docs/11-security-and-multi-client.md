@@ -38,6 +38,7 @@ The access defaults above, as the server implements them (M1).
 |---|---|
 | `auth/owner.json` | the owner password as an Argon2id PHC string (RFC 9106's second recommended costs: 64 MiB, 3 passes, 4 lanes) |
 | `auth/devices.json` | device sessions: id, name, kind (`token` or `password`), created, last seen, and the SHA-256 of the cookie value - never the value |
+| `auth/secrets.json` | the secret store ("Secrets" below): each value encrypted for the signed-in Windows user (DPAPI), by name |
 | `logs/security.log` | the audit log below: one JSON object per line, appended |
 
 Files are written whole under a temporary name and renamed over the old one, so a crash leaves the old file or the new one, never half of one.
@@ -172,7 +173,8 @@ Declared in the manifest (`docs/02`), shown before enabling, enforced at the plu
 
 ## Secrets
 
-- Stored in Windows Credential Manager (DPAPI), under `IED/<name>`; settings hold references (`{"secret": "anthropic-key"}`) or env references (`{"env": "ANTHROPIC_API_KEY"}`). Not built yet (F-SET-30): settings take only `{"env"}` references (`mcp.servers` env and headers, `configServer.token`), read from the IED server's environment when it started; a `{"secret": ...}` reference fails saying the store is missing (`docs/35`), never falling back to plain text.
+- Settings hold references, never values: `{"secret": "<name>"}` (the secret store) or `{"env": "ANTHROPIC_API_KEY"}` (the IED server's environment when it started).
+- **The secret store as built (2026-11-21, F-SET-30 in part; `src/auth/SecretStore.cf`, `Secrets.cf`):** the master's `auth/secrets.json` in the data folder, `{version: 1, secrets: {<name>: {dpapi: "<base64>", setMs}}}`, each value encrypted for the signed-in Windows user with DPAPI (`CryptProtectData` from `crypt32.dll`, loaded at its first use; the secret's name is its entropy, so a sealed value moved under another name does not open). The file is of no use to another user or another machine and never holds a value in the clear. It is a file of the data folder rather than Credential Manager's `IED/<name>` (the first plan) so each IED - a test server, a second install - keeps its own secrets and never reads or replaces another's. Names are 1 to 64 letters, digits, `.`, `_` and `-`; a value at most 4096 bytes. Without DPAPI (Linux) the store is not built yet: `secrets.list` says `available: false` with why, `secrets.set` fails saying so, and `{"env"}` references remain. Master methods: `secrets.list` -> `{available, problem?, secrets: [{name, setMs}]}` (never a value; also the `server` topic's `secrets`, `secrets.changed` when they change), `secrets.set {name, value}` -> `{}`, `secrets.remove {name}` -> `{removed}`. The security log gets `secret-set` and `secret-removed` with the name alone, and a change wakes the config server mirror. Read today by `configServer.token` (Settings > Environment > Config Server stores it, `docs/35`); `ai.models` API keys and `mcp.servers` env and headers still read only `{"env"}`, and a `{"secret"}` reference there is not resolved yet.
 - Never sent to clients (settings UI shows `******` + "replace"), never written to logs, trajectories, tool results or diagnostics bundles (a redaction filter over every outbound text sink matches known secret values).
 
 ## Multi-client concurrency rules

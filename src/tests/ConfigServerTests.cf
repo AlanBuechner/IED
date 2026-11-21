@@ -217,12 +217,78 @@ class ConfigServerTests {
 		assert_true(Ied::MirrorBaseUrl(Core::StringView("nas.lan:8780"), problem).IsEmpty() && !problem.IsEmpty(), "http or https only");
 		Platform::SetEnvironmentVariable("IED_CONFIG_TEST_TOKEN", " abc ");
 		problem = Core::String();
-		assert_se("abc", Ied::MirrorToken(Core::StringView("{\"env\":\"IED_CONFIG_TEST_TOKEN\"}"), problem).CStr(), problem.CStr());
+		assert_se("abc", Ied::MirrorToken(Core::StringView("{\"env\":\"IED_CONFIG_TEST_TOKEN\"}"), nullptr, problem).CStr(), problem.CStr());
 		Platform::RemoveEnvironmentVariable("IED_CONFIG_TEST_TOKEN");
-		assert_true(Ied::MirrorToken(Core::StringView("{\"env\":\"IED_CONFIG_TEST_TOKEN\"}"), problem).IsEmpty(), "an unset variable");
+		assert_true(Ied::MirrorToken(Core::StringView("{\"env\":\"IED_CONFIG_TEST_TOKEN\"}"), nullptr, problem).IsEmpty(), "an unset variable");
 		assert_true(problem.View().Contains(Core::StringView("IED_CONFIG_TEST_TOKEN")), problem.CStr());
-		assert_true(Ied::MirrorToken(Core::StringView("{\"secret\":\"configServer\"}"), problem).IsEmpty(), "no secret store yet");
-		assert_true(problem.View().Contains(Core::StringView("secret store")), problem.CStr());
-		assert_true(Ied::MirrorToken(Core::StringView("null"), problem).IsEmpty() && problem.View().Contains(Core::StringView("env")), "not set: says how");
+		assert_true(Ied::MirrorToken(Core::StringView("{\"secret\":\"configServer\"}"), nullptr, problem).IsEmpty(), "no store at all");
+		assert_true(problem.View().Contains(Core::StringView("no secret store")), problem.CStr());
+		assert_true(Ied::MirrorToken(Core::StringView("null"), nullptr, problem).IsEmpty() && problem.View().Contains(Core::StringView("env")), "not set: says how");
+		FS::Path root = ConfigTestScratch("ied-config-secret-token-");
+		Ied::SecretStore* store = new Ied::SecretStore((root / "secrets.json").View());
+		problem = Core::String();
+		assert_true(Ied::MirrorToken(Core::StringView("{\"secret\":\"configServer\"}"), store, problem).IsEmpty(), "a secret not stored");
+		assert_true(problem.View().Contains(Core::StringView("'configServer'")), problem.CStr());
+		assert_true(store->Set(Core::StringView("configServer"), Core::StringView("f00d\n"), problem), problem.CStr());
+		problem = Core::String();
+		assert_se("f00d", Ied::MirrorToken(Core::StringView("{\"secret\":\"configServer\"}"), store, problem).CStr(), problem.CStr());
+		FS::RemoveAll(root.CStr());
+	}
+
+	// docs/11 "Secrets": a value is kept encrypted for this user, by name, and never comes out of the list.
+	[test("secret_store")]
+	public static void TestSecretStore() {
+		FS::Path root = ConfigTestScratch("ied-secrets-");
+		FS::Path file = root / "auth" / "secrets.json";
+		Ied::SecretStore* store = new Ied::SecretStore(file.View());
+		Core::String problem;
+		assert_true(store->Available(problem), problem.CStr());
+		Core::String value;
+		assert_true(!store->Get(Core::StringView("configServer"), value, problem), "nothing stored yet");
+		assert_true(store->Set(Core::StringView("configServer"), Core::StringView("plain-token-0123456789"), problem), problem.CStr());
+		assert_true(store->Set(Core::StringView("other.key"), Core::StringView("second"), problem), problem.CStr());
+		Core::String text = ConfigTestRead(file);
+		assert_true(!text.View().Contains(Core::StringView("plain-token")), "the file never holds a value in the clear");
+		assert_true(text.View().Contains(Core::StringView("\"dpapi\"")), text.CStr());
+		assert_true(store->Get(Core::StringView("configServer"), value, problem), problem.CStr());
+		assert_se("plain-token-0123456789", value.CStr(), "read back");
+		Ied::SecretStore* again = new Ied::SecretStore(file.View());
+		assert_true(again->Get(Core::StringView("other.key"), value, problem) && value.View() == "second", "another store over the file reads it");
+		Core::String list = store->ListJson();
+		assert_true(list.View().Contains(Core::StringView("\"name\":\"configServer\"")) && list.View().Contains(Core::StringView("\"available\":true")), list.CStr());
+		assert_true(!list.View().Contains(Core::StringView("plain-token")) && !list.View().Contains(Core::StringView("dpapi")), "the list holds names alone");
+		// A sealed value moved under another name does not open: the name is its entropy.
+		Serialization::DomDoc doc;
+		Serialization::ReadResult read = Serialization::ReadJson(text.View(), doc);
+		Core::String sealed = Core::String(read.root.Member("secrets").Member("configServer").Member("dpapi").AsView());
+		Core::String moved = (Core::String("{\"version\":1,\"secrets\":{\"thief\":{\"dpapi\":\"") + sealed.View()) + "\",\"setMs\":1}}}";
+		FS::Path movedFile = root / "moved.json";
+		ConfigTestWrite(movedFile, moved.CStr());
+		Ied::SecretStore* thief = new Ied::SecretStore(movedFile.View());
+		problem = Core::String();
+		assert_true(!thief->Get(Core::StringView("thief"), value, problem), "a value under another name");
+		assert_true(problem.View().Contains(Core::StringView("cannot be decrypted")), problem.CStr());
+		bool removed = false;
+		assert_true(store->Remove(Core::StringView("configServer"), removed, problem) && removed, problem.CStr());
+		assert_true(store->Remove(Core::StringView("configServer"), removed, problem) && !removed, "removed once");
+		assert_true(!store->Get(Core::StringView("configServer"), value, problem), "gone");
+		assert_true(store->Get(Core::StringView("other.key"), value, problem), "the others stay");
+		assert_true(Ied::IsSecretName(Core::StringView("configServer")) && Ied::IsSecretName(Core::StringView("a.b_c-9")), "names");
+		assert_true(!Ied::IsSecretName(Core::StringView("")) && !Ied::IsSecretName(Core::StringView("a/b")) && !Ied::IsSecretName(Core::StringView("a b")), "not names");
+		FS::RemoveAll(root.CStr());
+	}
+
+	// docs/35 "Settings > Environment > Config Server": what the mirror holds, for the page.
+	[test("mirrored")]
+	public static void TestMirrored() {
+		FS::Path shared = ConfigTestScratch("ied-mirrored-");
+		assert_se("{\"settings\":[],\"plugins\":[],\"skills\":[]}", Ied::MirroredJson(shared).CStr(), "an empty mirror");
+		ConfigTestWrite(shared / "settings.json", "// The config server's settings\n{\"ai.models\": {\"b@lan\": {}, \"a@lan\": {}}, \"editor.fontSize\": 13}\n");
+		ConfigTestWrite(shared / "plugins" / "demo" / "ied-plugin.json", "{}");
+		ConfigTestWrite(shared / "skills" / "nas-deploy" / "SKILL.md", "x");
+		ConfigTestWrite(shared / "skills" / "loose.md", "a file is no skill");
+		assert_se("{\"settings\":[{\"key\":\"ai.models\",\"members\":[\"b@lan\",\"a@lan\"]},{\"key\":\"editor.fontSize\"}],\"plugins\":[\"demo\"],\"skills\":[\"nas-deploy\"]}",
+			Ied::MirroredJson(shared).CStr(), "keys, an object's members, the packages");
+		FS::RemoveAll(shared.CStr());
 	}
 }

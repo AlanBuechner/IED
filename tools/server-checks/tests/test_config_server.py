@@ -419,4 +419,77 @@ class ConfigServerTests(ServerTestCase):
 		second = self.start("nokey")
 		other = await self.connect(second)
 		status = await self.follow_state(other, "refused")
-		self.assertIn("secret store", status["error"], "a secret IED cannot read yet says so")
+		self.assertIn("no secret 'configServer' is stored on this machine", status["error"], "a secret the store does not hold says so")
+
+	# --- Settings > Environment > Config Server: the token in the secret store ----------------------------------------
+
+	async def test_a_stored_token_is_followed_and_never_comes_back(self):
+		self.start_config()
+		write(os.path.join(self.config, "settings.json"), json.dumps({"sample.models": {"a@lan": {"size": 1}, "b@lan": {"size": 2}}, "sample.theme": "darker"}))
+		app = os.path.join(self.root, "stored-app")
+		write_json(os.path.join(app, "settings.json"), {"configServer.url": self.url})
+		client = self.start("stored")
+		watcher = await self.connect(client)
+		status = await self.follow_state(watcher, "refused")
+		self.assertIn("configServer.token is not set", status["error"])
+		listed = await watcher.request("secrets.list", {})
+		self.assertEqual((True, []), (listed["available"], listed["secrets"]))
+		# What the page's Connect does: the token into the store, the setting naming it.
+		await watcher.request("secrets.set", {"name": "configServer", "value": self.reader})
+		await watcher.request("settings.set", {"tier": "app", "key": "configServer.token", "value": {"secret": "configServer"}})
+		status = await self.follow_state(await self.connect(client), "following", 15)
+		self.assertEqual([{"key": "sample.models", "members": ["a@lan", "b@lan"]}, {"key": "sample.theme"}], status["served"]["settings"], "what is shared, an object's members named")
+		self.assertEqual(([], []), (status["served"]["plugins"], status["served"]["skills"]))
+
+		async def shared_models():
+			values = await self.values(watcher)
+			return values.get("sample.models") == ({"a@lan": {"size": 1}, "b@lan": {"size": 2}}, "shared")
+		await self.until("the config server's models at the client", shared_models)
+		self.assertEqual(["configServer"], [s["name"] for s in (await watcher.request("secrets.list", {}))["secrets"]])
+		feed = await self.connect(client)
+		await feed.sub(["server"])
+		snapshot = (await feed.next_frame("server"))["data"]
+		self.assertEqual(["configServer"], [s["name"] for s in snapshot["secrets"]["secrets"]], "the server topic names the secrets")
+		data = os.path.join(self.root, "stored-data")
+		for path in [os.path.join(data, "auth", "secrets.json"), os.path.join(data, "logs", "security.log"), os.path.join(data, "logs", "server.log"), os.path.join(app, "settings.json")]:
+			with open(path, encoding="utf-8") as f:
+				self.assertNotIn(self.reader, f.read(), "the token is in no file in the clear: " + path)
+		self.assertNotIn(self.reader, json.dumps(snapshot))
+		security = [json.loads(line) for line in read_lines(os.path.join(data, "logs", "security.log"))]
+		self.assertIn(("secret-set", "configServer"), [(e["event"], e.get("name")) for e in security], "the security log names the secret")
+		# Removed: refused at once, not after the waiting request ends; the secrets.changed event says so.
+		removed = await watcher.request("secrets.remove", {"name": "configServer"})
+		self.assertTrue(removed["removed"])
+		changed = (await feed.wait_for("server", lambda f: f.get("kind") == "secrets.changed", 5))[-1]
+		self.assertEqual([], changed["data"]["secrets"])
+		status = await self.follow_state(await self.connect(client), "refused", 10)
+		self.assertIn("no secret 'configServer' is stored", status["error"])
+		self.assertFalse((await watcher.request("secrets.remove", {"name": "configServer"}))["removed"], "removed once")
+		for bad in [{"name": "a/b", "value": "x"}, {"name": "configServer", "value": ""}, {"name": "configServer", "value": "x" * 4097}]:
+			with self.assertRaises(RpcFailure):
+				await watcher.request("secrets.set", bad)
+
+	async def test_a_change_of_server_is_followed_at_once(self):
+		port = free_port()
+		self.start_config(port)
+		client, _ = self.start_client()
+		await self.follow_state(await self.connect(client), "following")
+		watcher = await self.connect(client)
+		await asyncio.sleep(1.5)
+		# Its waiting state request is out for 25 s: Disconnect stops following now.
+		began = time.monotonic()
+		await watcher.request("settings.reset", {"tier": "app", "key": "configServer.url"})
+		await self.follow_state(await self.connect(client), "off", 8)
+		self.assertLess(time.monotonic() - began, 8)
+		await watcher.request("settings.set", {"tier": "app", "key": "configServer.url", "value": self.url})
+		await self.follow_state(await self.connect(client), "following", 8)
+		# Unreachable for a while (its pause between tries grows to 8 s), back on its port: Retry now follows it now.
+		self.config_server.stop()
+		self.servers.remove(self.config_server)
+		await self.follow_state(await self.connect(client), "unreachable", 30)
+		await asyncio.sleep(8)
+		self.start_config(port)
+		began = time.monotonic()
+		await watcher.request("configServer.retry", {})
+		await self.follow_state(await self.connect(client), "following", 6)
+		self.assertLess(time.monotonic() - began, 6, "the retry did not wait out the pause")

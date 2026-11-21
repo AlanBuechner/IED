@@ -28,13 +28,13 @@ namespace Ied
 
 	// The master's own methods and topics a client sends it (docs/10 "Routing"); its plugins' code adds theirs.
 	static Core::Array<Core::String> MasterMethods() {
-		const char*[16] names = {
+		const char*[20] names = {
 			"server.info", "server.notify", "server.dismiss", "ws.list", "ws.openRecent", "ws.setFavorite", "ws.forgetRecent",
 			"ws.close", "ws.restart", "auth.setPassword", "auth.devices", "auth.revoke", "plugins.setEnabled", "plugins.approve",
-			"testhooks.mintToken", "testhooks.relaunch"
+			"testhooks.mintToken", "testhooks.relaunch", "secrets.list", "secrets.set", "secrets.remove", "configServer.retry"
 		};
 		Core::Array<Core::String> methods;
-		for (int32 i = 0; i < 16; ++i) methods.Push(Core::String(names[i]));
+		for (int32 i = 0; i < 20; ++i) methods.Push(Core::String(names[i]));
 		return methods;
 	}
 
@@ -78,6 +78,8 @@ namespace Ied
 			json.EndObject();
 			// The config server followed (docs/35 "The client"); `configServer.changed` when it changes.
 			if (m_Server->m_SharedMirror) json.RawField("configServer", m_Server->m_SharedMirror->StatusJson().View());
+			// The secret store's names, never a value (docs/11 "Secrets"); `secrets.changed` when they change.
+			if (m_Server->m_Secrets) json.RawField("secrets", m_Server->m_Secrets->Store()->ListJson().View());
 		}
 		Core::String workspaces = m_Server->m_Workspaces->SummariesJson();
 		json.RawField("workspaces", workspaces.View());

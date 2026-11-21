@@ -4390,3 +4390,71 @@ def close_workspace_from_start_page(run):
 	page.click(".popup.dialog button:text-is('Close')")
 	page.wait_for_function(gone, arg=clean, timeout=30000)
 	check(page.evaluate("ied_shell.server.workspaces.some(w => w.wsId === 'w1')"), "the other workspace stays open")
+
+
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def config_server_page(run):
+	"""Settings > Environment > Config Server (owner, 2026-11-21: "we should have some ui in the settings to set the config
+	server so settings like the local models will auto sync"; docs/35): a config server of the scenario's own shares two
+	model profiles. A wrong token is Refused with the server's why, and the status bar's warning opens the page; the right
+	one is stored (the field gives it up and never shows it), Following lists the profiles, and they are the client's
+	Shared ai.models; Disconnect stops following and keeps them; Remove deletes the token."""
+	import subprocess
+	import tempfile
+	exe = run.target.executable
+	root = tempfile.mkdtemp(prefix="ied-e2e-config-")
+	config = os.path.join(root, "config")
+	made = subprocess.run([exe, "--config-root", config, "--config-token", "reader", "e2e", "--data", os.path.join(root, "token-data")], capture_output=True, text=True, timeout=60)
+	check(made.returncode == 0, "a reader token: %s" % made.stderr)
+	reader = made.stdout.strip()
+	profile = {"endpoint": "http://127.0.0.1:9/v1", "privacy": "lan"}
+	with open(os.path.join(config, "settings.json"), "w", encoding="utf-8") as f:
+		json.dump({"ai.models": {"e2e-a@lan": dict(profile, model="e2e-a", label="E2E A (Spark)"), "e2e-b@lan": dict(profile, model="e2e-b", label="E2E B (Spark)")}}, f)
+	server = subprocess.Popen([exe, "--host", "127.0.0.1", "--port", "0", "--config-root", config, "--data", os.path.join(root, "data"), "--app-data", os.path.join(root, "app"),
+		"--control", "ied-e2e-config-%d" % os.getpid(), "--test-hooks", "--quiet"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+	url = server.stdout.readline().strip().split(" ", 1)[1]
+	cs = ".settings-overlay .set-custom[data-page='custom:shell.configServer']"
+	try:
+		page = run.open()
+		page.evaluate("ied_shell.commands.run('shell.settings', { page: 'custom:shell.configServer' })")
+		page.wait_for_selector(cs + " .cs-state")
+		run.wait_text(cs + " .cs-state-label", "Not following")
+		page.fill(cs + " #cs-url", url.replace("http://", ""))
+		page.fill(cs + " #cs-token", "0" * 64)
+		page.click(cs + " button.btn.primary")
+		run.wait_text(cs + " .cs-state-label", "Refused", 20000)
+		run.wait_text(cs + " .cs-line.c-error", "HTTP 401")
+		check(page.input_value(cs + " #cs-token") == "", "the field gives a stored token up")
+		check(page.input_value(cs + " #cs-url") == url.rstrip("/") + "/", "a bare host is http, the URL ends with '/'")
+		run.shot("refused")
+		if not run.phone:
+			page.click(".settings-overlay-close")
+			page.click(".statusbar .st-config")
+			page.wait_for_selector(cs + " .cs-state")
+		page.fill(cs + " #cs-token", reader)
+		page.click(cs + " button.btn.primary")
+		run.wait_text(cs + " .cs-state-label", "Following", 20000)
+		run.wait_text(cs + " .cs-served-row[data-kind='settings']", "e2e-b@lan")
+		check(page.get_attribute(cs + " #cs-token", "placeholder").startswith("Stored on this machine"), "the field says where the token is")
+		check(reader not in page.content(), "the token is nowhere in the page")
+		page.wait_for_function("() => ied_shell.client.request('settings.get', {}).then((s) => s.values['ai.models'].source === 'shared' && 'e2e-a@lan' in s.values['ai.models'].value)", timeout=15000)
+		run.shot("following")
+		page.click(cs + " button:has-text('Disconnect')")
+		run.wait_text(cs + " .cs-state-label", "Not following")
+		run.wait_text(cs, "IED keeps what it mirrored last")
+		run.shot("disconnected")
+		page.click(cs + " button:has-text('Remove')")
+		page.wait_for_function("() => ied_shell.server.secrets && ied_shell.server.secrets.secrets.length === 0", timeout=10000)
+		page.wait_for_function("() => ied_shell.client.request('settings.get', {}).then((s) => s.values['configServer.token'].source === 'default')", timeout=10000)
+	finally:
+		for key in ("configServer.url", "configServer.token"):
+			try:
+				run.request("settings.reset", {"tier": "app", "key": key})
+			except Exception:  # noqa: BLE001 - not set
+				pass
+		server.terminate()
+		server.wait(10)
+		server.stdout.close()
+		# The mirror would otherwise give the next scenarios its profiles.
+		shutil.rmtree(os.path.join(run.target.root, "data", "app", "shared"), ignore_errors=True)
+		shutil.rmtree(root, ignore_errors=True)

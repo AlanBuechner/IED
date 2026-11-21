@@ -101,12 +101,13 @@ export class StatusBar {
 	}
 
 	// The config server the master follows (docs/35 "The client"): nothing while it follows or none is set; while it
-	// cannot be followed, why, IED going on with what it mirrored last.
+	// cannot be followed, why, IED going on with what it mirrored last. A click opens Settings > Environment > Config
+	// Server.
 	configServerItem() {
 		const followed = this.shell.server.configServer;
 		if (!followed || !CONFIG_TROUBLE[followed.state]) return null;
 		const title = "Config server " + followed.url + ": " + CONFIG_TROUBLE[followed.state] + (followed.error ? " - " + followed.error : "") + ". IED uses the shared settings, plugins and skills it mirrored last.";
-		return h("span.st.st-config", { dataset: { state: followed.state }, title, "aria-label": title }, icon("warning"), "Config server");
+		return h("button.st.st-config", { dataset: { state: followed.state }, title, "aria-label": title, on: { click: () => this.shell.commands.run("shell.settings", { page: "custom:shell.configServer" }) } }, icon("warning"), "Config server");
 	}
 
 	// The shown workspace's server (docs/01 "Processes"): its state, the menu that restarts it or lists them all.

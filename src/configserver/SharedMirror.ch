@@ -5,9 +5,13 @@
 // and as a whole, then renamed into place, so no reader sees half of one. Every server reads the mirror as it reads the
 // app tier (host/Appdata.ch watches it). A config server that cannot be reached leaves the mirror as it was, and IED
 // never waits for one: only the status says so - the `server` topic's `configServer`, `configServer.changed` when it
-// changes, a notification when following stops, and a line in the IED output.
+// changes, a notification when following stops, and a line in the IED output. A change of the settings or of the secret
+// store wakes it at once (Wake): a state request still out to a server it no longer follows, or with a token it no
+// longer has, is left to end on its own. `configServer.retry` wakes it too.
 
 include "ConfigPackages.ch"
+include "auth/SecretStore.ch"
+include "web/Rpc.ch"
 
 namespace Ied { class Server; }
 
@@ -22,24 +26,33 @@ namespace Ied
 		public Net::TlsClientOptions m_Tls;
 	}
 
+	// A state request on a thread of its own: its answer once `m_Done`, under the mirror's lock.
+	class MirrorAsk
+	{
+		public Http::FetchResult m_Got;
+		public bool m_Done;
+	}
+
 	class SharedMirror
 	{
 		[operator("create")] public void Init() {}
-		[operator("create")] public void Init(Server* server) { this.m_Server = server; }
+		[operator("create")] public void Init(Server* server);
 
 		// Starts following on a thread of its own (the master, once it listens).
 		public void Start();
-		// The settings changed: the thread looks at them again now rather than at its next turn. The server lock may be
-		// held.
+		// The settings or the secret store changed: the thread looks at them again now rather than at its next turn. The
+		// server lock may be held.
 		public void Wake();
-		// {state, url, error?, version?, syncedMs?, plugins, skills}: state off, connecting, following, unreachable,
-		// refused (the token) or failed (what it served did not mirror). Its own lock.
+		// {state, url, error?, version?, syncedMs?, plugins, skills, served}: state off, connecting, following,
+		// unreachable, refused (the token) or failed (what it served did not mirror); served what the mirror holds
+		// (MirroredJson). Its own lock.
 		public Core::String StatusJson();
 
 	private:
 		private void Run();
 		private MirrorTarget Target();
 		private bool Follow(const MirrorTarget& target, Core::String& since);
+		private bool Ask(const MirrorTarget& target, Core::StringView path, int32 timeoutMs, Http::FetchResult& got);
 		private bool Mirror(const MirrorTarget& target, const Serialization::DomNode& state, Core::String& problem);
 		private bool MirrorKind(const MirrorTarget& target, Core::StringView kind, const Serialization::DomNode& listed, const char* idField, Core::String& problem);
 		private bool Fetch(const MirrorTarget& target, Core::StringView kind, Core::StringView id, Core::StringView hash, const FS::Path& into, Core::String& problem);
@@ -61,6 +74,7 @@ namespace Ied
 		private int64 m_SyncedMs;
 		private int64 m_Plugins;
 		private int64 m_Skills;
+		private Core::String m_Served;
 	}
 
 	// How long a state request waits on the config server, and how long the master waits for its answer past that.
@@ -72,6 +86,10 @@ namespace Ied
 	// The base URL of `url` ending with '/', or empty with `problem` when it is not http:// or https://.
 	Core::String MirrorBaseUrl(Core::StringView url, Core::String& problem);
 	// The token a configServer.token value (JSON) names: {"env": "VAR"} the variable's value; {"secret": "<name>"} the
-	// secret store's, which is not built yet (docs/11 "Secrets"), so it is a problem saying so. Empty with `problem`.
-	Core::String MirrorToken(Core::StringView valueJson, Core::String& problem);
+	// value `secrets` keeps by that name (docs/11 "Secrets"; null: there is no store). Empty with `problem`.
+	Core::String MirrorToken(Core::StringView valueJson, SecretStore* secrets, Core::String& problem);
+	// What a mirror folder holds, as StatusJson's `served`: {settings: [{key, members?}], plugins: [id], skills: [name]} -
+	// each key of its settings.json, with an object value's member names (ai.models' profiles), and its plugins' and
+	// skills' folder names.
+	Core::String MirroredJson(const FS::Path& shared);
 }
