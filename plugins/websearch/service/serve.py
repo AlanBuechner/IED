@@ -44,6 +44,13 @@ def prepare(options):
 	# SearXNG imports pwd (POSIX only) for a message about Valkey, which IED does not use; Linux has the real one.
 	if os.name != "posix":
 		sys.modules.setdefault("pwd", types.ModuleType("pwd"))
+	# SearXNG reads its version from searx/version_frozen.py, which only its own packaging writes, else asks git: on a
+	# machine without git it then stops as it starts (it catches git's errors, not a missing git), and with git it would
+	# report the version of whatever repository it runs in. Its own fallback values stand in.
+	frozen = types.ModuleType("searx.version_frozen")
+	frozen.VERSION_STRING = frozen.VERSION_TAG = frozen.DOCKER_TAG = "1.0.0"
+	frozen.GIT_URL = frozen.GIT_BRANCH = "unknown"
+	sys.modules.setdefault("searx.version_frozen", frozen)
 	# curl_cffi needs add_reader, which the default (proactor) loop on Windows lacks.
 	import asyncio
 	if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
