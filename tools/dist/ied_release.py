@@ -370,6 +370,7 @@ def check_windows(client, version, scratch):
 	"""Installs the published version with its installer into a scratch folder (no PATH, no Start menu) and runs it."""
 	folder = os.path.join(scratch, "IED")
 	installer = os.path.join(scratch, "install.ps1")
+	os.makedirs(scratch, exist_ok=True)
 	with open(installer, "wb") as f:
 		f.write(publish.render_installer("install.ps1", client.server, client.owner, PRODUCT))
 	env = dict(os.environ, DIST_VERSION=version, DIST_DIR=folder, DIST_NO_PATH="1", DIST_NO_REGISTER="1")
@@ -461,6 +462,7 @@ def main(argv):
 	parser.add_argument("--worktree", default=os.path.join(os.path.dirname(CHECKOUT), "IED-release"), help="the release worktree")
 	parser.add_argument("--only", choices=("windows", "linux"), help="build and publish one platform")
 	parser.add_argument("--skip-build", action="store_true", help="package what the worktree built last (at the same commit)")
+	parser.add_argument("--skip-package", action="store_true", help="publish and check the release folder made last for this commit")
 	parser.add_argument("--no-publish", action="store_true", help="build and package only")
 	parser.add_argument("--no-check", action="store_true", help="publish without the install checks (and make it latest)")
 	parser.add_argument("--no-latest", action="store_true", help="publish and check, but leave latest where it is")
@@ -482,15 +484,19 @@ def main(argv):
 		logs = os.path.join(out, version)
 		os.makedirs(logs, exist_ok=True)
 		say("IED %s from %s in %s" % (version, commit[:10], worktree))
-		if not args.skip_build:
-			prepare_worktree(worktree, commit)
-			if "windows" in platforms:
-				build_windows(worktree, args.jobs, logs)
-			if "linux" in platforms:
-				build_linux(worktree, args.jobs, logs)
-		elif git("rev-parse", "HEAD", cwd=worktree) != commit:
-			raise ReleaseError("--skip-build: the worktree is not at %s" % commit[:10])
-		folder = package(worktree, out, version, commit, platforms)
+		if args.skip_package:
+			folder = os.path.join(out, version)
+			publish.read_release(folder)
+		else:
+			if not args.skip_build:
+				prepare_worktree(worktree, commit)
+				if "windows" in platforms:
+					build_windows(worktree, args.jobs, logs)
+				if "linux" in platforms:
+					build_linux(worktree, args.jobs, logs)
+			elif git("rev-parse", "HEAD", cwd=worktree) != commit:
+				raise ReleaseError("--skip-build: the worktree is not at %s" % commit[:10])
+			folder = package(worktree, out, version, commit, platforms)
 		say("packaged in %s" % folder)
 		if args.no_publish:
 			return 0

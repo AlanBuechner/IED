@@ -265,7 +265,8 @@
 	# An update command beside the programs: this installer again, from the same server.
 	if ($pathFolders.Count) {
 		$update = Join-Path $pathFolders[0] "$product-update.cmd"
-		WriteUtf8 $update ("@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -Command `"irm $base/latest/install.ps1 | iex`"`r`n")
+		$here = if ($env:DIST_DIR) { "set `"DIST_DIR=$folder`"`r`n" } else { '' }   # an install elsewhere updates itself
+		WriteUtf8 $update ("@echo off`r`n$here" + "powershell -NoProfile -ExecutionPolicy Bypass -Command `"irm $base/latest/install.ps1 | iex`"`r`n")
 	}
 	if (-not (Flag 'DIST_NO_REGISTER')) { RunAll $target.register $folder 'register' }
 	if (-not (Flag 'DIST_NO_PATH') -and $pathFolders.Count) {

@@ -356,7 +356,8 @@ def main():
 	if path_folders:
 		write_text(env_file, env_text(path_folders))
 		update = os.path.join(path_folders[0], "%s-update" % PRODUCT)
-		write_text(update, "#!/bin/sh\n# Updates %s from %s (written by its installer).\ncurl -fsSL %s/latest/install.sh | sh\n" % (name, SERVER, BASE), 0o755)
+		here = 'DIST_DIR="%s" ' % folder if os.environ.get("DIST_DIR") else ""   # an install elsewhere updates itself
+		write_text(update, "#!/bin/sh\n# Updates %s from %s (written by its installer).\ncurl -fsSL %s/latest/install.sh | %ssh\n" % (name, SERVER, BASE, here), 0o755)
 
 	checks = target.get("check", [])
 	missing = missing_libraries(folder, checks)

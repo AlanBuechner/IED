@@ -350,6 +350,10 @@ class WindowsInstallerTests(unittest.TestCase):
 		first = self.install()
 		self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
 		self.assertEqual(self.files(), {"demo.exe", "plugins/a/old.js", "bin/tool.cmd", "vendor/kit/k.lib", "demo-update.cmd", "install.json"})
+		with open(os.path.join(self.target, "demo-update.cmd"), encoding="utf-8") as f:
+			update = f.read()
+		self.assertIn('set "DIST_DIR=%s"' % self.target, update, "an install outside the default folder updates itself")
+		self.assertIn("irm %s/api/packages/%s/generic/demo/latest/install.ps1 | iex" % (self.server.url, OWNER), update)
 		with open(os.path.join(self.target, "install.json"), encoding="utf-8") as f:
 			record = json.load(f)
 		self.assertEqual(record["version"], "1.0.0")
