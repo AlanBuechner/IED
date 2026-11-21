@@ -86,6 +86,22 @@ namespace Testing
 			});
 			return records;
 		}
+
+		// Every root __c4_gc_roots lists: its storage's name and its map (empty: read whole).
+		std::map<std::string, std::vector<uint64_t>> RootsOf(const char* source)
+		{
+			std::map<std::string, std::vector<uint64_t>> roots;
+			Lower(source, [&](llvm::Module& module) {
+				const llvm::GlobalVariable* table = module.getGlobalVariable("__c4_gc_roots");
+				const auto* entries = table && table->hasInitializer() ? llvm::dyn_cast<llvm::ConstantArray>(table->getInitializer()) : nullptr;
+				for (unsigned i = 0; entries && i + 1 < entries->getNumOperands(); ++i)
+				{
+					const auto* range = llvm::cast<llvm::ConstantStruct>(entries->getOperand(i));
+					roots[range->getOperand(0)->stripPointerCasts()->getName().str()] = MapAt(range->getOperand(2));
+				}
+			});
+			return roots;
+		}
 	}
 
 	void PointerMapTest::ARecordMapsTheWordsThatMayHoldAPointer()
@@ -169,6 +185,28 @@ namespace Testing
 		auto calls = [&](const char* maker, const char* name) { return std::find(callees[maker].begin(), callees[maker].end(), name) != callees[maker].end(); };
 		TEST_ASSERT(calls("MakeNode", "c4_alloc_typed") && !calls("MakeNode", "c4_alloc_precise"));
 		TEST_ASSERT(calls("MakeMixed", "c4_alloc_precise") && !calls("MakeMixed", "c4_alloc_typed"));
+		TEST_PASSED();
+	}
+
+	void PointerMapTest::AGlobalRootCarriesItsTypesMap()
+	{
+		// __c4_gc_roots gives each root its type's map: the collector reads a global holder's pointer word, not its numbers;
+		// an array of pointers has none and is read whole.
+		const auto roots = RootsOf(
+			"struct Node { public int32 v; }\n"
+			"struct Holder { public int64[3] numbers; public Node* item; }\n"
+			"Holder g_holder;\n"
+			"Node*[4] g_array;\n"
+			"int32 main() { return g_holder.item == null && g_array[0] == null ? 0 : 1; }");
+		std::string holder, array;
+		for (const auto& [name, map] : roots)
+		{
+			if (name.find("g_holder") != std::string::npos) holder = name;
+			if (name.find("g_array") != std::string::npos) array = name;
+		}
+		TEST_ASSERT(!holder.empty() && !array.empty());
+		TEST_ASSERT(roots.at(holder).size() == 1 && roots.at(holder)[0] == 0b1000);
+		TEST_ASSERT(roots.at(array).empty());
 		TEST_PASSED();
 	}
 } // namespace Testing

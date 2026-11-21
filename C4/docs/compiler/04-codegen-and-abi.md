@@ -76,9 +76,12 @@ program, `InferNoUnwind` (see [Exceptions](#exceptions)), `FinishModules` (8, 9)
 6. **Test harness** (`-test`, see below).
 7. **Entry point.** Emit `@main` forwarding to the user's entry (`main_0` etc.), mirroring its
    `argc/argv` parameters and returning its value; a `void` entry returns 0. A `-test` build needs none.
-8. **GC roots** (`GcRoots.cpp`). `__c4_gc_roots`: `{address, size}` of every global, static member and static
-   local whose type may hold a managed pointer (`TypeHandle::MayHoldPointers`), ended by `{null, 0}`. It is
-   emitted last, so the static locals the bodies created are listed.
+8. **GC roots** (`GcRoots.cpp`). `__c4_gc_roots`: `{address, size, pointers}` of every global, static member and
+   static local whose type may hold a managed pointer (`TypeHandle::MayHoldPointers`), ended by `{null, 0, null}`;
+   `pointers` is the storage type's pointer map (R16, `PointerMap::Of`, a `c4.pointer_map` constant), null when the
+   type has none or the storage is not on a word boundary, so the runtime reads it whole. `__c4_gc_thread_roots`
+   writes the same three fields for each thread_local. It is emitted last, so the static locals the bodies created
+   are listed.
 9. **Vector alignment and the target.** `AlignVectorAccesses` gives each load and store of a vector whose size is
    not a power of two the alignment C4 guarantees; `ApplyTarget` (`TargetAttributes.cpp`) gives every function the
    module defines the build's `target-cpu` and `target-features` (D-62, from `ProgramModel::Target`), as clang
@@ -416,9 +419,10 @@ The runtime contract is in [../runtime/01-memory-and-gc.md](../runtime/01-memory
    allocation: it reads the count and runs the innermost element's delete on each element, last first (a
    `T[2]` element is two `T`). The elements get their vptrs (a loop over the count) before they start.
 3. **Explicit free.** `delete` -> `c4_free`.
-4. **Roots.** `__c4_gc_roots` for global storage (assembly step 8); everything else is found by the runtime,
-   which captures the register file and then scans the stack conservatively, so pointers that optimized
-   code keeps only in callee-saved registers are roots too (no per-slot anchors are needed).
+4. **Roots.** `__c4_gc_roots` for global storage, each range with its pointer map (assembly step 8); everything
+   else is found by the runtime, which captures the register file and then scans the stack conservatively, so
+   pointers that optimized code keeps only in callee-saved registers are roots too (no per-slot anchors are needed).
+   Stack maps (R16 phase 3) wait for the MIR (R5): section "Not implemented here yet".
 5. **Value locals** are not GC objects: their `create`/`delete` are RAII, emitted as scope-exit defers by HIR.
 
 6. **Statistics.** With `-gc-stats`, `StartupEmitter::InstallGcStatsPrinter` adds a last-priority global
@@ -564,3 +568,15 @@ allowed (unions, bytes, `memcpy`, bit casts) where the optimizer cannot see that
 
 - Any C4-side optimization pass (deliberately none; revisit only if a benchmark shows C4 slower than C++).
 - Additional targets (ARM64): one more `TargetAbi` implementation, with its convention's `AggregateRegisters` - **Planned**.
+- Stack maps (R16 phase 3) - **Designed, not started**: it waits for the MIR (R5), since safepoints belong to how
+  functions are emitted, and it lands only if it costs no measurable run-time speed. The design: a collection stops
+  threads anywhere (D-48, `SuspendThread`), not at polls, so as Go does since its asynchronous preemption the
+  innermost frame of a stopped thread and its registers stay conservative and every caller frame is read precisely.
+  Its call sites are LLVM `gc.statepoint`s (RewriteStatepointsForGC over managed pointers moved to address space 1,
+  raw ones and FFI arguments cast back to 0) whose live managed values the stack map (`.llvm_stackmaps`, one record
+  per return address) names as frame slots; the collector walks each stopped thread's frames by their unwind data
+  (`RtlVirtualUnwind`, as the sampler does), finds each C4 frame's record by its return address and reads only those
+  slots, and reads a frame of code without a record (C, C++, the runtime, a script compiled before) whole. The
+  collector is non-moving, so a statepoint relocates nothing: its cost is that a managed pointer live across a call
+  lives in a stack slot instead of a callee-saved register, and the optimizer's view of the rewritten calls. That
+  cost is to be measured on `Benchmarks/{bedrock,math,gemm,gc}` before anything lands.

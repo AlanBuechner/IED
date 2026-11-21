@@ -48,6 +48,9 @@ void gc_mark_range(GCMarker* marker, const void* lo, const void* hi);
 // Queues [lo, hi) to be scanned by the drain, in chunks the markers share; the memory must stay as it is until then.
 void gc_mark_range_later(GCMarker* marker, const void* lo, const void* hi);
 
+// A compiler's root range (a global, a thread_local): the words its pointer map names are read now (a concurrent
+// cycle's snapshot of them), a range without a map is queued whole.
+void gc_mark_root_range(GCMarker* marker, const c4_gc_root_range* range);
 
 // Queues the part [from, to) of a precise span's object: the words its pointer bits name.
 void gc_mark_precise_later(GCMarker* marker, const uint8_t* from, const uint8_t* to);

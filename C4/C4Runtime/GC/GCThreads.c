@@ -65,8 +65,7 @@ void gc_threads_mark(GCMarker* marker, const GCThreads* threads, const GCThread*
 	for (const GCThread* thread = threads->all; thread; thread = thread->next)
 	{
 		if (thread != self) gc_os_scan_suspended(&thread->os, gc_mark_range_callback, gc_mark_range_later_callback, marker);
-		for (size_t i = 0; i < thread->localCount; ++i)
-			gc_mark_range_later(marker, thread->locals[i].start, (const uint8_t*)thread->locals[i].start + thread->locals[i].size);
+		for (size_t i = 0; i < thread->localCount; ++i) gc_mark_root_range(marker, &thread->locals[i]);
 	}
 }
 

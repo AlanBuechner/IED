@@ -244,6 +244,23 @@ void gc_mark_range_later(GCMarker* marker, const void* lo, const void* hi)
 		push(marker, p, (size_t)(end - p) < kRootChunkBytes ? (size_t)(end - p) : kRootChunkBytes, GC_SCAN_ALL);
 }
 
+void gc_mark_root_range(GCMarker* marker, const c4_gc_root_range* range)
+{
+	if (!range->pointers || ((uintptr_t)range->start & 7u))
+	{
+		gc_mark_range_later(marker, range->start, (const uint8_t*)range->start + range->size);
+		return;
+	}
+	const gc_word* words = (const gc_word*)range->start;
+	const size_t count = (size_t)range->size >> 3;
+	for (size_t w = 0; w < (count + 63u) >> 6; ++w)
+	{
+		uint64_t set = range->pointers[w];
+		if (count - (w << 6) < 64) set &= ((uint64_t)1 << (count - (w << 6))) - 1u;
+		for (; set; set &= set - 1u) mark_boxed(marker, words[(w << 6) + (size_t)__builtin_ctzll(set)]);
+	}
+}
+
 void gc_mark_range_callback(void* marker, const void* lo, const void* hi)
 {
 	gc_mark_range((GCMarker*)marker, lo, hi);

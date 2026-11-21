@@ -296,12 +296,15 @@ void* c4_buffer_resize_scanned(void* buffer, size_t oldBytes, size_t keepBytes, 
 void c4_buffer_free_scanned(void* buffer, size_t bytes);
 
 // --- Compiler interface ---------------------------------------------------------------------------
-// Every global, static member and static local that may hold a managed pointer, as {address, size};
-// terminated by {NULL, 0}. Emitted into every executable.
+// Every global, static member and static local that may hold a managed pointer, as {address, size, pointers};
+// terminated by {NULL, 0, NULL}. Emitted into every executable. `pointers` is the storage's pointer map (R16, as
+// c4_gc_type's: bit i says whether the word at byte 8i may hold a pointer): the collector reads only those words. NULL:
+// every word may hold one, and the range is read whole.
 typedef struct c4_gc_root_range
 {
 	void* start;
 	uint64_t size;
+	const uint64_t* pointers;
 } c4_gc_root_range;
 
 extern const c4_gc_root_range __c4_gc_roots[];

@@ -4,8 +4,7 @@
 
 static void mark_globals(GCMarker* marker, const c4_gc_root_range* globals)
 {
-	for (const c4_gc_root_range* r = globals; r && r->start; ++r)
-		gc_mark_range_later(marker, r->start, (const uint8_t*)r->start + r->size);
+	for (const c4_gc_root_range* r = globals; r && r->start; ++r) gc_mark_root_range(marker, r);
 }
 
 static void mark_root_tables(GCMarker* marker, const GCPtrMap* tables)

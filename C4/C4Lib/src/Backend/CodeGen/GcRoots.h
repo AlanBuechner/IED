@@ -6,8 +6,9 @@ namespace Scripting
 {
 	class ProgramModel;
 
-	/// `__c4_gc_roots` (docs/runtime/01): {address, size} of every global, static member and static local whose
-	/// type may hold a managed pointer, ended by {null, 0}. Emitted after every body, so it lists the static
+	/// `__c4_gc_roots` (docs/runtime/01): {address, size, pointer map} of every global, static member and static local
+	/// whose type may hold a managed pointer (the map PointerMap::Of its type, null when it is read whole), ended by
+	/// {null, 0, null}. Emitted after every body, so it lists the static
 	/// locals those bodies created. In a script, `hostSymbols` names the host's storage, which is not listed, and
 	/// there is no `__c4_gc_thread_roots`: the runtime roots each thread's emulated thread_locals.
 	void EmitGcRoots(ModuleContext& mctx, const ProgramModel& model, const AskedNames* hostSymbols = nullptr);

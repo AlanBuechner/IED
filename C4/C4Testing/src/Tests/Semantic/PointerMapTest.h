@@ -19,5 +19,8 @@ namespace Testing
 
 		TEST_FUNC(Semantic.PointerMap)
 		void ATypeOfPointersOnlyIsReadWhole();
+
+		TEST_FUNC(Semantic.PointerMap)
+		void AGlobalRootCarriesItsTypesMap();
 	};
 } // namespace Testing

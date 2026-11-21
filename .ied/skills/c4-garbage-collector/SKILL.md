@@ -41,8 +41,10 @@ maps), **conservative for stacks, registers and raw regions**. The C API is `C4R
   Still conservative: stacks, registers, scan regions, `c4_alloc` memory.
 
 ## Roots
-`__c4_gc_roots` (compiler-emitted `{address, size}` ranges for every global, static member and static local
-that may hold a pointer), every registered thread's registers and stack (conservative), registered scan regions,
+`__c4_gc_roots` (compiler-emitted `{address, size, pointers}` ranges for every global, static member and static
+local that may hold a pointer; `pointers` the storage type's map, R16 phase 2, so only those words are read - null
+reads the range whole; thread_locals the same through `__c4_gc_thread_roots`), every registered thread's registers
+and stack (conservative), registered scan regions,
 root enumerators, pinned objects and objects waiting for their finalizer. A conservative collector can keep
 an object alive while a stale copy of its address sits in a register or dead stack slot - tests that assert
 "was collected" must allow a few survivors.
