@@ -172,7 +172,8 @@ def nuke_environment():
 def build_windows(worktree, jobs, logs):
 	log = os.path.join(logs, "windows.log")
 	for projects in (("C4",), WINDOWS_PROJECTS):
-		run(["cmd", "/d", "/c", "nuke.bat", "build"] + list(projects) + ["-c", CONFIG, "-j", str(jobs)], cwd=worktree, env=nuke_environment(), log=log)
+		# By its whole path: with NoDefaultCurrentDirectoryInExePath set, cmd does not look in the current folder.
+		run(["cmd", "/d", "/c", os.path.join(worktree, "nuke.bat"), "build"] + list(projects) + ["-c", CONFIG, "-j", str(jobs)], cwd=worktree, env=nuke_environment(), log=log)
 
 
 def linux_container(worktree, extra_mounts=(), workdir="/ied"):
