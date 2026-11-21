@@ -71,7 +71,7 @@ namespace Terminal
 	}
 
 	// The programs to try, in order: the `terminal.shell` setting (a name or path, or an argv), else PowerShell 7, Windows
-	// PowerShell and the system's cmd.
+	// PowerShell and the system's cmd - on Linux the user's $SHELL, bash and sh.
 	Core::Array<Core::Array<Core::String>> Terminals::ShellsFor(Core::StringView wsId) {
 		Core::Array<Core::Array<Core::String>> shells;
 		Core::Array<Core::String> setting = ShellSetting(m_Context, wsId);
@@ -79,10 +79,17 @@ namespace Terminal
 			shells.Push(setting);
 			return shells;
 		}
+#if defined(PLATFORM_LINUX)
+		Core::String login;
+		if (Platform::TryGetEnvironmentVariable("SHELL", login) && !login.IsEmpty()) shells.Push(Argv(login.CStr(), nullptr));
+		shells.Push(Argv("bash", nullptr));
+		shells.Push(Argv("sh", nullptr));
+#else
 		shells.Push(Argv("pwsh", "-NoLogo"));
 		shells.Push(Argv("powershell", "-NoLogo"));
 		Core::String comspec;
 		shells.Push(Argv(Platform::TryGetEnvironmentVariable("ComSpec", comspec) ? comspec.CStr() : "cmd", nullptr));
+#endif
 		return shells;
 	}
 

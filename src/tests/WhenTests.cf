@@ -1,6 +1,7 @@
 // plugins/when: when-clauses as the server evaluates them - the same cases as frontend/tests/when.test.js.
 
 include "plugins/When.ch"
+include "plugins/Context.ch"
 
 static Ied::WhenValue Context(Core::StringView key) {
 	if (key == "workspaceTrusted") return Ied::WhenBool(true);
@@ -23,6 +24,11 @@ static bool Refused(const char* clause) {
 	Core::String error;
 	Ied::WhenHolds(Core::StringView(clause), Context, error);
 	return !error.IsEmpty();
+}
+
+static bool SystemIs(const char* key) {
+	Ied::WhenValue value = Ied::SystemWhen(Core::StringView(key));
+	return value.m_Kind == Ied::WhenKind::Bool && value.m_Flag;
 }
 
 [test("server.when")]
@@ -49,6 +55,16 @@ class WhenTests {
 		assert_true(Holds("count > 2") && Holds("count >= 3") && Holds("count < 4") && Holds("count <= 3") && Holds("count > -1") && Holds("count < 3.5"), "ordering");
 		assert_true(Holds("resourceExtname =~ /^\\.c[fh]$/") && !Holds("resourceExtname =~ /^\\.h$/"), "regex");
 		assert_true(Holds("deviceClass =~ /DESK/i") && !Holds("missing =~ /./"), "flags; a missing key is empty text");
+	}
+
+	[test("system")]
+	public static void TestSystem() {
+#if defined(PLATFORM_LINUX)
+		assert_true(SystemIs("isLinux") && !SystemIs("isWindows"), "a Linux server");
+#else
+		assert_true(SystemIs("isWindows") && !SystemIs("isLinux"), "a Windows server");
+#endif
+		assert_true(Ied::SystemWhen(Core::StringView("isMac")).m_Kind == Ied::WhenKind::None, "no other key");
 	}
 
 	[test("refused")]

@@ -47,12 +47,18 @@ namespace Terminal
 		return ws;
 	}
 
-	// The profiles New Terminal falls back on, in order, when no default is set (the terminal plugin's own).
+	// The profiles New Terminal falls back on, in order, when no default is set (the terminal plugin's own): on Linux the
+	// user's login shell ($SHELL), else bash.
 	static Core::Array<Core::String> Fallbacks() {
 		Core::Array<Core::String> ids;
+#if defined(PLATFORM_LINUX)
+		ids.Push(Core::String("shell"));
+		ids.Push(Core::String("bash"));
+#else
 		ids.Push(Core::String("pwsh"));
 		ids.Push(Core::String("powershell"));
 		ids.Push(Core::String("cmd"));
+#endif
 		return ids;
 	}
 

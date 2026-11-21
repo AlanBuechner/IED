@@ -29,9 +29,13 @@
 		},
 		"terminalProfiles": [
 			{ "id": "pwsh", "title": "PowerShell", "icon": "$(terminal-powershell)", "argv": ["pwsh", "-NoLogo"] },
-			{ "id": "powershell", "title": "Windows PowerShell", "icon": "$(terminal-powershell)", "argv": ["powershell", "-NoLogo"] },
-			{ "id": "cmd", "title": "Command Prompt", "icon": "$(terminal-cmd)", "argv": ["${env:ComSpec}"] },
-			{ "id": "gitbash", "title": "Git Bash", "icon": "$(terminal-git-bash)", "argv": ["${env:ProgramFiles}/Git/bin/bash.exe", "--login", "-i"] }
+			{ "id": "powershell", "title": "Windows PowerShell", "icon": "$(terminal-powershell)", "argv": ["powershell", "-NoLogo"], "when": "isWindows" },
+			{ "id": "cmd", "title": "Command Prompt", "icon": "$(terminal-cmd)", "argv": ["${env:ComSpec}"], "when": "isWindows" },
+			{ "id": "gitbash", "title": "Git Bash", "icon": "$(terminal-git-bash)", "argv": ["${env:ProgramFiles}/Git/bin/bash.exe", "--login", "-i"], "when": "isWindows" },
+			{ "id": "shell", "title": "Login Shell", "icon": "$(terminal-linux)", "argv": ["${env:SHELL}"], "when": "isLinux" },
+			{ "id": "bash", "title": "Bash", "icon": "$(terminal-bash)", "argv": ["bash"], "when": "isLinux" },
+			{ "id": "zsh", "title": "Zsh", "icon": "$(terminal)", "argv": ["zsh"], "when": "isLinux" },
+			{ "id": "fish", "title": "Fish", "icon": "$(terminal)", "argv": ["fish"], "when": "isLinux" }
 		],
 		"panels": [
 			{ "id": "ied.terminal.panel", "title": "Terminal", "icon": "$(terminal)", "view": "TerminalPanel" }

@@ -14,6 +14,17 @@ namespace Browser
 			return FS::FileExists(path.CStr()) ? FS::Path(configured) : FS::Path();
 		}
 		Core::Array<FS::Path> candidates;
+#if defined(PLATFORM_LINUX)
+		candidates.Push(FS::Path(Core::StringView("/usr/bin/google-chrome")));
+		candidates.Push(FS::Path(Core::StringView("/usr/bin/google-chrome-stable")));
+		candidates.Push(FS::Path(Core::StringView("/opt/google/chrome/chrome")));
+		candidates.Push(FS::Path(Core::StringView("/usr/bin/chromium")));
+		candidates.Push(FS::Path(Core::StringView("/usr/bin/chromium-browser")));
+		candidates.Push(FS::Path(Core::StringView("/snap/bin/chromium")));
+		candidates.Push(FS::Path(Core::StringView("/usr/bin/microsoft-edge")));
+		candidates.Push(FS::Path(Core::StringView("/usr/bin/microsoft-edge-stable")));
+		candidates.Push(FS::Path(Core::StringView("/opt/microsoft/msedge/msedge")));
+#endif
 		candidates.Push(Under("ProgramFiles(x86)", "Microsoft/Edge/Application/msedge.exe"));
 		candidates.Push(Under("ProgramFiles", "Microsoft/Edge/Application/msedge.exe"));
 		candidates.Push(Under("LOCALAPPDATA", "Microsoft/Edge/Application/msedge.exe"));

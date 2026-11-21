@@ -68,11 +68,23 @@ namespace Ied
 		public Core::Array<Core::String> m_Languages;
 	}
 
+	WhenValue SystemWhen(Core::StringView key) {
+#if defined(PLATFORM_LINUX)
+		const bool linux64 = true;
+#else
+		const bool linux64 = false;
+#endif
+		if (key == "isLinux") return WhenBool(linux64);
+		if (key == "isWindows") return WhenBool(!linux64);
+		return WhenNone();
+	}
+
 	WhenLookup WorkspaceWhen(Server* server, Workspace* ws) {
 		Settings* settings = server->m_Settings;
 		LanguagesOnce* once = new LanguagesOnce();
 		return [server, ws, settings, once](Core::StringView key) -> WhenValue {
 			if (key == "workspaceTrusted") return WhenBool(ws->m_Trusted);
+			if (key == "isLinux" || key == "isWindows") return SystemWhen(key);
 			if (key == "workspaceKind") return WhenText(ws->m_Kind.View());
 			if (key.StartsWith(Core::StringView("config."))) return WhenFromJson(settings->Effective(ws, Core::StringView(""), key.Substring(7, key.ByteLength() - 7)).View());
 			if (key.StartsWith(Core::StringView("workspaceContains."))) {

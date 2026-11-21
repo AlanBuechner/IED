@@ -21,7 +21,10 @@ from iedclient import RpcFailure
 from routed import RoutedClient
 from server import REPO, IedServer, ServerTestCase
 
-SHELLS = ["pwsh", "powershell", "cmd", "gitbash"]
+# The terminal's own shells on the server's system (plugins/terminal/ied-plugin.json, their `when`), and one that is
+# always there.
+SHELLS = ["pwsh", "powershell", "cmd", "gitbash"] if os.name == "nt" else ["pwsh", "shell", "bash", "zsh", "fish"]
+ALWAYS = "cmd" if os.name == "nt" else "bash"
 
 
 def write(path, text):
@@ -105,10 +108,11 @@ class TerminalProfileTests(ServerTestCase):
 		self.assertEqual(SHELLS, [i for i in ids if i in SHELLS], "the terminal's own, in its order")
 		python = [p for p in answer["profiles"] if p["id"] == "python"][0]
 		self.assertEqual(("Python", "$(python)", "ied.python", True), (python["title"], python["icon"], python["plugin"], python["available"]))
-		cmd = [p for p in answer["profiles"] if p["id"] == "cmd"][0]
-		self.assertTrue(cmd["available"], cmd)
+		always = [p for p in answer["profiles"] if p["id"] == ALWAYS][0]
+		self.assertTrue(always["available"], always)
 		usable = [p["id"] for p in answer["profiles"] if p["available"]]
-		self.assertEqual([i for i in ("pwsh", "powershell", "cmd") if i in usable][0], answer["default"], "the first shell there is")
+		fallbacks = ("pwsh", "powershell", "cmd") if os.name == "nt" else ("shell", "bash")
+		self.assertEqual([i for i in fallbacks if i in usable][0], answer["default"], "the first shell there is")
 		self.assertEqual("", answer["setting"])
 
 	async def test_the_python_terminal_runs_ieds_python_and_pip(self):

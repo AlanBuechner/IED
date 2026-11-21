@@ -17,4 +17,6 @@ namespace Ied
 	Core::Array<Core::String> WorkspaceLanguages(Server* server, Workspace* ws);
 	// The lookup of `ws`'s context; workspaceLanguage.<id> reads the languages on its first use. With the lock held.
 	WhenLookup WorkspaceWhen(Server* server, Workspace* ws);
+	// The server's system: `isWindows`, `isLinux` (none for any other key).
+	WhenValue SystemWhen(Core::StringView key);
 }
