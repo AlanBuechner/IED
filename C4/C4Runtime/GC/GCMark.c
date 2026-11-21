@@ -39,22 +39,14 @@ static void push(GCMarker* marker, const uint8_t* start, size_t size, GCScanKind
 // The marker that turns the bit on scans the object: alone, a plain store; beside other claims, an atomic one.
 static GCScanKind object_kind(GCObject object) { return (GCScanKind)object.span->scanKind; }
 
-// The pointer bits of a precise object of at most GC_MASKED_MAX_WORDS words (one load), its first word's the lowest.
-static inline __attribute__((always_inline)) uint64_t object_mask(GCObject object)
-{
-	const size_t words = object.span->elemSize >> 3;
-	const uint64_t mask = gc_pointers_slot_mask(object.span, object.slot);
-	return words >= 64 ? mask : mask & (((uint64_t)1 << words) - 1u);
-}
-
-// The object's contents go on the stack, unless it holds nothing to read; a small precise one with its pointer bits.
+// The object's contents go on the stack, unless it holds nothing to read; a small precise one with its span's mask.
 // Inline into every marking of an object, as the whole-object push it replaces was.
 static inline __attribute__((always_inline)) void push_contents(GCMarker* marker, GCObject object)
 {
 	const GCScanKind kind = object_kind(object);
 	if (kind == GC_SCAN_NONE) return;
-	if (kind == GC_SCAN_PRECISE && object.span->bitsStride <= GC_MASKED_MAX_WORDS / 8u && object.span->pointerBits)
-		push(marker, gc_object_base(object), (size_t)object_mask(object), GC_SCAN_MASKED);
+	const GCSpanMap* map = kind == GC_SCAN_PRECISE ? object.span->map : NULL;
+	if (map && map->masked) push(marker, gc_object_base(object), (size_t)map->mask, GC_SCAN_MASKED);
 	else push(marker, gc_object_base(object), gc_object_size(object), kind);
 }
 
@@ -132,43 +124,40 @@ static void mark_entries(GCMarker* marker, GCScanItem item)
 	}
 }
 
-// `count` (at most 64) pointer bits from bit `at` on, as the low bits.
-static uint64_t read_bits(const uint8_t* bits, size_t at, size_t count)
+// A word that may hold a pointer, read and marked.
+static inline void mark_mapped(GCMarker* marker, const gc_word* word)
 {
-	uint64_t value = 0;
-	for (size_t got = 0; got < count;)
-	{
-		const size_t bit = at + got;
-		const size_t part = count - got < 8u - (bit & 7u) ? count - got : 8u - (bit & 7u);
-		value |= (uint64_t)((__atomic_load_n(&bits[bit >> 3], __ATOMIC_RELAXED) >> (bit & 7u)) & ((1u << part) - 1u)) << got;
-		got += part;
-	}
-	return value;
+	const uintptr_t value = unboxed(*word);
+	if (value - marker->heap->pages.lo < marker->heap->pages.hi - marker->heap->pages.lo) gc_mark_word(marker, value);
 }
 
-// The words of a part of one object of a precise span that its pointer bits name (a span without bits: every word).
+// The words of a part of one object of a precise span that the span's map names (a span without one: every word). An
+// array's map repeats to the slot's end: the words past the object are zero, and keep nothing alive.
 static void mark_precise(GCMarker* marker, GCScanItem item)
 {
 	const GCSpan* span = gc_pages_span_of(&marker->heap->pages, (uintptr_t)item.start);
-	const uint8_t* bits = span ? span->pointerBits : NULL;
-	if (!bits)
+	const GCSpanMap* map = span && span->state != GC_SPAN_FREE ? span->map : NULL;
+	if (!map)
 	{
 		gc_mark_range(marker, item.start, item.start + item.size);
 		return;
 	}
-	const uintptr_t heapLo = marker->heap->pages.lo;
-	const uintptr_t heapExtent = marker->heap->pages.hi - heapLo;
 	const uint32_t slot = gc_span_slot(span, (size_t)(item.start - span->base));
-	const size_t firstWord = (size_t)(item.start - gc_span_slot_base(span, slot)) >> 3;
-	const size_t at = (size_t)slot * span->bitsStride * 8u + firstWord;
+	const size_t first = (size_t)(item.start - gc_span_slot_base(span, slot)) >> 3;
 	const gc_word* words = (const gc_word*)item.start;
 	const size_t count = item.size >> 3;
-	for (size_t done = 0; done < count; done += 64)
-		for (uint64_t set = read_bits(bits, at + done, count - done < 64 ? count - done : 64); set; set &= set - 1u)
-		{
-			const uintptr_t value = unboxed(words[done + (size_t)__builtin_ctzll(set)]);
-			if (value - heapLo < heapExtent) gc_mark_word(marker, value);
-		}
+	if (!map->array)
+	{
+		for (size_t w = 0; w < count && first + w < map->words; ++w)
+			if ((map->bits[(first + w) >> 6] >> ((first + w) & 63u)) & 1u) mark_mapped(marker, &words[w]);
+		return;
+	}
+	size_t w = first < map->firstWords ? map->firstWords - first : 0;
+	for (size_t e = (first + w - map->firstWords) % map->words; w < count; ++w)
+	{
+		if ((map->bits[e >> 6] >> (e & 63u)) & 1u) mark_mapped(marker, &words[w]);
+		if (++e == map->words) e = 0;
+	}
 }
 
 static void mark_masked(GCMarker* marker, GCScanItem item)

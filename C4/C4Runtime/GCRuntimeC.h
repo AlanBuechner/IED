@@ -226,11 +226,13 @@ typedef struct c4_gc_type
 	uint16_t firstElementWords;  // an array's: the words before its first element (the count a counted array keeps)
 } c4_gc_type;
 // c4_alloc for an object of a known type, noted while a census is on. `new` allocates through these: c4_alloc_precise
-// for a type with a pointer map, whose objects a collection reads by it (a type without one is read whole, as
-// c4_alloc_typed reads it); c4_alloc_typed for one whose every word may hold a pointer; _noscan for a pointer-free one.
+// for one object of a type with a pointer map (always of the type's size), c4_alloc_precise_array for `new T[n]` of
+// one, whose objects a collection reads by it (a record without a map is read whole); c4_alloc_typed for a type whose
+// every word may hold a pointer; _noscan for a pointer-free one.
 void* c4_alloc_typed(size_t size, size_t align, const c4_gc_type* type);
 void* c4_alloc_typed_noscan(size_t size, size_t align, const c4_gc_type* type);
 void* c4_alloc_precise(size_t size, size_t align, const c4_gc_type* type);
+void* c4_alloc_precise_array(size_t size, size_t align, const c4_gc_type* type);
 
 // The census of live objects by type: while on, every allocation notes its type, and each collection counts the
 // live objects by it, and the native memory they hold. Objects made before it was on, by c4_alloc or in a pool are of

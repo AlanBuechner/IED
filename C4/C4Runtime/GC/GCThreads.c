@@ -78,10 +78,28 @@ void gc_thread_flush_cache(GCThread* thread, GCHeap* heap, uint64_t* allocs)
 		gc_heap_disown(heap, cache->spans[c]);
 		cache->spans[c] = NULL;
 	}
+	for (uint32_t i = 0; i < GC_TYPED_SPANS; ++i) gc_thread_drop_typed(&cache->typed[i], heap);
 	heap->liveBytes += (int64_t)cache->allocatedBytes;
 	*allocs += cache->allocs;
 	cache->allocatedBytes = 0;
 	cache->allocs = 0;
+}
+
+void gc_thread_drop_typed(GCTypedSpan* entry, GCHeap* heap)
+{
+	if (entry->span) gc_heap_disown(heap, entry->span);
+	entry->span = NULL;
+	entry->key = NULL;
+}
+
+void gc_threads_forget_types_in(GCThreads* threads, GCHeap* heap, const void* low, const void* high)
+{
+	for (GCThread* thread = threads->all; thread; thread = thread->next)
+		for (uint32_t i = 0; i < GC_TYPED_SPANS; ++i)
+		{
+			const uintptr_t record = gc_typed_key_record(thread->cache.typed[i].key);
+			if (thread->cache.typed[i].key && record >= (uintptr_t)low && record < (uintptr_t)high) gc_thread_drop_typed(&thread->cache.typed[i], heap);
+		}
 }
 
 void gc_threads_flush_caches(GCThreads* threads, GCHeap* heap, uint64_t* allocs)

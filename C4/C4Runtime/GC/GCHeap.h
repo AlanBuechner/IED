@@ -23,6 +23,9 @@ typedef struct GCHeap
 	GCPageHeap pages;
 	GCClassSpans classes[GC_SPAN_CLASSES];
 	GCSpan* large;            // every large span (doubly linked)
+	GCPtrMap typedPartial;    // small precise spans with a free slot that no thread owns: typeKey -> the first (a), the
+	                          // rest linked through nextPartial
+	GCPointerMaps maps;       // the precise types' maps (GCPointers.h)
 	int64_t liveBytes;        // bytes of slots holding objects, as far as the heap has heard (thread caches report late)
 	int allocateMarked;       // set while a collection marks (also beside the program): new objects count as reached
 	int poison;               // C4_GC_POISON=1: ended objects are filled with GC_POISON_BYTE, so a later read faults
@@ -41,7 +44,7 @@ typedef struct GCAllocRequest
 	size_t size;
 	size_t align;
 	GCScanKind scanKind;
-	const c4_gc_type* type;   // GC_SCAN_PRECISE: the type whose pointer map the object's bits take
+	const c4_gc_type* type;   // GC_SCAN_PRECISE: the type whose map the object is read by
 } GCAllocRequest;
 
 // A small request's span class (class * GC_SCAN_KINDS + scanKind), or -1 for a large one.
@@ -59,7 +62,12 @@ void* gc_heap_alloc_large(GCHeap* heap, GCAllocRequest request);
 // A span of `spanClass` with a free slot, now owned by `owner` (the calling thread's cache); NULL when the OS gives
 // no more memory. gc_heap_disown gives it back.
 GCSpan* gc_heap_take_span(GCHeap* heap, uint32_t spanClass, const void* owner);
+// The same for a precise class: a span that holds objects of `type` only.
+GCSpan* gc_heap_take_typed_span(GCHeap* heap, uint32_t spanClass, const c4_gc_type* type, const void* owner);
 void gc_heap_disown(GCHeap* heap, GCSpan* span);
+
+// Forgets the types whose records lie in [low, high) (an image about to unload): their spans take no new objects.
+void gc_heap_forget_types_in(GCHeap* heap, const void* low, const void* high);
 
 // The first clear bit in [from, limit), or limit.
 static inline uint32_t gc_find_clear_bit(const uint64_t* bits, uint32_t from, uint32_t limit)
@@ -79,15 +87,13 @@ static inline uint32_t gc_find_clear_bit(const uint64_t* bits, uint32_t from, ui
 // only the owner sets a span's allocation bits and raises its count. Another thread may meanwhile delete an object of
 // it, clearing its bit and lowering the count atomically; should that land between the owner's read and write of the
 // same word, the slot reads as taken and the count as higher until the next sweep recomputes both from the marks.
-// The slot's number goes to *taken.
-static inline void* gc_heap_alloc_slot(const GCHeap* heap, GCSpan* span, uint32_t* taken)
+static inline void* gc_heap_alloc_slot(const GCHeap* heap, GCSpan* span)
 {
 	const uint32_t nelems = span->nelems;
 	if (__atomic_load_n(&span->allocCount, __ATOMIC_RELAXED) >= nelems) return NULL;
 	uint32_t slot = gc_find_clear_bit(span->allocBits, span->freeIndex, nelems);
 	if (slot == nelems) slot = gc_find_clear_bit(span->allocBits, 0, nelems);
 	if (slot == nelems) return NULL;
-	*taken = slot;
 	uint64_t* word = &span->allocBits[slot >> 6];
 	__atomic_store_n(word, __atomic_load_n(word, __ATOMIC_RELAXED) | ((uint64_t)1 << (slot & 63u)), __ATOMIC_RELEASE);
 	__atomic_store_n(&span->allocCount, __atomic_load_n(&span->allocCount, __ATOMIC_RELAXED) + 1u, __ATOMIC_RELAXED);
@@ -95,16 +101,6 @@ static inline void* gc_heap_alloc_slot(const GCHeap* heap, GCSpan* span, uint32_
 	uint8_t* p = gc_span_slot_base(span, slot);
 	if (__atomic_load_n(&span->needsZero, __ATOMIC_ACQUIRE)) memset(p, 0, span->elemSize);
 	if (__atomic_load_n(&heap->allocateMarked, __ATOMIC_ACQUIRE)) gc_bit_claim(span->markBits, slot); // markers claim beside it
-	return p;
-}
-
-// A slot of a span the calling thread holds under the lock for `request`: its pointer bits written for a precise one.
-// NULL when the span is full.
-static inline void* gc_heap_alloc_in(const GCHeap* heap, GCSpan* span, GCAllocRequest request)
-{
-	uint32_t slot = 0;
-	void* p = gc_heap_alloc_slot(heap, span, &slot);
-	if (p && request.scanKind == GC_SCAN_PRECISE) gc_pointers_write_fast(span, slot, request.size, request.type);
 	return p;
 }
 
@@ -127,7 +123,8 @@ static inline uint8_t* gc_object_base(GCObject object) { return gc_span_slot_bas
 static inline size_t gc_object_size(GCObject object) { return object.span->elemSize; }
 static inline int gc_object_marked(GCObject object) { return gc_bit(object.span->markBits, object.slot); }
 
-// Puts a span with a free slot on its class's partial list (a no-op if it is there or a thread owns it).
+// Puts a span with a free slot on its class's partial list, a precise one on its type's (a no-op if it is there, a
+// thread owns it or its type unloaded).
 void gc_heap_note_free_slot(GCHeap* heap, GCSpan* span);
 
 // Ends every unmarked object and clears the marks: the survivors are the allocated objects, and spans left

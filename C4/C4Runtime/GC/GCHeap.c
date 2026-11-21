@@ -1,4 +1,5 @@
 #include "GC/GCHeap.h"
+#include "GC/GCPlatform.h"
 #include <string.h>
 
 enum { kWasteShift = 3 }; // a span leaves at most 1/8 of its bytes unused
@@ -22,10 +23,25 @@ static void list_remove(GCSpan** head, GCSpan* span)
 	span->next = span->prev = NULL;
 }
 
+// A precise span waits for its own type: its type's list.
+static void note_typed_free_slot(GCHeap* heap, GCSpan* span)
+{
+	if (!span->typeKey) return;   // its type unloaded: it takes no new objects, and goes once its last one does
+	span->onPartial = 1;
+	GCEntry* first = gc_map_upsert(&heap->typedPartial, span->typeKey);
+	span->nextPartial = (GCSpan*)first->a;
+	first->a = span;
+}
+
 void gc_heap_note_free_slot(GCHeap* heap, GCSpan* span)
 {
 	GCClassSpans* spans = &heap->classes[span->spanClass];
 	if (span->onPartial || span->owner) return;
+	if (span->scanKind == GC_SCAN_PRECISE && span->state == GC_SPAN_SMALL)
+	{
+		note_typed_free_slot(heap, span);
+		return;
+	}
 	span->onPartial = 1;
 	span->nextPartial = spans->partial;
 	spans->partial = span;
@@ -55,7 +71,6 @@ static GCSpan* new_small_span(GCHeap* heap, uint32_t spanClass)
 	span->elemSize = size;
 	span->nelems = (uint32_t)((npages << GC_PAGE_SHIFT) / size);
 	span->divMagic = (uint32_t)(0xFFFFFFFFu / size) + 1u;
-	if (span->scanKind == GC_SCAN_PRECISE) gc_pointers_prepare(&heap->pages, span);
 	list_push(&heap->classes[spanClass].all, span);
 	return span;
 }
@@ -73,6 +88,45 @@ GCSpan* gc_heap_take_span(GCHeap* heap, uint32_t spanClass, const void* owner)
 	else span = new_small_span(heap, spanClass);
 	if (span) span->owner = owner;
 	return span;
+}
+
+GCSpan* gc_heap_take_typed_span(GCHeap* heap, uint32_t spanClass, const c4_gc_type* type, const void* owner)
+{
+	const void* key = gc_typed_key(type, spanClass);
+	GCEntry* first = gc_map_find(&heap->typedPartial, key);
+	GCSpan* span = first ? (GCSpan*)first->a : NULL;
+	if (span)
+	{
+		if (span->nextPartial) first->a = span->nextPartial;
+		else gc_map_remove(&heap->typedPartial, key);
+		span->nextPartial = NULL;
+		span->onPartial = 0;
+	}
+	else if ((span = new_small_span(heap, spanClass)))
+	{
+		span->map = gc_pointers_intern(&heap->maps, type);
+		span->typeKey = key;
+	}
+	if (span) span->owner = owner;
+	return span;
+}
+
+// The spans of a forgotten type stay as they are, read by its interned map, off every list that gives slots.
+static void forget_span(GCHeap* heap, GCSpan* span, uintptr_t low, uintptr_t high)
+{
+	const uintptr_t record = gc_typed_key_record(span->typeKey);
+	if (!span->typeKey || record < low || record >= high) return;
+	gc_map_remove(&heap->typedPartial, span->typeKey);
+	span->typeKey = NULL;
+	span->onPartial = 0;
+	span->nextPartial = NULL;
+}
+
+void gc_heap_forget_types_in(GCHeap* heap, const void* low, const void* high)
+{
+	for (uint32_t c = GC_SCAN_PRECISE; c < GC_SPAN_CLASSES; c += GC_SCAN_KINDS)
+		for (GCSpan* span = heap->classes[c].all; span; span = span->next) forget_span(heap, span, (uintptr_t)low, (uintptr_t)high);
+	gc_pointers_forget_in(&heap->maps, low, high);
 }
 
 void gc_heap_disown(GCHeap* heap, GCSpan* span)
@@ -98,11 +152,7 @@ void* gc_heap_alloc_large(GCHeap* heap, GCAllocRequest request)
 	span->allocCount = 1;
 	gc_bit_set(span->allocBits, 0);
 	if (span->needsZero) memset(span->base, 0, size);
-	if (request.scanKind == GC_SCAN_PRECISE)
-	{
-		gc_pointers_prepare(&heap->pages, span);
-		gc_pointers_write(span, 0, request.size, request.type);
-	}
+	if (request.scanKind == GC_SCAN_PRECISE) span->map = gc_pointers_intern(&heap->maps, request.type);
 	if (__atomic_load_n(&heap->allocateMarked, __ATOMIC_ACQUIRE)) gc_bit_claim(span->markBits, 0);
 	list_push(&heap->large, span);
 	heap->liveBytes += (int64_t)size;
@@ -209,6 +259,8 @@ static void sweep_large(GCHeap* heap, uint64_t epoch)
 void gc_heap_sweep(GCHeap* heap, uint64_t epoch)
 {
 	heap->liveBytes = 0;
+	gc_mem_free(heap->typedPartial.slots);   // the sweep files every span with a free slot again
+	heap->typedPartial = (GCPtrMap){ 0 };
 	for (uint32_t c = 0; c < GC_SPAN_CLASSES; ++c) sweep_class(heap, &heap->classes[c], epoch);
 	sweep_large(heap, epoch);
 }

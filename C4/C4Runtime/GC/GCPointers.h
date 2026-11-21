@@ -1,85 +1,57 @@
 #pragma once
 // Pointer maps (R16). The compiler writes one per type (c4_gc_type.pointers): which words of an object may hold a managed
-// pointer. Objects of such a type live in precise spans (GC_SCAN_PRECISE), which keep pointer bits for each slot, bit i
-// set when the slot's word i may hold a pointer, and marking reads only those words. A slot's bits start on a byte - 1,
-// 2, 4 or 8 bytes for a slot of up to 8, 16, 32 or 64 words, whole uint64s past that - so taking a slot for a small
-// object writes them with one store, and marking reads them with one load.
-//
-// A slot's bits are written by the thread that takes the slot for an object, right after its allocation fast path (or
-// under the lock): they share no byte with another slot's, so no other thread writes them meanwhile, whoever owns the
-// span by then. A marker may read them at any time: one that reads a slot's earlier bits meanwhile (the thread stopped
-// between the two) scans an object that is still all zero, and the stores that follow land on written pages, which a
-// concurrent cycle scans again. What the bits say of a slot no object holds does not matter, so a span takes the
-// bits a freed span left (GCPageHeap's spares) without clearing them.
+// pointer. Objects of such a type live in precise spans (GC_SCAN_PRECISE) that hold objects of that one type: the span
+// keeps the type's map (GCSpanMap), so taking a slot writes nothing more than an unmapped allocation does, and marking
+// reads only the words the map names. A thread's cache finds its span for a type by the type's record and size class
+// (gc_typed_key, GCThreadCache.typed). Maps are interned by content and never freed: a span whose type's image unloads
+// keeps reading its objects by it, and a marker beside the program never reads a freed map.
 
-#include "GC/GCPageHeap.h"
+#include "GC/GCPtrMap.h"
 #include "GCRuntimeC.h"
+
+typedef struct GCSpanMap
+{
+	struct GCSpanMap* next;   // every map (GCPointerMaps.all)
+	uint64_t mask;            // `masked`: the object's bits, its first word's the lowest
+	uint32_t words;           // the words `bits` covers: one object's, an array's element's
+	uint16_t array;           // the map repeats from `firstWords` on (`new T[n]`)
+	uint16_t firstWords;      // an array's: the words before its first element
+	uint32_t masked;          // one object (no array) of at most 64 words: `mask` is all of it
+	uint64_t bits[];
+} GCSpanMap;
+
+typedef struct GCPointerMaps
+{
+	GCPtrMap byRecord;        // a type record -> its map (a)
+	GCSpanMap* all;
+} GCPointerMaps;
 
 // Objects of `type` are scanned by its map; NULL, or a type without one, is scanned whole.
 static inline int gc_pointers_precise(const c4_gc_type* type) { return type && type->pointers && type->words; }
 
-// The bytes of pointer bits a slot of `slotWords` words takes.
-static inline uint32_t gc_pointers_stride(size_t slotWords)
+// The interned map of a precise type. Under the lock.
+const GCSpanMap* gc_pointers_intern(GCPointerMaps* maps, const c4_gc_type* type);
+
+// Forgets the records in [low, high) (an image about to unload): their maps stay, for the spans that use them.
+void gc_pointers_forget_in(GCPointerMaps* maps, const void* low, const void* high);
+
+// Whether word `word` (from the slot's start) of an object read by `map` may hold a pointer.
+static inline int gc_pointers_word(const GCSpanMap* map, size_t word)
 {
-	if (slotWords <= 8) return 1;
-	if (slotWords <= 16) return 2;
-	if (slotWords <= 32) return 4;
-	return (uint32_t)((slotWords + 63u) / 64u * 8u);
-}
-
-// Bits for every slot of a precise span (small, large or a pool's). Under the lock.
-void gc_pointers_prepare(GCPageHeap* pages, GCSpan* span);
-
-// The bits of `slot` say what an object of `type` and `size` bytes taking it may hold; the rest of the slot none.
-void gc_pointers_write(GCSpan* span, uint32_t slot, size_t size, const c4_gc_type* type);
-
-// The objects whose bits one store writes: one object (not an array) of at most this many words (a slot of at most 512
-// bytes, whose bits take at most 8 bytes).
-#define GC_SMALL_MAPPED_WORDS 64u
-
-static inline int gc_pointers_small(const c4_gc_type* type, size_t size)
-{
-	return !type->array && size <= GC_SMALL_MAPPED_WORDS * 8u;
-}
-
-// A small type's pointer bits, its first word's the lowest.
-static inline uint64_t gc_pointers_low_map(const c4_gc_type* type)
-{
-	return type->words >= 64 ? type->pointers[0] : type->pointers[0] & (((uint64_t)1 << type->words) - 1u);
-}
-
-// The bits of a slot of a span whose bits take at most 8 bytes a slot become `mapped`: one store.
-static inline void gc_pointers_store_mask(GCSpan* span, uint32_t slot, uint64_t mapped)
-{
-	uint8_t* at = span->pointerBits + (size_t)slot * span->bitsStride;
-	switch (span->bitsStride)
+	if (map->array)
 	{
-	case 1: __atomic_store_n(at, (uint8_t)mapped, __ATOMIC_RELAXED); break;
-	case 2: __atomic_store_n((uint16_t*)at, (uint16_t)mapped, __ATOMIC_RELAXED); break;
-	case 4: __atomic_store_n((uint32_t*)at, (uint32_t)mapped, __ATOMIC_RELAXED); break;
-	default: __atomic_store_n((uint64_t*)at, mapped, __ATOMIC_RELAXED); break;
+		if (word < map->firstWords) return 0;
+		word = (word - map->firstWords) % map->words;
 	}
+	else if (word >= map->words) return 0;
+	return (int)((map->bits[word >> 6] >> (word & 63u)) & 1u);
 }
 
-// gc_pointers_write, one store for a small object.
-static inline void gc_pointers_write_fast(GCSpan* span, uint32_t slot, size_t size, const c4_gc_type* type)
+// The key a thread cache and the heap find a type's spans of one size class by: an object type's record (its objects
+// are all of one size), an array's record and class. Records lie below 2^47.
+static inline const void* gc_typed_key(const c4_gc_type* type, uint32_t spanClass)
 {
-	if (gc_pointers_small(type, size) && span->bitsStride <= 8) gc_pointers_store_mask(span, slot, gc_pointers_low_map(type));
-	else gc_pointers_write(span, slot, size, type);
+	return type->array ? (const void*)((uintptr_t)type | ((uintptr_t)(spanClass + 1u) << 48)) : (const void*)type;
 }
 
-// The bits of a slot of at most 64 words (a stride of at most 8 bytes), its first word's the lowest.
-static inline uint64_t gc_pointers_slot_mask(const GCSpan* span, uint32_t slot)
-{
-	const uint8_t* at = span->pointerBits + (size_t)slot * span->bitsStride;
-	switch (span->bitsStride)
-	{
-	case 1: return __atomic_load_n(at, __ATOMIC_RELAXED);
-	case 2: return __atomic_load_n((const uint16_t*)at, __ATOMIC_RELAXED);
-	case 4: return __atomic_load_n((const uint32_t*)at, __ATOMIC_RELAXED);
-	default: return __atomic_load_n((const uint64_t*)at, __ATOMIC_RELAXED);
-	}
-}
-
-// Every slot of a pool's span holds an object of `type`.
-void gc_pointers_fill_slots(GCPageHeap* pages, GCSpan* span, const c4_gc_type* type);
+static inline uintptr_t gc_typed_key_record(const void* key) { return (uintptr_t)key & (((uintptr_t)1 << 48) - 1u); }

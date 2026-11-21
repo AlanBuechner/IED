@@ -9,9 +9,27 @@
 #include "GCRuntimeC.h"
 #include "GC/GCSampling.h"
 
+// A thread's span for one precise type and size class (gc_typed_key), in a table indexed by the key's hash.
+typedef struct GCTypedSpan
+{
+	const void* key;
+	GCSpan* span;
+} GCTypedSpan;
+
+#define GC_TYPED_SPANS 128u
+
+// Records are 32-byte constants side by side: their addresses' bits from the fifth tell them apart; an array's class
+// (the key's top bits) is folded in.
+static inline uint32_t gc_typed_index(const void* key)
+{
+	const uintptr_t bits = (uintptr_t)key;
+	return (uint32_t)((bits >> 5) ^ (bits >> 48)) & (GC_TYPED_SPANS - 1u);
+}
+
 typedef struct GCThreadCache
 {
 	GCSpan* spans[GC_SPAN_CLASSES];   // the span each size class allocates from, owned by this thread
+	GCTypedSpan typed[GC_TYPED_SPANS]; // the spans precise objects come from, by type, owned by this thread
 	size_t allocatedBytes;            // since the last refill: the heap counts them then
 	uint64_t allocs;
 } GCThreadCache;
@@ -50,6 +68,11 @@ void gc_threads_mark(GCMarker* marker, const GCThreads* threads, const GCThread*
 // Hands every thread's cached spans back to the heap and adds their counts to `allocs` (before a sweep).
 void gc_threads_flush_caches(GCThreads* threads, GCHeap* heap, uint64_t* allocs);
 void gc_thread_flush_cache(GCThread* thread, GCHeap* heap, uint64_t* allocs);
+// Gives an entry's span back to the heap.
+void gc_thread_drop_typed(GCTypedSpan* entry, GCHeap* heap);
+// Drops every thread's spans of the types whose records lie in [low, high) (an image about to unload; the threads are
+// stopped), so a record later loaded at their address finds no span of another layout.
+void gc_threads_forget_types_in(GCThreads* threads, GCHeap* heap, const void* low, const void* high);
 
 // A small object of `spanClass` from the thread's own span, or NULL when it has none with a free slot (the slow
 // path refills it under the lock). Runs without the lock, on the thread itself.
@@ -62,8 +85,7 @@ static inline void* gc_thread_alloc_fast(GCThread* thread, const GCHeap* heap, i
 	__atomic_store_n(&thread->inAllocator, 1, __ATOMIC_RELAXED);
 	__atomic_signal_fence(__ATOMIC_SEQ_CST);
 	GCSpan* span = thread->cache.spans[spanClass];
-	uint32_t slot = 0;
-	void* p = span ? gc_heap_alloc_slot(heap, span, &slot) : NULL;
+	void* p = span ? gc_heap_alloc_slot(heap, span) : NULL;
 	if (p)
 	{
 		thread->cache.allocatedBytes += span->elemSize;
@@ -74,18 +96,17 @@ static inline void* gc_thread_alloc_fast(GCThread* thread, const GCHeap* heap, i
 	return p;
 }
 
-// gc_thread_alloc_fast for a precise object of at most GC_SMALL_MAPPED_WORDS words, one object (not an array): `mapped`
-// is its pointer bits (gc_pointers_low_map), stored for its slot with one store.
-static inline void* gc_thread_alloc_mapped(GCThread* thread, const GCHeap* heap, int spanClass, uint64_t mapped)
+// gc_thread_alloc_fast for a precise object: the slot comes from the thread's span of its type and class (`key`), so
+// nothing more is written than for any object.
+static inline void* gc_thread_alloc_typed(GCThread* thread, const GCHeap* heap, const void* key)
 {
 	__atomic_store_n(&thread->inAllocator, 1, __ATOMIC_RELAXED);
 	__atomic_signal_fence(__ATOMIC_SEQ_CST);
-	GCSpan* span = thread->cache.spans[spanClass];
-	uint32_t slot = 0;
-	void* p = span ? gc_heap_alloc_slot(heap, span, &slot) : NULL;
+	const GCTypedSpan* entry = &thread->cache.typed[gc_typed_index(key)];
+	GCSpan* span = entry->key == key ? entry->span : NULL;
+	void* p = span ? gc_heap_alloc_slot(heap, span) : NULL;
 	if (p)
 	{
-		gc_pointers_store_mask(span, slot, mapped);
 		thread->cache.allocatedBytes += span->elemSize;
 		thread->cache.allocs++;
 	}

@@ -33,11 +33,13 @@ maps), **conservative for stacks, registers and raw regions**. The C API is `C4R
 - Heap objects are scanned precisely (R16): every `c4_gc_type` record `new` passes carries the type's pointer map
   (`CodeGen/PointerMaps.cpp`: which words may hold a pointer - pointer/reference fields, a `func`'s words, a union's
   word when a member may be one; not vptrs, function pointers or numbers); `new` of such a type calls
-  `c4_alloc_precise`, and marking reads only those words of an object (`GC_SCAN_PRECISE` spans keep each slot's bits
-  on a byte, written with one store at allocation, `GC/GCPointers.{h,c}`). A type whose every word may hold a
-  pointer has no map and is scanned whole (`c4_alloc_typed`). `new T[n]` repeats the element's map after a counted
-  array's count. Keep the mark and allocation fast paths inline (`push_contents`, `gc_thread_alloc_mapped`) and the
-  hot `GCSpan` fields before the bitmaps: each of those cost the GC benchmark 5-25% when lost.
+  `c4_alloc_precise` (`new T[n]`: `c4_alloc_precise_array`), and marking reads only those words of an object.
+  Precise spans hold one type each and keep its interned map (`GCSpan.map`, `GC/GCPointers.{h,c}`); a thread finds
+  its span for a type by the record pointer (`GCThreadCache.typed`), so a precise `new` writes and reads nothing an
+  unmapped one does not. A type whose every word may hold a pointer has no map and is scanned whole
+  (`c4_alloc_typed`). `new T[n]` repeats the element's map after a counted array's count. Keep the mark and
+  allocation fast paths inline (`push_contents`, `gc_thread_alloc_typed`), the record off the fast path, and the hot
+  `GCSpan` fields before the bitmaps: each of those cost the GC benchmark 1-25% when lost.
   Still conservative: stacks, registers, scan regions, `c4_alloc` memory.
 
 ## Roots

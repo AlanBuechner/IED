@@ -171,7 +171,6 @@ static void snapshot_stop(GCState* gc, GCThread* self, CycleTrace* trace)
 {
 	const uint64_t start = gc_os_now_ns();
 	stop(gc, self);
-	gc->heap.pages.keepFreedBits = 1; // the marker reads spans' pointer bits beside the program's deletes
 	GCMarker* marker = &gc->concurrent.marker;
 	marker->heap = &gc->heap;
 	marker->atomicClaims = 0;

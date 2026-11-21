@@ -50,7 +50,7 @@ namespace Scripting
 	{
 		const size_t size = objT && objT->GetSize() ? objT->GetSize() : kUnlaidObjectSize;
 		const size_t align = objT && objT->GetAlignment() ? objT->GetAlignment() : kDefaultAlignment;
-		return AllocateTyped(objT, m_Ctx.mctx().census().ObjectRecord(objT, CensusName(objT)), m_Ctx.builder().getInt64(size), align);
+		return AllocateTyped(objT, Shape::Object, m_Ctx.mctx().census().ObjectRecord(objT, CensusName(objT)), m_Ctx.builder().getInt64(size), align);
 	}
 
 	std::string ObjectEmitter::CensusName(const Type* type) const
@@ -60,11 +60,12 @@ namespace Scripting
 		return closure ? closure->displayName.c_str() : QualifiedName(type).c_str();
 	}
 
-	llvm::Value* ObjectEmitter::AllocateTyped(const Type* type, llvm::Constant* census, llvm::Value* size, uint64 align)
+	llvm::Value* ObjectEmitter::AllocateTyped(const Type* type, Shape shape, llvm::Constant* census, llvm::Value* size, uint64 align)
 	{
 		// A pointer-free object is never scanned by the collector, one with a pointer map only where it says (docs/runtime/01).
+		const char* precise = shape == Shape::Array ? "c4_alloc_precise_array" : "c4_alloc_precise";
 		const char* allocator = !TypeHandle::MayHoldPointers(type) ? "c4_alloc_typed_noscan"
-			: m_Ctx.mctx().census().HasPointerMap(type) ? "c4_alloc_precise" : "c4_alloc_typed";
+			: m_Ctx.mctx().census().HasPointerMap(type) ? precise : "c4_alloc_typed";
 		auto& B = m_Ctx.builder();
 		auto* allocFn = m_Ctx.mctx().RuntimeFunction(allocator, B.getPtrTy(), { B.getInt64Ty(), B.getInt64Ty(), B.getPtrTy() });
 		return m_Ctx.Call(allocFn, { size, B.getInt64(align), census }, false);
@@ -108,7 +109,7 @@ namespace Scripting
 		const uint64 align = std::max<uint64>(element->GetAlignment(), kDefaultAlignment);
 		llvm::Value* size = B.CreateAdd(B.CreateBinaryIntrinsic(llvm::Intrinsic::umax, bytes, B.getInt64(1)), B.getInt64(countBytes));
 		llvm::Constant* census = m_Ctx.mctx().census().ArrayRecord(element, CensusName(element) + "[]", countBytes);
-		llvm::Value* base = AllocateTyped(element, census, size, align);
+		llvm::Value* base = AllocateTyped(element, Shape::Array, census, size, align);
 		if (!countBytes) return base;
 		B.CreateStore(count, base);
 		return B.CreateGEP(B.getInt8Ty(), base, B.getInt64(countBytes));

@@ -84,7 +84,6 @@ void gc_reclaim(GCState* gc)
 	gc->collections++;
 	gc_heap_sweep(&gc->heap, gc->collections);
 	gc_pools_sweep(gc->pools, &gc->releases, &gc->heap.liveBytes);
-	gc_pages_drop_retired(&gc->heap.pages);
 	if (gc->census.on) gc_census_take(&gc->census, &gc->heap);
 	gc->heap.allocateMarked = 0;
 	gc_pages_scavenge(&gc->heap.pages, gc->collections);
@@ -142,16 +141,49 @@ static void check_request(GCAllocRequest request)
 	}
 }
 
+static void* take_counted(GCThreadCache* cache, const GCHeap* heap, GCSpan* span)
+{
+	void* p = gc_heap_alloc_slot(heap, span);
+	if (p)
+	{
+		cache->allocatedBytes += span->elemSize;
+		cache->allocs++;
+	}
+	return p;
+}
+
+// From the thread's span of the type and class, refilled from the heap until one has a free slot. The entry may hold
+// another type's span (their keys share the index): that one goes back to the heap.
+static void* allocate_typed(GCState* gc, GCThread* self, uint32_t spanClass, const c4_gc_type* type)
+{
+	const void* key = gc_typed_key(type, spanClass);
+	GCTypedSpan* entry = &self->cache.typed[gc_typed_index(key)];
+	for (;;)
+	{
+		if (entry->key == key && entry->span)
+		{
+			void* p = take_counted(&self->cache, &gc->heap, entry->span);
+			if (p) return p;
+		}
+		gc_thread_drop_typed(entry, &gc->heap);
+		GCSpan* span = gc_heap_take_typed_span(&gc->heap, spanClass, type, &self->cache);
+		if (!span) return NULL;
+		entry->key = key;
+		entry->span = span;
+	}
+}
+
 // From the thread's span of the class, refilled from the heap until one has a free slot.
 static void* allocate_small(GCState* gc, GCThread* self, uint32_t spanClass, GCAllocRequest request)
 {
+	if (request.scanKind == GC_SCAN_PRECISE) return allocate_typed(gc, self, spanClass, request.type);
 	GCThreadCache* cache = &self->cache;
 	for (;;)
 	{
 		GCSpan* span = cache->spans[spanClass];
 		if (span)
 		{
-			void* p = gc_heap_alloc_in(&gc->heap, span, request);
+			void* p = gc_heap_alloc_slot(&gc->heap, span);
 			if (p)
 			{
 				cache->allocatedBytes += span->elemSize;

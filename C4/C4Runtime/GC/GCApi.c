@@ -276,27 +276,22 @@ static inline __attribute__((always_inline)) void* allocate(GCAllocRequest reque
 	return p;
 }
 
-// The pointer bits of an object the fast path gave, found by its address: an array's, or a larger object's.
-__attribute__((noinline)) static void write_pointers_of(void* p, size_t size, const c4_gc_type* type)
+// The record is read only here, off the fast path (a record without a map is read whole).
+__attribute__((noinline)) static void* allocate_precise_slow(GCThread* self, size_t size, size_t align, const c4_gc_type* type)
 {
-	const GCObject object = gc_heap_find(&g_gc.heap, p);
-	gc_pointers_write(object.span, object.slot, size, type);
+	const GCAllocRequest request = { size, align, gc_pointers_precise(type) ? GC_SCAN_PRECISE : GC_SCAN_ALL, type };
+	return allocate_slow(self, request);
 }
 
-// `allocate` for an object of a type with a pointer map (R16): a small one's bits go with its slot in the fast path; an
-// array's or a larger one's are written after it (they share no byte with another slot's, so no other thread writes
-// them meanwhile), or under the lock in the slow path.
-static inline __attribute__((always_inline)) void* allocate_precise(size_t size, size_t align, const c4_gc_type* type, const void* caller)
+// `allocate` for an object of a type with a pointer map (R16): from the thread's span of that type, which holds the map.
+// The fast path finds it by `key` alone: a key is in the cache only once the slow path took a span for it.
+static inline __attribute__((always_inline)) void* allocate_precise(size_t size, size_t align, const c4_gc_type* type, const void* key, const void* caller)
 {
 	GCThread* self = this_thread();
-	const GCAllocRequest request = { size, align, GC_SCAN_PRECISE, type };
-	const int spanClass = gc_heap_small_class(request);
-	void* p = NULL;
-	if (spanClass >= 0 && gc_pointers_small(type, size)) p = gc_thread_alloc_mapped(self, &g_gc.heap, spanClass, gc_pointers_low_map(type));
-	else if (spanClass >= 0 && (p = gc_thread_alloc_fast(self, &g_gc.heap, spanClass))) write_pointers_of(p, size, type);
-	if (!p) p = allocate_slow(self, request);
+	void* p = gc_thread_alloc_typed(self, &g_gc.heap, key);
+	if (!p) p = allocate_precise_slow(self, size, align, type);
 	note_allocation(self, size, caller);
-	if (__atomic_load_n(&g_gc.census.on, __ATOMIC_RELAXED)) note_type(self, request, p, type);
+	if (__atomic_load_n(&g_gc.census.on, __ATOMIC_RELAXED)) note_type(self, (GCAllocRequest){ size, align, GC_SCAN_PRECISE, type }, p, type);
 	return p;
 }
 
@@ -334,8 +329,15 @@ void* c4_alloc_typed(size_t size, size_t align, const c4_gc_type* type)
 
 void* c4_alloc_precise(size_t size, size_t align, const c4_gc_type* type)
 {
-	if (!gc_pointers_precise(type)) return allocate(request_of(size, align, GC_SCAN_ALL), __builtin_return_address(0), type);
-	return allocate_precise(size, align, type, __builtin_return_address(0));
+	return allocate_precise(size, align, type, type, __builtin_return_address(0));
+}
+
+void* c4_alloc_precise_array(size_t size, size_t align, const c4_gc_type* type)
+{
+	const GCAllocRequest request = { size, align, GC_SCAN_PRECISE, type };
+	const int spanClass = gc_heap_small_class(request);
+	const void* key = spanClass >= 0 ? gc_typed_key(type, (uint32_t)spanClass) : NULL;
+	return allocate_precise(size, align, type, key, __builtin_return_address(0));
 }
 
 void* c4_alloc_typed_noscan(size_t size, size_t align, const c4_gc_type* type)
@@ -503,11 +505,18 @@ uint64_t c4_gc_drop_finalizers_in(const void* low, const void* high)
 	return dropped;
 }
 
+// The other threads stop meanwhile: a thread's cache finds its span of a type by the type's record, without the lock.
 void c4_gc_forget_types_in(const void* low, const void* high)
 {
-	gc_os_lock();
+	GCThread* self = this_thread();
 	GCState* gc = collector();
+	gc_concurrent_finish_now(gc);
+	gc_os_lock();
 	gc_census_forget_in(&gc->census, &gc->heap, low, high);
+	gc_threads_stop(&gc->threads, self);
+	gc_threads_forget_types_in(&gc->threads, &gc->heap, low, high);
+	gc_heap_forget_types_in(&gc->heap, low, high);
+	gc_threads_resume(&gc->threads, self);
 	gc_os_unlock();
 }
 

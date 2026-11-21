@@ -118,10 +118,11 @@ int gc_pool_set_type(GCHeap* heap, GCPool* pool, const c4_gc_type* type)
 	if (pool->desc.noscan || any_occupied(pool)) return 0;
 	const int precise = gc_pointers_precise(type);
 	if (precise && (type->array || (size_t)type->words * 8u > pool->desc.slot_size)) return 0;
+	const GCSpanMap* map = precise ? gc_pointers_intern(&heap->maps, type) : NULL;
 	for (size_t c = 0; c < pool->chunkCount; ++c)
 	{
 		GCSpan* chunk = pool->chunks[c];
-		if (precise) gc_pointers_fill_slots(&heap->pages, chunk, type);
+		chunk->map = map;
 		chunk->scanKind = (uint8_t)(precise ? GC_SCAN_PRECISE : GC_SCAN_ALL);
 	}
 	return 1;

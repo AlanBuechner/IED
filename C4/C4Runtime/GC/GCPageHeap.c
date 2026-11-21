@@ -295,58 +295,9 @@ GCSpan* gc_pages_split(GCPageHeap* heap, GCSpan* span, size_t npages)
 	return first;
 }
 
-typedef struct GCRetiredBits
-{
-	uint8_t* bits;
-	size_t bytes;
-} GCRetiredBits;
-
-uint8_t* gc_pages_take_bits(GCPageHeap* heap, size_t bytes)
-{
-	uint8_t* bits = bytes <= GC_SPARE_BITS_BYTES ? heap->spareBits[bytes / 8] : NULL;
-	if (bits) heap->spareBits[bytes / 8] = *(uint8_t**)bits;
-	else bits = (uint8_t*)gc_mem_alloc(bytes);
-	if (!bits) gc_os_fatal("out of memory for the collector's pointer maps");
-	return bits;
-}
-
-// Allocating and freeing them for every span a churning program makes and frees costs more than writing them: a span's
-// bits wait for the next span that takes as many.
-static void give_bits(GCPageHeap* heap, uint8_t* bits, size_t bytes)
-{
-	if (bytes > GC_SPARE_BITS_BYTES)
-	{
-		gc_mem_free(bits);
-		return;
-	}
-	*(uint8_t**)bits = heap->spareBits[bytes / 8];
-	heap->spareBits[bytes / 8] = bits;
-}
-
-static void retire_bits(GCPageHeap* heap, uint8_t* bits, size_t bytes)
-{
-	if (heap->retiredCount == heap->retiredCapacity)
-	{
-		const size_t capacity = heap->retiredCapacity ? heap->retiredCapacity * 2 : 16;
-		heap->retired = (GCRetiredBits*)gc_mem_realloc(heap->retired, capacity * sizeof(GCRetiredBits));
-		if (!heap->retired) gc_os_fatal("out of memory for collector metadata");
-		heap->retiredCapacity = capacity;
-	}
-	heap->retired[heap->retiredCount++] = (GCRetiredBits){ bits, bytes };
-}
-
-void gc_pages_drop_retired(GCPageHeap* heap)
-{
-	for (size_t i = 0; i < heap->retiredCount; ++i) give_bits(heap, heap->retired[i].bits, heap->retired[i].bytes);
-	heap->retiredCount = 0;
-	heap->keepFreedBits = 0;
-}
-
 void gc_pages_free(GCPageHeap* heap, GCSpan* span, uint64_t epoch)
 {
 	if (span->tags) gc_mem_free((void*)span->tags);
-	if (span->pointerBits && heap->keepFreedBits) retire_bits(heap, span->pointerBits, span->bitsBytes);
-	else if (span->pointerBits) give_bits(heap, span->pointerBits, span->bitsBytes);
 	set_pages(heap, span->base, span->npages, NULL);
 	uint8_t* base = span->base;
 	const size_t npages = span->npages;

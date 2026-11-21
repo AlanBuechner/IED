@@ -36,8 +36,10 @@ namespace Scripting
 
 		/// The name the census shows for `type`: its QualifiedName, or a lambda's closure by the code it is in.
 		std::string CensusName(const Type* type) const;
-		/// The allocator for `type`, given its census record (c4_alloc_typed / _noscan).
-		llvm::Value* AllocateTyped(const Type* type, llvm::Constant* census, llvm::Value* size, uint64 align);
+		/// What one allocation holds: one object of its type, or `new T[n]` of it.
+		enum class Shape { Object, Array };
+		/// The allocator for `type`, given its record (c4_alloc_typed / _noscan / _precise / _precise_array).
+		llvm::Value* AllocateTyped(const Type* type, Shape shape, llvm::Constant* census, llvm::Value* size, uint64 align);
 		llvm::Value* EmitNewArray(const NewNode* n);
 		llvm::Value* AllocateRun(const NewNode* n, llvm::Value* count, llvm::Value* bytes);
 		llvm::Value* ZeroedRun(const NewNode* n, llvm::Value* bytes);

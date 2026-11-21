@@ -394,7 +394,7 @@ The runtime contract is in [../runtime/01-memory-and-gc.md](../runtime/01-memory
 1. **Stores.** Every typed store goes through `ExprEmitter::GcStore`. The collector needs no barrier, so it
    is a plain store; a future generational or concurrent collector adds its barrier there.
 2. **Allocation.** `new` -> `c4_alloc_precise(size, align, type)` for a type with a pointer map (below,
-   `CensusTypes::HasPointerMap`), `c4_alloc_typed` for one whose every word may hold a pointer, or
+   `CensusTypes::HasPointerMap`; `new T[n]` of one: `c4_alloc_precise_array`, `ObjectEmitter::Shape`), `c4_alloc_typed` for one whose every word may hold a pointer, or
    `c4_alloc_typed_noscan` for a type that holds no pointers (`TypeHandle::MayHoldPointers`); `type` is the type's
    record (`CensusTypes`, one private
    `c4_gc_type { name, nativeBytes, pointers, words, array, firstElementWords }` per type in the module): its

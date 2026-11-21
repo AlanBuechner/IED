@@ -10,7 +10,7 @@
 #define GC_SPAN_WORDS 8u   // bitmap words: a span holds at most 512 slots (one page of 16-byte slots)
 
 // What marking reads of a span's objects: every word, nothing, hash entries (c4_alloc_entries), or the words the span's
-// pointer bits name (objects of a type with a pointer map, GCPointers.h).
+// map names (objects of one type with a pointer map, GCPointers.h).
 typedef enum GCScanKind
 {
 	GC_SCAN_ALL,
@@ -58,9 +58,8 @@ typedef struct GCSpan
 	uint64_t allocBits[GC_SPAN_WORDS];
 	uint64_t markBits[GC_SPAN_WORDS];
 	// After the bitmaps, so the fields every object lookup reads keep their cache lines.
-	uint8_t* pointerBits;     // precise spans: each slot's pointer bits, bitsStride bytes a slot (GCPointers.h)
-	uint32_t bitsStride;
-	uint32_t bitsBytes;       // the size of pointerBits
+	const struct GCSpanMap* map; // precise spans: what their objects may hold (GCPointers.h)
+	const void* typeKey;      // small precise spans: the type and class they hold (gc_typed_key); NULL once it unloads
 } GCSpan;
 
 static inline int gc_bit(const uint64_t* bits, uint32_t i) { return (int)((__atomic_load_n(&bits[i >> 6], __ATOMIC_RELAXED) >> (i & 63u)) & 1u); }
