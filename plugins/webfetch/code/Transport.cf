@@ -7,11 +7,13 @@ namespace WebFetch
 
 	Core::String CurlProgram(Core::StringView configured) {
 		if (!configured.IsEmpty()) return Core::String(configured);
+#if defined(PLATFORM_WINDOWS)
 		Core::String root;
 		if (Platform::TryGetEnvironmentVariable("SystemRoot", root) && !root.IsEmpty()) {
 			Core::String system = root + "\\System32\\curl.exe";
 			if (FS::FileExists(system.CStr())) return system;
 		}
+#endif
 		return Core::String("curl");
 	}
 

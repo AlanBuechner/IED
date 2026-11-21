@@ -7,7 +7,7 @@
 			"type": "string",
 			"default": "",
 			"x-ied-tiers": ["app"],
-			"description": "The tor.exe to run. Empty: the Tor Expert Bundle setup.bat installs (vendor/tor)."
+			"description": "The tor program to run (tor.exe on Windows). Empty: the Tor Expert Bundle in IED's vendor/tor (setup.bat installs it; an install for Linux carries Linux's)."
 		},
 		"tor.exitCountries": {
 			"type": "array",

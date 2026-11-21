@@ -15,6 +15,19 @@ namespace Tor
 		return text.ToString();
 	}
 
+	Core::String BundledProgram(Core::StringView bundle) {
+#if defined(PLATFORM_LINUX)
+		return Core::String(bundle) + "/tor/tor";
+#else
+		return Core::String(bundle) + "/tor/tor.exe";
+#endif
+	}
+
+	Core::String LibraryPath(Core::StringView program, Core::StringView inherited) {
+		Core::String folder = Slashes(FS::Path(program).Parent().View());
+		return inherited.IsEmpty() ? folder : (folder + ":") + inherited;
+	}
+
 	static Core::String ReadText(Core::StringView path) {
 		Core::String file = Core::String(path);
 		if (!FS::FileExists(file.CStr())) return Core::String();
@@ -54,10 +67,9 @@ namespace Tor
 	Core::String TorService::DesiredTorrc(Core::String& program, Core::String& problem) {
 		Core::StringView configured = SettingNode(m_Context, "tor.executable").AsView();
 		Core::String bundle = Slashes(IED::HomeFolder().View()) + "/vendor/tor";
-		program = configured.IsEmpty() ? bundle + "/tor/tor.exe" : Slashes(configured);
+		program = configured.IsEmpty() ? BundledProgram(bundle.View()) : Slashes(configured);
 		if (!FS::FileExists(program.CStr())) {
-			problem = configured.IsEmpty() ? Core::String("Tor is not installed: run setup.bat (it installs the Tor Expert Bundle into vendor/tor), or set tor.executable")
-				: Core::String("tor.executable names no file: ") + configured;
+			problem = configured.IsEmpty() ? Core::String(c_NotInstalled) : Core::String("tor.executable names no file: ") + configured;
 			return Core::String();
 		}
 		TorFiles files;
@@ -90,6 +102,11 @@ namespace Tor
 		info.input = Process::Redirect::Null;
 		info.output = Process::Redirect::Null;
 		info.errors = Process::Redirect::Null;
+#if defined(PLATFORM_LINUX)
+		Core::String inherited;
+		Platform::TryGetEnvironmentVariable("LD_LIBRARY_PATH", inherited);
+		info.environment.Push(Core::String("LD_LIBRARY_PATH=") + LibraryPath(program, inherited.View()).View());
+#endif
 		Process::Child started = Process::Child::Start(info);
 		if (!started.IsOpen()) {
 			Halt(TorState::Failed, (Core::String("Tor did not start: ") + started.Error()).View());

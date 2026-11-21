@@ -1,5 +1,6 @@
 // torrc: the torrc the plugin writes and the control port's replies it reads, as Tor 0.4.9 writes them.
 
+include "TorService.ch"
 include "Torrc.ch"
 
 static Core::Array<Core::String> Countries(const char* a, const char* b) {
@@ -95,5 +96,26 @@ class TorRepliesTests {
 		Core::String loud = Tor::LogTail(Core::StringView("a [notice] one\nb [warn] bad\nc [notice] three\nd [err] worse\n"), 3);
 		assert_true(loud.View() == "b [warn] bad | d [err] worse", loud.CStr());
 		assert_true(Tor::LogTail(Core::StringView(""), 3).IsEmpty(), "empty");
+	}
+}
+
+[test("server.tor.program")]
+class TorProgramTests {
+	[test("the_bundles_program_on_this_system")]
+	public static void TestBundled() {
+		Core::String program = Tor::BundledProgram(Core::StringView("/opt/ied/vendor/tor"));
+#if defined(PLATFORM_LINUX)
+		assert_true(program.View() == "/opt/ied/vendor/tor/tor/tor", program.CStr());
+#else
+		assert_true(program.View() == "/opt/ied/vendor/tor/tor/tor.exe", program.CStr());
+#endif
+	}
+
+	[test("its_libraries_beside_it_first")]
+	public static void TestLibraryPath() {
+		Core::String alone = Tor::LibraryPath(Core::StringView("/opt/ied/vendor/tor/tor/tor"), Core::StringView(""));
+		assert_true(alone.View() == "/opt/ied/vendor/tor/tor", alone.CStr());
+		Core::String both = Tor::LibraryPath(Core::StringView("/opt/ied/vendor/tor/tor/tor"), Core::StringView("/usr/local/lib:/opt/x"));
+		assert_true(both.View() == "/opt/ied/vendor/tor/tor:/usr/local/lib:/opt/x", both.CStr());
 	}
 }

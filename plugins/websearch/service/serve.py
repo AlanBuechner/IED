@@ -11,6 +11,8 @@ import os
 import secrets
 import sys
 import tempfile
+import threading
+import time
 import types
 
 
@@ -39,12 +41,29 @@ def prepare(options):
 	os.makedirs(cache, exist_ok=True)
 	os.environ["TMP"] = os.environ["TEMP"] = cache
 	tempfile.tempdir = cache
-	# SearXNG imports pwd (POSIX only) for a message about Valkey, which IED does not use.
-	sys.modules.setdefault("pwd", types.ModuleType("pwd"))
+	# SearXNG imports pwd (POSIX only) for a message about Valkey, which IED does not use; Linux has the real one.
+	if os.name != "posix":
+		sys.modules.setdefault("pwd", types.ModuleType("pwd"))
 	# curl_cffi needs add_reader, which the default (proactor) loop on Windows lacks.
 	import asyncio
 	if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
 		asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+
+def follow_parent():
+	"""On Linux, ends this process once the server that started it is gone (this process is then another's child):
+	there is no job object to end it with the server, as Windows' does."""
+	if os.name != "posix":
+		return
+	parent = os.getppid()
+
+	def watch():
+		while os.getppid() == parent:
+			time.sleep(2)
+		print("the server that started SearXNG is gone; stopping", flush=True)
+		os._exit(0)
+
+	threading.Thread(target=watch, name="parent-watch", daemon=True).start()
 
 
 def write_port(path, port):
@@ -57,6 +76,7 @@ def write_port(path, port):
 def main(argv):
 	options = parse(argv)
 	redirect_output(options.log)
+	follow_parent()
 	prepare(options)
 	import waitress
 	from searx.webapp import app

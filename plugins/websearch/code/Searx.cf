@@ -304,11 +304,11 @@ namespace WebSearch
 
 	// Under `starting`.
 	bool SearxService::Launch(Core::StringView yaml, Core::String& error) {
-		Core::String python = Folder("websearch.python", "/vendor/python/python.exe");
+		Core::String python = Folder("websearch.python", c_BundledPython);
 		Core::String searxng = Folder("websearch.searxngFolder", "/vendor/searxng");
 		Core::String packages = Slashes(FS::Path(searxng.View()).Parent().View()) + "/searxng-packages";
 		if (!FS::FileExists(python.CStr()) || !FS::FileExists((searxng + "/searx/webapp.py").CStr()) || !FS::IsDirectory((packages + "/waitress").CStr())) {
-			error = Core::String("SearXNG is not installed: run setup.bat (it installs SearXNG, its Python packages and Tor into vendor/), or set websearch.instanceUrl");
+			error = Core::String(c_NotInstalled);
 			SetState(SearxState::Failed, Core::StringView(""), error.View());
 			return false;
 		}

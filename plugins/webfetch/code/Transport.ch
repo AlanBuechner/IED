@@ -1,7 +1,7 @@
 // Fetching a page for web_fetch (docs/29 "Transport"): by a fetcher that writes the body to standard output and a report
 // - status, type, the address the redirects ended at, exit code, message - to standard error after kReportMarker. The
 // fetcher is the private Python running service/fetch.py, whose curl_cffi impersonates a browser so bot checks that refuse
-// curl let it through, or - without it, or with webfetch.impersonate off - the system's curl.exe with --write-out. Both
+// curl let it through, or - without it, or with webfetch.impersonate off - the system's curl with --write-out. Both
 // follow redirects, decode compressed bodies, take http and https only and stop at a time and a size. Direct, never
 // through Tor (owner, docs/29).
 
@@ -10,6 +10,13 @@ include "bedrock.ch"
 namespace WebFetch
 {
 	const char* c_ReportMarker = "IED-WEBFETCH";
+	// The private Python under the home (tools/setup/deps.toml: the embeddable CPython on Windows; on Linux the
+	// relocatable one, python-linux, whose program is named by its version).
+#if defined(PLATFORM_LINUX)
+	const char* c_BundledPython = "/vendor/python/bin/python3.12";
+#else
+	const char* c_BundledPython = "/vendor/python/python.exe";
+#endif
 
 	struct FetchOptions
 	{
@@ -39,6 +46,7 @@ namespace WebFetch
 	bool ReadReport(Core::StringView errors, Fetched& fetched, int64& exitCode, Core::String& message);
 	// Runs a fetcher, `program` with `arguments`, for at most `options.seconds` and 10 more.
 	Fetched RunFetcher(Core::StringView program, const Core::Array<Core::String>& arguments, const FetchOptions& options);
-	// The curl to run: `configured` when set, else Windows' own (%SystemRoot%\System32\curl.exe), else "curl" on PATH.
+	// The curl to run: `configured` when set, else Windows' own (%SystemRoot%\System32\curl.exe) on Windows, else "curl"
+	// on PATH (Linux: the distribution's, a package the Linux install asks for).
 	Core::String CurlProgram(Core::StringView configured);
 }

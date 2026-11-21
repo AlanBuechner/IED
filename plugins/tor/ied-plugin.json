@@ -1,6 +1,6 @@
-// Tor (docs/29 "Tor"): tor.exe run on demand as a SOCKS proxy other plugins send traffic through - web search's engine
-// requests leave through it. Its server code (code/) is compiled into the server: the tor.* bindings and the tor:status
-// topic.
+// Tor (docs/29 "Tor"): the Tor Expert Bundle's tor run on demand as a SOCKS proxy other plugins send traffic through -
+// web search's engine requests leave through it. Its server code (code/) is compiled into the server: the tor.* bindings
+// and the tor:status topic.
 {
 	"manifestVersion": 1,
 	"id": "ied.tor",

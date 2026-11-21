@@ -209,7 +209,7 @@ namespace WebFetch
 		options.m_MaxBytes = SettingInt(m_Context, "webfetch.maxBytes", 5242880);
 		Core::StringView browser = SettingNode(m_Context, "webfetch.impersonate").AsView();
 		Core::String home = Slashes(IED::HomeFolder().View());
-		Core::String python = home + "/vendor/python/python.exe";
+		Core::String python = home + c_BundledPython;
 		Core::String packages = home + "/vendor/searxng-packages";
 		const bool impersonate = browser != "off" && FS::FileExists(python.CStr()) && FS::IsDirectory((packages + "/curl_cffi").CStr());
 		Fetched fetched = impersonate

@@ -17,8 +17,19 @@ namespace Tor
 	const int64 c_NewCircuitSpacingNs = 10000000000;     // Tor takes one NEWNYM every 10 s
 	const int64 c_AliveCheckNs = 2000000000;
 	const int64 c_DefaultStopAfterSeconds = 1800;
+#if defined(PLATFORM_LINUX)
+	const char* c_NotInstalled = "Tor is not installed: an IED install for Linux carries it in vendor/tor; or set tor.executable (a distribution's tor: /usr/bin/tor)";
+#else
+	const char* c_NotInstalled = "Tor is not installed: run setup.bat (it installs the Tor Expert Bundle into vendor/tor), or set tor.executable";
+#endif
 
 	const char* StateName(TorState state);
+
+	// The Tor Expert Bundle's program in the bundle's folder (<home>/vendor/tor): tor.exe on Windows, tor on Linux.
+	Core::String BundledProgram(Core::StringView bundle);
+	// LD_LIBRARY_PATH for a tor started on Linux: the program's folder first - the Expert Bundle's tor has no run path,
+	// its libevent and OpenSSL sit beside it - then what this process has (`inherited`).
+	Core::String LibraryPath(Core::StringView program, Core::StringView inherited);
 
 	class TorService
 	{

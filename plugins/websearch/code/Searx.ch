@@ -25,6 +25,15 @@ namespace WebSearch
 	const int64 c_StartWaitSeconds = 20;   // a search's default wait for a start: a binding call has 30 s in all
 	const int64 c_LongestStartWaitSeconds = 120;
 	const int64 c_StartPollNs = 250000000;
+	// The private Python under the home (tools/setup/deps.toml: the embeddable CPython on Windows; on Linux the
+	// relocatable one, python-linux, whose program is named by its version) and what to do without SearXNG.
+#if defined(PLATFORM_LINUX)
+	const char* c_BundledPython = "/vendor/python/bin/python3.12";
+	const char* c_NotInstalled = "SearXNG is not installed: an IED install for Linux carries it in vendor/ (Python, SearXNG, its packages, Tor); or set websearch.instanceUrl";
+#else
+	const char* c_BundledPython = "/vendor/python/python.exe";
+	const char* c_NotInstalled = "SearXNG is not installed: run setup.bat (it installs SearXNG, its Python packages and Tor into vendor/), or set websearch.instanceUrl";
+#endif
 
 	const char* SearxStateName(SearxState state);
 
