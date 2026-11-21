@@ -105,6 +105,8 @@ class FileToolTests {
 		assert_true(Ai::OnlySourceFile(none).IsEmpty(), "only build output: none");
 		Core::Array<Core::String> rebuilt = { Core::String("src/build.cf") };
 		assert_se("src/build.cf", Ai::OnlySourceFile(rebuilt).CStr(), "a file named like a skipped folder is a source");
+		Core::Array<Core::String> scratch = { Core::String(".ied/local/overlay/src/AstNode.h"), Core::String("src/Parser/AstNode.h") };
+		assert_se("src/Parser/AstNode.h", Ai::OnlySourceFile(scratch).CStr(), "a copy in the per-machine state is no source");
 	}
 
 	[test("edit_line_breaks")]

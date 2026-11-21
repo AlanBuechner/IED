@@ -295,10 +295,11 @@ namespace Ai
 		return false;
 	}
 
+	// A copy in the workspace's per-machine state (a chat's scratch or overlay of sources) is not the workspace's file.
 	Core::String OnlySourceFile(const Core::Array<Core::String>& found) {
 		Core::String only;
 		for (const Core::String& path : found) {
-			if (InSkippedFolder(path.View())) continue;
+			if (InSkippedFolder(path.View()) || path.View().StartsWith(Core::StringView(".ied/local/"))) continue;
 			if (!only.IsEmpty()) return Core::String();
 			only = path;
 		}
