@@ -133,6 +133,13 @@ def submodules(commit):
 	return [(p, git("rev-parse", "%s:%s" % (commit, p))) for p in found]
 
 
+def main_checkout():
+	"""The repository's main working tree - where setup put vendor/ and the submodules are checked out - also when this
+	script runs from another worktree (whose submodules are plain copies)."""
+	common = git("rev-parse", "--path-format=absolute", "--git-common-dir")
+	return os.path.dirname(os.path.normpath(common))
+
+
 def prepare_worktree(worktree, commit):
 	if not os.path.isdir(worktree):
 		git("worktree", "add", "--detach", worktree, commit)
@@ -140,11 +147,12 @@ def prepare_worktree(worktree, commit):
 		if git("status", "--porcelain", "--untracked-files=no", cwd=worktree):
 			raise ReleaseError("%s has changes; a release builds only committed work" % worktree)
 		git("checkout", "-q", "--detach", commit, cwd=worktree)
+	home = main_checkout()
 	vendor = os.path.join(worktree, "vendor")
 	if not os.path.exists(vendor):
-		subprocess.run(["cmd", "/d", "/c", "mklink", "/J", vendor, os.path.join(CHECKOUT, "vendor")], check=True, capture_output=True)
+		subprocess.run(["cmd", "/d", "/c", "mklink", "/J", vendor, os.path.join(home, "vendor")], check=True, capture_output=True)
 	for path, gitlink in submodules(commit):
-		source = os.path.join(CHECKOUT, path)
+		source = os.path.join(home, path)
 		have = git("rev-parse", "HEAD", cwd=source) if os.path.exists(os.path.join(source, ".git")) else ""
 		if have != gitlink:
 			raise ReleaseError("the checkout's %s is at %s, the release names %s: `git submodule update %s` first" % (path, have[:10] or "nothing", gitlink[:10], path))
