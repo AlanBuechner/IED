@@ -1,11 +1,15 @@
 """Build configurations: the three built-ins plus any a workspace adds or overrides."""
 
+import sys
 from dataclasses import dataclass, field, replace
 
 from .errors import NukeError
 
 ARCHITECTURES = {"x64": "x64", "x86_64": "x64", "amd64": "x64"}
 SYSTEMS = {"windows": "windows", "win": "windows", "linux": "linux"}
+# The system a build is for when the command names none: the one Nuke runs on (an IED install on Linux builds Linux
+# programs; Windows cross-compiles for Linux only with --system linux).
+HOST_SYSTEM = "linux" if sys.platform.startswith("linux") else "windows"
 
 
 @dataclass(frozen=True)

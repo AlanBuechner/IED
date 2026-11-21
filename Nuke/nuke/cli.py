@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 
 from . import NUKE_VERSION, configs, fsutil, graph, ied_files, installed, packages, toolchains, workspace as workspaces
 from .commands import command_table
+from .configs import HOST_SYSTEM
 from .engine import execute, validate_phases
 from .errors import NukeError, StepFailed
 from .log import Log
@@ -28,7 +29,7 @@ class Invocation:
 	command_args: list = field(default_factory=list)
 	configs: list = field(default_factory=list)   # every configuration word or -c value
 	arch: str = "x64"
-	system: str = "windows"
+	system: str = HOST_SYSTEM   # the one Nuke runs on (configs.HOST_SYSTEM)
 	projects: list = field(default_factory=list)
 	workspace: str = None
 	filter: str = None

@@ -68,7 +68,7 @@ a **project** of the workspace. Commands run in order and each (command, project
 |---|---|
 | `-p, --project NAME` | work on NAME (repeatable; same as naming it as a word) |
 | `-c, --config NAME` | configuration (same as the word) |
-| `-a, --arch NAME` / `-s, --system NAME` | `x64`; `windows` (the default) or `linux`: a C4 project cross-compiles for Linux from Windows (`C4.exe --target linux-x64`, C4 D-86, no `.exe`), a C/C++ project builds for Linux on Linux (`tools/linux/build.py` runs Nuke in a container) |
+| `-a, --arch NAME` / `-s, --system NAME` | `x64`; `windows` or `linux` (the default is the system Nuke runs on): a C4 project cross-compiles for Linux from Windows (`C4.exe --target linux-x64`, C4 D-86, no `.exe`), a C/C++ project builds for Linux on Linux (`tools/linux/build.py` runs Nuke in a container) |
 | `-w, --workspace DIR` | the workspace at DIR instead of searching up from the current folder |
 | `--all` | every project of the workspace |
 | `--filter GLOB` | test cases to run (`*` any run of characters, `?` one; without either, a case's or a group's name: `math.vector` runs `math.vector.*`); a filter no case matches is said so |

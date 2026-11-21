@@ -1,3 +1,4 @@
+import sys
 import unittest
 
 import support  # noqa: F401
@@ -38,6 +39,10 @@ class ParseTests(unittest.TestCase):
 			"--all", "--json", "-v", "test")
 		self.assertEqual(inv.projects, ["Engine", "Game"])
 		self.assertEqual((inv.configs, inv.filter, inv.all, inv.json, inv.verbose), (["Debug"], "math.*", True, True, True))
+
+	def test_the_system_defaults_to_the_one_nuke_runs_on(self):
+		self.assertEqual(parse("build").system, "linux" if sys.platform.startswith("linux") else "windows")
+		self.assertEqual(parse("build", "-s", "linux").system, "linux")
 
 	def test_program_args_after_separator(self):
 		inv = parse("run", "--", "--fullscreen", "build")

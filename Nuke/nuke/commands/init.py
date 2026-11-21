@@ -5,7 +5,7 @@ import argparse
 import os
 import re
 
-from .. import fsutil, ied_files
+from .. import configs, fsutil, ied_files
 from .. import workspace as workspaces
 from ..c4 import ide_bridge
 from ..errors import NukeError
@@ -15,7 +15,7 @@ from . import base
 
 LANGUAGE = re.compile(r"^[a-z][a-z0-9_+-]*$")
 DEFAULT_ARCH = "x64"
-DEFAULT_SYSTEM = "windows"
+DEFAULT_SYSTEM = configs.HOST_SYSTEM
 TEMPLATES = fsutil.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "templates")
 USAGE = """nuke init [NAME] [--kind executable|module|library|custom] [--language ID] [--toolchain VERSION] [--ied]
   outside a workspace: make the current folder a new workspace with one project (NAME defaults to the folder)
