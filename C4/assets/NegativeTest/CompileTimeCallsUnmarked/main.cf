@@ -1,0 +1,3 @@
+int32 Plain(int32 x) { return x; }
+[compile_time] int32 Wrapped(int32 x) { return Plain(x); }
+int32 main() { return Wrapped(1); }

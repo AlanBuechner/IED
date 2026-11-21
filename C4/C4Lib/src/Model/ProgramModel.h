@@ -92,6 +92,8 @@ namespace Scripting
 		Core::Vector<std::pair<Core::String, SymbolInfo>> packParams; // Ts := int32, float (D-19)
 	};
 
+	class ICompileTimeCalls; // compile-time evaluation (Model/CompileTimeCalls.h)
+
 	/// The single object every phase holds and queries (doc 03). It OWNS all type/symbol/constant
 	/// facts - a phase never constructs a type or a scope layer, it asks. Queries take SOURCE-LEVEL
 	/// inputs (the AST node as written, a name, an operand type) and do everything internally:
@@ -281,6 +283,12 @@ namespace Scripting
 		/// model to make them.
 		void Settle() const;
 
+		// --- Compile-time evaluation (D-91) -------------------------------------------
+		/// What runs a `[compile_time]` function a constant calls; null folds no calls. The driver that builds the model
+		/// sets it and owns it.
+		ICompileTimeCalls* CompileTimeCalls() const { return m_CompileTimeCalls; }
+		void SetCompileTimeCalls(ICompileTimeCalls* calls) { m_CompileTimeCalls = calls; }
+
 		// --- Introspection (LSP/DAP/tests + HIR lowering) ------------------------------
 		SymbolTable* Symbols() const { return m_Symbols.get(); }
 		TypeStore* TypeStorePtr() const { return m_Types.get(); }
@@ -440,6 +448,7 @@ namespace Scripting
 		std::unordered_map<Core::String, Core::Vector<TemplateDef>> m_TypeSpecializations;     // name -> explicit and partial specializations of type templates
 		std::unordered_map<Core::String, Core::Vector<TemplateDef>> m_FunctionSpecializations; // name -> explicit specializations of function templates
 		mutable std::unordered_map<const FunctionRecord*, const TemplateDef*> m_TemplateOfInstance; // function template instance -> its template (partial ordering)
+		ICompileTimeCalls* m_CompileTimeCalls = nullptr; // the driver's (CompileTimeCalls)
 		// Lazy caches: populated on first use from const query methods, hence mutable.
 		mutable std::unordered_map<Core::String, const Type*> m_TypeInstantiations;        // cache key -> concrete type
 		mutable std::unordered_map<const Type*, InstantiationBindings> m_InstantiationBindings; // concrete type -> bindings (its first)

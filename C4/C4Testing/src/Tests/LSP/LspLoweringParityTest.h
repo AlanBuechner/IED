@@ -38,5 +38,11 @@ namespace Testing
 
 		TEST_FUNC(Lsp.LoweringParity)
 		void ACleanProgramIsCleanInBoth();
+
+		// D-91: a [compile_time] body is checked, and a constant that calls one folds, alike in both.
+		TEST_FUNC(Lsp.LoweringParity)
+		void ACompileTimeBodyIsCheckedAlikeInBoth();
+		TEST_FUNC(Lsp.LoweringParity)
+		void AConstantCallIsFoldedAlikeInBoth();
 	};
 } // namespace Testing

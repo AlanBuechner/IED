@@ -1531,7 +1531,7 @@
         "reason": "A constant cannot name itself (BUG-144)."
     },
     "RuntimeConstantAsExtent": {
-        "expect": ["main.cf (3:7) error: unresolved type for variable 'arr': the array size 'kN' is not a constant expression: 'kN' starts at runtime: 'Seed()' is not one of the forms a constant folds from"],
+        "expect": ["main.cf (3:7) error: unresolved type for variable 'arr': the array size 'kN' is not a constant expression: 'kN' starts at runtime: 'Seed' is not [compile_time]: only a function marked [compile_time] runs in a constant"],
         "reason": "A const set at startup is read-only but has no compile-time value (BUG-144)."
     },
     "UnknownNameInConstant": {
@@ -3055,6 +3055,66 @@
     "UsersOfAnUnresolvedAlias": {
         "expect": ["main.cf (2:16) error: unresolved type for field 'first' in 'Owner': the alias 'Handle' does not resolve"],
         "reason": "R9: what names a declaration that failed says which one; the alias's own error says why, once."
+    },
+    "CompileTimeHeap": {
+        "expect": ["'Fresh' is [compile_time], but it allocates on the heap ('new')"],
+        "reason": "D-91: a [compile_time] function may do only what compile time runs; the heap is not there."
+    },
+    "CompileTimeCallsUnmarked": {
+        "expect": ["'Wrapped' is [compile_time], but it calls 'Plain', which is not [compile_time]"],
+        "reason": "D-91: what a [compile_time] function calls is marked too, so editing a body never breaks a constant elsewhere."
+    },
+    "CompileTimeGlobal": {
+        "expect": ["'Count' is [compile_time], but it uses the global variable 'g_Count', which is not a constant"],
+        "reason": "D-91: a global variable has no value while the program compiles."
+    },
+    "CompileTimeStaticLocal": {
+        "expect": ["'Next' is [compile_time], but it has a static local"],
+        "reason": "D-91: a static local is state that outlives a call; compile time has none."
+    },
+    "CompileTimeMarkArguments": {
+        "expect": ["[compile_time] takes no arguments"],
+        "reason": "D-91: the mark is a bare annotation."
+    },
+    "ConstantCallsUnmarked": {
+        "expect": ["'Plain' is not [compile_time]: only a function marked [compile_time] runs in a constant"],
+        "reason": "D-91: a constant calls only a function marked [compile_time], never one that happens to qualify."
+    },
+    "CompileTimeStepLimit": {
+        "expect": ["compile-time evaluation ran more than 1000000 steps"],
+        "reason": "R6: evaluation must end; a loop that does not is an error with a reason, not a hang."
+    },
+    "CompileTimeDepthLimit": {
+        "expect": ["compile-time evaluation of 'Down' went more than 256 calls deep"],
+        "reason": "R6: a recursion that does not end is an error, not a crash of the compiler's stack."
+    },
+    "CompileTimeThrow": {
+        "expect": ["compile-time evaluation threw an exception"],
+        "reason": "R6: a throw ends a compile-time evaluation with an error."
+    },
+    "CompileTimeDivideByZero": {
+        "expect": ["divided by zero"],
+        "reason": "R6: what would be undefined at run time is an error at compile time."
+    },
+    "CompileTimeReadPastEnd": {
+        "expect": ["read past the end of an object"],
+        "reason": "R6: compile-time memory is bounds-checked: an index past an array is an error, not a wrong constant."
+    },
+    "CompileTimeAggregateResult": {
+        "expect": ["'Both' returns a 'Pair': a constant here is a number, a bool or a character"],
+        "reason": "R6: an array extent takes a number; a call that returns an object is no such constant."
+    },
+    "CompileTimeSelfReference": {
+        "expect": ["'Sized' cannot run at compile time while it is compiled: a constant in it needs it"],
+        "reason": "R6: a constant inside a function that needs that same function cannot be had (a cycle, not a hang)."
+    },
+    "CompileTimeCycle": {
+        "expect": ["the alias 'Row' depends on itself: Row -> Count -> Row"],
+        "reason": "D-91: an alias sized by a call of a function whose signature names the alias is a cycle, said as R9 says one."
+    },
+    "CompileTimeBodyUsedOnlyInAConstant": {
+        "expect": ["'Fresh' is [compile_time], but it allocates on the heap ('new')"],
+        "reason": "D-91: a body only a constant runs is checked too, and the constant says why it cannot run."
     },
     "HeaderLeansOnItsIncluder": {
         "expect": ["error: unresolved type for field 'v' in 'User': no type named Vec is visible here: it is declared in z_def.ch, which this file does not include"],

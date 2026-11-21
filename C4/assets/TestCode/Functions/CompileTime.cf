@@ -1,0 +1,66 @@
+// Functions - [compile_time] functions in constants (implementation)
+include "../Framework/Assert.ch"
+include "CompileTime.ch"
+
+// D-91 (R6): a function marked [compile_time] runs while the program compiles wherever a constant calls it.
+[compile_time] int32 CtSquare(int32 x) { return x * x; }
+[compile_time] int32 CtFib(int32 n) { if (n < 2) return n; return CtFib(n - 1) + CtFib(n - 2); }
+[compile_time] int32 CtSumTo(int32 n) { int32 s = 0; for (int32 i = 1; i <= n; ++i) s += i; return s; }
+[compile_time] int32 CtTableAt(int32 i) { int32[8] t; for (int32 k = 0; k < 8; ++k) t[k] = k * k + 1; return t[i]; }
+[compile_time] bool CtIsPowerOfTwo(uint32 v) { return v != 0 && (v & (v - 1)) == 0; }
+[compile_time] double CtHalf(double v) { return v / 2.0; }
+[compile_time] int32 CtClassify(int32 k) { switch (k) { case 1: return 10; case 2: return 20; default: return 0; } }
+
+namespace CtMath { [compile_time] int32 Cube(int32 x) { return x * x * x; } }
+
+struct CtPair {
+	public int32 a;
+	public int32 b;
+	[compile_time] public int32 Sum() const { return a + b; }
+}
+[compile_time] int32 CtPairSum(int32 x) { CtPair p = CtPair{ x, x * 2 }; return p.Sum(); }
+
+const int32 CT_NINE = CtSquare(3);            // a const initializer
+const int32 CT_FIB10 = CtFib(10);             // recursion
+const double CT_HALF = CtHalf(5.0);           // a double
+const bool CT_POW = CtIsPowerOfTwo(64);       // a bool
+const int32 CT_CHAIN = CtSquare(CT_NINE) + 1; // a call on a constant that is itself a call
+const int32 CT_PAIR = CtPairSum(4);           // a value type and its method
+
+int32[CtSquare(3)] g_CtArray;                    // a global's array extent
+
+struct CtTable { public int32[8] v; }
+[compile_time] CtTable CtSquares() { CtTable t; for (int32 k = 0; k < 8; ++k) t.v[k] = k * k; return t; }
+const CtTable CT_SQUARES = CtSquares();          // a global table, built while compiling: data in the image
+struct CtHolder { public int32[CtSumTo(4)] values; } // a field's extent, folded while the model resolves
+enum CtLevel { CtLow = CtSquare(2), CtHigh = CtMath::Cube(3) } // enum values, one qualified
+template<int32 N> struct CtFixed { public int32[N] items; public int32 Count() const { return N; } }
+
+void TestCompileTime() {
+	AssertIntEquals(9, CT_NINE, "a const initializer calls a [compile_time] function");
+	AssertIntEquals(55, CT_FIB10, "a recursive [compile_time] function");
+	AssertFloatEquals(2.5f, (float)CT_HALF, "a double result");
+	AssertTrue(CT_POW ? 1 : 0);
+	AssertIntEquals(82, CT_CHAIN, "a constant built from another call's constant");
+	AssertIntEquals(12, CT_PAIR, "a value type and its [compile_time] method");
+	AssertIntEquals(36, (int32)sizeof(g_CtArray), "a global's extent: int32[9]");
+	AssertIntEquals(40, (int32)sizeof(CtHolder), "a field's extent: int32[10]");
+	AssertIntEquals(4, (int32)CtLevel::CtLow, "an enum value");
+	AssertIntEquals(27, (int32)CtLevel::CtHigh, "an enum value from a namespace's function");
+	CtFixed<(CtSquare(2))> fixed; // parenthesized: in a template argument `F(x)` reads as a function signature
+	AssertIntEquals(4, fixed.Count(), "a template value argument");
+	int32[CtTableAt(3)] local;
+	AssertIntEquals(40, (int32)sizeof(local), "a local's extent from a table built at compile time: int32[10]");
+	int32 picked = 0;
+	switch (20) {
+		case CtClassify(1): picked = 1; break;
+		case CtClassify(2): picked = 2; break;
+		default: picked = 3; break;
+	}
+	AssertIntEquals(2, picked, "a case label");
+	AssertIntEquals(49, CtSquare(7), "a [compile_time] function still runs at run time");
+	AssertIntEquals(49, CT_SQUARES.v[7], "a global table built at compile time");
+	int32 total = 0;
+	for (int32 k = 0; k < 8; ++k) total += CT_SQUARES.v[k];
+	AssertIntEquals(140, total, "every entry of the table");
+}

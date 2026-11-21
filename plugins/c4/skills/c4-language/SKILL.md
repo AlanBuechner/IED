@@ -215,6 +215,7 @@ static void Buckets() {
 | `m.find(k) != m.end()`, `m.count(k)`, `m.insert({k, v})` | `m.Find(k)` (a `V*`, null when absent), `m.Contains(k)`, `m.Insert(k, v)`; `m[k]` creates a zero value |
 | `std::sort(v.begin(), v.end(), cmp)` | `v.Sort()` (by `<`) or `v.SortBy([](const T& a, const T& b) -> bool { return ...; })` |
 | `[](int x) { return x * 2; }` returning a value | `[](int32 x) -> int32 { return x * 2; }` - a lambda that returns names its type |
+| `constexpr int Sq(int x)` used in `int a[Sq(3)]` | `[compile_time] int32 Sq(int32 x) { ... }` then `int32[Sq(3)] a;` - no heap, globals or unmarked calls inside; in a template argument parenthesize the call: `Arr<(Sq(3))>` |
 | `std::stoi`, `atoi`, `std::stod`, `std::to_string` | `Core::ParseInt64(view, value)`, `Core::ParseDouble(view, value)` (false when not a number), `builder.AppendInt(n)` |
 | `std::cin`, `getline` | `Platform::InputLines lines; Core::String line; while (lines.Next(line)) { ... }` (no line break in `line`), or `Platform::ReadAllInput(builder)` |
 | `T& r = c ? a : b;` to pick one of two objects | `?:` on objects makes a copy: pick through pointers, `T* r = c ? &a : &b;` |

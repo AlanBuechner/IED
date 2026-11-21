@@ -1,0 +1,3 @@
+[compile_time] int32 Fresh() { int32* p = new int32(); return *p; }
+int32[Fresh()] g_Table;
+int32 main() { return 0; }

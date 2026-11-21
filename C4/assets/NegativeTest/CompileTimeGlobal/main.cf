@@ -1,0 +1,3 @@
+int32 g_Count = 3;
+[compile_time] int32 Count() { return g_Count; }
+int32 main() { return Count(); }

@@ -33,7 +33,9 @@ template<T, ...int32 Ns>    // a value pack after a type parameter
 - A parameter written `Type Name` is a value parameter. Its argument is a constant expression
   (`Arr<3>`, `Arr<N * 2>`, `Arr<kSize>`, `Arr<sizeof(T)>`); inside the template it behaves like a named
   constant (usable in expressions, array sizes and `sizeof`). A comparison in an argument needs
-  parentheses (`Flag<(A > B)>`), as in C++.
+  parentheses (`Flag<(A > B)>`), as in C++, and so does a call of a `[compile_time]` function
+  (`Arr<(Square(3))>`, [07 section 7.13](07-functions-and-lambdas.md#713-compile-time-functions)): `Square(3)` alone reads as a
+  function signature, as in `funcptr<int32(int32)>`.
 - Arguments bind to parameters **by position**, whatever the mix of kinds. A type where a value parameter
   is (or the reverse) is an error naming the parameter: `template parameter 'N' of 'Arr' takes a constant
   value`. More arguments than parameters: `template 'Box' takes 1 argument(s), got 2`.

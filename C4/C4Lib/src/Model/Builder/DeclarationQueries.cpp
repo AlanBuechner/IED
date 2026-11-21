@@ -129,6 +129,29 @@ namespace Scripting
 		return Ask(pending.resolution, { &type, "the union", type.GetName() }, [&] { return ModelResolver(m_Builder, m_Ctx, *this).ResolveUnion(pending); });
 	}
 
+	QueryResult<void> DeclarationQueries::Functions(const Core::String& name)
+	{
+		const size_t cut = name.rfind("::");
+		const Core::String last = cut == Core::String::npos ? name : name.substr(cut + 2);
+		FreeFunctionResolver functions(m_Builder, m_Ctx, *this);
+		bool anyResolved = false;
+		QueryResult<void> failure = QueryResult<void>::Success();
+		const auto keep = [&](const QueryResult<void>& asked) {
+			anyResolved = anyResolved || asked.Ok();
+			const bool firstCycle = asked.error == QueryError::CyclicDependency && failure.error != QueryError::CyclicDependency;
+			if (!asked.Ok() && (failure.Ok() || firstCycle)) failure = asked;
+		};
+		for (auto& function : m_Builder.m_PendingFuncs)
+			if (function.name == last)
+				keep(Ask(function.resolution, { &function, "the function", function.name }, [&] { return functions.ResolveFree(function); }));
+		for (auto& function : m_Builder.m_PendingQualifiedFuncs)
+			if (function.last == last)
+				keep(Ask(function.resolution, { &function, "the function", function.prefix + "::" + function.last },
+					[&] { return functions.ResolveQualified(function); }));
+		if (failure.error == QueryError::CyclicDependency || !anyResolved) return failure;
+		return QueryResult<void>::Success();
+	}
+
 	QueryResult<void> DeclarationQueries::Variable(const SymbolInfo& variable)
 	{
 		if (auto member = m_StaticMembers.find(&variable); member != m_StaticMembers.end()) return Field(member->second);

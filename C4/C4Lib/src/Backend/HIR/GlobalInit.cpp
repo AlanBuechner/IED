@@ -1,4 +1,5 @@
 #include "Backend/HIR/GlobalInit.h"
+#include "Backend/HIR/CompileTimeImage.h"
 #include "Backend/HIR/ConstantImage.h"
 #include "Backend/HIR/DeclLowerer.h"
 #include "Backend/HIR/LifecycleFacts.h"
@@ -141,6 +142,8 @@ namespace Scripting
 				StartVariable(model, errors, out, var, start, StartTime::WithTheProgram);
 				const uint64 size = TypeHandle::UnwrapToValue(var.sym->type)->GetSize();
 				std::optional<ConstantData> image = errors.GetErrors().Count() == failures ? ConstantImage(*start, *var.sym, size) : std::nullopt;
+				if (!image && errors.GetErrors().Count() == failures)
+					image = CompileTimeImage(model, *var.sym, var.declarator->m_Initializer.Get(), var.scope, size);
 				if (image) constants.push_back({ var.sym, std::move(*image), start });
 				else out.root->stmts.push_back(start);
 			}

@@ -1,0 +1,2 @@
+[compile_time] int32 Sized(int32 x) { int32[Sized(1)] t; return x; }
+int32 main() { return Sized(2); }

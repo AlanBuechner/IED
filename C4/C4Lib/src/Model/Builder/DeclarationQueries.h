@@ -34,6 +34,12 @@ namespace Scripting
 		/// Everything a value of `type` holds - its elements, its bases, its fields' objects, its enums' underlying
 		/// types - so it can be measured (sizeof, alignof, offsetof).
 		QueryResult<void> Complete(const Type* type);
+		/// The free functions named `name` (`Square`, or `Ops::Twice` by its last part), resolved before their turn: a
+		/// constant in an enum value or an array extent that calls a `[compile_time]` function finds its records (D-91).
+		/// The answer is the first cycle through one of them (the constant needs a function whose signature needs the
+		/// constant), or, when none of them resolves, the first failure; a function's failure is also said where it is
+		/// declared.
+		QueryResult<void> Functions(const Core::String& name);
 
 		/// Asks for every pending declaration, in the order pass 1 registered them.
 		void ResolveAll();

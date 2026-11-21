@@ -113,24 +113,23 @@ files and tests it moves into [plan.md](plan.md) like every other package.
 
 ---
 
-## 6. Compile-time evaluation (Planned)
+## 6. Compile-time evaluation (Implemented, R6)
 
-The language already folds constant expressions (`ConstEvaluator`: literals, arithmetic, `sizeof`,
-folds, const/enum/template-parameter references; see [program model - Constant evaluation](../compiler/02-program-model.md#constant-evaluation)),
-but user functions cannot run at compile time. Extending this is a planned direction:
+The language folds constant expressions (`ConstEvaluator`: literals, arithmetic, `sizeof`, folds,
+const/enum/template-parameter references; see [program model - Constant evaluation](../compiler/02-program-model.md#constant-evaluation)),
+and a function marked `[compile_time]` (D-91) runs at compile time where a constant calls it
+([functions 7.13](../language/07-functions-and-lambdas.md#713-compile-time-functions)):
 
-- **`constexpr`-style function evaluation.** A `const` initializer (or any constant-expression
-  position) may call a function marked as compile-time evaluable; the compiler runs it over already
-  folded values and stores the result. Non-evaluable inputs are a clean error, not a fallback to
-  runtime code.
-- **Scope grows in stages.** First pure functions on scalars and value types with no allocation; then
-  control flow (loops with bounded iteration), then container/array construction at compile time
-  (e.g. building lookup tables or shader-like data). Each stage needs the `ConstEvaluator` to model
-  that feature, so this is a sequence of small work packages, not one big one.
-- **Interaction with the rest of the plan.** Template value arguments already require constant
-  expressions, so CTFE immediately widens what templates can take (`Arr<BuildTable()>`); annotation
-  arguments (D-42) get the same for free; and it is a prerequisite for generating data at compile
-  time instead of shipping precomputed blobs.
-- **Guards.** Evaluation must terminate: bounded iteration, no unbounded recursion, a step limit with
-  a clear diagnostic. A function that cannot prove termination stays runtime-only.
+- **Done (R6).** The compiler interprets the function's MIR over the folded arguments
+  ([compiler 06](../compiler/06-mir.md#compile-time-evaluation-r6-d-91)) in every constant position - a
+  `const` initializer, an array extent, an enum value, a template value argument, an annotation argument,
+  a `case` label. All three stages: pure functions on scalars and value types; control flow, loops and
+  recursion; fixed arrays and structs built in the function, and a global initialized by such a call
+  (`const Table t = BuildTable();`) starts as data in the image instead of code run before main, when
+  what it returns is plain data (no pointer, no vtable, nothing to destroy). What a constant cannot
+  evaluate is an error saying why, never a fallback to run-time code, and the mark is checked where the
+  function is defined. Guards: at most 1,000,000 steps and 256 calls deep per evaluation, each with its
+  diagnostic.
+- **Not planned.** Heap allocation at compile time, and pointers in a result (an evaluation's memory is
+  not the program's).
 

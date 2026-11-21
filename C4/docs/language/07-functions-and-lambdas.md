@@ -313,6 +313,7 @@ float a;
 | `va_list` + `va_start(ap, last)` | `va_list` + `va_start(ap)`: no last named parameter (7.7) |
 | `std::tuple` / structured bindings | A return list `[T1, T2] F()` and a destructuring `[a, T2 b] = F();` (section 7.9) |
 | Templates must be in headers | Function bodies (template or not) may live in `.cf` |
+| `constexpr` functions | `[compile_time]` functions (section 7.13): checked where they are defined, never run at run time instead |
 
 ## 7.11 `func<R(A)>`
 
@@ -355,3 +356,49 @@ struct Multiplier {
 Multiplier m; m.factor = 3;
 int32 r = m(5);   // 15
 ```
+
+## 7.13 Compile-time functions
+
+**Status:** **Implemented** (D-91, R6)
+
+A function marked `[compile_time]` (on any of its declarations) runs while the program compiles wherever a
+constant calls it: a `const` initializer, an array extent, an enum value, a template value argument, an
+annotation argument, a `case` label. It is an ordinary function too, and runs at run time when code calls it.
+
+```c4
+[compile_time] int32 Square(int32 x) { return x * x; }
+[compile_time] int32 TableAt(int32 i) { int32[8] t; for (int32 k = 0; k < 8; ++k) t[k] = k * k + 1; return t[i]; }
+
+const int32 NINE = Square(3);
+int32[Square(3)] grid;                       // int32[9]
+enum Level { Low = Square(2), High = TableAt(5) }
+Fixed<(Square(2))> four;                      // a template value argument (template<int32 N> struct Fixed)
+```
+
+A call in a template argument is written in parentheses, `Fixed<(Square(2))>`: there `Square(2)` alone reads as a
+function signature, as `int32(int32)` does in `funcptr<int32(int32)>`.
+
+- **What it may do.** Arithmetic and comparisons on numbers, bools and characters (integers wrap in their
+  width, as at run time), locals of any value type including fixed arrays and structs, their methods, loops,
+  `switch`, recursion, and calls of other `[compile_time]` functions (and of the compiler-written create,
+  copy and delete of a type). It may not allocate (`new`, `delete`), use a global variable that is not a
+  constant, keep a static local, run inline assembly, use atomics, SIMD vectors or variadic arguments, take a
+  function's address, or call through a pointer, a `func` or a vtable. Each is an error where the function
+  is defined: `'Fresh' is [compile_time], but it allocates on the heap ('new')`, `'Wrapped' is
+  [compile_time], but it calls 'Plain', which is not [compile_time]`. Only what runs when nothing is thrown
+  counts: a `catch` handler may do anything.
+- **What a constant gets.** A number, a bool or a character; a call whose result is an object or a pointer
+  is no constant (`'Both' returns a 'Pair': a constant here is a number, a bool or a character`). Arguments
+  are constants themselves, converted to the parameter types as a call converts them.
+- **A global's table.** A global initialized by a call of a `[compile_time]` function (`const Table SQUARES =
+  Squares();`) whose type is plain data - no pointer, no vtable, nothing to destroy - starts as data in the
+  program's image: the call runs while compiling, not before `main`. When the call cannot run, or the type
+  is not plain data, the global starts by running its initializer before `main`, as any global does.
+- **When it cannot run.** The constant is an error saying why, never code that runs later instead: a
+  function not marked (`'Seed' is not [compile_time]: only a function marked [compile_time] runs in a
+  constant`), a division by zero, a shift by the width or more, an index past an array (`read past the end
+  of an object`), a `throw` (`compile-time evaluation threw an exception`). Evaluation always ends: a call
+  runs at most 1,000,000 steps (`compile-time evaluation ran more than 1000000 steps: a loop that does not
+  end, or work too big to do while compiling`) and at most 256 calls deep.
+- The mark takes no arguments (`[compile_time] takes no arguments`). C++'s `constexpr` is this mark; a
+  function that is not marked never runs at compile time, even when its body could.

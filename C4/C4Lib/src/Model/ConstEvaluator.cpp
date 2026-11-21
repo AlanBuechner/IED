@@ -10,6 +10,7 @@
 #include "Parser/Nodes/Expressions/LiteralNode.h"
 #include "Parser/Nodes/Expressions/BinaryExpressionNode.h"
 #include "Parser/Nodes/Expressions/CastExpressionNode.h"
+#include "Parser/Nodes/Expressions/FunctionCallNode.h"
 #include "Parser/Nodes/Expressions/UnaryExpressionNode.h"
 #include "Parser/Nodes/Expressions/IdentifierExpressionNode.h"
 #include "Parser/Nodes/Expressions/ParenthesizedExpressionNode.h"
@@ -274,8 +275,10 @@ namespace Scripting
 		if (const auto* query = dynamic_cast<const TypeOfExpressionNode*>(expr))
 			return FoldQuery(*query, unitId, bindingScope);
 
+		if (const auto* call = dynamic_cast<const FunctionCallNode*>(expr)) return FoldCall(*call, unitId, visiting, bindingScope);
+
 		return QueryResult<ConstantValue>::Fail(QueryError::NotAValue, "'" + expr->ToString() + "' is not one of the forms a constant folds from "
-			"(literals, constants, enum members, sizeof and alignof, and operators on them)");
+			"(literals, constants, enum members, sizeof and alignof, operators on them, and calls of [compile_time] functions)");
 	}
 
 	QueryResult<ConstantValue> ConstEvaluator::PackLength(const Core::String& name, Scope* bindingScope) const

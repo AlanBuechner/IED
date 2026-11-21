@@ -1,0 +1,3 @@
+[compile_time] int32 Down(int32 n) { return Down(n + 1); }
+int32[Down(0)] g_Table;
+int32 main() { return 0; }

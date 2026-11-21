@@ -4,6 +4,7 @@
 #include "Backend/HIR/MethodBody.h"
 #include "Backend/HIR/LambdaLowerer.h"
 #include "Backend/HIR/TemplateBindings.h"
+#include "Backend/MIR/CompileTimeCheck.h"
 #include "Backend/MIR/MirMoves.h"
 #include "Backend/MIR/MirReach.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
@@ -136,6 +137,7 @@ namespace Scripting
 			r = MirReach::CheckCases(*fn.mir);
 		}
 		if (r.Ok()) r = ReturnsOnEveryPath(*record, model.ClosureOf(record->containingType) != nullptr, body, *fn.mir);
+		if (r.Ok()) r = CheckCompileTimeBody(fn);
 		if (!r.Ok())
 		{
 			// Contract: an incomplete lowering ALWAYS reports why. Some paths return a raw Fail without

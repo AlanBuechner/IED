@@ -1,0 +1,4 @@
+alias Row = int32[Count()];
+[compile_time] Row* Count() { return null; }
+Row g_Row;
+int32 main() { return (int32)sizeof(g_Row); }

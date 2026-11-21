@@ -384,8 +384,10 @@ under a shared lock and filled under their own.
 `ConstEvaluator` (`Model/ConstEvaluator.h`) folds compile-time expressions: integer/float/bool literals,
 arithmetic, bitwise, logical (`&&`, `||`) and comparison operators, unary `+ - !`, parentheses, `sizeof`
 (resolved in a template's binding layer, its type named from where the constant is written), `nameof` (the type's
-QualifiedName, a string), `sizeof...`, fold expressions, and references to other constants
-(const variables, enum members, template non-type parameters) resolved through the model.
+QualifiedName, a string), `sizeof...`, fold expressions, references to other constants
+(const variables, enum members, template non-type parameters) resolved through the model, and calls of
+`[compile_time]` functions (D-91, `FoldCall` in `ConstCalls.cpp`), which the model's `ICompileTimeCalls` runs by
+interpreting their MIR ([06 - MIR, Compile-time evaluation](06-mir.md#compile-time-evaluation-r6-d-91)).
 
 - **On demand:** `Evaluate(expr, unitId, bindingScope)` folds any expression when asked (array sizes, enum
   values, global initializers, annotation arguments). `bindingScope` lets a template's `N` fold to its bound
@@ -396,8 +398,6 @@ QualifiedName, a string), `sizeof...`, fold expressions, and references to other
   diamonds fold whatever the order. `FoldGlobalConstants` is one sweep after pass 2 that stores each global's
   constant start. A const that names itself reports `CyclicDependency` instead of hanging.
 - Folded constants have no storage: a `const` global or local becomes its value.
-
-**Planned:** compile-time evaluation of user functions (constexpr-style) is not implemented.
 
 ## OperatorTable
 

@@ -1,0 +1,2 @@
+[compile_time] int32 Fresh() { int32* p = new int32(); return *p; }
+int32 main() { return Fresh(); }

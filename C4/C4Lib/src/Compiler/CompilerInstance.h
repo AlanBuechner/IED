@@ -17,6 +17,8 @@
 
 namespace Scripting
 {
+	class CompileTimeEvaluator;
+
 	/// The front end: owns the state of a compilation - which sources are registered, their
 	/// parsed units, and the single program-wide model built from them. The CLI driver (src/Source.cpp)
 	/// orchestrates CompileAll() + AnalyzeProgram(); an LSP host can stop there and serve semantic
@@ -207,6 +209,9 @@ namespace Scripting
 		// declarations fills it; it OWNS all type/symbol/constant facts and is the single object
 		// downstream phases query. Rebuilt in place by BuildProgramModel().
 		ProgramModel m_ProgramModel;
+		// What runs the [compile_time] functions its constants call (D-91), made with each model; after the model, so it
+		// goes first (the bodies it keeps are the model's).
+		std::unique_ptr<CompileTimeEvaluator> m_CompileTime;
 		ErrorTracker m_ProgramModelErrorTracker; // diagnostics from the model build
 		ErrorTracker m_MacroErrorTracker;        // diagnostics from the macro pass
 	};

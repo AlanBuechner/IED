@@ -23,7 +23,7 @@ namespace Scripting
 	namespace
 	{
 		const char* const kCompilerAnnotations[] = { "operator", "test", "test_setup", "test_teardown", "group", "link", "uuid", "target",
-			"reflect", "reflects" };
+			"reflect", "reflects", "compile_time" };
 	}
 
 	std::span<const char* const> CompilerAnnotationNames() { return kCompilerAnnotations; }

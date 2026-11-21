@@ -2,6 +2,7 @@
 #include "Model/ConstantValue.h"
 #include "Model/QueryResult.h"
 #include "Core/Core.h"
+#include <vector>
 
 namespace Scripting
 {
@@ -14,6 +15,9 @@ namespace Scripting
 	struct Scope;       // a template instantiation's binding layer, when folding inside one
 	struct FoldExpressionNode;
 	struct CastExpressionNode;
+	struct FunctionCallNode;
+	struct FunctionRecord;
+	class ICompileTimeCalls;
 
 	/// Folds compile-time constant expressions to a value (doc 02 pass 3). Handles literals,
 	/// arithmetic/bitwise/logical operators on ints and floats, unary +/-/!, identifier references
@@ -51,7 +55,19 @@ namespace Scripting
 		/// depends on itself is CyclicDependency, with the loop in the message.
 		QueryResult<ConstantValue> EvaluateConstant(const SymbolInfo& symbol) const;
 
+		/// D-91: the bytes of what `expr` - a call of a `[compile_time]` function - returns, an array or an object as the
+		/// target lays it out (a global's table that starts as data); why not when it is no such call or cannot run.
+		QueryResult<std::vector<uint8>> EvaluateData(const AstNode* expr, uint32 unitId = 0) const;
+
 	private:
+		/// A call a constant makes of a `[compile_time]` function: the overload, its folded arguments, what runs it.
+		struct CompileTimeCall
+		{
+			const FunctionRecord* record = nullptr;
+			std::vector<ConstantValue> arguments;
+			ICompileTimeCalls* calls = nullptr;
+		};
+		QueryResult<CompileTimeCall> ResolveCall(const FunctionCallNode& call, uint32 unitId, Core::Vector<const SymbolInfo*>& visiting, Scope* bindingScope) const;
 		using Visiting = Core::Vector<const SymbolInfo*>; // the constants whose initializers are folding
 		QueryResult<ConstantValue> EvaluateInner(const AstNode* expr, uint32 unitId, Visiting& visiting, Scope* bindingScope) const;
 		QueryResult<ConstantValue> FoldBinary(const Core::String& op, const AstNode* left, const AstNode* right, uint32 unitId, Visiting& visiting, Scope* bindingScope) const;
@@ -65,6 +81,11 @@ namespace Scripting
 		static QueryResult<ConstantValue> FoldLiteral(const LiteralNode& literal);
 		static QueryResult<ConstantValue> AddressLiteral(const AstNode* initializer);
 		QueryResult<ConstantValue> FoldCast(const CastExpressionNode& cast, uint32 unitId, Visiting& visiting, Scope* bindingScope) const;
+		/// D-91: a call of a `[compile_time]` function on folded arguments, run by the model's compile-time evaluation
+		/// (ConstCalls.cpp).
+		QueryResult<ConstantValue> FoldCall(const FunctionCallNode& call, uint32 unitId, Visiting& visiting, Scope* bindingScope) const;
+		/// The type a folded argument has for overload resolution: its expression's, else its value's (int32 when it fits).
+		const Type* ArgumentType(const AstNode* argument, const ConstantValue& value, uint32 unitId) const;
 		QueryResult<ConstantValue> FoldQuery(const TypeOfExpressionNode& query, uint32 unitId, Scope* bindingScope) const;
 		QueryResult<const Type*> QueryOperandType(const TypeOfExpressionNode& query, uint32 unitId, Scope* bindingScope) const;
 		QueryResult<const Type*> ExpressionType(const AstNode* expr, uint32 unitId) const;

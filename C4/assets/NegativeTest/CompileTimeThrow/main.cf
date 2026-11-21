@@ -1,0 +1,3 @@
+[compile_time] int32 Checked(int32 v) { if (v < 0) throw v; return v; }
+int32[Checked(-1)] g_Table;
+int32 main() { return 0; }

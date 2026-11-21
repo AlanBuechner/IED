@@ -75,6 +75,7 @@ DifferentialTest (150 programs against clang), the concurrent-GC step (Bedrock, 
 | C variadics + `va_list` | **Implemented** | `va_start` / `va_arg(ap, T)` / `va_copy` / `va_end`; C variadics bind with their `...` | [functions](../language/07-functions-and-lambdas.md#77-c-variadic-functions) |
 | Lambdas: C++ captures, closures, `mutable`, `func<R(A)>`, the call operator | **Implemented** | | [functions](../language/07-functions-and-lambdas.md#76-lambdas-and-closures) |
 | Multiple return values: return lists, value lists, destructuring | **Implemented** | | [functions](../language/07-functions-and-lambdas.md#79-multiple-return-values) |
+| `[compile_time]` functions in constants (D-91, R6) | **Implemented** | Their MIR is interpreted while compiling, in every constant position; scalars, value types, arrays, loops, recursion; a step limit and a depth limit; checked where defined. A global initialized by one that returns plain data starts as data in the image | [functions](../language/07-functions-and-lambdas.md#713-compile-time-functions) |
 | Class / function / alias templates, value params, default template args, members compiled on use | **Implemented** | | [templates](../language/08-templates.md) |
 | Template argument deduction, function templates in overload sets, deduction from a target funcptr/func type | **Implemented** | | [templates](../language/08-templates.md#5-argument-deduction) |
 | Variadic templates: packs, expansions, `sizeof...`, folds | **Implemented** | | [templates](../language/08-templates.md#6-variadic-templates) |

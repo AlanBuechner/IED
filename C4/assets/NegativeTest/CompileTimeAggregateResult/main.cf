@@ -1,0 +1,4 @@
+struct Pair { public int32 a; public int32 b; }
+[compile_time] Pair Both(int32 v) { return Pair{ v, v }; }
+int32[Both(1)] g_Table;
+int32 main() { return 0; }

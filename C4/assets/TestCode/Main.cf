@@ -90,6 +90,7 @@ include "Core/IncludeVisibility.ch"
 include "Types/BraceSlots.ch"
 include "Types/UnionCopies.ch"
 include "Functions/BracedArguments.ch"
+include "Functions/CompileTime.ch"
 include "Core/NestedNamespaceShorthand.ch"
 include "Types/NamedUnions.ch"
 include "Types/FoldedConstants.ch"
@@ -299,6 +300,7 @@ int32 main() {
 	TestBraceSlots();
 	TestUnionCopies();
 	TestBracedArguments();
+	TestCompileTime();
 	TestNestedNamespaceShorthand();
 	TestNamedUnions();
 	TestMemberAccessSpelling();

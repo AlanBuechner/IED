@@ -180,4 +180,30 @@ namespace Testing
 			"}\n");
 		TEST_ASSERT(diagnostics.empty());
 	}
+
+	void LspLoweringParityTest::ACompileTimeBodyIsCheckedAlikeInBoth()
+	{
+		const std::vector<std::string> diagnostics = SameInBoth(
+			"[compile_time] int32 Fresh() { int32* p = new int32(); return *p; }\n"
+			"int32 main() { return Fresh(); }\n");
+		TEST_ASSERT(AnyMentions(diagnostics, "'Fresh' is [compile_time], but it allocates on the heap ('new')"));
+	}
+
+	void LspLoweringParityTest::AConstantCallIsFoldedAlikeInBoth()
+	{
+		const std::vector<std::string> diagnostics = SameInBoth(
+			"[compile_time] int32 Square(int32 x) { int32 s = 0; for (int32 i = 0; i < x; ++i) s += x; return s; }\n"
+			"enum Level { Low = Square(2), High = Square(3) }\n"
+			"template<int32 N> struct Fixed { public int32[N] items; }\n"
+			"struct UsesFixed { public Fixed<(Square(2))> f; }\n"
+			"struct Holder { public int32[Square(2)] values; }\n"
+			"const int32 Nine = Square(3);\n"
+			"int32[Square(3)] g_Good;\n"
+			"int32 main()\n"
+			"{\n"
+			"\tint32[Square(2)] local;\n"
+			"\tswitch (Nine) { case Square(3): return (int32)sizeof(local) + (int32)sizeof(g_Good) + (int32)sizeof(Holder) + (int32)sizeof(UsesFixed) + (int32)Level::High; default: return 0; }\n"
+			"}\n");
+		TEST_ASSERT(diagnostics.empty());
+	}
 } // namespace Testing

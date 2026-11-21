@@ -79,6 +79,56 @@ label) stay a check of the source's scopes while lowering (`HIR/JumpScopes`): HI
 block that owns its temporaries, so after lowering a declaration's block is no longer the block whose scope it
 belongs to. The MIR builder relies on what they guarantee when it resolves a forward goto.
 
+## Compile-time evaluation (R6, D-91)
+
+A function marked `[compile_time]` (on any of its declarations) can run while the program compiles: its MIR is
+interpreted over folded arguments.
+
+- **The check where it is defined** (`CompileTimeCheck`, from `LowerFunction` after the flow checks): a marked
+  function may do only what the interpreter runs - no `new` or `delete`, no inline assembly, no static local or exit
+  registration, no global variable that is not a constant, no atomic, SIMD, variadic or run-time type operation, no
+  function address, no call through a pointer, a func value or a vtable, no call of a function that is neither marked
+  nor compiler-written (a create, copy or delete). Only what runs while nothing is thrown counts (the blocks reached
+  from the entry without unwinding): a throw ends an evaluation with an error, so a handler never runs there. The
+  first breach is the function's error: `'F' is [compile_time], but it allocates on the heap ('new')`; the mark takes
+  no arguments (`[compile_time] takes no arguments`). An unmarked function is not checked and can never run at
+  compile time.
+- **The interpreter** (`MirInterpreter`): memory is a list of byte allocations - each slot of each frame one, laid out
+  as the target lays out its type (little-endian x64) - and a pointer is an allocation and an offset in it (the
+  allocation in the high 32 bits; allocation 0 is null), so reading or writing past an object is an error, not a
+  wrong value. Scalars compute as the emitted code does: integers wrap in their width, `float` rounds as `float`,
+  division by zero and a shift by the width or more are errors. It runs every terminator but `Throw` (an error:
+  `compile-time evaluation threw an exception`) and the unwinding ones (nothing unwinds); a region runs where its
+  expression names it. Two limits keep it finite: 1,000,000 statements and terminators in all (`compile-time
+  evaluation ran more than 1000000 steps: a loop that does not end, or work too big to do while compiling`) and 256
+  calls deep (`... went more than 256 calls deep: a recursion that does not end?`).
+- **The evaluator** (`CompileTimeEvaluator`, one per program model): `Call` gives the result as a constant (a
+  number, a bool, a character; a pointer or an aggregate is an error), `CallForData` the bytes of whatever it returns
+  (an array or an object: a table). Each callee is lowered once by `LowerFunction` - the same HIR and MIR a build
+  emits - and kept; a callee that is not marked (`'F' is not [compile_time]`) or does not compile (`'F' cannot run at
+  compile time: it does not compile`; its own errors are reported where the build lowers it) is refused. Each call
+  has an interpreter of its own and no lock is held while a body lowers, so constants fold on the lowering threads at
+  once; a constant in a function's own body that needs that function is refused (`'F' cannot run at compile time
+  while it is compiled`). Only bodies that compiled are kept: one that failed while the model resolved is lowered
+  again when asked later. While the model is still resolving (a field's extent or an enum value folds in pass 2),
+  the types a callee takes and returns are completed before its body lowers, and every type its slots hold before it
+  runs (`DeclarationQueries::Complete`), so it never reads a half-built layout; the callee itself is resolved first
+  (`DeclarationQueries::Functions`: free functions resolve last in pass 2), and a cycle through its signature is said
+  as R9 says one (`the alias 'Row' depends on itself: Row -> Count -> Row`).
+- **Where a constant calls it.** `ConstEvaluator::FoldCall` (`Model/ConstCalls.cpp`): a call written with a
+  function's name (`Square(3)`, `Tables::Square(3)`) in any constant position. When no overload of the name is
+  marked (`Model/CompileTimeMark`) it fails at once - `'Seed' is not [compile_time]: only a function marked
+  [compile_time] runs in a constant` - so a call that never ran at compile time resolves no overload and
+  instantiates nothing; else its arguments fold, the overload is chosen as a call chooses it (their written
+  types, or a folded value's), and the model's `ICompileTimeCalls` (`Model/CompileTimeCalls.h`) runs it. The
+  model owns no evaluator: `CompilerInstance` makes one with each model it builds (C4.exe, C4LSP and scripts
+  alike) and sets it on the model; a model without one folds no calls.
+- **A global's table** (`HIR/CompileTimeImage`, from `GlobalInit`'s starts after `ConstantImage`): a global
+  whose initializer is such a call and whose type is plain data (no pointer - an evaluation's pointers are not
+  the program's -, no vtable, nothing to destroy) starts holding the bytes `ConstEvaluator::EvaluateData` gets
+  from `CallForData`, as a constant start; anything else, or a call that cannot run, starts as code before
+  `main` as before.
+
 ## Emission (`Backend/CodeGen/MirEmitter`)
 
 - Every block control reaches from the entry is emitted, from the function's entry block on, the others as a
@@ -110,6 +160,11 @@ belongs to. The MIR builder relies on what they guarantee when it resolves a for
 | `MIR/MirReach.{h,cpp}` | Reachability: the missing-return and case-fallthrough checks |
 | `MIR/MirMoves.{h,cpp}` | D-05's last-use moves and their drop flags |
 | `MIR/MirText.{h,cpp}` | A body as text |
+| `MIR/MirInterpreter.{h,cpp}`, `MirInterpreterValues.cpp` | Compile-time evaluation: control flow; values, places and memory |
+| `MIR/CompileTimeCheck.{h,cpp}` | The `[compile_time]` mark and the check where a marked function is defined |
+| `MIR/CompileTimeEvaluator.{h,cpp}` | The evaluator a constant calls: kept bodies, a call's arguments and result |
+| `Model/CompileTimeCalls.h`, `CompileTimeMark.{h,cpp}`, `ConstCalls.cpp` | The model's side: the evaluator's interface, the mark, `ConstEvaluator::FoldCall` and `EvaluateData` |
+| `HIR/CompileTimeImage.{h,cpp}` | A global that starts as the data a `[compile_time]` call returns |
 | `CodeGen/MirEmitter.{h,cpp}` | MIR to LLVM |
 | `CodeGen/EhLowering.h`, `FuncletLowering.{h,cpp}`, `LandingPadLowering.{h,cpp}` | The exception schemes |
 
@@ -119,7 +174,13 @@ C4Testing `Mir.Reach` (reachability on hand-made HIR: jumps, branches, loops, sw
 checks), `Mir.Builder` (the graph of lowered bodies: exits, the shared way out of returns, unwind steps, dispatch and
 handlers, regions, noexcept, once regions, drop flags, no MIR for an incomplete body), `Mir.Emitter` (funclets for
 Windows and landing pads for Linux from one MIR, a noexcept body on both, straight-line code as one block),
-`Semantic.LastUseMoves` (the moves on the flow: goto, exclusive branches, an exception path), `Lsp.LoweringParity`;
+`Semantic.LastUseMoves` (the moves on the flow: goto, exclusive branches, an exception path), `Mir.Interpreter`
+(scalars, wrapping, value types and methods, loops and switches, recursion, arrays and tables, the two limits, what
+compile time cannot do), `Mir.CompileTime` (the mark, the definition check's errors, the evaluator's results and
+refusals, data as the target lays it out, every constant position through the model, a global table as data),
+`Lsp.LoweringParity`;
+TestCode `Functions/CompileTime` (each constant position end to end, at `-O0` and `-O2`); NegativeTests
+`CompileTime*` and `ConstantCallsUnmarked` (each diagnostic);
 NegativeTests `SwitchImplicitFallthrough`, `SwitchFallthroughOnOneBranch`, the `control reaches the end` family; every
 end-to-end suite (IsolatedTest, RuntimeTest, the Bedrock tests) runs MIR-emitted code on Windows, and the Linux suites
 on landing pads.

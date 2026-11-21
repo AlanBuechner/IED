@@ -1,0 +1,2 @@
+[compile_time] int32 Next() { static int32 n = 0; n = n + 1; return n; }
+int32 main() { return Next(); }

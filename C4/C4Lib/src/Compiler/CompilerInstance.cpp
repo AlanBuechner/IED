@@ -7,6 +7,7 @@
 #include "Parser/Nodes/Declarations/NamespaceNode.h"
 #include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
 #include "Model/Builder/ModelBuilder.h" // ModelBuilder fills the program model
+#include "Backend/MIR/CompileTimeEvaluator.h"
 #include "Core/StringFormat.h"
 #include <filesystem>
 #include <iostream>
@@ -347,6 +348,8 @@ namespace Scripting
 	bool CompilerInstance::BuildProgramModel()
 	{
 		m_ProgramModelErrorTracker.Clear();
+		m_CompileTime = std::make_unique<CompileTimeEvaluator>(m_ProgramModel);
+		m_ProgramModel.SetCompileTimeCalls(m_CompileTime.get());
 
 		ModelBuilder builder(&m_ProgramModelErrorTracker);
 		builder.Build(*this, m_ProgramModel);

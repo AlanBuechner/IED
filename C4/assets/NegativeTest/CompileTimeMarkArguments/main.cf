@@ -1,0 +1,2 @@
+[compile_time("fast")] int32 Twice(int32 x) { return x * 2; }
+int32 main() { return Twice(1); }
