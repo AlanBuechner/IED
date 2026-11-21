@@ -23,6 +23,12 @@ def _ied_start():
 
 	packages = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.join(os.path.expanduser("~"), ".ied-python-packages")
 	pip_folder = os.path.normpath(os.path.join(os.path.dirname(sys.executable), os.pardir, "pip"))
+	if not os.path.isfile(os.path.join(pip_folder, "pip", "__main__.py")):
+		# Linux's private Python (python-build-standalone) carries pip among its own packages: their folder stands in.
+		import importlib.util
+		found = importlib.util.find_spec("pip")
+		if found is not None and found.origin:
+			pip_folder = os.path.dirname(os.path.dirname(found.origin))
 	boot = "import runpy, sys; sys.path[:0] = [sys.argv.pop(1), sys.argv.pop(1)]; sys.argv[0] = 'pip'; runpy.run_module('pip', run_name='__main__', alter_sys=True)"
 
 	class Pip:
@@ -59,7 +65,7 @@ def _ied_start():
 		sys.path.insert(0, "")
 	sys.argv = [""]
 	sys.excepthook = hint_for_pip_lines(sys.excepthook)
-	print("Python %s - IED's own Python (vendor\\python). exit() ends it." % sys.version.split()[0])
+	print("Python %s - IED's own Python (%s). exit() ends it." % (sys.version.split()[0], os.path.join("vendor", "python")))
 	print('pip("install <name>") installs into %s' % packages)
 	return Pip()
 

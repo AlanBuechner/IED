@@ -23,7 +23,8 @@
 			{ "languageId": "python", "label": "PY", "color": "--hue-cyan", "markers": ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"] }
 		],
 		"terminalProfiles": [
-			{ "id": "python", "title": "Python", "icon": "$(python)", "argv": ["${iedHome}/vendor/python/python.exe", "-i", "${pluginDir}/shell/startup.py", "${pluginState}/packages"], "env": { "PYTHONIOENCODING": "utf-8" } }
+			{ "id": "python", "title": "Python", "icon": "$(python)", "argv": ["${iedHome}/vendor/python/python.exe", "-i", "${pluginDir}/shell/startup.py", "${pluginState}/packages"], "env": { "PYTHONIOENCODING": "utf-8" }, "when": "isWindows" },
+			{ "id": "python", "title": "Python", "icon": "$(python)", "argv": ["${iedHome}/vendor/python/bin/python3.12", "-i", "${pluginDir}/shell/startup.py", "${pluginState}/packages"], "env": { "PYTHONIOENCODING": "utf-8", "PYTHONNOUSERSITE": "1" }, "when": "isLinux" }
 		],
 		"outputLinks": [
 			{ "id": "traceback", "regexp": "File \\\"([^\\\"]+)\\\", line (\\d+)", "file": 1, "line": 2 },
