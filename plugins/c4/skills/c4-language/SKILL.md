@@ -251,9 +251,13 @@ All files of a project compile together as one program (no per-file object and l
   Macros (`#define`) do carry from an included header to the includer.
 - Outside function bodies, order does not matter: no forward declarations of types are needed. Functions defined in
   a `.cf` are declared in the `.ch` others include.
-- A file sees another file's functions, types and constants only through a `.ch` it includes. The names still share
-  the program: two files may not define the same function, type or `const` unless both are `static` (private to their
-  file).
+- A file sees another file's functions, types, templates and constants only through a `.ch` it includes (directly or
+  through that header's includes) - in declarations (a field's type, a parameter, a base, an array size) as in
+  function bodies, so every header includes what it names; a template's own fields and bodies see what the template's
+  file includes. The error says which: `no type named Widget is visible here: it is declared in widgets.ch, which
+  this file does not include`. Two headers that name each other declare the other's type ahead (`struct Widget;`)
+  instead. Members (`widget.Size()`) need no include of their own. The names still share the program: two files may
+  not define the same function, type or `const` unless both are `static` (private to their file).
 - A `static` variable in a `.ch` is defined there (the header is a source file); templates and their methods may be
   defined in a `.cf`.
 
