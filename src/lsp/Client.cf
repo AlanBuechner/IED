@@ -148,6 +148,7 @@ namespace Ied
 		m_Progress.Clear();
 		m_Progressed = false;
 		m_StartedNs = clock_now_ns();
+		m_FirstOpenedNs = 0;
 		m_UsedNs = m_StartedNs;
 		LanguageServer* self = this;
 		Process::Child* process = m_Child;

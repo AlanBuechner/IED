@@ -32,6 +32,32 @@ static Core::String Rewritten(const char* json, const Ied::Rewrite& rewrite) {
 
 [test("server.lsp")]
 class LspTests {
+	// A workspace-symbol search waits for a new server's index: clangd begins it only once a file is open on it, which
+	// can be seconds after it started (the conformance check's first search found 0 symbols).
+	[test("index_grace_counts_from_the_first_open_document")]
+	public static void TestIndexGrace() {
+		const int64 ms = 1000000;
+		Ied::LanguageServer* language = new Ied::LanguageServer();
+		language->m_Profile = new Ied::LspProfile();
+		language->m_Profile->m_IndexGraceMs = Ied::c_LspIndexGraceMs;
+		const int64 grace = Ied::c_LspIndexGraceMs;
+		language->m_StartedNs = 1000 * ms;
+		assert_true(Ied::IndexMayBegin(language, 1000 * ms + grace * ms - 1), "a new server with nothing open yet");
+		assert_true(!Ied::IndexMayBegin(language, 1000 * ms + grace * ms), "nothing begun long after it started");
+		language->m_FirstOpenedNs = 4000 * ms;
+		assert_true(Ied::IndexMayBegin(language, 4000 * ms + grace * ms - 1), "its file opened late: the grace runs from there");
+		assert_true(!Ied::IndexMayBegin(language, 4000 * ms + grace * ms), "and ends");
+		language->m_Profile->m_IndexGraceMs = 10000;
+		assert_true(Ied::IndexMayBegin(language, 4000 * ms + 9999 * ms), "a profile that indexes slowly asks for more (clangd's)");
+		language->m_Progressed = true;
+		assert_true(!Ied::IndexMayBegin(language, 4001 * ms), "once it reported work, its progress says when it is done");
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Core::Array<Ied::LspProfile*> read;
+		Ied::ReadLspProfiles(Serialization::ReadJson(Core::StringView("{\"lspProfiles\": [{\"id\": \"a\", \"indexGraceMs\": 10000}, {\"id\": \"b\"}]}"), *doc).root,
+			Core::StringView("p"), FS::Path("C:/p"), read);
+		assert_true(read[0]->m_IndexGraceMs == 10000 && read[1]->m_IndexGraceMs == Ied::c_LspIndexGraceMs, "indexGraceMs, else the default");
+	}
+
 	[test("framing")]
 	public static void TestFraming() {
 		Ied::FrameReader reader;

@@ -39,6 +39,7 @@ namespace Ied
 		profile->m_PluginCodeOption = Core::String(node.Member("pluginCodeOption").AsView());
 		profile->m_Staged = node.Member("launchMode").AsView() == "staged";
 		profile->m_PerProject = node.Member("scope").AsView() == "project";
+		profile->m_IndexGraceMs = node.Member("indexGraceMs").AsInt() > 0 ? node.Member("indexGraceMs").AsInt() : c_LspIndexGraceMs;
 		Core::StringView encoding = node.Member("positionEncoding").AsView();
 		profile->m_Negotiate = encoding.IsEmpty() || encoding == "negotiate";
 		profile->m_Encoding = PositionEncoding::Utf16;

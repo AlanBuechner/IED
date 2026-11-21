@@ -14,7 +14,6 @@ namespace Ied
 {
 	const int64 c_LspTransientMost = 16;      // files open on one server for plugin code alone
 	const int64 c_LspIndexWaitMs = 30000;     // how long workspace symbols wait for the servers' indexes
-	const int64 c_LspIndexGraceMs = 2000;     // a server this new is given this long to begin indexing
 	const int64 c_LspIndexSliceNs = 50000000;
 	const int64 c_LspSweepNs = 1000000000;    // how often idle and rebuilt servers are looked for (lsp.idleStopMinutes)
 	const char* c_LspIdleSetting = "lsp.idleStopMinutes";
@@ -26,6 +25,11 @@ namespace Ied
 		public Core::String m_Path;
 		public bool m_HadDiagnostics;
 	}
+
+	// Whether `language` may still be about to begin its index: it has reported no work since it started, and its first
+	// document opened (or, with none open, it started) less than its profile's indexGraceMs ago. An index begins only once
+	// the server has a file - clangd learns its compile database from the first one - so the grace counts from there.
+	bool IndexMayBegin(const LanguageServer* language, int64 nowNs);
 
 	// The not_found error for a file no language server serves, saying how to read it instead (a shader, a config file).
 	Core::String NoServerMessage(Core::StringView path);

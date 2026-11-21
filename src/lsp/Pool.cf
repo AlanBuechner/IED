@@ -198,6 +198,7 @@ namespace Ied
 		json.EndObject();
 		json.EndObject();
 		language->Notify(Core::StringView("textDocument/didOpen"), json.View());
+		if (language->m_FirstOpenedNs == 0) language->m_FirstOpenedNs = clock_now_ns();
 	}
 
 	static void SendText(LanguageServer* language, Core::StringView uri, int64 version, Core::StringView text) {
@@ -1018,6 +1019,12 @@ namespace Ied
 		}
 	}
 
+	bool IndexMayBegin(const LanguageServer* language, int64 nowNs) {
+		if (language->m_Progressed) return false;
+		const int64 from = language->m_FirstOpenedNs > language->m_StartedNs ? language->m_FirstOpenedNs : language->m_StartedNs;
+		return nowNs - from < language->m_Profile->m_IndexGraceMs * 1000000;
+	}
+
 	void LspPool::AwaitIndexes(Call& call, const Core::Array<LanguageServer*>& servers, int64 ms) {
 		const int64 deadline = clock_now_ns() + ms * 1000000;
 		for (;;) {
@@ -1025,8 +1032,7 @@ namespace Ied
 			for (LanguageServer* language : servers) {
 				if (language->m_State != LspState::Running) continue;
 				language->m_UsedNs = clock_now_ns();   // waited for: not idle
-				const bool fresh = clock_now_ns() - language->m_StartedNs < c_LspIndexGraceMs * 1000000;
-				busy = busy || language->m_Progress.Count() > 0 || (fresh && !language->m_Progressed);
+				busy = busy || language->m_Progress.Count() > 0 || IndexMayBegin(language, clock_now_ns());
 			}
 			if (!busy || call.m_Cancel->IsCancelled() || clock_now_ns() >= deadline) return;
 			call.m_Cancel->m_Wake.WaitFor(m_Server->m_Lock, c_LspIndexSliceNs);

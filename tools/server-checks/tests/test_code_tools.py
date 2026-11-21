@@ -232,6 +232,12 @@ class ClangdCodeToolTests(CodeToolCase):
 		await super().asyncSetUp()
 		await self.client.request("settings.set", {"tier": "app", "key": "cpp.clangd.path", "value": CLANGD})
 
+	async def server_log(self):
+		await self.client.sub(["out:w1:ied"])
+		tail = (await self.client.wait_for("out:w1:ied", lambda f: f["t"] == "snap"))[-1]["data"]["tail"]
+		await self.client.unsub(["out:w1:ied"])
+		return tail
+
 	async def test_navigating_a_cpp_project(self):
 		results = await self.results(
 			("s1", "code_symbols", {"query": "Push"}),
@@ -255,7 +261,8 @@ class ClangdCodeToolTests(CodeToolCase):
 			("a2", "code_read_symbol", {"symbol": "Write"}))
 		for call_id in ("s1", "o1", "r1", "r2", "r3", "d1", "f1", "h1", "m1", "t1", "i1", "c1", "c2", "y1", "x1"):
 			self.assertNotIn("did not run", results[call_id], call_id)
-		self.assertIn("method game::Ring::Push  src/ring.cpp:8", results["s1"], "the servers started and indexed for the first search")
+		if "method game::Ring::Push  src/ring.cpp:8" not in results["s1"]:
+			self.fail("the servers started and indexed for the first search: %s\nthe server's log (each language server's progress):\n%s" % (results["s1"], await self.server_log()))
 		self.assertIn("Its source, src/ring.cpp:\n7\t// Adds the value at the end.\n8\tvoid Ring::Push(int value) {", results["s1"], "a lone match comes with its definition")
 		self.assertIn("class Ring", results["o1"])
 		self.assertIn("Push", results["o1"])

@@ -26,6 +26,7 @@ namespace Ied
 		public Core::String m_PluginCodeOption;           // the initializationOptions key that gets the plugin code scopes
 		public bool m_Staged;
 		public bool m_PerProject;                         // scope "project": one server per project of a solution
+		public int64 m_IndexGraceMs;                      // indexGraceMs: how long after its first file opens it may take to begin indexing
 		public bool m_Negotiate;                          // offer utf-16 and utf-8 and take what the server picks
 		public PositionEncoding m_Encoding;               // when not negotiated
 		public bool m_IntegerIds;
@@ -37,6 +38,8 @@ namespace Ied
 		public Core::String m_DiagnosticsOnAiWrite;
 		public Core::String m_When;
 	}
+
+	const int64 c_LspIndexGraceMs = 2000;   // a profile's indexGraceMs when it names none
 
 	// The variables a profile's command, arguments and folders may use.
 	// A setting's effective value for the workspace as JSON text; empty when it has none.

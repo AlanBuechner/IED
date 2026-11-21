@@ -133,6 +133,7 @@
 				"command": "${tool:clangd}",
 				"args": ["${config:cpp.clangd.arguments}"],
 				"selector": { "languages": ["c", "cpp"] },
+				"indexGraceMs": 10000,
 				"formatOnAiWrite": "workspaceContains..clang-format || workspaceContains._clang-format",
 				"diagnosticsOnAiWrite": true,
 				"when": "config.cpp.languageServer && workspaceTrusted"
