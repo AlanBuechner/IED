@@ -1,4 +1,4 @@
-// Exceptions on Linux (D-86). C4 code unwinds by landing pads on libgcc's unwinder (Backend/CodeGen/RegionLandingPads.cpp);
+// Exceptions on Linux (D-86). C4 code unwinds by landing pads on libgcc's unwinder (Backend/CodeGen/LandingPadLowering.cpp);
 // this is the rest: the exception a throw makes, its raise, the personality routine that finds a function's landing
 // pad and the clause that takes the exception (from the function's LSDA), and what a handler does with it (begin and end
 // its catch, rethrow it). Which types a throw can be caught as, and how a handler gets its copy, are the ThrowInfo's,

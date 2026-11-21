@@ -16,7 +16,6 @@ namespace Scripting
 	{
 		uint32 count = m_Hir.SlotCount();
 		m_SlotAllocas.resize(count, nullptr);
-		m_Declared.assign(count, false);
 		m_PrologueLocation = m_B->getCurrentDebugLocation();
 		for (uint32 i = 0; i < count; ++i)
 			if (i < held.size() && held[i]) m_SlotAllocas[i] = held[i];
@@ -31,7 +30,7 @@ namespace Scripting
 		return storage;
 	}
 
-	void IRContext::ZeroUndeclaredSlots()
+	void IRContext::ZeroUndeclaredSlots(const std::vector<bool>& declared)
 	{
 		if (!m_LastSlotAlloca) return;
 		llvm::IRBuilder<> atEntry(m_LastSlotAlloca->getNextNode());
@@ -39,7 +38,7 @@ namespace Scripting
 		for (uint32 i = 0; i < m_Hir.SlotCount(); ++i)
 		{
 			const HIRFunction::Slot& slot = m_Hir.GetSlot(i);
-			if (slot.cls == SlotClass::Static || slot.cls == SlotClass::Param || m_Declared[i]) continue;
+			if (slot.cls == SlotClass::Static || slot.cls == SlotClass::Param || (i < declared.size() && declared[i])) continue;
 			m_MCtx.StoreZero(atEntry, slot.type, m_SlotAllocas[i]);
 			m_MCtx.vtables().StoreVptrs(atEntry, slot.type, m_SlotAllocas[i]);
 		}
@@ -98,33 +97,6 @@ namespace Scripting
 		llvm::Value* slot = EntryAlloca(m_MCtx.Lower(t), "c4.throw_val");
 		m_ThrowSlots[t] = slot;
 		return slot;
-	}
-
-	llvm::BasicBlock* IRContext::UnwindTargetBelow(size_t index, size_t floor)
-	{
-		// With landing pads every entry is on an exception's way out: a handler ends its catch there.
-		if (!Funclets()) return index > floor && m_Region ? m_Region->LandingPadFor(index - 1) : nullptr;
-		for (size_t i = index; i-- > floor; )
-		{
-			const CleanupEntry& e = m_Cleanups.At(i);
-			if (e.kind == CleanupEntry::Kind::Try) return e.dispatch;
-			if (e.HasPad()) return m_Region ? m_Region->CleanupPadFor(i) : nullptr;
-		}
-		return nullptr;
-	}
-
-	llvm::FuncletPadInst* IRContext::CurrentFunclet() const
-	{
-		if (llvm::CatchPadInst* handler = m_Cleanups.InnermostHandler(m_Floor)) return handler;
-		return m_FloorFunclet;
-	}
-
-	IRContext::FuncletState IRContext::EnterCleanupFunclet(size_t floor, llvm::FuncletPadInst* pad)
-	{
-		FuncletState saved{ m_Floor, m_FloorFunclet };
-		m_Floor = floor;
-		m_FloorFunclet = pad;
-		return saved;
 	}
 
 	llvm::CallBase* IRContext::Call(llvm::FunctionType* fty, llvm::Value* callee, llvm::ArrayRef<llvm::Value*> args, bool mayThrow)

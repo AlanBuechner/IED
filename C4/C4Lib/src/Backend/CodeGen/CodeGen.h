@@ -1,17 +1,17 @@
 #pragma once
 // =====================================================================
-// CodeGen - HIR-driven LLVM emitter (see docs/compiler/04-codegen-and-abi.md).
+// CodeGen - the LLVM emitter of MIR and HIR expressions (see docs/compiler/04-codegen-and-abi.md, 06-mir.md).
 // Public umbrella of the emitter. It emits what Backend/Lowering lowered and decides nothing about
 // what is lowered. Every subsystem is a self-contained .h/.cpp pair (one-to-one):
 //
 //   Abi.{h,cpp}               THE calling-convention brick (04)
 //   ModuleContext.{h,cpp}     one module's LLVM state: module, type map, struct fill, function sigs, globals
-//   IRContext.{h,cpp}         per-function emission state: builder, slot allocas, label registry, this
+//   IRContext.{h,cpp}         per-function emission state: builder, slot allocas, this, the block being emitted
 //   ExprEmitter.{h,cpp}       rvalue nodes -> SSA values + lvalue address resolution + the GC store
 //   CallEmitter.{h,cpp}       calls: hidden params, arguments per the Abi, direct/virtual/indirect callee
 //   ObjectEmitter.{h,cpp}     new / T(...) / init lists / delete
-//   CleanupStack.{h,cpp}      scope-exit cleanups, try and handler entries (04 scope exit)
-//   RegionEmitter.{h,cpp}     the block-owning walker: control flow + straight-line statements (03)
+//   MirEmitter.{h,cpp}        one function's MIR: its blocks, statements and terminators (06)
+//   EhLowering.h              the target's exception scheme: FuncletLowering (Windows) or LandingPadLowering (Linux)
 //   VtableEmitter.{h,cpp}     vtables per vptr location, this-adjusting thunks, vptr stores
 //   RttiEmitter.{h,cpp}       MSVC RTTI: type descriptors, hierarchy descriptors, object locators
 //   EhTables.{h,cpp}          MSVC throw info and catch handler operands
@@ -29,6 +29,6 @@
 #include "Backend/CodeGen/ModuleContext.h"
 #include "Backend/CodeGen/IRContext.h"
 #include "Backend/CodeGen/ExprEmitter.h"
-#include "Backend/CodeGen/RegionEmitter.h"
+#include "Backend/CodeGen/MirEmitter.h"
 #include "Backend/CodeGen/FunctionEmitter.h"
 #include "Backend/CodeGen/ProgramEmitter.h"

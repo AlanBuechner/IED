@@ -20,10 +20,10 @@ Every component is a 1:1 `.h/.cpp` pair; `CodeGen.h` is the umbrella.
 | `ModuleContext` | one module | The module; the single C4 -> LLVM type map (`Lower`); struct creation/filling (`StructFor`, `FillStruct`); function signatures (`GetOrCreateFunction`, `SignatureOf`); global storage (`GlobalAddress`); runtime entry points (`RuntimeFunction`). Owns the `Abi` brick and the object-model emitters below. |
 | `Abi` | one compile | THE calling-convention brick: which types are by-value aggregates, register vs hidden pointer, sret, the LLVM param/return types at a boundary. What differs between conventions it asks the module's `TargetAbi`. |
 | `TargetAbi` (`C4Lib/src/Target/`) | the process | What the target decides (R11, see [Targets](#targets-targetabi)): one immutable implementation per system, picked once per build (`CpuTarget::Abi`, `ModuleContext::Target`). |
-| `IRContext` | one function | The `IRBuilder`, slot allocas, `this`, entry-block temporaries, the `CleanupStack`, the unwind-target query, and the ONE call brick (`Call`: funclet bundle + invoke). Truthiness rule. |
-| `CleanupStack` | one function | The scope-exit obligations (cleanups), try scopes and catch handlers between the entry and the current point, in nesting order. |
-| `FunctionEmitter` | one function | Entry block, slot allocas, parameter binding, runs the region walker, terminates leftover blocks, emits nested functions as siblings. |
-| `RegionEmitter` | one function | Statements and control-flow blocks, block frames and labels, scope exit (`ExitCleanups` / `BranchThroughCleanups`), try/catch, throw, and the lazily created cleanup pads (`CleanupPadFor`). |
+| `IRContext` | one function | The `IRBuilder`, slot allocas, `this`, entry-block temporaries, the block being emitted (`BlockServices`: where a call unwinds, its funclet), and the ONE call brick (`Call`: funclet bundle + invoke). Truthiness rule. |
+| `FunctionEmitter` | one function | Entry block, slot allocas, parameter binding, emits the body's MIR, zeroes the slots no declaration starts, emits nested functions as siblings. |
+| `MirEmitter` | one function | The function's MIR ([06-mir.md](06-mir.md)): every reachable block, its statements through the `ExprEmitter`, its terminator (branch, switch, return, the staged return, a once region's guard); a region where its expression names it. |
+| `EhLowering` | one function | The target's exception scheme (`TargetAbi::Exceptions`): `FuncletLowering` (cleanuppad, catchswitch, catchpad) or `LandingPadLowering` (landingpad, the runtime's personality); unwind steps' blocks made on first need, handlers' entries, throw, rethrow. |
 | `ExprEmitter` (+ `ExprOperatorEmitter.cpp`: operators and conversions) | one function | Rvalue nodes -> SSA values; lvalue -> address resolution (incl. base sub-objects); loads/stores incl. SIMD lanes; conversions (object pointers move to the target sub-object); checked casts; the one store helper (`GcStore`). Creates blocks only for ternary and short-circuit joins. |
 | `CallEmitter` | one call | Hidden parameters in MSVC order, each argument per `Abi`, the callee (direct, virtual through the receiver's vptr, indirect through a funcptr), the result unpacked to its C4 type. Constructor calls share it. |
 | `AsmEmitter` | one `Asm` statement | a call of `llvm::InlineAsm` (Intel or AT&T dialect, side effects unless `pure`, stack alignment unless `nostack`, `memory(none)` / `memory(read)` for `nomem` / `readonly`); outputs extracted and stored into their slots; `noreturn` ends in `unreachable`. File-scope `asm` is module assembly (`ProgramEmitter::EmitFileAssembly`), each block wrapped in `.intel_syntax noprefix` / `.att_syntax prefix` unless it is AT&T. |
@@ -134,7 +134,7 @@ emitter asks it instead of branching on the system, so another target (ARM64) is
 | `Convention` | `ExprEmitter::EmitVa` (the `va_arg` expansion) | `Win64` | `SystemV` |
 | `AggregateRegisters` (`Target/AggregateRegisters`) | `Abi::RegisterType` | 1, 2, 4 or 8 bytes as one integer | eightbyte classes up to 16 bytes |
 | `VectorPassesInMemory`, `MemberReturnsObjectsInMemory`, `SretBeforeThis`, `MemoryArgumentsOnStack` | `Abi` | no, yes, no, no | wider than a register, no, yes, yes (`byval`) |
-| `Exceptions` | `IRContext::Funclets` (and so `RegionEmitter`) | `Funclets` | `LandingPads` (`RegionLandingPads.cpp`) |
+| `Exceptions` | `MirEmitter` (which `EhLowering`) | `Funclets` (`FuncletLowering`) | `LandingPads` (`LandingPadLowering`) |
 | `Personality` | `ModuleContext::Personality` | `__CxxFrameHandler3` | `__c4_personality_v0` |
 | `AnchorTables` | a finished partition, a script module | nothing (image-relative) | `PeTables::AnchorAtFields` |
 | `DebugInfoFormat`, `SeparateDebugFile`, `DebugFileLinkArguments` | `DebugInfo`, `ProgramOutput::Link` | CodeView, a `.pdb` (`/DEBUG /PDB /PDBALTPATH`) | DWARF 5 in the program |
@@ -270,38 +270,31 @@ Emission:
 | `Delete` | `c4_free(p)` - the runtime runs the registered finalizer once, then frees; a plain call (an exception escaping a finalizer is fatal) |
 | `Construct` | zero-init, every vptr, constructor or field fill (`ObjectEmitter::ConstructAt`): where the value goes when it is built in place, else in an entry-block temporary whose value it yields |
 | `InitList` | entry-block element array + `{ptr, size}` aggregate |
-| `For`/`While`/`If`/`Switch` | structural blocks pre-created before the body; every break/continue/fallthrough target is defined with the cleanup depth of its statement; a `for` init block is a frame around the whole loop |
-| `Goto` / `Label` | the labels of a block are created when the block starts; a backward goto exits to the depth recorded at the label, a forward goto to the depth of the statement that contains it in the label's block; falling through into a label branches to it |
-| `Defer` | pushes a cleanup; see [Scope exit and unwinding](#scope-exit-and-unwinding). An `exceptionalOnly` cleanup is skipped by every normal exit and runs only in its cleanup pad |
+| `For`/`While`/`If`/`Switch`, `Goto` / `Label`, `Defer`, `Return`, try/catch, `Once` | MIR blocks and terminators ([06-mir.md](06-mir.md)): the builder makes the blocks, the exits that run the cleanups they leave and the unwind steps; the emitter makes a branch, a switch or a return of each terminator |
 | static locals | module globals (value persists across calls), initialized with their vptrs |
 
-A block left unterminated at the end of a body gets `ret void` (or `ret` of a null value for non-void bodies,
-which HIR has already rejected for reachable paths) so partial control flow still verifies.
+The end of a body (MIR's `FallOff`) returns from a void function and returns 0 from `main`; any other function
+that returns a value cannot get there (D-55, checked on the MIR), so it is `unreachable`.
 
 ## Scope exit and unwinding
 
 Everything that must happen when a scope is left - a `defer`, a value local's `delete` (HIR emits it as a
-defer), a `finally` (HIR lowers it as a defer around the try statement) - is a **cleanup** on the
-`CleanupStack`. The stack also holds a **try** entry while a try body is emitted and a **handler** entry
-while a catch clause is emitted, so it always describes every scope between the function entry and the
-insert point.
+defer), a `finally` (HIR lowers it as a defer around the try statement) - is a **cleanup**. The MIR builder
+elaborates every exit ([06-mir.md](06-mir.md#building-mirbuilder)); the emitter emits what it built:
 
-- **Normal exits.** Falling off a block pops its cleanups and emits each one inline. Every jump - `break`,
-  `continue`, `fallthrough`, `goto`, `return` - knows the cleanup depth of its target and emits the exit
-  of every entry above it: a cleanup's body inline, a handler as a `catchret` into a fresh block (leaving
-  the funclet before running outer cleanups). The entries are popped while their exit is emitted, so the
-  code of a cleanup sees exactly the scopes outside it, then restored for the code after the jump.
+- **Normal exits.** Running off a block, and every jump - `break`, `continue`, `fallthrough`, `goto` - run a
+  copy of each cleanup they leave in place, and leave each catch handler they leave with its catch's end (a
+  `catchret` into the next block, or `c4_eh_end_catch`). A cleanup's copy sees exactly the scopes outside it.
 - **Return.** The value is computed first, staged in an entry-block slot (or the sret pointer) because SSA
-  values do not survive a `catchret`, then the return branches to the function's one way out
-  (`RegionEmitter::ReturnPathFrom`): a chain of `return.cleanup` blocks, one per cleanup or handler entry,
-  each emitted once with only the scopes outside it visible, ending in the one block that loads the staged
-  value and returns. Every return inside an entry shares that entry's exit instead of a copy of its own.
-- **Exceptional exits.** `IRContext::UnwindTarget` walks the stack downwards: the innermost try gives its
-  catchswitch, the innermost cleanup gives its `cleanuppad`, created the first time an exception edge
-  needs it (`RegionEmitter::CleanupPadFor`). The pad runs a second copy of the cleanup body with only the
-  scopes below it visible (an unwind floor), then `cleanupret`s to whatever is below it. Handlers are
-  skipped by the walk: an exception raised inside a handler unwinds to the same place the try's
-  catchswitch does, which is how clang structures MSVC funclets.
+  values do not survive a `catchret`, then the return branches to the function's one way out: a chain of
+  blocks, one per cleanup or handler it crosses, each built once with only the scopes outside it, ending in the
+  one block that loads the staged value and returns. A return with nothing to clean up returns at once.
+- **Exceptional exits.** A block's unwind step is its innermost scope's: a cleanup's exception copy (a
+  `cleanuppad` on Windows, run with only the scopes below it and an unwind floor of its own, then `cleanupret` to
+  the step below), a try's dispatch, a once region's abandon, or a handler's end - an exception raised inside a
+  handler unwinds to the same place the try's catchswitch does, which is how clang structures MSVC funclets
+  (Linux ends the catch on the way, [Landing pads](#landing-pads-linux-d-86)). The target's `EhLowering` makes a
+  step's blocks the first time a call needs them.
 - **Calls.** `IRContext::Call` is the only place a call instruction is created. It adds the `funclet`
   bundle when the insert point is inside a catchpad or a cleanup pad, and emits an `invoke` whenever the
   callee may throw and an unwind target exists. Runtime calls that cannot reach user code (`c4_alloc`,
@@ -310,8 +303,9 @@ insert point.
   callees that cannot unwind into calls (see [Exceptions](#exceptions)).
 - **Slots.** A slot is zeroed (with its vptrs) where its declaration runs, or initialized there; a slot no
   declaration starts (a temporary the lifecycle reads, a drop flag) is zeroed once in the entry block
-  (`IRContext::ZeroUndeclaredSlots`), so no local ever holds stack garbage and none is zeroed twice. Blocks
-  that no label made live after a `return` or `throw` are deleted with the body.
+  (`IRContext::ZeroUndeclaredSlots`, from `MirBody::declared`), so no local ever holds stack garbage and none is
+  zeroed twice. Code after a `return` or `throw` that no label makes live is not emitted (only blocks control
+  reaches are).
 - **Temporaries.** Every alloca - slots, sret buffers, materialized arguments, construct temporaries,
   init-list arrays, the return slot, throw buffers - is created at the top of the entry block. An alloca
   anywhere else is a dynamic stack allocation that grows on each loop iteration and breaks clang's frame
@@ -340,7 +334,7 @@ C4 exceptions use the same native Windows EH that clang emits for C++ on MSVC:
 - The exception object's lifecycle is the type's own (`EhTables::ThrowInfo` gets an `ObjectLifecycle`):
   each CatchableType's copy function is the copy of that type or base (member convention: `this`, source),
   0 where the bytes suffice, and the ThrowInfo destructor is the type's full destruction.
-- A `noexcept` function's body is emitted inside a catch-all funclet (`RegionEmitter::EmitNoexceptBody`)
+- A `noexcept` function's body runs inside a catch-all (MIR's catch-all dispatch, `MirBuilder::BuildNoexceptBody`)
   whose handler calls `c4_noexcept_violation` (fatal message, exit 1). Its function is `nounwind`, and a call
   to it is a plain `call`, never an `invoke`.
 - **Nounwind inference** (`UnwindInference.cpp`), over every partition once the program is emitted: a
@@ -367,16 +361,16 @@ matches the C4 one. Windows only.
 
 ### Landing pads (Linux, D-86)
 
-On Linux the same cleanup stack lowers to landing pads (`RegionLandingPads.cpp`) on libgcc's unwinder, with the
+On Linux the same MIR unwind steps lower to landing pads (`LandingPadLowering`) on libgcc's unwinder, with the
 runtime's personality `__c4_personality_v0` (`C4Runtime/ExceptionsPosix.c`); the tables are the same
 `EhTables` ThrowInfo and catchable types, so a clause catches what it catches on Windows:
 
-- An exception raised above entry `i` lands at that entry's `landingpad`, whose clauses are the TypeDescriptors of
-  every try on the way out, innermost first, up to a `catch (...)` (a null clause), and `cleanup` when a cleanup
-  or a handler is on the way. It saves the exception and the selector, then takes each entry's step in turn
-  (`EhStepOf`): a cleanup runs its body (with only the scopes outside it visible, as its cleanuppad does), a
-  handler ends its catch, a try's dispatch compares the selector with `llvm.eh.typeid.for` of each clause and
-  branches to the first that matches. Below the last entry it `resume`s.
+- An exception raised in a block lands at its unwind step's `landingpad`, whose clauses are the TypeDescriptors of
+  every dispatch on the way out, innermost first, up to a `catch (...)` (a null clause), and `cleanup` when a
+  cleanup, an abandon or a handler's end is on the way. It saves the exception and the selector, then takes each
+  step in turn (`StepBlock`): a cleanup's exception copy runs (with only the scopes outside it, as its cleanuppad
+  does on Windows), a handler ends its catch, a dispatch compares the selector with `llvm.eh.typeid.for` of each
+  clause and branches to the first that matches. Below the last step it `resume`s.
 - A handler begins with `c4_eh_begin_catch(exception, TypeDescriptor, adjectives, slot)`, which makes the copy
   the frame handler makes on Windows (by reference, a simple type's bits with a pointer adjusted, an object by
   its copy function), and every way out of it calls `c4_eh_end_catch`, which destroys the exception unless
@@ -518,8 +512,9 @@ without it nothing below is emitted.
   have none, and a debugger's breakpoints would bind to an out-of-line copy that never runs.
 - **Lines.** Every HIR node carries `origin`, the start of the statement it was lowered for:
   `HIRFunction::NewNode` stamps it from `HIRFunction::location`, which `StmtLowerer::LowerStmt` sets per
-  statement and restores after it. `RegionEmitter::EmitStatement` sets the builder's location from it
-  (`IRContext::At`), so every instruction of a statement, its calls included, carries the statement's line. A
+  statement and restores after it. The MIR builder gives each statement and terminator the line its statement had
+  (`MirStatement::at`), and `MirEmitter` sets the builder's location from it (`IRContext::At`), so every
+  instruction of a statement, its calls included, carries the statement's line. A
   statement from another file (a template's body) is in a lexical block of that file. A catch handler's entry
   (its catchpad) is at the `catch` (`TryNode::CatchClause::origin`), and so is its caught value.
 - **Variables.** After the parameter stores, `DeclareVariables` describes `this` (stored to a `this.addr`

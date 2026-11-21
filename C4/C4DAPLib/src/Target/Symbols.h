@@ -107,8 +107,9 @@ namespace C4DAP::Target
 		/// How many bytes the module at `base` takes; 0 for one with no symbols loaded.
 		uint64_t ModuleSize(uint64_t base) const;
 		SourcePosition PositionOf(CodePlace place) const;
-		/// `address` when a line's code starts there, else where the next line's code starts. Code with no line of
-		/// its own (a catch funclet's prologue) belongs to the line before it in the line table, which is not its.
+		/// `address` when a line's code starts there, else where the next line's code starts, by address, in its function.
+		/// Code with no line of its own (a catch funclet's prologue) belongs to the line before it in the line table, which is
+		/// not its.
 		uint64_t NextStatementFrom(uint64_t address) const;
 		std::optional<FunctionFacts> FunctionOf(CodePlace place) const;
 		InlinedCalls InlinedAt(uint64_t address) const;

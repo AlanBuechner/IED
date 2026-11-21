@@ -1,6 +1,7 @@
 #include "Backend/Lowering/ProgramReach.h"
 #include "Backend/HIR/NativeBytes.h"
 #include "Backend/Lowering/UseSites.h"
+#include "Backend/MIR/MirBody.h"
 #include "Model/ProgramModel.h"
 #include "Model/Types/QualifiedName.h"
 
@@ -41,6 +42,8 @@ namespace Scripting
 
 	void ProgramReach::Keep(std::vector<LoweredUnit> units)
 	{
+		// A thunk's or a round of starts' tree is made without LowerFunction: its MIR is built here, as codegen emits it.
+		m_Lowering.Pool().Run(units.size(), [&](size_t i) { EnsureMir(*units[i].tree); });
 		std::vector<const HIRFunction*> trees;
 		for (const LoweredUnit& unit : units) trees.push_back(unit.tree.get());
 		const std::vector<BodyNeeds> needs = NeedsOfEach(trees);
@@ -124,6 +127,7 @@ namespace Scripting
 			record.type = CounterType(m_Model);
 			record.mangledName = CounterSymbol(need).c_str();
 			auto tree = std::make_unique<HIRFunction>(NativeBytes::LowerCensusFunction(m_Model, m_Errors, need.type, need.countBytes, record));
+			EnsureMir(*tree);
 			NeedWhatItNeeds(*tree, NeedsOf(*tree));
 			m_Program.census.push_back({ need, &record, std::move(tree) });
 		}

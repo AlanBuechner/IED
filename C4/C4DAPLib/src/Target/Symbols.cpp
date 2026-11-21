@@ -222,13 +222,21 @@ namespace C4DAP::Target
 		return SourcePosition{ Narrow(line.FileName), line.LineNumber };
 	}
 
+	// The first line entry after `address` by address, within its function (BUG-485): DbgHelp's SymGetLineNext walks a
+	// file's entries in its own order, not by address, so the entry after a catch funclet's prologue is not always next.
 	uint64_t Symbols::NextStatementFrom(uint64_t address) const
 	{
 		IMAGEHLP_LINEW64 line{ sizeof(IMAGEHLP_LINEW64) };
 		DWORD displacement = 0;
 		if (!m_Process || !SymGetLineFromAddrW64(m_Process, address, &displacement, &line) || displacement == 0) return address;
-		while (SymGetLineNextW64(m_Process, &line))
-			if (line.Address > address && !Hidden(line.LineNumber)) return line.Address;
+		const std::optional<FunctionFacts> function = FunctionOf(CodePlace{ address, 0 });
+		if (!function) return address;
+		for (uint64_t at = address + 1; at < function->start + function->size; ++at)
+		{
+			IMAGEHLP_LINEW64 next{ sizeof(IMAGEHLP_LINEW64) };
+			DWORD offset = 0;
+			if (SymGetLineFromAddrW64(m_Process, at, &offset, &next) && offset == 0 && !Hidden(next.LineNumber)) return at;
+		}
 		return address;
 	}
 

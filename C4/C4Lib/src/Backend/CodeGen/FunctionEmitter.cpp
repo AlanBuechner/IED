@@ -1,5 +1,6 @@
 #include "Backend/CodeGen/FunctionEmitter.h"
 #include "Backend/CodeGen/DebugInfo.h"
+#include "Backend/CodeGen/MirEmitter.h"
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
 
 namespace Scripting
@@ -14,7 +15,7 @@ namespace Scripting
 
 	void FunctionEmitter::Emit(const HIRFunction& hir)
 	{
-		if (!hir.record || !hir.root || !hir.complete) return; // declarations and incomplete trees emit nothing
+		if (!hir.record || !hir.root || !hir.complete || !hir.mir) return; // declarations and incomplete trees emit nothing
 		EmitBody(hir);
 		// Nested functions declared inside this body are siblings: emit each with its own context.
 		for (const auto& nested : hir.nestedFunctions)
@@ -23,7 +24,7 @@ namespace Scripting
 
 	void FunctionEmitter::EmitImport(const HIRFunction& hir)
 	{
-		if (!hir.record || !hir.root || !hir.complete) return;
+		if (!hir.record || !hir.root || !hir.complete || !hir.mir) return;
 		m_MCtx.SetImporting(true);
 		EmitBody(hir);
 		m_MCtx.SetImporting(false);
@@ -105,28 +106,11 @@ namespace Scripting
 
 		if (described) debug->DeclareVariables(described, hir, ctx, *entry);
 
-		// Run the region walker over the root block. The insert point starts at the entry block.
-		RegionEmitter regions(ctx);
+		// The body's MIR (built where it was lowered), from the entry block on.
 		ctx.SetInsertPoint(entry);
-		if (hir.record->isNoexcept) regions.EmitNoexceptBody(hir.root);
-		else regions.EmitBlock(hir.root);
-
-		// Terminate any block left without an end-of-region terminator. Control-flow constructs (if/while/for/switch)
-		// create a join/exit block and continue the body there; when such a construct is the LAST statement, that block
-		// is left empty. Reaching the end of a void body returns; `main` returns 0 there; any other function that
-		// returns a value cannot get there (D-55: lowering rejects a body that could), so the block is unreachable.
-		const bool isVoid = fn->getReturnType()->isVoidTy();
-		const bool returnsZero = hir.record && IsEntryPoint(*hir.record, "main");
-		for (llvm::BasicBlock& bb : *fn)
-			if (bb.empty() || !bb.back().isTerminator())
-			{
-				ctx.builder().SetInsertPoint(&bb);
-				if (isVoid) ctx.builder().CreateRetVoid();
-				else if (returnsZero) ctx.builder().CreateRet(llvm::Constant::getNullValue(fn->getReturnType()));
-				else ctx.builder().CreateUnreachable();
-			}
-		ctx.ZeroUndeclaredSlots();
-		// The code after a return or a throw that no label made live (RegionEmitter::ContinueAfterTerminator).
+		MirEmitter(ctx, *hir.mir).Emit();
+		ctx.ZeroUndeclaredSlots(hir.mir->declared);
+		// What only an expression after a region that never ends left behind.
 		llvm::EliminateUnreachableBlocks(*fn);
 	}
 } // namespace Scripting

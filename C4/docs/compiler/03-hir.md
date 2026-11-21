@@ -46,11 +46,11 @@ Every layer pops by RAII, even on error.
 | `FoldLowerer.{h,cpp}` | Fold expressions: the copies combined from the right or the left with `ApplyBinary` / `ApplyShortCircuit`, a comma fold as a sequence, the empty-pack values |
 | `TemplateBindings.{h,cpp}` | `BindTemplateParameters`: a template's bindings (types, constants, packs) as names in the current lowering layer |
 | `ExprAssignment.cpp` | `ExprLowerer`'s assignments: `ResolveAssignment`, `AssignTo` (an already lowered value), `AssignValue` (a lifecycle assignment or a store), `CompoundAssign`, `StoreAssigned` (including a by-value indexer's setter) |
-| `LastUseMoves.{h,cpp}` | D-05's last-use moves: after a body lowers, each `TransferNode` (a copy of a local or by-value parameter) that is its variable's last use and whose address never escaped becomes a move, with a drop flag guarding the variable's cleanup |
+| (MIR) | After a body lowers, `LowerFunction` builds its control-flow graph and runs the flow checks and D-05's last-use moves on it ([06-mir.md](06-mir.md)): each `TransferNode` (a copy of a local or by-value parameter) that is its variable's last use and whose address never escaped becomes a move, with a drop flag guarding the variable's cleanup |
 | `DestructuringLowerer.{h,cpp}` | `[a, T b, _] = value;`: the value held once in a statement temporary, each element moved out of it to a new local (`DeclLowerer::DeclareValue`), an assignment, or discarded |
 | `LoopLowerer.{h,cpp}` | while, do-while, for, range-for (arrays, pointers, init lists, the iterator protocol) |
 | `ExceptionLowerer.{h,cpp}` | try/catch, throw, defer; `finally` as a defer around the try |
-| `JumpScopes.{h,cpp}` | The goto rules: the block path of every label and goto, checked after the body |
+| `JumpScopes.{h,cpp}` | The goto rules: the block path of every label and goto as the source has them, checked after the body (the MIR builder relies on them when it resolves a forward goto) |
 | `IndexLValue.{h,cpp}` | The element lvalue of a built-in `base[index]` |
 | `MethodReceiver.{h,cpp}` | A method call's receiver: moved to the sub-object that declares the method, or to the vptr that holds its slot (`BindReceiver`, `CallDispatch::Direct` for `Base::F()`); `SubobjectLValue` |
 | `IndirectCall.{h,cpp}` | A call through a funcptr: argument count, conversions to the parameter types, reference arguments |
@@ -206,6 +206,10 @@ subsystem in `Backend/HIR/`; every other lowerer calls it instead of storing obj
 - `goto`/labels share one id per name regardless of order. After the body is lowered, `JumpScopes::Validate`
   checks every goto: undefined label, a label in a nested block, or a forward jump across a declaration or
   defer of the label's block are errors.
+- **After the body:** `LowerFunction` builds the complete tree's MIR ([06-mir.md](06-mir.md)) and checks on it that
+  no case runs into the next one (D-39; `StmtLowerer::LowerCase` marks the case, `SwitchCase::fallCheck`) and that
+  a value-returning function cannot run off its end (D-55), then makes the last-use moves (D-05). A body that fails
+  a check is incomplete and keeps no MIR.
 
 ## What a program lowers (`ProgramLowering`)
 

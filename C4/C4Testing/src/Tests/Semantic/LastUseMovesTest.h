@@ -7,8 +7,8 @@
 
 namespace Testing
 {
-	// Last-use moves (D-05, A10) as HIR: which copies of a variable become moves, and the drop flag that keeps a
-	// moved-from variable's cleanup from destroying the object again.
+	// Last-use moves (D-05, A10), decided on the body's MIR (Backend/MIR/MirMoves): which copies of a variable become moves,
+	// and the drop flag that keeps a moved-from variable's cleanup from destroying the object again.
 	CLASS(GROUP = Testing) LastUseMovesTest : public Test
 	{
 	public:
@@ -27,7 +27,11 @@ namespace Testing
 		TEST_FUNC(Semantic.LastUseMoves)
 		void DeferUseKeepsTheCopy();
 		TEST_FUNC(Semantic.LastUseMoves)
-		void GotoKeepsEveryCopy();
+		void GotoFollowsTheFlow();
+		TEST_FUNC(Semantic.LastUseMoves)
+		void ExclusiveBranchesMoveInEach();
+		TEST_FUNC(Semantic.LastUseMoves)
+		void AnExceptionPathKeepsTheCopy();
 		TEST_FUNC(Semantic.LastUseMoves)
 		void TriviallyCopiedTypesHaveNoTransfers();
 		TEST_FUNC(Semantic.LastUseMoves)

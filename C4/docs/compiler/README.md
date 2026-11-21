@@ -13,6 +13,7 @@ and [../tools/05-test-suites.md](../tools/05-test-suites.md).
 | [03-hir.md](03-hir.md) | HIR contract, node taxonomy, lvalues/values, lowering walks, RAII scopes, diagnostics |
 | [04-codegen-and-abi.md](04-codegen-and-abi.md) | LLVM emission design, Windows x64 ABI, vtables, EH funclets, GC emission, test harness, entry point, LLVM traps |
 | [05-partitioned-emission.md](05-partitioned-emission.md) | How an incremental build emits the program into its partitions on all threads (D-81): the coordinator, placement, symbols across partitions, imports, a script host |
+| [06-mir.md](06-mir.md) | MIR, each function's control-flow graph (R5): its shape, how it is built from HIR, the flow checks and last-use moves on it, its emission and the exception scheme of each target |
 
 ## Architecture principles (non-negotiable)
 
@@ -79,8 +80,9 @@ emission, so its body diagnostics are the build's by construction.
 | `Model/Builder/` | `ModelBuilder` (pass 1 register + orchestration), `DeclarationQueries` (pass 2: each pending declaration resolved on demand, once; cycles), `ModelResolver` (how a variable, enum, alias, union and an object's members resolve; the body-reference walk), `FreeFunctionResolver` (free functions, extension methods, out-of-line definitions) |
 | `Model/Types/` | One class per type kind: Primitive, Pointer, Reference, Array, FunPtr, Function, Object, Union, Enum, Alias, Swizzle (packed sub-vector), InitList, TemplateParam, TemplateSpecialization, Invalid |
 | `Backend/HIR/` | Typed lowering of one function body: `HIRNodes`, `HIRValue`, `ModelQueries`, `LoweringContext`, `ExprLowerer`, `StmtLowerer`, `DeclLowerer`, `LoopLowerer`, `ExceptionLowerer`, `JumpScopes`, `IndexLValue`, `LoweringDriver` (`LowerFunction`), `HIRWalk` (the tree codegen emits), `CountedArray` |
+| `Backend/MIR/` | Each lowered function's control-flow graph ([06](06-mir.md)): `MirBody` (blocks, statements, terminators, regions, unwind steps, handlers), `MirBuilder` (from HIR, where the body is lowered), `MirReach` (the missing-return and case-fallthrough checks), `MirMoves` (last-use moves and drop flags), `MirText` |
 | `Backend/Lowering/` | What a program lowers and in what order (R2, [03-hir.md](03-hir.md#what-a-program-lowers-programlowering)) - the one driver C4.exe, the language server and scripts share: `ProgramLowering` (the steps), `ProgramReach` (the D-16 closure: what lowered bodies need is lowered next), `BodyNeeds` (what a tree names), `VtableEntries`, `InvokeThunkPlan`, `TypeThunkPlan`, `GlobalStarts`, `GlobalStorage`, `ScriptLowering`, `ParallelLowering` (bodies on threads), `UseSites`; its result is a `LoweredProgram` |
-| `Backend/CodeGen/` | LLVM emission of a `LoweredProgram`; it lowers nothing ([04](04-codegen-and-abi.md)): `ProgramEmitter` (the assembly order), `PartitionSet` (the modules, placement, emission on threads), `StartupEmitter`, `ReflectionEmitter`, `ImportEmitter`, `ModuleContext`, `IRContext`, `CleanupStack`, `Abi`, `ExprEmitter`, `RegionEmitter`, `FunctionEmitter`, `TestHarnessEmitter` |
+| `Backend/CodeGen/` | LLVM emission of a `LoweredProgram`; it lowers nothing ([04](04-codegen-and-abi.md)): `ProgramEmitter` (the assembly order), `PartitionSet` (the modules, placement, emission on threads), `StartupEmitter`, `ReflectionEmitter`, `ImportEmitter`, `ModuleContext`, `IRContext`, `Abi`, `ExprEmitter`, `MirEmitter` (a function's MIR), `EhLowering` (`FuncletLowering`, `LandingPadLowering`), `FunctionEmitter`, `TestHarnessEmitter` |
 | `Backend/ProgramBackend` | The backend C4.exe and a script's compile run: `ProgramLowering`, then `ProgramEmitter` |
 | `Testing/` | Empty (test-mode support lives in the model's test registry and `TestHarnessEmitter`) |
 

@@ -1,5 +1,6 @@
 #include "Backend/CodeGen/StartupEmitter.h"
 #include "Backend/CodeGen/DataImage.h"
+#include "Backend/MIR/MirBody.h"
 #include "Model/ProgramModel.h"
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/Transforms/Utils/ModuleUtils.h>
@@ -68,6 +69,7 @@ namespace Scripting
 
 	void StartupEmitter::StartAsData(std::vector<ConstantStart>& constants, HIRFunction& round)
 	{
+		bool started = false;
 		for (ConstantStart& constant : constants)
 		{
 			ModuleContext& home = m_Partitions.Partition(m_Partitions.Of(*constant.variable));
@@ -79,11 +81,17 @@ namespace Scripting
 			if (!data)
 			{
 				round.root->stmts.push_back(constant.start);
+				started = true;
 				continue;
 			}
 			storage->setInitializer(data);
 			if (constant.variable->isConst) storage->setConstant(true);
 		}
+		// Only the storage's type tells whether a start fits as data: one that does not runs in the round, so the round's
+		// MIR is built again with it.
+		if (!started) return;
+		round.mir.reset();
+		EnsureMir(round);
 	}
 
 	llvm::Function* StartupEmitter::EmitStartFunction(ProgramModel& model, HIRFunction& body, const std::string& name)

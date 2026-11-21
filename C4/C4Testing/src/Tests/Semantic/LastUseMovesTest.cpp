@@ -91,10 +91,31 @@ namespace Testing
 		TEST_ASSERT(t.complete && t.total == 1 && t.moves == 0);
 	}
 
-	void LastUseMovesTest::GotoKeepsEveryCopy()
+	void LastUseMovesTest::GotoFollowsTheFlow()
 	{
-		const Transfers t = Lower("void F() { Res a; Res b = a; goto done; done: return; }\n");
+		// The MIR sees where a goto goes: a forward one past the last use still moves, one back to before it keeps the copy.
+		const Transfers forward = Lower("void F() { Res a; Res b = a; goto done; done: return; }\n");
+		TEST_ASSERT(forward.complete && forward.total == 1 && forward.moves == 1);
+		const Transfers back = Lower("void F(int32 n) { Res a; again: Res b = a; if (n > 0) { n = n - 1; goto again; } }\n");
+		TEST_ASSERT(back.complete && back.total == 1 && back.moves == 0);
+	}
+
+	void LastUseMovesTest::ExclusiveBranchesMoveInEach()
+	{
+		// A use in another case or the other arm of an if does not follow the copy.
+		const Transfers cases = Lower("void F(int32 k) { Res a; switch (k) { case 1: { Res b = a; break; } default: { Res c = a; break; } } }\n");
+		TEST_ASSERT(cases.complete && cases.total == 2 && cases.moves == 2);
+		const Transfers arms = Lower("void F(bool c) { Res a; if (c) { Res b = a; } else { Res d = a; } }\n");
+		TEST_ASSERT(arms.complete && arms.total == 2 && arms.moves == 2);
+	}
+
+	void LastUseMovesTest::AnExceptionPathKeepsTheCopy()
+	{
+		// A handler that uses the variable after the copy may run: the copy is not the last use.
+		const Transfers t = Lower("void F() { Res a; try { Res b = a; Peek(b); } catch (...) { Peek(a); } }\n");
 		TEST_ASSERT(t.complete && t.total == 1 && t.moves == 0);
+		const Transfers none = Lower("void F() { Res a; try { Res b = a; Peek(b); } catch (...) { } }\n");
+		TEST_ASSERT(none.complete && none.total == 1 && none.moves == 1);
 	}
 
 	void LastUseMovesTest::AssignedVariableStillMoves()

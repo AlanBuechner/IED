@@ -146,12 +146,16 @@ forgetting the source:
   is an error that points here.
 - A **local or by-value parameter at its last use** moves instead of being copied, when its address never
   escaped: `Res b = a;`, `Sink(a);` or `c = a;` with no later use of `a` take `a`'s object, and `a` is not
-  destroyed. A use is any read or write; a use in the other arm of an `if` or `?:` does not follow it; a copy
-  inside a loop of a variable declared outside the loop is not a last use; a variable a `defer` uses, and every
-  variable of a function with a `goto`, keep their copies. The address escapes through `&a`, a reference
-  variable (`T& r = a;`) or a reference capture - passing `a` to a reference parameter or calling a method on
-  it does not. A moved-from variable is destroyed on no path: the move clears its drop flag, which its cleanup
-  tests (an exception after the move destroys the object once, through its new owner).
+  destroyed. A use is any read or write; the copy is the last use when no path from it - through branches,
+  loops, `goto`s, `break`s and an exception's way to a handler - reaches another use of `a` before `a` is
+  declared again. So a use in the other arm of an `if` or `?:`, or in another `case`, does not follow it; a copy
+  inside a loop of a variable declared outside the loop is not a last use while the loop can come round to it
+  again; a handler that uses `a` after the copy keeps it. A variable a `defer` uses keeps its copies. The
+  address escapes through `&a`, a reference variable (`T& r = a;`) or a reference capture - passing `a` to a
+  reference parameter or calling a method on it does not. A moved-from variable is destroyed on no path: the
+  move clears its drop flag, which every exit's copy of its cleanup tests (an exception after the move destroys
+  the object once, through its new owner). The compiler decides this on the function's control-flow graph
+  ([compiler/06-mir.md](../compiler/06-mir.md)).
 
 **Assignment.** `a = b` on objects (D-06):
 

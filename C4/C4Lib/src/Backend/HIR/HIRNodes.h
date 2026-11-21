@@ -357,13 +357,16 @@ namespace Scripting
 		ForNode() : HIRNode(Kind::For, nullptr) {}
 	};
 
-	struct SwitchCase { ConstantValue value; BlockNode* block = nullptr; uint32 entryLabel = 0; };
+	// fallCheck: a case that may not run into the next one (D-39: it is not the last, and does not end in `fallthrough;`);
+	// the MIR checks that its end cannot be reached (MirReach::CheckCases). A line of 0: no check.
+	struct SwitchCase { ConstantValue value; BlockNode* block = nullptr; uint32 entryLabel = 0; SourceLocation fallCheck{}; };
 	struct SwitchNode : HIRNode
 	{
 		const HIRNode* cond = nullptr;
 		std::vector<SwitchCase> cases;
 		BlockNode* defaultBlock = nullptr; // null when no default
 		uint32 defaultEntry = 0;           // the default slot's entry label (a `fallthrough;` from the prior case jumps here)
+		SourceLocation defaultFallCheck{}; // the default's SwitchCase::fallCheck
 		uint32 breakLabel = 0;             // a `break` inside a case exits the switch (not any loop)
 		SwitchNode(const HIRNode* c) : HIRNode(Kind::Switch, nullptr), cond(c) {}
 	};
@@ -379,9 +382,8 @@ namespace Scripting
 		uint32 targetLabel = 0;
 		explicit JumpNode(uint32 l) : HIRNode(Kind::Jump, nullptr), targetLabel(l) {}
 	};
-	// A `goto label`. HIR has checked the jump rules: the label is in the goto's block or an enclosing one
-	// and a forward jump crosses no declaration or defer, so codegen can always find the label's block on
-	// its current block path. Code after a goto is laid out as unreachable.
+	// A `goto label`. HIR has checked the jump rules (JumpScopes): a forward jump crosses no declaration or defer, so
+	// the MIR builder finds the label's block on its current block path. Code after a goto is unreachable.
 	struct GotoNode : HIRNode
 	{
 		uint32 targetLabel = 0;
@@ -419,7 +421,6 @@ namespace Scripting
 	{
 		uint32 slot = 0;
 		const HIRNode* init = nullptr; // null when default-initialized
-		uint32 liveFlag = kNoDropFlag; // a moved-from local's drop flag, set when the declaration runs (D-05)
 		Core::String m_Name;           // kept for debug/diagnostics; lookup uses the scope chain
 		LocalDeclNode(uint32 s, const Type* t, const HIRNode* i) : HIRNode(Kind::LocalDecl, t), slot(s), init(i) {}
 	};
@@ -540,11 +541,17 @@ namespace Scripting
 	// =====================================================================
 	enum class SlotClass { Param, Local, Temp, Static };
 
+	struct MirBody;
+	void DeleteMirBody(MirBody* body);
+	struct MirBodyDelete { void operator()(MirBody* body) const { DeleteMirBody(body); } };
+
 	struct HIRFunction
 	{
 		const FunctionRecord* record = nullptr; // the function this tree is for
 		BlockNode* root = nullptr;              // the top-level block (scope carrier)
 		bool complete = false;                  // true when lowering finished without error
+		// Its control-flow graph (Backend/MIR), built from the complete tree where it is lowered: what codegen emits.
+		std::unique_ptr<MirBody, MirBodyDelete> mir;
 
 		// Slot table: parameters, locals, and temporaries in one indexed array. Codegen lays out
 		// stack space from this single table. Order is allocation order (params first).

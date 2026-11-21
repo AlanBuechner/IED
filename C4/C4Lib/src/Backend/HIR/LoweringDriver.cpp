@@ -4,12 +4,12 @@
 #include "Backend/HIR/MethodBody.h"
 #include "Backend/HIR/LambdaLowerer.h"
 #include "Backend/HIR/TemplateBindings.h"
-#include "Backend/HIR/LastUseMoves.h"
+#include "Backend/MIR/MirMoves.h"
+#include "Backend/MIR/MirReach.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
 #include "Model/Types/ReferenceType.h" // T& parameter - passed by address, registered as Pointer(pointee)
 #include "Model/TypeHandle.h"           // UnwrapToValue (alias/reference -> concrete type)
 #include "Model/Abstractness.h"
-#include "Backend/HIR/Reachability.h"
 
 namespace Scripting
 {
@@ -32,11 +32,11 @@ namespace Scripting
 	namespace
 	{
 		// D-55: control may not run off the end of a function that returns a value; `main` returns 0 there, as in C.
-		QueryResult<void> ReturnsOnEveryPath(const FunctionRecord& record, bool isLambda, const CodeBlockNode* body, const BlockNode& root)
+		QueryResult<void> ReturnsOnEveryPath(const FunctionRecord& record, bool isLambda, const CodeBlockNode* body, const MirBody& mir)
 		{
 			const Type* returned = record.type ? TypeHandle::UnwrapToValue(record.type->GetReturnType()) : nullptr;
 			if (!body || !returned || returned->GetKind() == TypeKind::Void || IsEntryPoint(record, "main") ||
-				!Reachability::CompletesNormally(root))
+				!MirReach::FallsOffEnd(mir))
 				return QueryResult<void>::Success();
 			const Core::String function = isLambda ? Core::String("the lambda")
 				: "non-void function '" + (record.name.empty() ? record.mangledName : record.name) + "'";
@@ -44,6 +44,15 @@ namespace Scripting
 				": return a '" + returned->GetName() + "' on every path");
 			missing.loc = body->GetCloseBraceToken().GetStartLocation();
 			return missing;
+		}
+
+		// What the body's lowering recorded for its last-use moves (D-05).
+		MirMoveSites MoveSitesOf(const LoweringContext& ctx)
+		{
+			MirMoveSites sites;
+			for (const LoweringContext::TransferSite& transfer : ctx.transfers) sites.transfers.push_back({ transfer.node, transfer.slot });
+			for (const auto& [slot, cleanup] : ctx.localCleanups) sites.cleanups[slot] = { cleanup.cleanup, cleanup.beginsWith };
+			return sites;
 		}
 
 		bool HasErrorSince(const ErrorTracker& errors, size_t first)
@@ -118,17 +127,26 @@ namespace Scripting
 		size_t errorsBefore = errors.GetErrors().Count();
 		auto r = LowerFunctionBody(ctx, record, body, fn.root);
 		if (r.Ok()) r = ctx.jumps.Validate();
-		if (r.Ok()) r = ReturnsOnEveryPath(*record, model.ClosureOf(record->containingType) != nullptr, body, *fn.root);
+		// The complete tree's control-flow graph: the flow checks and the last-use moves run on it, and codegen emits it.
+		const std::optional<MirMoveSites> moves = r.Ok() && !ctx.transfers.empty() ? std::optional(MoveSitesOf(ctx)) : std::nullopt;
+		if (r.Ok())
+		{
+			const std::optional<MirBuildOptions> options = moves ? std::optional(moves->BuildOptions()) : std::nullopt;
+			fn.mir.reset(new MirBody(MirBuilder(fn, options ? &*options : nullptr).Build()));
+			r = MirReach::CheckCases(*fn.mir);
+		}
+		if (r.Ok()) r = ReturnsOnEveryPath(*record, model.ClosureOf(record->containingType) != nullptr, body, *fn.mir);
 		if (!r.Ok())
 		{
 			// Contract: an incomplete lowering ALWAYS reports why. Some paths return a raw Fail without
 			// recording it; guarantee this function contributed at least one error (a warning does not say why).
 			if (!HasErrorSince(errors, errorsBefore))
 				errors.AddError(r.loc.line ? r.loc : (body ? body->startLocation : SourceLocation()), r.message);
+			fn.mir.reset();
 			return fn; // incomplete tree, codegen skips it
 		}
 
-		MoveAtLastUse(ctx, fn);
+		if (moves) MirMoves::Apply(fn, *fn.mir, *moves, ctx.queries().TypeStore()->Builtin(TypeKind::Bool));
 		fn.complete = true;
 		return fn;
 	}

@@ -3,7 +3,6 @@
 #include "Parser/Nodes/Statements/AsmStatementNode.h"
 #include "Backend/HIR/ImplicitConversion.h"
 #include "Backend/HIR/CaseLabels.h"
-#include "Backend/HIR/Reachability.h"
 #include "Backend/HIR/DestructuringLowerer.h"
 #include "Backend/HIR/ReadOnly.h"
 #include "Model/Types/ReferenceType.h"
@@ -391,7 +390,7 @@ namespace Scripting
 		static_cast<BlockNode*>(region)->stmts.push_back(node);
 
 		// Each case owns an entry label: `fallthrough;` and a stacked empty label jump to the next case's entry.
-		struct CaseSlot { const SwitchCaseNode* cn; BlockNode* block; uint32 entry; };
+		struct CaseSlot { const SwitchCaseNode* cn; BlockNode* block; uint32 entry; size_t caseIndex; };
 		std::vector<CaseSlot> slots;
 		CaseLabels labels(m_Ctx, selector);
 		for (const auto& c : n->GetCases())
@@ -408,6 +407,8 @@ namespace Scripting
 				}
 				node->defaultBlock = caseBlock;
 				node->defaultEntry = entry;
+				slots.push_back({ cn, caseBlock, entry, SIZE_MAX });
+				continue;
 			}
 			else
 			{
@@ -416,13 +417,14 @@ namespace Scripting
 				SwitchCase sc; sc.value = v.value; sc.block = caseBlock; sc.entryLabel = entry;
 				node->cases.push_back(sc);
 			}
-			slots.push_back({ cn, caseBlock, entry });
+			slots.push_back({ cn, caseBlock, entry, node->cases.size() - 1 });
 		}
 
 		for (size_t i = 0; i < slots.size(); ++i)
 		{
 			const uint32* next = i + 1 < slots.size() ? &slots[i + 1].entry : nullptr;
-			if (auto r = LowerCase(*slots[i].cn, slots[i].block, next); !r.Ok()) { m_Ctx.PopSwitch(); return r; }
+			SourceLocation& fallCheck = slots[i].caseIndex == SIZE_MAX ? node->defaultFallCheck : node->cases[slots[i].caseIndex].fallCheck;
+			if (auto r = LowerCase(*slots[i].cn, slots[i].block, next, fallCheck); !r.Ok()) { m_Ctx.PopSwitch(); return r; }
 		}
 
 		m_Ctx.PopSwitch();
@@ -431,8 +433,8 @@ namespace Scripting
 
 	// A case runs its statements. `fallthrough;`, its last statement, jumps into the next case; an empty case
 	// (a stacked label) continues into the next one; any other case that can run off its end is an error
-	// unless it is the last (D-39).
-	QueryResult<void> StmtLowerer::LowerCase(const SwitchCaseNode& cn, BlockNode* block, const uint32* next)
+	// unless it is the last (D-39): the MIR checks that its end cannot be reached (`fallCheck`, MirReach::CheckCases).
+	QueryResult<void> StmtLowerer::LowerCase(const SwitchCaseNode& cn, BlockNode* block, const uint32* next, SourceLocation& fallCheck)
 	{
 		RegionScope caseScope(m_Ctx, block, "switch-case");
 		const auto& statements = cn.GetStatements();
@@ -457,9 +459,7 @@ namespace Scripting
 			block->stmts.push_back(m_Ctx.out->NewNode<JumpNode>(*next));
 			return QueryResult<void>::Success();
 		}
-		if (Reachability::CompletesNormally(*block))
-			return m_Ctx.Fail(&cn, QueryResult<void>::Fail(QueryError::NotAValue,
-				"this case falls into the next one: end it with 'break;' or 'fallthrough;'"));
+		fallCheck = cn.startLocation;
 		return QueryResult<void>::Success();
 	}
 

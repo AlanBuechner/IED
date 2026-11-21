@@ -76,7 +76,7 @@ namespace Scripting
 		QueryResult<void> LowerIf(const IfStatementNode* n, HIRNode* region);
 		QueryResult<void> LowerElse(const AstNode* elseBranch, BlockNode* target);
 		QueryResult<void> LowerSwitch(const SwitchStatementNode* n, HIRNode* region);
-		QueryResult<void> LowerCase(const SwitchCaseNode& cn, BlockNode* block, const uint32* next);
+		QueryResult<void> LowerCase(const SwitchCaseNode& cn, BlockNode* block, const uint32* next, SourceLocation& fallCheck);
 		QueryResult<void> LowerBreak(const BreakStatementNode* n, HIRNode* region);
 		QueryResult<void> LowerContinue(const ContinueStatementNode* n, HIRNode* region);
 		QueryResult<void> LowerGoto(const GotoStatementNode* n, HIRNode* region);
