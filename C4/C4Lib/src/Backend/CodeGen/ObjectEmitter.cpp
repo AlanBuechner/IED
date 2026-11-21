@@ -62,8 +62,9 @@ namespace Scripting
 
 	llvm::Value* ObjectEmitter::AllocateTyped(const Type* type, llvm::Constant* census, llvm::Value* size, uint64 align)
 	{
-		// A pointer-free object is never scanned by the collector (docs/runtime/01).
-		const char* allocator = TypeHandle::MayHoldPointers(type) ? "c4_alloc_typed" : "c4_alloc_typed_noscan";
+		// A pointer-free object is never scanned by the collector, one with a pointer map only where it says (docs/runtime/01).
+		const char* allocator = !TypeHandle::MayHoldPointers(type) ? "c4_alloc_typed_noscan"
+			: m_Ctx.mctx().census().HasPointerMap(type) ? "c4_alloc_precise" : "c4_alloc_typed";
 		auto& B = m_Ctx.builder();
 		auto* allocFn = m_Ctx.mctx().RuntimeFunction(allocator, B.getPtrTy(), { B.getInt64Ty(), B.getInt64Ty(), B.getPtrTy() });
 		return m_Ctx.Call(allocFn, { size, B.getInt64(align), census }, false);

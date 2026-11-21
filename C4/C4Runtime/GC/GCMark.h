@@ -1,7 +1,8 @@
 #pragma once
-// Marking with an explicit stack (no recursion). Scanning is conservative: every aligned word in a scanned
-// range that points into an object (anywhere inside it) marks that object, also a pointer boxed in a NaN (a tag over
-// its 47 bits: a Lua value, D-85). While several markers drain together (GCParallelMark.h) a mark bit is claimed
+// Marking with an explicit stack (no recursion). Every aligned word read that points into an object (anywhere inside
+// it) marks that object, also a pointer boxed in a NaN (a tag over its 47 bits: a Lua value, D-85). Roots and objects
+// of unknown type are read whole (conservatively); an object of a type with a pointer map only where the map says a
+// pointer may be (GC_SCAN_PRECISE, GCPointers.h). While several markers drain together (GCParallelMark.h) a mark bit is claimed
 // atomically, so each object is scanned once.
 
 #include "GC/GCHeap.h"
@@ -11,8 +12,14 @@ typedef struct GCScanItem
 {
 	const uint8_t* start;
 	size_t size;
-	GCScanKind kind;          // GC_SCAN_ALL, or the kind of the hash entries it covers, whole ones
+	GCScanKind kind;          // GC_SCAN_ALL; GC_SCAN_PRECISE (part of a precise span); GC_SCAN_MASKED; the kind of the
+	                          // hash entries it covers
 } GCScanItem;
+
+// An item kind no span has: a small precise object whose pointer bits were read when it was pushed, held in `size` (bit
+// i: the word at start + 8i), so its scan needs neither its size nor its span.
+#define GC_SCAN_MASKED ((GCScanKind)GC_SCAN_KINDS)
+#define GC_MASKED_MAX_WORDS 64u
 
 struct GCMarkShare;
 
@@ -40,6 +47,10 @@ void gc_mark_range(GCMarker* marker, const void* lo, const void* hi);
 
 // Queues [lo, hi) to be scanned by the drain, in chunks the markers share; the memory must stay as it is until then.
 void gc_mark_range_later(GCMarker* marker, const void* lo, const void* hi);
+
+
+// Queues the part [from, to) of a precise span's object: the words its pointer bits name.
+void gc_mark_precise_later(GCMarker* marker, const uint8_t* from, const uint8_t* to);
 
 // Queues the part [from, to) of the hash entries of an object starting at `base`, rounded out to whole entries.
 void gc_mark_entries_later(GCMarker* marker, const uint8_t* base, const uint8_t* from, const uint8_t* to, GCScanKind kind);

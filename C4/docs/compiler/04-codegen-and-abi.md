@@ -396,11 +396,22 @@ The runtime contract is in [../runtime/01-memory-and-gc.md](../runtime/01-memory
 
 1. **Stores.** Every typed store goes through `ExprEmitter::GcStore`. The collector needs no barrier, so it
    is a plain store; a future generational or concurrent collector adds its barrier there.
-2. **Allocation.** `new` -> `c4_alloc_typed(size, align, type)`, or `c4_alloc_typed_noscan` for a type that holds
-   no pointers (`TypeHandle::MayHoldPointers`); `type` is the type's census record (`CensusTypes`, one private
-   `c4_gc_type { name, nativeBytes }` per name in the module): its QualifiedName (`T[]` for `new T[n]`) and, for a
-   type that holds native memory (`NativeMemory::Holds`), an internal `__c4_native_bytes.<name>` function that
-   returns `native_bytes_of` the object (or of a counted array's elements). Lowering lowers each such function once
+2. **Allocation.** `new` -> `c4_alloc_precise(size, align, type)` for a type with a pointer map (below,
+   `CensusTypes::HasPointerMap`), `c4_alloc_typed` for one whose every word may hold a pointer, or
+   `c4_alloc_typed_noscan` for a type that holds no pointers (`TypeHandle::MayHoldPointers`); `type` is the type's
+   record (`CensusTypes`, one private
+   `c4_gc_type { name, nativeBytes, pointers, words, array, firstElementWords }` per type in the module): its
+   QualifiedName (`T[]` for `new T[n]`); for a type that holds native memory (`NativeMemory::Holds`), an internal
+   `__c4_native_bytes.<name>` function that returns `native_bytes_of` the object (or of a counted array's elements);
+   and its pointer map (R16, `PointerMap::Of` in `PointerMaps.cpp`), a private `c4.pointer_map` constant of `i64`
+   words whose bit i says whether the object's word at byte 8i may hold a managed pointer, walked from the layout:
+   bases at their offsets, fields at theirs, every member of a union or an anonymous union (a word counts when any
+   reading of it may be a pointer), fixed arrays element by element, a pointer, reference or `func` whole, nothing
+   for a vptr, a function pointer or a pointer-free type. A type whose every word may hold one, or whose layout is not
+   known or no whole number of words, has none (`pointers` null, `words` 0): the collector scans it whole, which reads
+   the same. An array's record maps one element (`array` 1, `firstElementWords` the words of a counted array's count)
+   and the runtime repeats it. A closure's environment is allocated the same way (`FuncEmitter::HeapEnvironment`).
+   Lowering lowers each such counter function once
    (`ProgramReach`, `NativeBytes::LowerCensusFunction`) for the types code allocates (`BodyNeeds`), and each partition
    that allocates one defines its own copy from that tree (`PartitionSet::DefineCensusCounters`). The runtime notes the
    record only while a census runs; finalizer registration when `[operator("delete")]` exists.

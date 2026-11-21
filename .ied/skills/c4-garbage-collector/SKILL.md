@@ -1,6 +1,6 @@
 ---
 name: c4-garbage-collector
-description: C4 garbage collector - conservative, non-moving mark-sweep, mostly concurrent past 16 MiB live (OS write watch, no barrier), with size-class spans, an O(1) page map, an explicit mark stack, ordered finalizers and noscan allocation for pointer-free types (C4Runtime/GC/, linked into every executable). Covers the managed-pointer model, roots, raw allocation, scan regions, root enumerators, collection callbacks, custom-allocator pools, counted pins, pacing, disable/enable windows, stats and the Bedrock GC namespace.
+description: C4 garbage collector - non-moving mark-sweep, precise for heap objects by compiler pointer maps and conservative for stacks and raw regions, mostly concurrent past 16 MiB live (OS write watch, no barrier), with size-class spans, an O(1) page map, an explicit mark stack, ordered finalizers and noscan allocation for pointer-free types (C4Runtime/GC/, linked into every executable). Covers the managed-pointer model, roots, raw allocation, scan regions, root enumerators, collection callbacks, custom-allocator pools, counted pins, pacing, disable/enable windows, stats and the Bedrock GC namespace.
 triggers:
   - "C4 garbage collector"
   - "non-moving mark-sweep stop-the-world finalizer"
@@ -13,8 +13,9 @@ triggers:
 
 # C4 garbage collector
 
-C4 uses a **conservative, non-moving, stop-the-world mark-sweep** collector with **no write barriers** (it
-rescans everything each collection). The C API is `C4Runtime/GCRuntimeC.h`; the implementation is
+C4 uses a **non-moving mark-sweep** collector with **no write barriers** (it rescans everything each collection;
+past 16 MiB live it marks mostly concurrently): **precise for heap objects of known type** (R16: compiler pointer
+maps), **conservative for stacks, registers and raw regions**. The C API is `C4Runtime/GCRuntimeC.h`; the implementation is
 `C4Runtime/GC/` (pure C plus a C++ finalizer shim), linked into every executable. The reference is
 `docs/runtime/01-memory-and-gc.md`.
 
@@ -29,10 +30,19 @@ rescans everything each collection). The C API is `C4Runtime/GCRuntimeC.h`; the 
   A finalizer may allocate. An exception escaping a finalizer is fatal.
 - Objects of pointer-free types are allocated `noscan`: a pointer kept in such an object as an integer does
   not keep anything alive. Hiding pointers in integers is not supported.
+- Heap objects are scanned precisely (R16): every `c4_gc_type` record `new` passes carries the type's pointer map
+  (`CodeGen/PointerMaps.cpp`: which words may hold a pointer - pointer/reference fields, a `func`'s words, a union's
+  word when a member may be one; not vptrs, function pointers or numbers); `new` of such a type calls
+  `c4_alloc_precise`, and marking reads only those words of an object (`GC_SCAN_PRECISE` spans keep each slot's bits
+  on a byte, written with one store at allocation, `GC/GCPointers.{h,c}`). A type whose every word may hold a
+  pointer has no map and is scanned whole (`c4_alloc_typed`). `new T[n]` repeats the element's map after a counted
+  array's count. Keep the mark and allocation fast paths inline (`push_contents`, `gc_thread_alloc_mapped`) and the
+  hot `GCSpan` fields before the bitmaps: each of those cost the GC benchmark 5-25% when lost.
+  Still conservative: stacks, registers, scan regions, `c4_alloc` memory.
 
 ## Roots
 `__c4_gc_roots` (compiler-emitted `{address, size}` ranges for every global, static member and static local
-that may hold a pointer), the calling thread's registers and stack (conservative), registered scan regions,
+that may hold a pointer), every registered thread's registers and stack (conservative), registered scan regions,
 root enumerators, pinned objects and objects waiting for their finalizer. A conservative collector can keep
 an object alive while a stale copy of its address sits in a register or dead stack slot - tests that assert
 "was collected" must allow a few survivors.
@@ -70,11 +80,13 @@ size limit, and hooks may (un)register hooks while they run.
   nothing reaches and frees their slots (`options.released` hears of each; `Take` collects once before saying the
   pool is full). `options.keepAll` keeps every taken object (and what it reaches) until given back; `options.keep`
   may keep one a collection would end (it runs with other threads stopped: no locks, no Take); `options.noscan` for
-  pointer-free objects. `At(i)`, `IndexOf`, `Holds`; `delete` and finalizers do not apply to pool objects.
+  pointer-free objects. `At(i)`, `IndexOf`, `Holds`; `delete` and finalizers do not apply to pool objects. The C API
+  `c4_gc_pool_set_type(pool, type)` (before a slot is occupied) makes a pool's objects precise by a `c4_gc_type`.
 
 ## Internals (C4Runtime/GC/)
 `GCPlatformWin32.c` (OS memory, register capture + stack scan, clock), `GCPageHeap` (64 MiB arenas,
 two-level page map, coalescing free runs, scavenging to the OS), `GCHeap` (72 size classes, bitmaps, large
-objects, sweep), `GCMark` (explicit mark stack), `GCFinalize`, `GCRoots`, `GCPtrMap`, `GCCollector`
+objects, sweep), `GCPointers` (precise spans' pointer bits), `GCMark` (explicit mark stack), `GCFinalize`, `GCRoots`,
+`GCPtrMap`, `GCCollector`
 (cycle, pacing), `GCPools` (pool spans, keep decisions, release queue), `GCApi.c` (exports; the only process
 state). Threads are D-48: suspend-and-scan with per-thread caches and parallel marking.

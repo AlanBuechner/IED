@@ -45,6 +45,9 @@ int64_t gc_pool_slot_of(const GCPool* pool, const void* object);
 // An object occupied while a collection marks (`marked`) counts as reached, like a new allocation.
 void gc_pool_set_occupied(GCPool* pool, size_t slot, int occupied, int marked);
 int gc_pool_occupied(const GCPool* pool, size_t slot);
+// The pool's objects are of `type`: marking reads each by its pointer map (c4_gc_pool_set_type). 0 when a slot is
+// occupied, the pool is noscan, or the type is an array's or larger than a slot.
+int gc_pool_set_type(GCHeap* heap, GCPool* pool, const c4_gc_type* type);
 
 // During a collection: the occupied objects of keep-all pools, as roots.
 void gc_pools_mark_kept(GCMarker* marker, const GCPool* pools);

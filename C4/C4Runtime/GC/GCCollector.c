@@ -84,6 +84,7 @@ void gc_reclaim(GCState* gc)
 	gc->collections++;
 	gc_heap_sweep(&gc->heap, gc->collections);
 	gc_pools_sweep(gc->pools, &gc->releases, &gc->heap.liveBytes);
+	gc_pages_drop_retired(&gc->heap.pages);
 	if (gc->census.on) gc_census_take(&gc->census, &gc->heap);
 	gc->heap.allocateMarked = 0;
 	gc_pages_scavenge(&gc->heap.pages, gc->collections);
@@ -142,7 +143,7 @@ static void check_request(GCAllocRequest request)
 }
 
 // From the thread's span of the class, refilled from the heap until one has a free slot.
-static void* allocate_small(GCState* gc, GCThread* self, uint32_t spanClass)
+static void* allocate_small(GCState* gc, GCThread* self, uint32_t spanClass, GCAllocRequest request)
 {
 	GCThreadCache* cache = &self->cache;
 	for (;;)
@@ -150,7 +151,7 @@ static void* allocate_small(GCState* gc, GCThread* self, uint32_t spanClass)
 		GCSpan* span = cache->spans[spanClass];
 		if (span)
 		{
-			void* p = gc_heap_alloc_slot(&gc->heap, span);
+			void* p = gc_heap_alloc_in(&gc->heap, span, request);
 			if (p)
 			{
 				cache->allocatedBytes += span->elemSize;
@@ -169,7 +170,7 @@ static void* allocate_small(GCState* gc, GCThread* self, uint32_t spanClass)
 static void* allocate_once(GCState* gc, GCThread* self, GCAllocRequest request)
 {
 	const int spanClass = gc_heap_small_class(request);
-	if (spanClass >= 0) return allocate_small(gc, self, (uint32_t)spanClass);
+	if (spanClass >= 0) return allocate_small(gc, self, (uint32_t)spanClass, request);
 	void* p = gc_heap_alloc_large(&gc->heap, request);
 	if (p) gc->allocs++;
 	return p;

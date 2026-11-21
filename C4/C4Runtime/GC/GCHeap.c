@@ -55,6 +55,7 @@ static GCSpan* new_small_span(GCHeap* heap, uint32_t spanClass)
 	span->elemSize = size;
 	span->nelems = (uint32_t)((npages << GC_PAGE_SHIFT) / size);
 	span->divMagic = (uint32_t)(0xFFFFFFFFu / size) + 1u;
+	if (span->scanKind == GC_SCAN_PRECISE) gc_pointers_prepare(&heap->pages, span);
 	list_push(&heap->classes[spanClass].all, span);
 	return span;
 }
@@ -97,6 +98,11 @@ void* gc_heap_alloc_large(GCHeap* heap, GCAllocRequest request)
 	span->allocCount = 1;
 	gc_bit_set(span->allocBits, 0);
 	if (span->needsZero) memset(span->base, 0, size);
+	if (request.scanKind == GC_SCAN_PRECISE)
+	{
+		gc_pointers_prepare(&heap->pages, span);
+		gc_pointers_write(span, 0, request.size, request.type);
+	}
 	if (__atomic_load_n(&heap->allocateMarked, __ATOMIC_ACQUIRE)) gc_bit_claim(span->markBits, 0);
 	list_push(&heap->large, span);
 	heap->liveBytes += (int64_t)size;

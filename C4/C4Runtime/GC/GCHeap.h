@@ -5,6 +5,7 @@
 // (GCThreads.h) without the collector's lock; everything else here runs under it.
 
 #include "GC/GCPageHeap.h"
+#include "GC/GCPointers.h"
 #include "GC/GCSizeClasses.h"
 #include <string.h>
 
@@ -40,6 +41,7 @@ typedef struct GCAllocRequest
 	size_t size;
 	size_t align;
 	GCScanKind scanKind;
+	const c4_gc_type* type;   // GC_SCAN_PRECISE: the type whose pointer map the object's bits take
 } GCAllocRequest;
 
 // A small request's span class (class * GC_SCAN_KINDS + scanKind), or -1 for a large one.
@@ -77,13 +79,15 @@ static inline uint32_t gc_find_clear_bit(const uint64_t* bits, uint32_t from, ui
 // only the owner sets a span's allocation bits and raises its count. Another thread may meanwhile delete an object of
 // it, clearing its bit and lowering the count atomically; should that land between the owner's read and write of the
 // same word, the slot reads as taken and the count as higher until the next sweep recomputes both from the marks.
-static inline void* gc_heap_alloc_slot(const GCHeap* heap, GCSpan* span)
+// The slot's number goes to *taken.
+static inline void* gc_heap_alloc_slot(const GCHeap* heap, GCSpan* span, uint32_t* taken)
 {
 	const uint32_t nelems = span->nelems;
 	if (__atomic_load_n(&span->allocCount, __ATOMIC_RELAXED) >= nelems) return NULL;
 	uint32_t slot = gc_find_clear_bit(span->allocBits, span->freeIndex, nelems);
 	if (slot == nelems) slot = gc_find_clear_bit(span->allocBits, 0, nelems);
 	if (slot == nelems) return NULL;
+	*taken = slot;
 	uint64_t* word = &span->allocBits[slot >> 6];
 	__atomic_store_n(word, __atomic_load_n(word, __ATOMIC_RELAXED) | ((uint64_t)1 << (slot & 63u)), __ATOMIC_RELEASE);
 	__atomic_store_n(&span->allocCount, __atomic_load_n(&span->allocCount, __ATOMIC_RELAXED) + 1u, __ATOMIC_RELAXED);
@@ -91,6 +95,16 @@ static inline void* gc_heap_alloc_slot(const GCHeap* heap, GCSpan* span)
 	uint8_t* p = gc_span_slot_base(span, slot);
 	if (__atomic_load_n(&span->needsZero, __ATOMIC_ACQUIRE)) memset(p, 0, span->elemSize);
 	if (__atomic_load_n(&heap->allocateMarked, __ATOMIC_ACQUIRE)) gc_bit_claim(span->markBits, slot); // markers claim beside it
+	return p;
+}
+
+// A slot of a span the calling thread holds under the lock for `request`: its pointer bits written for a precise one.
+// NULL when the span is full.
+static inline void* gc_heap_alloc_in(const GCHeap* heap, GCSpan* span, GCAllocRequest request)
+{
+	uint32_t slot = 0;
+	void* p = gc_heap_alloc_slot(heap, span, &slot);
+	if (p && request.scanKind == GC_SCAN_PRECISE) gc_pointers_write_fast(span, slot, request.size, request.type);
 	return p;
 }
 

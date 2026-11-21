@@ -1,0 +1,117 @@
+// R16: an object of a type with a pointer map is read only where the map says a pointer may be. An address kept in an
+// integer field does not keep the object it names alive; the pointer fields keep theirs - in a lone object, through a
+// base and past a vptr, in a union whose member may be a pointer, in an array (`new T[n]`), in a counted array (its
+// elements have a finalizer, so their count comes first) and in an array past the small-object sizes.
+include "Memory/gc.ch"
+
+int32 g_finalized = 0;
+int32 g_holdersFinalized = 0;
+
+struct Target {
+	public int32 value;
+	[operator("delete")] void Finalize() { g_finalized++; }
+}
+
+struct Mixed { public uint64 address; public Target* target; public float[6] numbers; }
+
+class Base { public Target* target; public virtual int32 Kind() { return 1; } }
+class Derived : Base { public uint64 address; public int32 side; public override int32 Kind() { return 2; } }
+
+union Word { public Target* pointer; public uint64 bits; }
+struct Punned { public uint64 address; public Word word; }
+
+struct Holder {
+	public uint64 address;
+	public Target* target;
+	[operator("delete")] void Finalize() { g_holdersFinalized++; }
+}
+
+const int32 kLone = 50;
+const int32 kSmallArray = 8;
+const int32 kCountedArray = 6;
+const int32 kLargeArray = 1000;   // 40 000 bytes: a large object
+
+Mixed*[50] g_mixed;
+Derived*[50] g_derived;
+Punned*[50] g_punned;
+Mixed* g_small;
+Holder* g_counted;
+Mixed* g_large;
+int32 g_kept = 0;      // targets only a pointer field refers to
+int64 g_keptSum = 0;
+
+Target* Kept() {
+	Target* t = new Target;
+	t->value = g_kept;
+	g_keptSum += g_kept;
+	g_kept++;
+	return t;
+}
+
+uint64 Dropped() { return (uint64)new Target; }
+
+void FillMixed(Mixed* m) {
+	m->address = Dropped();
+	m->target = Kept();
+}
+
+void Fill() {
+	for (int32 i = 0; i < kLone; i++) {
+		g_mixed[i] = new Mixed;
+		FillMixed(g_mixed[i]);
+		Derived* d = new Derived;
+		d->address = Dropped();
+		d->target = Kept();
+		g_derived[i] = d;
+		Punned* p = new Punned;
+		p->address = Dropped();
+		p->word.pointer = Kept();
+		g_punned[i] = p;
+	}
+	g_small = new Mixed[kSmallArray];
+	for (int32 i = 0; i < kSmallArray; i++) FillMixed(&g_small[i]);
+	g_counted = new Holder[kCountedArray];
+	for (int32 i = 0; i < kCountedArray; i++) {
+		g_counted[i].address = Dropped();
+		g_counted[i].target = Kept();
+	}
+	g_large = new Mixed[kLargeArray];
+	for (int32 i = 0; i < kLargeArray; i++) FillMixed(&g_large[i]);
+}
+
+int64 Scrub(int32 depth) {
+	int64[128] junk;
+	for (int32 i = 0; i < 128; i++) junk[i] = depth;
+	GC::IsReachable((void*)&junk);
+	if (depth == 0) return junk[1];
+	return Scrub(depth - 1) + junk[2];
+}
+
+int64 KeptSum() {
+	int64 sum = 0;
+	for (int32 i = 0; i < kLone; i++) {
+		sum += g_mixed[i]->target->value;
+		sum += g_derived[i]->target->value;
+		sum += g_punned[i]->word.pointer->value;
+	}
+	for (int32 i = 0; i < kSmallArray; i++) sum += g_small[i].target->value;
+	for (int32 i = 0; i < kCountedArray; i++) sum += g_counted[i].target->value;
+	for (int32 i = 0; i < kLargeArray; i++) sum += g_large[i].target->value;
+	return sum;
+}
+
+int32 main() {
+	Fill();
+	Scrub(8);
+	GC::Collect();
+	GC::Collect();
+	const int32 dropped = 3 * kLone + kSmallArray + kCountedArray + kLargeArray;
+	printf("finalized %d of %d targets only an integer named\n", g_finalized, dropped);
+	if (g_finalized < dropped - 5) return 1;     // the integer-held targets went
+	if (g_finalized > dropped) return 2;         // the pointer-held ones stayed
+	if (KeptSum() != g_keptSum) return 3;
+	if (g_derived[0]->Kind() != 2) return 4;     // the vptr survived the collections
+	if (g_holdersFinalized != 0) return 5;       // the counted array is still reachable
+	printf("PRECISE OK\n");
+	return 0;
+}

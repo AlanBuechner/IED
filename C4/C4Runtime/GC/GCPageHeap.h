@@ -12,6 +12,7 @@
 #define GC_L1_COUNT 2048u   // user addresses are below 2^47
 #define GC_L2_COUNT (1u << (GC_L1_SHIFT - GC_ARENA_SHIFT))
 #define GC_FREE_BINS 128u   // bin n holds free runs of n pages; bin 0 holds every longer run
+#define GC_SPARE_BITS_BYTES 4096u   // freed spans' pointer bits up to this size wait for the next span that takes as many
 
 typedef struct GCArena
 {
@@ -35,6 +36,11 @@ typedef struct GCPageHeap
 	GCSpan* bins[GC_FREE_BINS];
 	GCSpan* spareSpans;            // span records ready for reuse
 	size_t committedBytes;
+	uint8_t* spareBits[GC_SPARE_BITS_BYTES / 8 + 1]; // freed spans' pointer bits by their size in words, linked by their first
+	int keepFreedBits;             // a concurrent cycle marks without the lock: freed spans' pointer bits wait for its end
+	struct GCRetiredBits* retired; // those bits
+	size_t retiredCount;
+	size_t retiredCapacity;
 } GCPageHeap;
 
 // A run of `npages` pages as a span record (state and slots left to the caller); its needsZero says whether
@@ -44,8 +50,16 @@ GCSpan* gc_pages_alloc(GCPageHeap* heap, size_t npages);
 // The first `npages` pages of an allocated span as a span of their own; `span` keeps the rest.
 GCSpan* gc_pages_split(GCPageHeap* heap, GCSpan* span, size_t npages);
 
-// Returns a span's pages; `epoch` is the current collection count.
+// Returns a span's pages; `epoch` is the current collection count. Its pointer bits go too (to the spares, or to the
+// collector's memory), or wait for gc_pages_drop_retired while keepFreedBits holds.
 void gc_pages_free(GCPageHeap* heap, GCSpan* span, uint64_t epoch);
+
+// `bytes` (a multiple of 8) of pointer bits for a span (GCPointers.h): a freed span's of that size, or new. They are not
+// cleared: every object writes the bits of its slot when it takes it. Under the lock.
+uint8_t* gc_pages_take_bits(GCPageHeap* heap, size_t bytes);
+
+// Gives back the pointer bits kept since keepFreedBits went up, and lets it down: no marker runs (a cycle's final stop).
+void gc_pages_drop_retired(GCPageHeap* heap);
 
 // A copy of the mappings (the collector's memory: gc_mem_free it), for walking them without the lock.
 GCMapping* gc_pages_mappings(const GCPageHeap* heap, size_t* count);

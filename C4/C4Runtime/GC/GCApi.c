@@ -276,9 +276,33 @@ static inline __attribute__((always_inline)) void* allocate(GCAllocRequest reque
 	return p;
 }
 
+// The pointer bits of an object the fast path gave, found by its address: an array's, or a larger object's.
+__attribute__((noinline)) static void write_pointers_of(void* p, size_t size, const c4_gc_type* type)
+{
+	const GCObject object = gc_heap_find(&g_gc.heap, p);
+	gc_pointers_write(object.span, object.slot, size, type);
+}
+
+// `allocate` for an object of a type with a pointer map (R16): a small one's bits go with its slot in the fast path; an
+// array's or a larger one's are written after it (they share no byte with another slot's, so no other thread writes
+// them meanwhile), or under the lock in the slow path.
+static inline __attribute__((always_inline)) void* allocate_precise(size_t size, size_t align, const c4_gc_type* type, const void* caller)
+{
+	GCThread* self = this_thread();
+	const GCAllocRequest request = { size, align, GC_SCAN_PRECISE, type };
+	const int spanClass = gc_heap_small_class(request);
+	void* p = NULL;
+	if (spanClass >= 0 && gc_pointers_small(type, size)) p = gc_thread_alloc_mapped(self, &g_gc.heap, spanClass, gc_pointers_low_map(type));
+	else if (spanClass >= 0 && (p = gc_thread_alloc_fast(self, &g_gc.heap, spanClass))) write_pointers_of(p, size, type);
+	if (!p) p = allocate_slow(self, request);
+	note_allocation(self, size, caller);
+	if (__atomic_load_n(&g_gc.census.on, __ATOMIC_RELAXED)) note_type(self, request, p, type);
+	return p;
+}
+
 static GCAllocRequest request_of(size_t size, size_t align, GCScanKind scanKind)
 {
-	GCAllocRequest request = { size, align, scanKind };
+	GCAllocRequest request = { size, align, scanKind, NULL };
 	return request;
 }
 
@@ -306,6 +330,12 @@ void* c4_alloc_entries(size_t size, size_t align, c4_gc_entries kind)
 void* c4_alloc_typed(size_t size, size_t align, const c4_gc_type* type)
 {
 	return allocate(request_of(size, align, GC_SCAN_ALL), __builtin_return_address(0), type);
+}
+
+void* c4_alloc_precise(size_t size, size_t align, const c4_gc_type* type)
+{
+	if (!gc_pointers_precise(type)) return allocate(request_of(size, align, GC_SCAN_ALL), __builtin_return_address(0), type);
+	return allocate_precise(size, align, type, __builtin_return_address(0));
 }
 
 void* c4_alloc_typed_noscan(size_t size, size_t align, const c4_gc_type* type)
@@ -613,6 +643,15 @@ bool c4_gc_pool_occupy(c4_gc_pool* pool, void* object)
 }
 
 bool c4_gc_pool_vacate(c4_gc_pool* pool, void* object) { return set_occupied(pool, object, 0) >= 0; }
+
+bool c4_gc_pool_set_type(c4_gc_pool* pool, const c4_gc_type* type)
+{
+	if (!pool) return false;
+	gc_os_lock();
+	const int set = gc_pool_set_type(&collector()->heap, (GCPool*)pool, type);
+	gc_os_unlock();
+	return set != 0;
+}
 
 bool c4_gc_pool_occupied(const c4_gc_pool* pool, const void* object)
 {

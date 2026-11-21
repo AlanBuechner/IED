@@ -105,6 +105,28 @@ void gc_pool_set_occupied(GCPool* pool, size_t slot, int occupied, int marked)
 	else __atomic_fetch_and(&chunk->allocBits[bit >> 6], ~mask, __ATOMIC_RELEASE);
 }
 
+static int any_occupied(const GCPool* pool)
+{
+	for (size_t c = 0; c < pool->chunkCount; ++c)
+		for (uint32_t w = 0; w < GC_SPAN_WORDS; ++w)
+			if (__atomic_load_n(&pool->chunks[c]->allocBits[w], __ATOMIC_RELAXED)) return 1;
+	return 0;
+}
+
+int gc_pool_set_type(GCHeap* heap, GCPool* pool, const c4_gc_type* type)
+{
+	if (pool->desc.noscan || any_occupied(pool)) return 0;
+	const int precise = gc_pointers_precise(type);
+	if (precise && (type->array || (size_t)type->words * 8u > pool->desc.slot_size)) return 0;
+	for (size_t c = 0; c < pool->chunkCount; ++c)
+	{
+		GCSpan* chunk = pool->chunks[c];
+		if (precise) gc_pointers_fill_slots(&heap->pages, chunk, type);
+		chunk->scanKind = (uint8_t)(precise ? GC_SCAN_PRECISE : GC_SCAN_ALL);
+	}
+	return 1;
+}
+
 int gc_pool_occupied(const GCPool* pool, size_t slot)
 {
 	return gc_bit(pool->chunks[slot / GC_POOL_CHUNK_SLOTS]->allocBits, (uint32_t)(slot % GC_POOL_CHUNK_SLOTS));

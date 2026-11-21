@@ -53,6 +53,7 @@ static void rescan_part(GCMarker* marker, const GCSpan* span, const uint8_t* lo,
 	const uint8_t* to = hi < end ? hi : end;
 	if (from >= to) return;
 	if (span->scanKind == GC_SCAN_ALL) gc_mark_range_later(marker, from, to);
+	else if (span->scanKind == GC_SCAN_PRECISE) gc_mark_precise_later(marker, from, to);
 	else gc_mark_entries_later(marker, lo, from, to, (GCScanKind)span->scanKind);
 }
 
@@ -170,6 +171,7 @@ static void snapshot_stop(GCState* gc, GCThread* self, CycleTrace* trace)
 {
 	const uint64_t start = gc_os_now_ns();
 	stop(gc, self);
+	gc->heap.pages.keepFreedBits = 1; // the marker reads spans' pointer bits beside the program's deletes
 	GCMarker* marker = &gc->concurrent.marker;
 	marker->heap = &gc->heap;
 	marker->atomicClaims = 0;

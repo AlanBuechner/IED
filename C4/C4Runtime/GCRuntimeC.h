@@ -1,6 +1,7 @@
 #pragma once
-// C4 garbage collector: conservative, non-moving, stop-the-world mark-sweep (docs/runtime/01-memory-and-gc.md,
-// D-47). Every `T*` is a managed pointer. Roots are the globals the compiler lists in __c4_gc_roots, the
+// C4 garbage collector: non-moving mark-sweep (docs/runtime/01-memory-and-gc.md, D-47), concurrent past a live size
+// (D-79); objects of a type the compiler maps are read by their pointer maps (R16), everything else conservatively.
+// Every `T*` is a managed pointer. Roots are the globals the compiler lists in __c4_gc_roots, the
 // calling thread's registers and stack, registered scan regions, root enumerators, pinned objects and objects
 // waiting for their finalizer. Thread-safe: every entry point takes the collector's lock (D-48).
 
@@ -100,6 +101,7 @@ void c4_gc_unpin(void* obj);
 // other thread stopped, so it must not take a lock another thread may hold, nor occupy slots. Slot i is at
 // c4_gc_pool_base(pool) + i * c4_gc_pool_slot_size(pool) (`slot_size` rounded up to 16, at most 1 MiB); the memory
 // starts zeroed and is the pool's until it is destroyed. `delete` and finalizers do not apply to pool objects.
+struct c4_gc_type;
 typedef bool (*c4_gc_pool_keep_fn)(void* user_data, void* object);
 typedef void (*c4_gc_pool_release_fn)(void* user_data, void* object);
 typedef struct c4_gc_pool_desc
@@ -124,6 +126,10 @@ size_t c4_gc_pool_slot_count(const c4_gc_pool* pool);
 bool c4_gc_pool_occupy(c4_gc_pool* pool, void* object);
 bool c4_gc_pool_vacate(c4_gc_pool* pool, void* object);
 bool c4_gc_pool_occupied(const c4_gc_pool* pool, const void* object);
+// Its objects are of `type` (not an array, at most a slot's size): a collection reads only the words of each that its
+// pointer map names (R16). Only while no slot is occupied: false otherwise, or for a noscan pool or a type that does not
+// fit. A type without a map (NULL `pointers`) scans the objects whole again.
+bool c4_gc_pool_set_type(c4_gc_pool* pool, const struct c4_gc_type* type);
 
 // --- After a collection ---------------------------------------------------------------------------
 // Callbacks run after each collection's sweep. There, c4_gc_is_reachable tells whether an object survived.
@@ -203,17 +209,28 @@ uint64_t c4_gc_set_alloc_sampling(uint64_t everyBytes);
 // Moves up to `capacity` of the oldest waiting samples to `out`: how many. The runtime keeps the latest 4096.
 int32_t c4_gc_take_alloc_samples(c4_gc_alloc_sample* out, int32_t capacity);
 
-// A type `new` makes, as the census knows it: its qualified name (`T[]` for an array of T) and the function that
-// counts the native memory one of its objects holds (the type's native_bytes_of, docs/language/14), or NULL when the
-// type holds none. The compiler writes one per type; it lives as long as the program.
+// A type `new` makes, as the census and the collector know it: its qualified name (`T[]` for an array of T), the
+// function that counts the native memory one of its objects holds (the type's native_bytes_of, docs/language/14), or
+// NULL when the type holds none; and its pointer map (R16): which words of one object - of one element, for an array -
+// may hold a managed pointer, bit i of `pointers` the word at byte 8i (a word of a union or of storage the type
+// reinterprets counts when any of its readings is a pointer). The collector reads only those words of the object.
+// `pointers` NULL: every word may hold one, and the object is scanned whole. The compiler writes one per type; it lives
+// as long as the program (or the script) that holds it.
 typedef struct c4_gc_type
 {
 	const char* name;
 	int64_t (*nativeBytes)(const void* object);
+	const uint64_t* pointers;
+	uint32_t words;              // the words `pointers` covers: one object's size (an array's element's) / 8
+	uint16_t array;              // 1: `new T[n]`, the map repeats for each element to the object's end
+	uint16_t firstElementWords;  // an array's: the words before its first element (the count a counted array keeps)
 } c4_gc_type;
-// c4_alloc for an object of a known type, noted while a census is on. `new` allocates through these.
+// c4_alloc for an object of a known type, noted while a census is on. `new` allocates through these: c4_alloc_precise
+// for a type with a pointer map, whose objects a collection reads by it (a type without one is read whole, as
+// c4_alloc_typed reads it); c4_alloc_typed for one whose every word may hold a pointer; _noscan for a pointer-free one.
 void* c4_alloc_typed(size_t size, size_t align, const c4_gc_type* type);
 void* c4_alloc_typed_noscan(size_t size, size_t align, const c4_gc_type* type);
+void* c4_alloc_precise(size_t size, size_t align, const c4_gc_type* type);
 
 // The census of live objects by type: while on, every allocation notes its type, and each collection counts the
 // live objects by it, and the native memory they hold. Objects made before it was on, by c4_alloc or in a pool are of

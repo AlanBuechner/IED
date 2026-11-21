@@ -62,9 +62,30 @@ static inline void* gc_thread_alloc_fast(GCThread* thread, const GCHeap* heap, i
 	__atomic_store_n(&thread->inAllocator, 1, __ATOMIC_RELAXED);
 	__atomic_signal_fence(__ATOMIC_SEQ_CST);
 	GCSpan* span = thread->cache.spans[spanClass];
-	void* p = span ? gc_heap_alloc_slot(heap, span) : NULL;
+	uint32_t slot = 0;
+	void* p = span ? gc_heap_alloc_slot(heap, span, &slot) : NULL;
 	if (p)
 	{
+		thread->cache.allocatedBytes += span->elemSize;
+		thread->cache.allocs++;
+	}
+	__atomic_signal_fence(__ATOMIC_SEQ_CST);
+	__atomic_store_n(&thread->inAllocator, 0, __ATOMIC_RELAXED);
+	return p;
+}
+
+// gc_thread_alloc_fast for a precise object of at most GC_SMALL_MAPPED_WORDS words, one object (not an array): `mapped`
+// is its pointer bits (gc_pointers_low_map), stored for its slot with one store.
+static inline void* gc_thread_alloc_mapped(GCThread* thread, const GCHeap* heap, int spanClass, uint64_t mapped)
+{
+	__atomic_store_n(&thread->inAllocator, 1, __ATOMIC_RELAXED);
+	__atomic_signal_fence(__ATOMIC_SEQ_CST);
+	GCSpan* span = thread->cache.spans[spanClass];
+	uint32_t slot = 0;
+	void* p = span ? gc_heap_alloc_slot(heap, span, &slot) : NULL;
+	if (p)
+	{
+		gc_pointers_store_mask(span, slot, mapped);
 		thread->cache.allocatedBytes += span->elemSize;
 		thread->cache.allocs++;
 	}

@@ -1,0 +1,109 @@
+// R16: a pool given its objects' type (c4_gc_pool_set_type) is read by the type's pointer map: an address kept in an
+// integer word of a pool object keeps nothing alive, its pointer word keeps its target. Only a pool with no occupied
+// slot takes a type, and not one larger than its slots.
+include "Memory/gc.ch"
+
+int32 g_finalized = 0;
+
+struct Target {
+	public int32 value;
+	[operator("delete")] void Finalize() { g_finalized++; }
+}
+
+struct Slot { public uint64 address; public Target* target; }
+
+// The runtime's c4_gc_pool_desc and c4_gc_type.
+struct PoolDesc {
+	public uint64 slotSize;
+	public uint64 slotCount;
+	public bool noscan;
+	public bool keepAll;
+	public void* keep;
+	public void* release;
+	public void* userData;
+}
+
+struct GcType {
+	public const char8* name;
+	public void* nativeBytes;
+	public const uint64* pointers;
+	public uint32 words;
+	public uint16 array;
+	public uint16 firstElementWords;
+}
+
+[link("c4_gc_pool_create")] void* PoolCreate(const PoolDesc* desc) noexcept;
+[link("c4_gc_pool_destroy")] void PoolDestroy(void* pool) noexcept;
+[link("c4_gc_pool_base")] uint8* PoolBase(void* pool) noexcept;
+[link("c4_gc_pool_slot_size")] uint64 PoolSlotSize(void* pool) noexcept;
+[link("c4_gc_pool_occupy")] bool PoolOccupy(void* pool, void* object) noexcept;
+[link("c4_gc_pool_set_type")] bool PoolSetType(void* pool, const GcType* type) noexcept;
+
+const int32 kSlots = 300;
+uint64 g_map = 2u;      // word 1 (Slot.target) may hold a pointer, word 0 (Slot.address) may not
+uint64 g_wide = 7u;
+int64 g_keptSum = 0;
+
+GcType TypeOf(const char8* name, uint64* map, uint32 words) {
+	GcType type;
+	type.name = name;
+	type.nativeBytes = null;
+	type.pointers = map;
+	type.words = words;
+	type.array = 0u;
+	type.firstElementWords = 0u;
+	return type;
+}
+
+Slot* SlotAt(void* pool, int32 i) { return (Slot*)(PoolBase(pool) + (uint64)i * PoolSlotSize(pool)); }
+
+void Fill(void* pool) {
+	for (int32 i = 0; i < kSlots; i++) {
+		Slot* slot = SlotAt(pool, i);
+		PoolOccupy(pool, (void*)slot);
+		slot->address = (uint64)new Target;
+		Target* kept = new Target;
+		kept->value = i;
+		g_keptSum += i;
+		slot->target = kept;
+	}
+}
+
+int64 Scrub(int32 depth) {
+	int64[128] junk;
+	for (int32 i = 0; i < 128; i++) junk[i] = depth;
+	GC::IsReachable((void*)&junk);
+	if (depth == 0) return junk[1];
+	return Scrub(depth - 1) + junk[2];
+}
+
+int32 main() {
+	PoolDesc desc;
+	desc.slotSize = sizeof(Slot);
+	desc.slotCount = (uint64)kSlots;
+	desc.noscan = false;
+	desc.keepAll = true;      // every occupied object is a root
+	desc.keep = null;
+	desc.release = null;
+	desc.userData = null;
+	void* pool = PoolCreate(&desc);
+	if (pool == null) return 1;
+	GcType wide = TypeOf("Wide", &g_wide, 3u);   // 24 bytes: larger than the 16-byte slots
+	if (PoolSetType(pool, &wide)) return 2;
+	GcType slotType = TypeOf("Slot", &g_map, 2u);
+	if (!PoolSetType(pool, &slotType)) return 3;
+	Fill(pool);
+	if (PoolSetType(pool, &slotType)) return 4;   // an occupied slot: too late
+	Scrub(8);
+	GC::Collect();
+	GC::Collect();
+	printf("finalized %d of %d targets only an integer named\n", g_finalized, kSlots);
+	if (g_finalized < kSlots - 5) return 5;
+	if (g_finalized > kSlots) return 6;
+	int64 sum = 0;
+	for (int32 i = 0; i < kSlots; i++) sum += SlotAt(pool, i)->target->value;
+	if (sum != g_keptSum) return 7;
+	PoolDestroy(pool);
+	printf("PRECISE POOLS OK\n");
+	return 0;
+}
