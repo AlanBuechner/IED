@@ -359,7 +359,8 @@ def release_record(version, commit, windows, linux):
 			"unregister": [["ied-desktop", "--unregister"]],
 			"desktopLibraries": [list(LINUX_DESKTOP_LIBRARIES)],
 			"desktopPackages": LINUX_DESKTOP_PACKAGES,
-			"hint": "IED is in your applications menu; in a terminal `ied` opens this folder in it (over SSH: `ied url --no-browser` prints a sign-in link)",
+			# The installer says "IED is in your applications menu" itself where it put it there.
+			"hint": "`ied` opens this folder in the desktop app (over SSH: `ied url --no-browser` prints a sign-in link)",
 		}
 	return {"product": PRODUCT, "name": NAME, "version": version, "commit": commit,
 		"built": datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat(), "platforms": platforms}
