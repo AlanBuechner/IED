@@ -51,8 +51,18 @@ CHECK_IMAGE = "mirror.gcr.io/library/debian:12"
 VOLUME = "ied-release-linux-build"
 CONFIG = "Development"
 WINDOWS_PROJECTS = ("ied-server", "ied", "ied-desktop", "flashbang")
-LINUX_PROJECTS = ("ied-server", "ied")
-LINUX_PROGRAMS = ("ied-server/ied-server", "ied-server/ied-server.c4i", "ied-server/C4Script.so", "ied/ied")
+LINUX_PROJECTS = ("ied-server", "ied", "ied-desktop")
+# The programs and, beside the desktop app, its icon (the windows' and the applications menu's).
+LINUX_PROGRAMS = ("ied-server/ied-server", "ied-server/ied-server.c4i", "ied-server/C4Script.so", "ied/ied",
+	"ied-desktop/ied-desktop", "ied-desktop/ied.png", "ied-desktop/ied.svg")
+# What the desktop app loads when it starts (desktop/linux/Shell.c: WebKitGTK 4.1, else 4.0, and the GTK 3 it brings).
+LINUX_DESKTOP_LIBRARIES = ("libwebkit2gtk-4.1.so.0", "libwebkit2gtk-4.0.so.37")
+LINUX_DESKTOP_PACKAGES = {
+	"apt": ["libwebkit2gtk-4.1-0"],
+	"dnf": ["webkit2gtk4.1"],
+	"pacman": ["webkit2gtk-4.1"],
+	"zypper": ["libwebkit2gtk-4_1-0"],
+}
 # The libraries the Linux programs load (ldd): the server's TLS and its script host's LLVM dependencies, the
 # toolchain's clang and ld.lld with theirs; python3 runs Nuke.
 LINUX_PACKAGES = {
@@ -319,7 +329,12 @@ def release_record(version, commit, windows, linux):
 			"check": list(LINUX_CHECK),
 			"packages": LINUX_PACKAGES,
 			"glibc": "2.36",
-			"hint": "`ied` opens this folder in your browser (`ied url --no-browser` prints a sign-in link instead)",
+			# The desktop app (docs/27 "Linux"): on a machine with a desktop, its WebKitGTK and the applications menu's entry.
+			"register": [["ied-desktop", "--register"]],
+			"unregister": [["ied-desktop", "--unregister"]],
+			"desktopLibraries": [list(LINUX_DESKTOP_LIBRARIES)],
+			"desktopPackages": LINUX_DESKTOP_PACKAGES,
+			"hint": "IED is in your applications menu; in a terminal `ied` opens this folder in it (over SSH: `ied url --no-browser` prints a sign-in link)",
 		}
 	return {"product": PRODUCT, "name": NAME, "version": version, "commit": commit,
 		"built": datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat(), "platforms": platforms}
@@ -454,6 +469,48 @@ def check_linux(client, version, scratch):
 	say("Linux: installed in Debian 12, served the web client, built and ran a C4 program")
 
 
+DESKTOP_CHECK_IMAGE = "ied-dist-desktop-check"
+LINUX_DESKTOP_CHECK_SCRIPT = r"""
+set -eu
+Xvfb :99 -screen 0 1600x1000x24 >/tmp/xvfb.log 2>&1 &
+export DISPLAY=:99
+sleep 2
+eval "$(dbus-launch --sh-syntax)"
+DIST_VERSION="$VERSION" sh /dist/install.sh
+desktop-file-validate "$HOME/.local/share/applications/ied.desktop"
+test "$(xdg-mime query default application/x-ied-solution)" = ied.desktop
+. "$HOME/.local/opt/ied/env"
+# WebKit's sandbox needs user namespaces, which a container does not give.
+export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
+ied-desktop >/tmp/desktop.out 2>&1 &
+timeout 90 sh -c 'until xdotool search --onlyvisible --name "IED" >/dev/null 2>&1; do sleep 1; done'
+sleep 15
+import -window root /out/desktop.png
+ied status | grep -q '"clients":1' || { ied status; cat /tmp/desktop.out; exit 1; }
+echo "LINUX-DESKTOP-CHECK-PASSED"
+"""
+
+
+def check_linux_desktop(client, version, scratch, logs):
+	"""Installs the published version in a clean Debian 12 with a virtual display: the installer must bring WebKitGTK
+	and put IED in the applications menu (an entry desktop-file-validate passes, IED's files opening in it), and the
+	desktop app must open a window showing IED, signed in to the server it started. Its screenshot goes beside the logs."""
+	dist = os.path.join(scratch, "dist")
+	os.makedirs(dist, exist_ok=True)
+	with open(os.path.join(dist, "install.sh"), "wb") as f:
+		f.write(publish.render_installer("install.sh", client.server, client.owner, PRODUCT))
+	with open(os.path.join(dist, "check.sh"), "w", encoding="utf-8", newline="\n") as f:
+		f.write(LINUX_DESKTOP_CHECK_SCRIPT)
+	run([docker(), "build", "-q", "-t", DESKTOP_CHECK_IMAGE, os.path.join(HERE, "desktop-check")])
+	result = subprocess.run([docker(), "run", "--rm", "--platform", "linux/amd64", "-e", "VERSION=" + version, "-v", docker_path(dist) + ":/dist:ro",
+		"-v", docker_path(logs) + ":/out", DESKTOP_CHECK_IMAGE, "sh", "/dist/check.sh"], capture_output=True, text=True)
+	sys.stdout.write(result.stdout[-4000:])
+	sys.stderr.write(result.stderr[-4000:])
+	if result.returncode != 0 or "LINUX-DESKTOP-CHECK-PASSED" not in result.stdout:
+		raise ReleaseError("the Linux desktop check failed (exit %d)" % result.returncode)
+	say("Linux: the desktop app opened IED from the applications menu's install (screenshot: %s)" % os.path.join(logs, "desktop.png"))
+
+
 # --- the command -------------------------------------------------------------------------------------------------------
 
 def main(argv):
@@ -507,6 +564,7 @@ def main(argv):
 				check_windows(client, version, os.path.join(scratch, "windows"))
 			if "linux" in platforms:
 				check_linux(client, version, os.path.join(scratch, "linux"))
+				check_linux_desktop(client, version, os.path.join(scratch, "linux-desktop"), logs)
 			shutil.rmtree(scratch, ignore_errors=True)
 		if not args.no_latest:
 			publish.promote(client, PRODUCT, version, say=say)

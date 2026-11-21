@@ -7,13 +7,16 @@
 # Made by tools/dist/publish.py from tools/dist/install.sh (IED docs/21 "Prebuilt releases on the owner's Gitea").
 # It reads the release's release.json, downloads the archives this machine does not have yet (each checked against its
 # SHA-256), puts them into the install folder (only what changed; a running program keeps running until restarted),
-# installs the system packages the programs need when ldd finds a library missing, puts the folder's programs on the
-# PATH (an `env` file the shell's startup files source) and writes install.json last. Run it again to update.
+# installs the system packages the programs need when ldd finds a library missing, and on a machine with a desktop the
+# desktop app's (WebKitGTK) and its entry in the applications menu (the release's `register`), puts the folder's
+# programs on the PATH (an `env` file the shell's startup files source) and writes install.json last. Run it again to
+# update.
 #
 # Set before the command (`curl ... | DIST_VERSION=... sh`):
 #   DIST_VERSION      install that published version instead of the newest
 #   DIST_DIR          the install folder (default: the release's, ~/.local/opt/<product>)
 #   DIST_NO_PATH      1: leave the shell startup files alone
+#   DIST_NO_REGISTER  1: no entry in the applications menu (and no file types)
 #   DIST_NO_PACKAGES  1: never install system packages (only say which are missing)
 #   DIST_FORCE        1: replace an install that something else made in that folder
 #   DIST_UNINSTALL    1: remove it (the folder and the startup files' line)
@@ -185,6 +188,48 @@ def missing_libraries(folder, programs):
 	return missing
 
 
+def has_desktop():
+	"""Whether this machine has a graphical desktop: a session now, or sessions it offers at login (an SSH shell into a
+	desktop machine has the latter)."""
+	if any(os.environ.get(name) for name in ("DISPLAY", "WAYLAND_DISPLAY", "XDG_CURRENT_DESKTOP")):
+		return True
+	for folder in ("/usr/share/xsessions", "/usr/share/wayland-sessions"):
+		try:
+			if os.listdir(folder):
+				return True
+		except OSError:
+			pass
+	return False
+
+
+def missing_sonames(groups):
+	"""The groups of `groups` (each a list of alternative sonames, one is enough) none of which the system's libraries
+	have, as `ldconfig -p` lists them, else as files in the usual folders."""
+	listed = ""
+	for program in ("ldconfig", "/sbin/ldconfig", "/usr/sbin/ldconfig"):
+		try:
+			listed = subprocess.run([program, "-p"], capture_output=True, text=True, timeout=60).stdout
+			break
+		except OSError:
+			continue
+	folders = ("/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu", "/usr/lib64", "/lib64", "/usr/lib", "/lib")
+	def present(name):
+		return (name + " ") in listed or any(os.path.exists(os.path.join(f, name)) for f in folders)
+	return [group for group in groups if not any(present(name) for name in group)]
+
+
+def run_all(commands, folder, what):
+	"""Each of a release's commands ([program, args...], the program in the install folder); a failure is said."""
+	for command in commands or []:
+		program = inside(folder, command[0])
+		if not os.path.isfile(program):
+			say("%s: %s is not there; skipped" % (what, command[0]))
+			continue
+		code = subprocess.run([program] + list(command[1:])).returncode
+		if code != 0:
+			say("warning: %s: %s exited with %d" % (what, " ".join(command), code))
+
+
 def package_manager():
 	for name in ("apt-get", "dnf", "pacman", "zypper"):
 		if shutil.which(name):
@@ -295,6 +340,7 @@ def main():
 		running = running_from(folder)
 		if running:
 			fail("%s is running from %s (%s); stop it (ied stop) and run this again" % (name, folder, ", ".join(running)))
+		run_all(target.get("unregister"), folder, "unregister")
 		for path in change_startup(env_file, add=False):
 			say("took the PATH line out of %s" % path)
 		shutil.rmtree(folder)
@@ -366,6 +412,18 @@ def main():
 	for program, libraries in sorted(missing.items()):
 		say("warning: %s cannot find %s; install them with your package manager" % (program, ", ".join(libraries)))
 
+	# A machine with a desktop gets the desktop app's libraries (loaded when it starts, so ldd does not see them) and the
+	# applications menu's entry; a server without one needs neither (`ied` serves the browser there).
+	desktop = has_desktop()
+	if desktop:
+		lost = missing_sonames(target.get("desktopLibraries", []))
+		if lost and not flag("DIST_NO_PACKAGES") and install_packages(target.get("desktopPackages")):
+			lost = missing_sonames(target.get("desktopLibraries", []))
+		for group in lost:
+			say("warning: the desktop app needs %s; install it with your package manager (until then IED opens in the browser)" % " or ".join(group))
+		if not flag("DIST_NO_REGISTER"):
+			run_all(target.get("register"), folder, "register")
+
 	if path_folders and not flag("DIST_NO_PATH"):
 		for path in change_startup(env_file, add=True):
 			say("PATH line added to %s" % path)
@@ -383,6 +441,8 @@ def main():
 	running = running_from(folder)
 	if running and wanted:
 		say("%s was running (%s): restart it to use this version (ied stop, then ied)" % (name, ", ".join(running)))
+	if desktop and target.get("register") and not flag("DIST_NO_REGISTER"):
+		say("%s is in your applications menu" % name)
 	if path_folders:
 		say('open a new terminal (or run: . "%s"), then: %s' % (env_file, target.get("hint") or PRODUCT))
 		say("update later with: %s-update" % PRODUCT)
