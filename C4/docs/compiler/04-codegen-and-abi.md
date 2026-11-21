@@ -568,7 +568,7 @@ allowed (unions, bytes, `memcpy`, bit casts) where the optimizer cannot see that
 
 - Any C4-side optimization pass (deliberately none; revisit only if a benchmark shows C4 slower than C++).
 - Additional targets (ARM64): one more `TargetAbi` implementation, with its convention's `AggregateRegisters` - **Planned**.
-- Stack maps (R16 phase 3) - **Designed, not started**: it waits for the MIR (R5), since safepoints belong to how
+- Stack maps (R16 phase 3) - **Designed and prototyped, not landed** (findings below): it waits for the MIR (R5), since safepoints belong to how
   functions are emitted, and it lands only if it costs no measurable run-time speed. The design: a collection stops
   threads anywhere (D-48, `SuspendThread`), not at polls, so as Go does since its asynchronous preemption the
   innermost frame of a stopped thread and its registers stay conservative and every caller frame is read precisely.
@@ -578,5 +578,20 @@ allowed (unions, bytes, `memcpy`, bit casts) where the optimizer cannot see that
   (`RtlVirtualUnwind`, as the sampler does), finds each C4 frame's record by its return address and reads only those
   slots, and reads a frame of code without a record (C, C++, the runtime, a script compiled before) whole. The
   collector is non-moving, so a statepoint relocates nothing: its cost is that a managed pointer live across a call
-  lives in a stack slot instead of a callee-saved register, and the optimizer's view of the rewritten calls. That
-  cost is to be measured on `Benchmarks/{bedrock,math,gemm,gc}` before anything lands.
+  lives in a stack slot instead of a callee-saved register (LLVM's `max-registers-for-gc-values` lets it stay in one,
+  which a collector that unwinds frames with their registers can read), and the optimizer's view of the rewritten
+  calls (none: the rewrite runs after the optimizer).
+  **Prototype (R16, 2026-11-21; kept out of the tree)**: a `c4-statepoint` GC strategy and `RewriteStatepointsForGC`
+  after `OptimizeModule`, on Windows x64. Findings: (1) C4 emits every pointer in address space 0, so the strategy
+  must call every pointer managed, stack and global and integer-made ones included, and RS4GC's base-pointer search
+  crashes on that IR (an access violation in `RewriteStatepointsForGC::runOnFunction`, in every benchmark, gemm's 8
+  functions too): precise stacks need the emitter (MIR emission, `ExprEmitter`, calls) to give managed pointers an
+  address space of their own, with casts at raw and foreign boundaries - the prerequisite of any honest measurement.
+  (2) Statepoint lowering also crashes in functions with funclet EH (catchswitch, cleanuppad, invoke); after
+  optimization those are few (30 of 3322 functions in the Bedrock benchmark, none in gemm or math), and could stay
+  conservative frames. (3) The cost of the rewrite itself is not measurable: with every call a statepoint and no GC
+  value live across it (5646 statepoints in the Bedrock benchmark, 5446 in the GC benchmark), against the same
+  compiler without, median of 7 alternating runs: Bedrock kernels -2.9% to +1.6% (one +6.4%), gemm +0.3%, math
+  per-vector -9% to +3% and batch -3.7% to +0.4% (kernels of 0.3-5 ms move as much between runs), GC benchmark frames
+  -0.6% stop-the-world and 0.0% concurrent. The cost of live values across calls - the real one - is not measured:
+  it needs (1) first. Until then stacks stay conservative.

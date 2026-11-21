@@ -203,7 +203,7 @@ enumerators or callbacks.
 | Gap | Status |
 |---|---|
 | Win32 only (`GCPlatformWin32.c`). Linux needs a `GCPlatformPosix.c` (B31). | **Planned** |
-| Stacks, registers and scan regions are read conservatively: an object stays alive while a stale copy of its address sits in a register, a dead stack slot or a region's unused memory. Heap objects of known type and global roots are read by their pointer maps (R16 phases 1 and 2). Precise stack maps are designed, not started: they wait for the MIR (R5) and land only if they cost no measurable speed ([compiler/04](../compiler/04-codegen-and-abi.md), "Not implemented here yet"). A region of known element type (Bedrock's scanned buffers, B70; reflected values, B71) could be read by its element's map too, once C4 code can name a type's record. | Planned |
+| Stacks, registers and scan regions are read conservatively: an object stays alive while a stale copy of its address sits in a register, a dead stack slot or a region's unused memory. Heap objects of known type and global roots are read by their pointer maps (R16 phases 1 and 2). Precise stack maps are designed and prototyped, not landed: LLVM's statepoints need managed pointers in an address space of their own, which C4's emitter does not give them yet, and they land only if they cost no measurable speed ([compiler/04](../compiler/04-codegen-and-abi.md), "Not implemented here yet", with the prototype's findings). A region of known element type (Bedrock's scanned buffers, B70; reflected values, B71) could be read by its element's map too, once C4 code can name a type's record. | Planned |
 
 ---
 
