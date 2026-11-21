@@ -64,14 +64,26 @@ LINUX_DESKTOP_PACKAGES = {
 	"zypper": ["libwebkit2gtk-4_1-0"],
 }
 # The libraries the Linux programs load (ldd): the server's TLS and its script host's LLVM dependencies, the
-# toolchain's clang and ld.lld with theirs; python3 runs Nuke.
+# toolchain's clang and ld.lld with theirs (zlib is also Tor's); python3 runs Nuke; curl is web fetch's fallback
+# (docs/29: when it does not impersonate a browser).
 LINUX_PACKAGES = {
-	"apt": ["ca-certificates", "python3", "libssl3", "libz3-4", "libxml2", "libzstd1", "zlib1g", "libedit2", "libffi8"],
-	"dnf": ["ca-certificates", "python3", "openssl-libs", "z3-libs", "libxml2", "libzstd", "zlib", "libedit", "libffi"],
-	"pacman": ["ca-certificates", "python", "openssl", "z3", "libxml2", "zstd", "zlib", "libedit", "libffi"],
-	"zypper": ["ca-certificates", "python3", "libopenssl3", "libz3-4", "libxml2-2", "libzstd1", "libz1", "libedit0", "libffi8"],
+	"apt": ["ca-certificates", "python3", "libssl3", "libz3-4", "libxml2", "libzstd1", "zlib1g", "libedit2", "libffi8", "curl"],
+	"dnf": ["ca-certificates", "python3", "openssl-libs", "z3-libs", "libxml2", "libzstd", "zlib", "libedit", "libffi", "curl"],
+	"pacman": ["ca-certificates", "python", "openssl", "z3", "libxml2", "zstd", "zlib", "libedit", "libffi", "curl"],
+	"zypper": ["ca-certificates", "python3", "libopenssl3", "libz3-4", "libxml2-2", "libzstd1", "libz1", "libedit0", "libffi8", "curl"],
 }
-LINUX_CHECK = ("ied-server", "ied", "C4Script.so", "toolchains/c4/dev/C4", "toolchains/c4/dev/toolchain/bin/clang", "toolchains/c4/dev/toolchain/bin/ld.lld")
+LINUX_CHECK = ("ied-server", "ied", "C4Script.so", "toolchains/c4/dev/C4", "toolchains/c4/dev/toolchain/bin/clang", "toolchains/c4/dev/toolchain/bin/ld.lld",
+	"vendor/python/bin/python3.12")
+# The web search services of a Linux install (docs/29 "On Linux"): setup's linux packages, which it fetches on Windows
+# into vendor/linux/, and SearXNG's own package, which serves both systems - each where a Windows install has its own:
+# (source in the worktree, folder in the install, its top folders left out).
+LINUX_SERVICE_PACKAGES = ("searxng", "python-linux", "searxng-packages-linux", "tor-linux")
+LINUX_SERVICES = (
+	("vendor/linux/python", "vendor/python", ()),
+	("vendor/searxng/searx", "vendor/searxng/searx", ()),
+	("vendor/linux/searxng-packages", "vendor/searxng-packages", ("bin",)),   # pip's Windows launchers
+	("vendor/linux/tor", "vendor/tor", ("docs",)),
+)
 # What a Windows package must hold (install_ied reports what it could not find; these are the ones a release needs).
 WINDOWS_REQUIRED = ("ied.exe", "ied-desktop.exe", "ied-server.exe", "ied-server.c4i", "C4Script.dll", "bin/nuke.cmd",
 	"frontend/login.html", "vendor/python/python.exe", "plugins/cpp/clangd/bin/clangd.exe", "plugins/gpu/bin/flashbang.dll")
@@ -273,8 +285,9 @@ def stage_windows(worktree, stage):
 
 
 def stage_linux(worktree, stage, programs):
-	"""The Linux install folder: the programs from the Linux build, and the trees an install has (install_ied's) but
-	the Windows-only services."""
+	"""The Linux install folder: the programs from the Linux build, the trees an install has (install_ied's), and the
+	Linux web search services (LINUX_SERVICES), which setup first installs into the worktree's vendor/ when they are
+	missing or out of date."""
 	install_ied = install_module(worktree)
 	report = {"copied": 0, "removed": 0, "in_use": [], "missing": []}
 	os.makedirs(stage, exist_ok=True)
@@ -282,6 +295,14 @@ def stage_linux(worktree, stage, programs):
 		install_ied.copy_program(os.path.join(programs, name), os.path.join(stage, name), report)
 	for tree, skip in install_ied.TREES:
 		install_ied.mirror(os.path.join(worktree, tree), os.path.join(stage, tree), set(skip), report, anywhere=install_ied.BUILT_IN_PLACE)
+	python = os.path.join(worktree, "vendor", "python", "python.exe")
+	run([python if os.path.isfile(python) else sys.executable, "-I", os.path.join(worktree, "tools", "setup", "setup.py"),
+		"--only", ",".join(LINUX_SERVICE_PACKAGES), "--no-path"], cwd=worktree)
+	for source, target, skip in LINUX_SERVICES:
+		folder = os.path.join(worktree, *source.split("/"))
+		if not os.path.isdir(folder):
+			raise ReleaseError("the Linux services lack %s (setup did not install it)" % source)
+		install_ied.mirror(folder, os.path.join(stage, *target.split("/")), set(skip), report, anywhere={"__pycache__"})
 	say("Linux stage: %d copied, %d removed" % (report["copied"], report["removed"]))
 
 
