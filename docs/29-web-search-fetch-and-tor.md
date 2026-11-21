@@ -33,7 +33,8 @@ workspace server: it runs no service.
 ## Tor (`ied.tor`)
 
 **Program.** `tor.executable`, else `<home>/vendor/tor/tor/tor.exe` - the Tor Expert Bundle, `tools/setup/deps.toml`
-package `tor`. `<home>` is `IED::HomeFolder()`: the checkout in development, the install folder once installed.
+package `tor` - or on Linux `<home>/vendor/tor/tor/tor` ("On Linux"). `<home>` is `IED::HomeFolder()`: the checkout in
+development, the install folder once installed.
 
 **Start on demand.** The first `tor.proxy` call starts it; the binding always answers at once with the state (a binding
 call waits at most 30 s, a cold bootstrap can take longer), so a caller polls it. The `torrc` is written into the
@@ -68,14 +69,18 @@ progress, summary, error?, socks?, host?, port?, executable?}`.
 waitress: every dependency has a `win_amd64` wheel (it speaks to engines with `curl_cffi`, SOCKS5 included); its only
 POSIX import (`pwd`, in its Valkey error path) is stubbed by the launcher, which also sets the selector event loop
 `curl_cffi` needs on Windows. Measured: SearXNG starts in 1-3 s; a JSON search takes 1-3 s direct and 3-8 s through Tor.
+The launcher also gives SearXNG its version (`searx.version_frozen`, SearXNG's own fallback values): without that file,
+which only SearXNG's packaging writes, SearXNG runs `git` to learn it, and on a machine without git it stopped as it
+started ("No such file or directory: 'git'": found by the Linux check, 2026-11-21; a Windows machine without git, such
+as one with only a prebuilt install, would have failed the same way).
 
 **What runs.** `<python> -I <plugin>/service/serve.py --searxng <dir> --packages <dir> --settings <file> --state <dir>
 --port-file <file> --log <file>`: the launcher puts SearXNG and its packages on `sys.path`, points SearXNG's caches
 (it uses the temp folder) into `<state>/cache`, gives SearXNG a secret key of its own per start (`SEARXNG_SECRET`),
 binds waitress to `127.0.0.1:0` and writes the port it got to `--port-file` once SearXNG has started; its output goes to
 `<state>/searxng.log`, whose ERROR and exception lines a failed start reports. `<python>` is `websearch.python`, else
-`<home>/vendor/python/python.exe`; SearXNG is `websearch.searxngFolder`, else `<home>/vendor/searxng`; its packages are
-always the `searxng-packages` folder beside it.
+`<home>/vendor/python/python.exe` (Linux: `<home>/vendor/python/bin/python3.12`); SearXNG is `websearch.searxngFolder`,
+else `<home>/vendor/searxng`; its packages are always the `searxng-packages` folder beside it.
 
 **Its settings.yml** is made from the settings at each start (`use_default_settings`, then):
 
@@ -156,7 +161,7 @@ Class `net`, 120 s. http and https only; an address without a scheme gets `https
 `<plugin>/service/fetch.py`, whose `curl_cffi` (installed with SearXNG's packages) impersonates `webfetch.impersonate`
 (Chrome by default: its TLS and HTTP/2 fingerprint and headers). Measured: Medium and npm, which answer Windows' curl
 with Cloudflare's 403, answer it with the page. Without the private Python or `curl_cffi`, or with `webfetch.impersonate`
-off, Windows' own `%SystemRoot%\System32\curl.exe` (`webfetch.curl` overrides) runs with `webfetch.userAgent` and a
+off, Windows' own `%SystemRoot%\System32\curl.exe` (on Linux `curl` on the PATH; `webfetch.curl` overrides) runs with `webfetch.userAgent` and a
 browser's `Accept` headers: `-sS -L --globoff --compressed --max-redirs 8 --proto =http,https --proto-redir =http,https
 --max-time --max-filesize`. Both write the body to standard output and a report - status, content type, final URL, exit
 code, message - to standard error after a marker (curl through `--write-out "%{stderr}..."`), so one reader serves both.
@@ -254,6 +259,55 @@ a generic addition to the settings page API, `docs/07`). Web > Fetch and Web > T
 - Without them the tools still load and say what is missing ("SearXNG is not installed: run setup.bat ..., or set
   websearch.instanceUrl"); `web_fetch` falls back to Windows' curl.
 
+## On Linux
+
+The prebuilt Linux install (`docs/21` "Prebuilt releases on the owner's Gitea") carries the same services in the same
+places, Linux's own builds of them, so search and fetch work with nothing else installed and whatever `python3` the
+machine has:
+
+| Install folder | What | `deps.toml` package (group `linux`) | In a checkout |
+|---|---|---|---|
+| `vendor/python/` | a relocatable CPython 3.12.10 for x86_64 glibc (python-build-standalone 20250529, `install_only_stripped`; needs glibc 2.17) | `python-linux` | `vendor/linux/python` |
+| `vendor/searxng/searx/` | SearXNG itself, pure Python: the one package both systems share | `searxng` | `vendor/searxng` |
+| `vendor/searxng-packages/` | SearXNG's packages and waitress as manylinux x86_64 wheels for that CPython (`tools/setup/searxng-requirements-linux.txt`: the Windows file's versions, each hash-pinned to its Linux wheel) | `searxng-packages-linux` | `vendor/linux/searxng-packages` |
+| `vendor/tor/` | the Tor Expert Bundle 15.0.26 for linux-x86_64: `tor/tor` with its libevent and OpenSSL beside it, `data/geoip[6]` | `tor-linux` | `vendor/linux/tor` |
+
+- **Fetched on Windows.** `tools/setup/setup.py` installs the `linux` group into the checkout's `vendor/linux/` (never
+  by default: `setup.bat --with linux`, or `--only python-linux,searxng-packages-linux,tor-linux`), checked against
+  their SHA-256 like every package. The wheels come from Windows' own pip with `--platform` (the package's `platforms`,
+  manylinux 2.28 first, then 2.17/2014), `--python-version 3.12 --implementation cp --abi cp312`, `--require-hashes
+  --only-binary=:all: --no-deps`. An archive's symbolic links are left out on Windows (`python3` names `python3.12`),
+  and a package's `skip` leaves out what an install never runs: the CPython's headers, terminfo and man pages and its
+  libpython for embedding (`bin/python3.12` has the interpreter linked in), the bundle's unstripped `debug/` copies.
+- **Packaged by the release.** `tools/dist/ied_release.py`'s `stage_linux` has setup install those packages and
+  `searxng` (only what is missing or out of date), then mirrors them into the Linux stage's `vendor/` as the table says
+  (pip's Windows launchers in `bin/`, the bundle's `docs/` and every `__pycache__` left out); the release's tar makes
+  every ELF file and script 0755. The installer's `ldd` check covers `vendor/python/bin/python3.12`; `curl` is among
+  the system packages it asks for (web fetch's fallback).
+- **The plugins.** `ied.tor` runs `vendor/tor/tor/tor` with `LD_LIBRARY_PATH` set to the program's own folder first
+  (the bundle's `tor` has no run path; Tor Browser's launcher does the same) - also for a `tor.executable`, harmless for
+  a distribution's `/usr/bin/tor`. `ied.websearch` and `ied.webfetch` run `vendor/python/bin/python3.12` (the program
+  named by its version: a Python bump changes it with the wheels anyway). Web fetch's fallback is `curl` on the PATH. A
+  Linux server run from a checkout finds none of these (its `vendor/python` is Windows'): the tools say so, and
+  `tor.executable`, `websearch.python` and `websearch.searxngFolder` point them at others.
+- **No job object.** Linux has nothing that ends a server's children with it (C4's `Process`: a child outlives a parent
+  that dies without closing it). Tor already exits when its owning control connection closes (`TAKEOWNERSHIP`); the
+  SearXNG launcher watches its parent and exits once it is another process's child (`serve.py`, POSIX only), and does
+  not stub `pwd`, which Linux has.
+- **Checked by** `tools/server-checks/tests/test_websearch.py`'s `RealWebTests` (`IED_SERVER_CHECKS_REAL_WEB=1`: it
+  needs the network and a home with the services): from a stopped Tor, the Search page's search through Tor (new
+  circuits and again when every engine refused the exit), Tor ready and SearXNG running, then a chat turn whose
+  `web_search` went through Tor and whose `web_fetch` of `https://example.com/` came back by the impersonator
+  (`webfetch.curl` names no program, so curl could not have fetched it).
+- **As built (2026-11-21).** A Linux release packaged by `ied_release.py`'s own functions, served in the Gitea layout
+  from a loopback server and installed by its `install.sh` in a clean Debian 12 container (`ldd` asked apt for the
+  packages, `curl` among them): Python 3.12.10, Tor 0.4.9.14, curl_cffi 0.16.3 and lxml 6.1.3 load with no library
+  missing; `RealWebTests` and the start check passed - from a stopped Tor the first search had 5 results through Tor in
+  10.5 s (18.3 s in an earlier run), the chat turn's search and fetch as above. Killed with SIGKILL after a search, the
+  server left neither Tor nor SearXNG running (both gone within 1 s). The same check passed on Windows against the
+  checkout's services (13.5 s), and the plugins' unit tests (`server.tor.*`, `server.websearch.*`, `server.webfetch.*`)
+  pass on both systems.
+
 ## As built (2026-10-21)
 
 Checked in the app (a private server, a scripted model): a chat's `web_search` (approval card, results through Tor from
@@ -274,10 +328,14 @@ host now clears the mark wherever it releases the lock for plugin code (`CodeUnl
 ## Licenses
 
 SearXNG (AGPL-3.0) runs unmodified as its own process; the launcher and the fetcher are IED's. Tor (BSD-3), curl_cffi
-(MIT) and the other packages likewise. `docs/21` lists them.
+(MIT) and the other packages likewise; on Linux also python-build-standalone's CPython (PSF, with the licenses of what
+it links in). `docs/21` lists them.
 
 ## Open items
 
 - Fetch through Tor (opt-in per call or per solution) and the general egress policy of `docs/04` - not wanted now.
 - A `summary` format for `web_fetch` (the `summarizer` role, `docs/13`).
 - A readability-style score for pages with neither `<main>` nor one `<article>` (today: the whole body without chrome).
+- Brave's results through Tor often carry addresses like `http:///go/v1/...` (its redirect links, made absolute
+  against no host by SearXNG's `brave` engine at the pinned commit; seen on Windows and Linux alike, 2026-11-21): the
+  model cannot fetch those. Drop or repair them in `Results.cf`, or a newer SearXNG.
