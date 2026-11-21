@@ -102,9 +102,15 @@ class ClaudeModelsTests {
 		Ai::SetClaudeCatalog(Catalog());
 		Core::Array<Ai::ModelProfile*> models = Ai::ReadModels(Text(c_Ladder), problems);
 		Ai::SetClaudeCatalog(Core::Array<Ai::ClaudeCatalogModel*>());
+		if (!Ai::c_ClaudeSubscriptionOffered) {
+			assert_true(models.Count() == 1 && Ai::FindModel(models, Text("qwen")) != nullptr, "a distributed build offers no Claude login: the other models alone");
+			assert_true(problems.Count() == 4 && problems[0].View().Contains(Text(Ai::c_ClaudeNotOffered)), "each Claude profile refused, saying why");
+			return;
+		}
 		Ai::ModelProfile* fable = Ai::FindModel(models, Text("claude-fable"));
 		assert_true(fable && fable->m_Model == "claude-fable-5-2" && fable->m_Written == "fable" && !fable->m_FromCatalog, "the fable family runs Fable 5.2");
-		assert_true(Ai::FindModel(models, Text("claude-opus"))->m_Model == "opus", "Opus by its alias");
+		Ai::ModelProfile* opus = Ai::FindModel(models, Text("claude-opus"));
+		assert_true(opus && opus->m_Model == "opus", "Opus by its alias");
 		Ai::ModelProfile* old = Ai::FindModel(models, Text("claude-opus-4-8"));
 		assert_true(old && old->IsClaude() && old->m_FromCatalog && old->m_Model == "claude-opus-4-8" && old->m_Privacy == Ai::Privacy::Cloud, "an older version, a model of its own");
 		assert_true(models.Count() == 5 + 9 && Ai::FindModel(models, Text("claude-fable-5-2")) && Ai::FindModel(models, Text("claude-mythos-6")), "every version beside ai.models");

@@ -21,7 +21,8 @@ static Serialization::DomNode PrivacyJson(const char* text) {
 	return Serialization::ReadJson(Core::StringView(text), *doc).root;
 }
 
-const char* c_PrivacyModels = "{\"claude-opus\": {\"provider\": \"claude-code\", \"model\": \"opus\"}, \"router\": {\"endpoint\": \"http://models.example.com/v1\", \"privacy\": \"cloud\"},"
+// A cloud model by its endpoint, not a Claude login: a distributed build has no Claude login (docs/04 "Distributed builds").
+const char* c_PrivacyModels = "{\"claude-opus\": {\"endpoint\": \"http://api.example.com/v1\", \"privacy\": \"cloud\"}, \"router\": {\"endpoint\": \"http://models.example.com/v1\", \"privacy\": \"cloud\"},"
 	"\"qwen\": {\"endpoint\": \"http://127.0.0.1:8080/v1\"}, \"spark\": {\"endpoint\": \"http://spark.lan:8080/v1\", \"privacy\": \"lan\"}}";
 
 [test("server.ai.privacy")]
@@ -36,7 +37,7 @@ class PrivacyTests {
 		Ai::ChatPrivacy closed;
 		closed.m_NoCloudModels = true;
 		Core::Array<Ai::ModelProfile*> allowed = Ai::AllowedModels(models, closed);
-		assert_eq((int64)2, allowed.Count(), "Claude and the cloud endpoint are left out");
+		assert_eq((int64)2, allowed.Count(), "the cloud endpoints are left out");
 		assert_se("qwen", allowed[0]->m_Name.CStr(), "local first, as the chain had it");
 		assert_se("spark", allowed[1]->m_Name.CStr(), "a LAN model is no cloud model");
 		assert_true(Ai::ModelRefusal(models, PrivacyText("qwen"), closed).IsEmpty(), "a local model is no refusal");

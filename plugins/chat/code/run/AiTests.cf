@@ -301,10 +301,10 @@ class ProbeTests {
 		// An engine's lines come after the process's own, far into a large answer: reading only the head of it used to
 		// decide a healthy vLLM says nothing of itself (the owner's server, 2026-10-25: the gauges 2 kB into 71 kB).
 		assert_true(Ai::MetricsHasRequestGauges(View("# HELP python_gc_objects_collected_total Objects collected during gc\n"
-													  "python_gc_objects_collected_total{generation=\"2\"} 42897.0\n"
-													  "# TYPE vllm:num_requests_running gauge\n"
-													  "vllm:num_requests_running{engine=\"0\",model_name=\"m\"} 0.0\n")),
-													  "the gauges past the head of a big answer, and a # TYPE line is no gauge");
+			"python_gc_objects_collected_total{generation=\"2\"} 42897.0\n"
+			"# TYPE vllm:num_requests_running gauge\n"
+			"vllm:num_requests_running{engine=\"0\",model_name=\"m\"} 0.0\n")),
+			"the gauges past the head of a big answer, and a # TYPE line is no gauge");
 	}
 }
 
@@ -338,7 +338,8 @@ class ModelTests {
 		assert_true(role.PaceOf(View("local")).m_Max == 0 && role.PaceOf(View("sonnet")).m_Max == 0 && role.PaceOf(View("nowhere")).m_Max == 0, "no pace: always");
 		Core::Array<Core::String> problems;
 		Ai::ReadModels(View("{\"old\": {\"provider\": \"claude-code\", \"model\": \"auto\"}}"), problems);
-		assert_true(problems.Count() == 1 && problems[0].View().Contains(View("model auto is gone")), "an auto profile is refused");
+		const char* why = Ai::c_ClaudeSubscriptionOffered ? "model auto is gone" : Ai::c_ClaudeNotOffered;   // a Dist build refuses any Claude login first
+		assert_true(problems.Count() == 1 && problems[0].View().Contains(View(why)), "an auto profile is refused");
 	}
 
 	[test("a_turns_role_comes_from_its_mode")]
