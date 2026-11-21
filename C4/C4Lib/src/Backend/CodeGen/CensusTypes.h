@@ -35,6 +35,9 @@ namespace Scripting
 		/// The record of an array of `element`s named `name`, whose element count sits `countBytes` before the first
 		/// element; 0: the count is not kept, so its native memory cannot be counted.
 		llvm::Constant* ArrayRecord(const Type* element, const std::string& name, uint64 countBytes);
+		/// A record of `type` for the collector alone (`gc_type_of`, the reflection image): its name and pointer map, no
+		/// counter, so it needs nothing lowering plans.
+		llvm::Constant* MapRecord(const Type* type, const std::string& name);
 
 		/// The counters the records declared since the last call, for the module to define.
 		std::vector<const CensusFunction*> TakeFunctions() { return std::move(m_New); }
@@ -43,10 +46,12 @@ namespace Scripting
 		const std::vector<const Type*>& Unplanned() const { return m_Unplanned; }
 
 	private:
-		// What a record describes: one object, or an array of them whose first element is `countBytes` in.
+		// What a record describes: one object, an array of them whose first element is `countBytes` in, or one object for
+		// the collector alone.
+		enum class Form { Object, Array, MapOnly };
 		struct Shape
 		{
-			bool array;
+			Form form;
 			uint64 countBytes;
 		};
 
@@ -58,7 +63,7 @@ namespace Scripting
 
 		ModuleContext& m_MCtx;
 		const LoweredProgram* m_Program = nullptr;
-		std::map<std::pair<const Type*, bool>, llvm::GlobalVariable*> m_Records;   // by type, and whether of arrays
+		std::map<std::pair<const Type*, Form>, llvm::GlobalVariable*> m_Records;   // by type and form
 		std::map<const Type*, std::optional<PointerMap>> m_Maps;
 		std::vector<const CensusFunction*> m_New;
 		std::vector<const Type*> m_Unplanned;

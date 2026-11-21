@@ -74,9 +74,14 @@
 // bytes it keeps.
 [link("c4_buffer_resize_scanned")] void* buffer_resize_scanned(void* buffer, uint64 oldBytes, uint64 keepBytes, uint64 newBytes) noexcept;
 [link("c4_buffer_free_scanned")] void buffer_free_scanned(void* buffer, uint64 bytes) noexcept;
+// The same for a buffer of elements of one type, `element` its gc_type_of: the collector reads only the words its pointer
+// map names (R16). Freed with buffer_free_scanned.
+[link("c4_buffer_resize_scanned_typed")] void* buffer_resize_scanned_typed(void* buffer, uint64 oldBytes, uint64 keepBytes, uint64 newBytes, const void* element) noexcept;
 [link("c4_gc_collect")] void gc_collect() noexcept;
 [link("c4_gc_register_region")] void gc_register_region(void* start, uint64 size) noexcept;
 [link("c4_gc_unregister_region")] void gc_unregister_region(void* start) noexcept;
+// A scan region of elements of one type (`element`: its gc_type_of), read by the type's pointer map.
+[link("c4_gc_register_typed_region")] void gc_register_typed_region(void* start, uint64 size, const void* element) noexcept;
 [link("c4_gc_allocs")] uint64 gc_allocs() noexcept;
 [link("c4_gc_collections")] uint64 gc_collections() noexcept;
 [link("c4_gc_heap_bytes")] uint64 gc_heap_bytes() noexcept;
@@ -161,6 +166,7 @@
 [link("reflect_enum_handle_value")] int64 reflect_enum_handle_value(void* handle) noexcept;
 [link("reflect_is_virtual_type")] int32 reflect_is_virtual_type(void* handle) noexcept;
 [link("reflect_type_flags")] uint32 reflect_type_flags(void* handle) noexcept;
+[link("reflect_type_gc_type")] const void* reflect_type_gc_type(void* handle) noexcept;
 [link("reflect_type_has_destroy")] uint32 reflect_type_has_destroy(void* handle) noexcept;
 [link("reflect_type_has_copy")] uint32 reflect_type_has_copy(void* handle) noexcept;
 [link("reflect_type_construct")] uint32 reflect_type_construct(void* handle, void* object);

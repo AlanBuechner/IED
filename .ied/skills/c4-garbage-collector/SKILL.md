@@ -40,7 +40,10 @@ maps), **conservative for stacks, registers and raw regions**. The C API is `C4R
   (`c4_alloc_typed`). `new T[n]` repeats the element's map after a counted array's count. Keep the mark and
   allocation fast paths inline (`push_contents`, `gc_thread_alloc_typed`), the record off the fast path, and the hot
   `GCSpan` fields before the bitmaps: each of those cost the GC benchmark 1-25% when lost.
-  Still conservative: stacks, registers, scan regions, `c4_alloc` memory.
+  Buffers too: `gc_type_of(T)` (a builtin) names T's record, and a region registered with it
+  (`gc_register_typed_region`, `buffer_resize_scanned_typed`; a reflected type's `Reflection::Type::GcType()`) is
+  read by T's map; Bedrock's containers and serializers register theirs so.
+  Still conservative: stacks, registers, untyped scan regions, `c4_alloc` memory.
 
 ## Roots
 `__c4_gc_roots` (compiler-emitted `{address, size, pointers}` ranges for every global, static member and static

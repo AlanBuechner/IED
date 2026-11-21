@@ -52,8 +52,13 @@ void gc_mark_range_later(GCMarker* marker, const void* lo, const void* hi);
 // cycle's snapshot of them), a range without a map is queued whole.
 void gc_mark_root_range(GCMarker* marker, const c4_gc_root_range* range);
 
-// Queues the part [from, to) of a precise span's object: the words its pointer bits name.
-void gc_mark_precise_later(GCMarker* marker, const uint8_t* from, const uint8_t* to);
+// A scan region of elements read by `map` (the element's, back to back from `start`): the words it names are read now (a
+// concurrent cycle's snapshot of them), as a mapped root's.
+void gc_mark_typed_region(GCMarker* marker, const uint8_t* start, size_t size, const GCSpanMap* map);
+
+// Queues the part [from, to) of the precise span's object at `base`: the words the span's map names; a whole small object
+// with the span's mask, as marking pushes it.
+void gc_mark_precise_later(GCMarker* marker, const GCSpan* span, const uint8_t* base, const uint8_t* from, const uint8_t* to);
 
 // Queues the part [from, to) of the hash entries of an object starting at `base`, rounded out to whole entries.
 void gc_mark_entries_later(GCMarker* marker, const uint8_t* base, const uint8_t* from, const uint8_t* to, GCScanKind kind);

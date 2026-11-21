@@ -22,6 +22,7 @@ namespace Serialization
 		public int64 size;
 		public int64 align;
 		public bool holdsPointers;       // a value may hold managed pointers (holds_pointers): an array of it is scanned
+		public const void* gcType;       // what of a value the collector reads (its gc_type_of, from reflection); null: all
 		public Core::String element;     // Array, FixedArray: the element type's name; StringMap: the value type's
 		public int64 count;              // FixedArray: its length
 		public int64 valueOffset;        // StringMap: where a KeyValue<Core::String, V>'s value starts

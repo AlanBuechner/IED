@@ -12,8 +12,9 @@
 namespace Scripting
 {
 	// Compile-time queries (docs/language/10 4): sizeof, alignof, offsetof (int64 constants), holds_native_bytes and
-	// holds_pointers (bools; a program function of the name wins), __uuidof (the address of a COM GUID), nameof (a type's
-	// qualified name) and sizeof...(pack). Nothing runs: an expression operand is typed, not evaluated.
+	// holds_pointers (bools; a program function of the name wins), gc_type_of (the address of the type's GC record),
+	// __uuidof (the address of a COM GUID), nameof (a type's qualified name) and sizeof...(pack). Nothing runs: an
+	// expression operand is typed, not evaluated.
 
 	QueryResult<Value> ExprLowerer::ResolveTypeOf(const TypeOfExpressionNode* n)
 	{
@@ -21,6 +22,7 @@ namespace Scripting
 		if (n->GetKind() == TypeOfExpressionNode::Kind::UuidOf) return ResolveUuidOf(n);
 		if (n->GetKind() == TypeOfExpressionNode::Kind::NameOf) return ResolveNameOf(n);
 		if (CallsProgramFunction(m_Ctx.model(), *n, m_Ctx.unitId, m_Ctx.scope)) return ResolveExpr(n->GetCall().Get());
+		if (n->GetKind() == TypeOfExpressionNode::Kind::GcTypeOf) return ResolveGcTypeOf(n);
 		if (const std::optional<int64> bytes = SizeOfStringLiteral(*n))
 			return Constant(m_Ctx.queries().TypeStore()->Builtin(TypeKind::Int64), ConstantValue::Int(*bytes));
 		auto operand = QueryOperandType(n);
@@ -91,6 +93,17 @@ namespace Scripting
 		if (!operand.Ok()) return m_Ctx.Fail(n, QueryResult<Value>::Fail(operand.error, "nameof: " + operand.message));
 		TypeStore* types = m_Ctx.queries().TypeStore();
 		return Constant(types->Pointer(types->Builtin(TypeKind::Char8)), CompileTimeQueryValue(*n, operand.value).value);
+	}
+
+	// gc_type_of(T): a `void*` to T's c4_gc_type record (its name and pointer map; docs/language/14), for a scan region
+	// of T elements (gc_register_typed_region) that the collector reads by T's map.
+	QueryResult<Value> ExprLowerer::ResolveGcTypeOf(const TypeOfExpressionNode* n)
+	{
+		auto operand = QueryOperandType(n);
+		if (!operand.Ok()) return m_Ctx.Fail(n, QueryResult<Value>::Fail(operand.error, "gc_type_of: " + operand.message));
+		TypeStore* types = m_Ctx.queries().TypeStore();
+		const Type* voidPtr = types->Pointer(types->Builtin(TypeKind::Void));
+		return QueryResult<Value>::Success(Value::R(m_Ctx.out->NewNode<GcTypeNode>(voidPtr, operand.value), voidPtr));
 	}
 
 	// __uuidof(T): the [uuid("...")] a type carries (CBind emits it for __declspec(uuid) / MIDL_INTERFACE), else the

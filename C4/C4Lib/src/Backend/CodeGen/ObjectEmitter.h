@@ -20,6 +20,8 @@ namespace Scripting
 		llvm::Value* EmitInitList(const InitListNode* n);
 		llvm::Value* EmitDelete(const DeleteNode* n);
 		llvm::Value* EmitRelocate(const RelocateNode* n);
+		/// `gc_type_of(T)`: the address of T's record, its name and pointer map (no census counter).
+		llvm::Value* EmitGcType(const GcTypeNode* n);
 
 		/// Zeroed managed storage for one `objectType` (a pointer-free type is never scanned by the collector).
 		llvm::Value* Allocate(const Type* objectType);

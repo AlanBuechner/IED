@@ -58,6 +58,7 @@ int32_t reflect_is_virtual_type(const c4_type_info* t)
 // ------------------------------------------------------------------ type operations
 
 uint32_t reflect_type_flags(const c4_type_info* t) { return t ? t->flags : 0; }
+const struct c4_gc_type* reflect_type_gc_type(const c4_type_info* t) { return t ? t->gcType : 0; }
 uint32_t reflect_type_has_destroy(const c4_type_info* t) { return t && t->destroy ? 1 : 0; }
 uint32_t reflect_type_has_copy(const c4_type_info* t) { return t && t->copy ? 1 : 0; }
 

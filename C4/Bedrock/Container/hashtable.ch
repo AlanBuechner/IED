@@ -67,12 +67,14 @@ namespace Core
 	// The capacity a full table moves to: room for twice its live entries; the removed slots are left behind.
 	int64 GrownCapacity(const HashTable& table);
 
-	// How a table stores its entries: sizeof(E), alignof(E) and holds_pointers(E) (whether the collector scans them).
+	// How a table stores its entries: sizeof(E), alignof(E), holds_pointers(E) (whether the collector scans them) and
+	// gc_type_of(E) (what of each it reads; null: all of it).
 	struct EntryStorage
 	{
 		public int64 bytes;
 		public int64 align;
 		public bool holdsPointers;
+		public const void* gcType;
 	}
 
 	template<E> EntryStorage EntryStorageOf() {
@@ -80,6 +82,7 @@ namespace Core
 		storage.bytes = (int64)sizeof(E);
 		storage.align = (int64)alignof(E);
 		storage.holdsPointers = holds_pointers(E);
+		storage.gcType = gc_type_of(E);
 		return storage;
 	}
 

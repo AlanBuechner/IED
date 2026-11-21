@@ -5,8 +5,9 @@
 
 namespace Scripting
 {
-	/// The rows of the reflection wire format (C4Runtime/ReflectABI.h), and a table of pointers.
-	enum class ImageShape : uint8 { AnnotationArg, Annotation, Param, Field, Method, EnumValue, TypeInfo, Variable, Function, Image, Pointer };
+	/// The rows of the reflection wire format (C4Runtime/ReflectABI.h), a type's GC record (GCRuntimeC.h c4_gc_type) and its
+	/// pointer map's words, and a table of pointers.
+	enum class ImageShape : uint8 { AnnotationArg, Annotation, Param, Field, Method, EnumValue, TypeInfo, Variable, Function, Image, Pointer, GcType, Word };
 
 	/// One field of a row: a number (its width is the field's, from the row's shape), a text, null, a table or a symbol.
 	struct ImageValue

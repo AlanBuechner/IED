@@ -110,13 +110,14 @@ namespace Core
 		public int64 capacity;
 	}
 
-	// What Array<T> knows of T at compile time, for code that knows T only at run time: sizeof(T), alignof(T) and
-	// holds_pointers(T) (whether the buffer is scanned).
+	// What Array<T> knows of T at compile time, for code that knows T only at run time: sizeof(T), alignof(T),
+	// holds_pointers(T) (whether the buffer is scanned) and gc_type_of(T) (what of it is read; null: all of it).
 	struct ElementStorage
 	{
 		public int64 bytes;
 		public int64 align;
 		public bool holdsPointers;
+		public const void* gcType;
 	}
 
 	// Gives the empty Array<T> at `array` `count` elements of `element`, stored as Array<T> stores them and zero rather

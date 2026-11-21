@@ -180,9 +180,11 @@ void gc_mark_scan_item(GCMarker* marker, GCScanItem item)
 	else mark_entries(marker, item);
 }
 
-void gc_mark_precise_later(GCMarker* marker, const uint8_t* from, const uint8_t* to)
+void gc_mark_precise_later(GCMarker* marker, const GCSpan* span, const uint8_t* base, const uint8_t* from, const uint8_t* to)
 {
-	push(marker, from, (size_t)(to - from), GC_SCAN_PRECISE);
+	const GCSpanMap* map = span->map;
+	if (map && map->masked && from == base && to == base + span->elemSize) push(marker, base, (size_t)map->mask, GC_SCAN_MASKED);
+	else push(marker, from, (size_t)(to - from), GC_SCAN_PRECISE);
 }
 
 void gc_mark_entries_later(GCMarker* marker, const uint8_t* base, const uint8_t* from, const uint8_t* to, GCScanKind kind)
@@ -247,6 +249,23 @@ void gc_mark_root_range(GCMarker* marker, const c4_gc_root_range* range)
 		uint64_t set = range->pointers[w];
 		if (count - (w << 6) < 64) set &= ((uint64_t)1 << (count - (w << 6))) - 1u;
 		for (; set; set &= set - 1u) mark_boxed(marker, words[(w << 6) + (size_t)__builtin_ctzll(set)]);
+	}
+}
+
+void gc_mark_typed_region(GCMarker* marker, const uint8_t* start, size_t size, const GCSpanMap* map)
+{
+	const gc_word* words = (const gc_word*)start;
+	const size_t count = size >> 3;
+	if (map->masked)
+	{
+		for (size_t element = 0; element + map->words <= count; element += map->words)
+			for (uint64_t set = map->mask; set; set &= set - 1u) mark_boxed(marker, words[element + (size_t)__builtin_ctzll(set)]);
+		return;
+	}
+	for (size_t w = 0, e = 0; w < count; ++w)
+	{
+		if ((map->bits[e >> 6] >> (e & 63u)) & 1u) mark_boxed(marker, words[w]);
+		if (++e == map->words) e = 0;
 	}
 }
 

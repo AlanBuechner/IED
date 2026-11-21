@@ -257,6 +257,9 @@ namespace Reflection
 		// may hold managed pointers (its storage must be scanned), can start from nothing or be copied, can exist on
 		// its own, and whether destroying or copying one runs code.
 		public bool HoldsPointers() const { return (reflect_type_flags(handle) & kTypeHoldsPointers) != 0u; }
+		// Its record for the collector (gc_type_of): a buffer of its values registered with it is read by its pointer map;
+		// null for a type read whole or holding no pointers.
+		public const void* GcType() const { return reflect_type_gc_type(handle); }
 		public bool IsDefaultConstructible() const { return (reflect_type_flags(handle) & kTypeDefaultConstructible) != 0u; }
 		public bool IsCopyable() const { return (reflect_type_flags(handle) & kTypeCopyable) != 0u; }
 		public bool IsAbstract() const { return (reflect_type_flags(handle) & kTypeAbstract) != 0u; }

@@ -53,6 +53,11 @@ namespace Scripting
 		return AllocateTyped(objT, Shape::Object, m_Ctx.mctx().census().ObjectRecord(objT, CensusName(objT)), m_Ctx.builder().getInt64(size), align);
 	}
 
+	llvm::Value* ObjectEmitter::EmitGcType(const GcTypeNode* n)
+	{
+		return m_Ctx.mctx().census().MapRecord(n->of, CensusName(n->of));
+	}
+
 	std::string ObjectEmitter::CensusName(const Type* type) const
 	{
 		if (!type) return "";

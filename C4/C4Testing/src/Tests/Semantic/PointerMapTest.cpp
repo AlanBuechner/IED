@@ -188,6 +188,29 @@ namespace Testing
 		TEST_PASSED();
 	}
 
+	void PointerMapTest::GcTypeOfIsTheTypesMapRecord()
+	{
+		// gc_type_of(T) (B70): T's c4_gc_type for a scan region of T elements - its map, and no census counter even for a
+		// type that holds native memory, so lowering plans nothing for it.
+		std::vector<std::string> counters;
+		const char* source =
+			"struct Buffer { public int64 bytes; [operator(\"native_bytes\")] public int64 NativeBytes() const { return bytes; } }\n"
+			"struct Mixed { public int64 a; public Mixed* next; public Buffer buffer; }\n"
+			"int32 main() { const void* t = gc_type_of(Mixed); return t == null ? 1 : 0; }";
+		const auto records = RecordsOf(source);
+		TEST_ASSERT(records.count("Mixed"));
+		TEST_ASSERT(records.at("Mixed").pointers.size() == 1 && records.at("Mixed").pointers[0] == 0b010);
+		TEST_ASSERT_EQ((int)records.at("Mixed").words, 3);
+		TEST_ASSERT(Lower(source, [&](llvm::Module& module) {
+			for (const llvm::GlobalVariable& global : module.globals())
+				if (global.getName().starts_with("c4.census_type") && global.hasInitializer())
+					if (const auto* record = llvm::dyn_cast<llvm::ConstantStruct>(global.getInitializer()))
+						if (NameOf(*record) == "Mixed") counters.push_back(llvm::isa<llvm::ConstantPointerNull>(record->getOperand(1)) ? "null" : "counter");
+		}));
+		TEST_ASSERT(counters.size() == 1 && counters[0] == "null");
+		TEST_PASSED();
+	}
+
 	void PointerMapTest::AGlobalRootCarriesItsTypesMap()
 	{
 		// __c4_gc_roots gives each root its type's map: the collector reads a global holder's pointer word, not its numbers;

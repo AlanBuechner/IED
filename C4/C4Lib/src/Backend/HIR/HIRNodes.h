@@ -21,7 +21,7 @@ namespace Scripting
 		enum class Kind
 		{
 			// rvalue-producing (a quantity)
-			Constant, Load, Call, IntrinsicOp, Convert, New, Delete, Construct, AddressOf, AddressArithmetic, Ternary, InitList, FunctionAddress, VectorBuild, Sequence, DynamicCast, Relocate, MakeFunc, FuncCode, Transfer, Va, Atomic, Simd,
+			Constant, Load, Call, IntrinsicOp, Convert, New, Delete, Construct, AddressOf, AddressArithmetic, Ternary, InitList, FunctionAddress, VectorBuild, Sequence, DynamicCast, Relocate, MakeFunc, FuncCode, Transfer, Va, Atomic, Simd, GcType,
 			// statements / regions
 			Block, If, While, For, Switch, Break, Continue, Jump, Goto, Label, Return, ExprStmt, LocalDecl, Store, TryCatch, Throw, Defer, Once, AtExit, Asm
 		};
@@ -100,6 +100,14 @@ namespace Scripting
 	{
 		const FunctionRecord* fn = nullptr; // the record (mangled symbol to load the address from)
 		FunctionAddressNode(const Type* fpType, const FunctionRecord* f) : HIRNode(Kind::FunctionAddress, fpType), fn(f) {}
+	};
+
+	// `gc_type_of(T)`: the address of the c4_gc_type record of `of` (its name and pointer map, docs/runtime/01), which
+	// codegen emits once per module; the collector reads a scan region of T elements by it.
+	struct GcTypeNode : HIRNode
+	{
+		const Type* of = nullptr;
+		GcTypeNode(const Type* pointerType, const Type* t) : HIRNode(Kind::GcType, pointerType), of(t) {}
 	};
 
 	// A func<R(A)> value (docs/language/07): its code and environment. From a funcptr (`source`, called through

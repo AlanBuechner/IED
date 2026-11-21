@@ -11,7 +11,7 @@ namespace Core
 		if (layout->count != 0 || count < 0) return false;
 		if (count == 0) return true;
 		const uint64 bytes = (uint64)(count * element.bytes);
-		layout->data = ResizeElementBytes(layout->data, (uint64)(layout->capacity * element.bytes), 0u, bytes, (uint64)element.align, element.holdsPointers);
+		layout->data = ResizeElementBytes(layout->data, (uint64)(layout->capacity * element.bytes), 0u, bytes, (uint64)element.align, element.holdsPointers, element.gcType);
 		memset(layout->data, 0, bytes);
 		layout->count = count;
 		layout->capacity = count;

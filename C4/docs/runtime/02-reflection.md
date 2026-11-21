@@ -132,6 +132,10 @@ NegativeTest `ReflectsOutOfScope`, `ReflectBadArgument`, `NamespaceTakesOnlyRefl
   [lifecycle 6.4](../language/06-lifecycle-and-operators.md#64-copy-move-and-assignment), or with a part that is; a
   class-template instance whose copy is its template's counts as copyable only when its type arguments are, as a
   container copies its elements) and `reflect_TYPE_ABSTRACT` (an abstract class or an interface: no start, no copy).
+  Its `gcType` (R16) is its record for the collector, the `c4_gc_type` `gc_type_of` gives (its name and pointer map,
+  the image's own copy): storage for its values registered with it (`c4_gc_register_typed_region`; Bedrock's
+  `Reflection::Type::GcType()`, which its serializers use for the arrays they build) is read by its map; NULL for a
+  type read whole and for an enum.
   An enum or a union has no thunks and starts, copies and ends as bytes. The thunks are emitted for every type the
   program registers, so a type the program never makes (a script's component, a template instance it only names)
   can still be made: their code, and what it calls, is part of the program. A method's `operatorRole` names the

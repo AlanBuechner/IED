@@ -7,19 +7,19 @@
 namespace Scripting
 {
 	/// A compile-time query (docs/language/10 4): `sizeof(T)` / `sizeof(expr)` / `sizeof expr`, `alignof(T)` /
-	/// `alignof(expr)`, `offsetof(T, field.field)`, `holds_native_bytes(T)`, `holds_pointers(T)`, `__uuidof(T)`, `nameof(T)` /
-	/// `nameof(expr)` and `sizeof...(pack)`.
+	/// `alignof(expr)`, `offsetof(T, field.field)`, `holds_native_bytes(T)`, `holds_pointers(T)`, `gc_type_of(T)`, `__uuidof(T)`,
+	/// `nameof(T)` / `nameof(expr)` and `sizeof...(pack)`.
 	///
 	/// A parenthesized single name (`sizeof(x)`) parses as a type: whether it names a type or a value is the
 	/// model's call, so the operand of that form is the type node and the lowering falls back to the value. The two
-	/// `holds_*` queries also keep their text as a call: a program function of that name wins over the query.
+	/// `holds_*` queries and `gc_type_of` also keep their text as a call: a program function of that name wins over the query.
 	struct TypeOfExpressionNode : public AstNode
 	{
-		enum class Kind { SizeOf, AlignOf, OffsetOf, UuidOf, NameOf, SizeOfPack, HoldsNativeBytes, HoldsPointers };
+		enum class Kind { SizeOf, AlignOf, OffsetOf, UuidOf, NameOf, SizeOfPack, HoldsNativeBytes, HoldsPointers, GcTypeOf };
 
 		TypeOfExpressionNode() = default;
 
-		/// `sizeof`, `alignof`, `offsetof`, `holds_native_bytes`, `holds_pointers`, `__uuidof` or `nameof`.
+		/// `sizeof`, `alignof`, `offsetof`, `holds_native_bytes`, `holds_pointers`, `gc_type_of`, `__uuidof` or `nameof`.
 		static bool IsKeyword(const Core::String& text);
 		/// The query at the keyword `token` (already peeked, not consumed); null when it is not one, or when a
 		/// `holds_*` keyword is followed by arguments that are no type (an ordinary call then parses them).

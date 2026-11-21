@@ -46,6 +46,7 @@ namespace Serialization
 		value.size = element.size * count;
 		value.align = element.align;
 		value.holdsPointers = element.holdsPointers;
+		value.gcType = element.gcType;   // the element's map repeats over the array
 		return value;
 	}
 
@@ -77,6 +78,7 @@ namespace Serialization
 		value.entry.bytes = (int64)entry.SizeOf();
 		value.entry.align = (int64)entry.AlignOf();
 		value.entry.holdsPointers = entry.HoldsPointers();
+		value.entry.gcType = entry.GcType();
 		value.entriesOffset = (int64)entries.Offset();
 		value.tableOffset = (int64)table.Offset();
 		value.kind = ValueKind::StringMap;
@@ -100,6 +102,7 @@ namespace Serialization
 		value.size = (int64)value.type.SizeOf();
 		value.align = (int64)value.type.AlignOf();
 		value.holdsPointers = value.type.HoldsPointers();
+		value.gcType = value.type.GcType();
 		if (value.type.Kind() == Reflection::EntityKind::Enum) value.kind = ValueKind::Enum;
 		else if (text == "Core::String") value.kind = ValueKind::String;
 		else if (text.StartsWith(Core::StringView("Core::Array<"))) DescribeArray(value);
@@ -245,6 +248,7 @@ namespace Serialization
 		storage.bytes = element.size;
 		storage.align = element.align;
 		storage.holdsPointers = element.holdsPointers;
+		storage.gcType = element.gcType;
 		if (!Core::ResizeEmptyArray(at, node.Count(), storage)) return false;
 		void* first = ((Core::ArrayLayout*)at)->data;
 		return ConstructElements(element, first, node.Count()) && ReadElements(node, element, first);

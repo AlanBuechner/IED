@@ -16,12 +16,14 @@ namespace Scripting
 			if (text == "nameof") return Kind::NameOf;
 			if (text == "holds_native_bytes") return Kind::HoldsNativeBytes;
 			if (text == "holds_pointers") return Kind::HoldsPointers;
+			if (text == "gc_type_of") return Kind::GcTypeOf;
 			return Kind::SizeOf;
 		}
 
 		bool ReadsAsCall(TypeOfExpressionNode::Kind kind)
 		{
-			return kind == TypeOfExpressionNode::Kind::HoldsNativeBytes || kind == TypeOfExpressionNode::Kind::HoldsPointers;
+			return kind == TypeOfExpressionNode::Kind::HoldsNativeBytes || kind == TypeOfExpressionNode::Kind::HoldsPointers ||
+				kind == TypeOfExpressionNode::Kind::GcTypeOf;
 		}
 
 		// `name(args)` from the keyword on, read ahead and rolled back, as an ordinary call parses it.
@@ -56,7 +58,7 @@ namespace Scripting
 	bool TypeOfExpressionNode::IsKeyword(const Core::String& text)
 	{
 		return text == "sizeof" || text == "alignof" || text == "offsetof" || text == "__uuidof" || text == "nameof" ||
-			text == "holds_native_bytes" || text == "holds_pointers";
+			text == "holds_native_bytes" || text == "holds_pointers" || text == "gc_type_of";
 	}
 
 	Ref<TypeOfExpressionNode> TypeOfExpressionNode::TryParse(ParserState& state)

@@ -18,7 +18,9 @@ static void mark_regions(GCMarker* marker, const GCPtrMap* regions)
 	for (size_t i = 0; i < regions->capacity; ++i)
 	{
 		const GCEntry* region = &regions->slots[i];
-		if (region->key) gc_mark_range_later(marker, region->key, (const uint8_t*)region->key + (size_t)region->a);
+		if (!region->key) continue;
+		if (region->b) gc_mark_typed_region(marker, (const uint8_t*)region->key, (size_t)region->a, (const GCSpanMap*)region->b);
+		else gc_mark_range_later(marker, region->key, (const uint8_t*)region->key + (size_t)region->a);
 	}
 }
 

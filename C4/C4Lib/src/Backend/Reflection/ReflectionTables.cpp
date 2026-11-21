@@ -18,10 +18,13 @@ namespace Scripting
 		m_Field = llvm::StructType::get(m_Context, { ptr, ptr, u64, u64, u32, u32, u32, u32, ptr });
 		m_Method = llvm::StructType::get(m_Context, { ptr, u32, ptr, ptr, u32, u32, u32, ptr, u32, ptr, ptr, ptr });
 		m_EnumValue = llvm::StructType::get(m_Context, { ptr, u64 });
-		m_TypeInfo = llvm::StructType::get(m_Context, { u32, ptr, u64, u64, u32, ptr, u32, ptr, ptr, u32, ptr, u32, ptr, u32, ptr, ptr, ptr, ptr, u32 });
+		m_TypeInfo = llvm::StructType::get(m_Context, { u32, ptr, u64, u64, u32, ptr, u32, ptr, ptr, u32, ptr, u32, ptr, u32, ptr, ptr, ptr, ptr, u32, ptr });
 		m_Variable = llvm::StructType::get(m_Context, { ptr, ptr, ptr, u64, u64, u32, ptr, u32, ptr, u32, ptr });
 		m_Function = llvm::StructType::get(m_Context, { ptr, ptr, ptr, u32, ptr, u32, u32, ptr, u32, ptr, ptr, u32, ptr, ptr, ptr });
 		m_Image = llvm::StructType::get(m_Context, { u32, ptr, u32, ptr, ptr, u32, ptr });
+		llvm::Type* u16 = llvm::Type::getInt16Ty(m_Context);
+		m_GcType = llvm::StructType::get(m_Context, { ptr, ptr, ptr, u32, u16, u16 });
+		m_Word = llvm::StructType::get(m_Context, llvm::ArrayRef<llvm::Type*>(u64));
 	}
 
 	llvm::GlobalVariable* ReflectionTables::Build(const ImageDescription& image)
@@ -57,6 +60,8 @@ namespace Scripting
 		case ImageShape::Function: return m_Function;
 		case ImageShape::Image: return m_Image;
 		case ImageShape::Pointer: return nullptr;
+		case ImageShape::GcType: return m_GcType;
+		case ImageShape::Word: return m_Word;
 		}
 		return nullptr;
 	}

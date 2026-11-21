@@ -55,6 +55,7 @@ namespace Scripting
 			switch (node.kind)
 			{
 			case HIRNode::Kind::Constant:
+			case HIRNode::Kind::GcType:
 			case HIRNode::Kind::FunctionAddress: return;
 			case HIRNode::Kind::Load: Place(As<LoadNode>(node).loc); return;
 			case HIRNode::Kind::Call:

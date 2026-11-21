@@ -130,6 +130,8 @@ typedef struct c4_type_info {
     c4_destroy_fn destroy;         // what `destroy(p)` runs; NULL when there is nothing to destroy
     c4_copy_fn copy;               // what `new (to) T(*from)` runs on zero `to`; NULL when a byte copy is the copy
     uint32_t flags;                // reflect_TYPE_*
+    const struct c4_gc_type* gcType; // its record for the collector (GCRuntimeC.h, R16): a scan region of values of the
+                                   // type is read by its pointer map; NULL for a type read whole or holding no pointers
 } c4_type_info;
 
 // A global variable or static data member.
@@ -232,6 +234,7 @@ uint32_t    reflect_enum_count(const c4_type_info* t);
 const char* reflect_base_name(const c4_type_info* t);
 int32_t     reflect_is_virtual_type(const c4_type_info* t);
 uint32_t    reflect_type_flags(const c4_type_info* t);
+const struct c4_gc_type* reflect_type_gc_type(const c4_type_info* t); // gcType: for c4_gc_register_typed_region
 uint32_t    reflect_type_has_destroy(const c4_type_info* t);   // 1 when destroying one runs code
 uint32_t    reflect_type_has_copy(const c4_type_info* t);      // 1 when copying one runs code
 // The object at `object` zeroed and started as `new (object) T()` starts it: 1, or 0 (nothing written) when the type is

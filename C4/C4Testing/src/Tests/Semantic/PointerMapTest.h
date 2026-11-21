@@ -22,5 +22,8 @@ namespace Testing
 
 		TEST_FUNC(Semantic.PointerMap)
 		void AGlobalRootCarriesItsTypesMap();
+
+		TEST_FUNC(Semantic.PointerMap)
+		void GcTypeOfIsTheTypesMapRecord();
 	};
 } // namespace Testing

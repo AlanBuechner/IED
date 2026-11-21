@@ -80,6 +80,10 @@ void c4_gc_enable(void);
 // registered region is scanned. Registering the same start again replaces its size.
 void c4_gc_register_region(const void* start, size_t size);
 void c4_gc_unregister_region(const void* start);
+// The same for a region of `element`s back to back from `start` (a container's buffer): only the words the element's
+// pointer map names are read (R16; `gc_type_of(T)` gives a type's record). A record without a map reads the region whole.
+struct c4_gc_type;
+void c4_gc_register_typed_region(const void* start, size_t size, const struct c4_gc_type* element);
 
 // Storage that holds handles instead of pointers: once per collection `fn` reports each live object by
 // calling visit(visit_ctx, ptr) (any pointer into the object). `key` identifies the registration.
@@ -296,6 +300,9 @@ void c4_buffer_free(void* buffer, size_t bytes);
 // past the kept bytes (BUG-409: the memory's earlier contents would keep objects alive).
 void* c4_buffer_resize_scanned(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes);
 void c4_buffer_free_scanned(void* buffer, size_t bytes);
+// c4_buffer_resize_scanned for a buffer of `element`s: its region is read by the element's map
+// (c4_gc_register_typed_region). Freed with c4_buffer_free_scanned.
+void* c4_buffer_resize_scanned_typed(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes, const struct c4_gc_type* element);
 
 // --- Compiler interface ---------------------------------------------------------------------------
 // Every global, static member and static local that may hold a managed pointer, as {address, size, pointers};

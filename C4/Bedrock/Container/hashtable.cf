@@ -74,7 +74,7 @@ namespace Core
 		const uint64 bytes = (uint64)(capacity * entry.bytes);
 		void* entries = (uint64)entry.align > kRawAllocAlignment ? raw_alloc_aligned(bytes, (uint64)entry.align) : raw_alloc(bytes);
 		memset(entries, 0, bytes);
-		if (entry.holdsPointers) gc_register_region(entries, bytes);
+		if (entry.holdsPointers) gc_register_typed_region(entries, bytes, entry.gcType);
 		table.control = (int8*)raw_alloc((uint64)ControlBytes(capacity));
 		table.capacity = capacity;
 		EmptyTable(table);

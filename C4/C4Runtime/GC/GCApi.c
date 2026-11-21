@@ -468,9 +468,18 @@ int32_t c4_gc_set_percent(int32_t percent)
 
 void c4_gc_register_region(const void* start, size_t size)
 {
+	c4_gc_register_typed_region(start, size, NULL);
+}
+
+// A region of `element`s is read by the element's map (R16), one without a map whole; regions keep their map interned.
+void c4_gc_register_typed_region(const void* start, size_t size, const c4_gc_type* element)
+{
 	if (!start || !size) return;
 	gc_os_lock();
-	gc_map_upsert(&collector()->regions, start)->a = (void*)size;
+	GCState* gc = collector();
+	GCEntry* region = gc_map_upsert(&gc->regions, start);
+	region->a = (void*)size;
+	region->b = gc_pointers_precise(element) && !element->array ? (void*)gc_pointers_intern(&gc->heap.maps, element) : NULL;
 	gc_os_unlock();
 }
 

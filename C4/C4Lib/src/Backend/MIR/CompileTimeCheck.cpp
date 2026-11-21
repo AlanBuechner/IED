@@ -111,6 +111,7 @@ namespace Scripting
 					return Fail("it takes a function's address");
 				case HIRNode::Kind::Relocate: return Fail("it relocates an object");
 				case HIRNode::Kind::InitList: return Fail("it builds an initializer list");
+				case HIRNode::Kind::GcType: return Fail("it takes a type's GC record ('gc_type_of')");
 				default: return Fail("it does what compile time cannot run");
 				}
 			}

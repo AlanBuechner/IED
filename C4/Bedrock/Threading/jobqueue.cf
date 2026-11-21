@@ -10,7 +10,7 @@ namespace Threading
 		if (!cells) return;   // out of memory: every push fails, so jobs run where they are submitted
 		memset((void*)cells, 0, bytes);
 		for (int64 i = 0; i < size; i++) cells[i].sequence = i;
-		if (holds_pointers(JobCell)) gc_register_region((void*)cells, bytes);
+		if (holds_pointers(JobCell)) gc_register_typed_region((void*)cells, bytes, gc_type_of(JobCell));
 		mask = size - 1;
 	}
 

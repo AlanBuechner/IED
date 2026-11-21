@@ -20,17 +20,18 @@ namespace Core
 
 	// A buffer of `newBytes` in place of `elements` (`oldBytes`, null for none), its first `keepBytes` kept. The collector
 	// scans it only when `scanned`: when its elements may hold managed pointers (holds_pointers), so a buffer of numbers
-	// costs a collection nothing; a scanned one is zero past the kept bytes (BUG-409). Past 1 MiB it grows in place
-	// (buffer_resize); over-aligned elements move into a block of their own, registered once they are in it, while the old
-	// one still is. A buffer keeps the form it was made with.
-	void* ResizeElementBytes(void* elements, uint64 oldBytes, uint64 keepBytes, uint64 newBytes, uint64 align, bool scanned) {
+	// costs a collection nothing; it reads only the words the elements' pointer map names (`gcType`, their gc_type_of);
+	// a scanned one is zero past the kept bytes (BUG-409). Past 1 MiB it grows in place (buffer_resize); over-aligned
+	// elements move into a block of their own, registered once they are in it, while the old one still is. A buffer keeps
+	// the form it was made with.
+	void* ResizeElementBytes(void* elements, uint64 oldBytes, uint64 keepBytes, uint64 newBytes, uint64 align, bool scanned, const void* gcType) {
 		if (align <= kRawAllocAlignment)
-			return scanned ? buffer_resize_scanned(elements, oldBytes, keepBytes, newBytes) : buffer_resize(elements, oldBytes, keepBytes, newBytes);
+			return scanned ? buffer_resize_scanned_typed(elements, oldBytes, keepBytes, newBytes, gcType) : buffer_resize(elements, oldBytes, keepBytes, newBytes);
 		void* moved = newBytes > 0u ? raw_alloc_aligned(newBytes, align) : nullptr;
 		if (keepBytes > 0u) memcpy(moved, elements, keepBytes);
 		if (moved && scanned) {
 			memset((void*)((uint8*)moved + keepBytes), 0, newBytes - keepBytes);
-			gc_register_region(moved, newBytes);
+			gc_register_typed_region(moved, newBytes, gcType);
 		}
 		if (elements) {
 			if (scanned) gc_unregister_region(elements);
@@ -46,7 +47,7 @@ namespace Core
 		if (elements && holds_pointers(T)) {
 			const uint64 bytes = (uint64)(count * (int64)sizeof(T));
 			memset((void*)elements, 0, bytes);
-			gc_register_region((void*)elements, bytes);
+			gc_register_typed_region((void*)elements, bytes, gc_type_of(T));
 		}
 		return elements;
 	}
@@ -81,6 +82,6 @@ namespace Core
 	template<T> T* ResizeElements(T* elements, int64 oldCount, int64 keepCount, int64 newCount) {
 		const uint64 size = (uint64)sizeof(T);
 		return (T*)ResizeElementBytes((void*)elements, (uint64)oldCount * size, (uint64)keepCount * size, (uint64)newCount * size, (uint64)alignof(T),
-			holds_pointers(T));
+			holds_pointers(T), gc_type_of(T));
 	}
 }

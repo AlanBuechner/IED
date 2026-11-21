@@ -57,5 +57,7 @@ namespace Scripting
 		llvm::StructType* m_Variable;       // c4_variable_info
 		llvm::StructType* m_Function;       // c4_function_info
 		llvm::StructType* m_Image;          // c4_reflect_image
+		llvm::StructType* m_GcType;         // c4_gc_type (GCRuntimeC.h)
+		llvm::StructType* m_Word;           // one uint64 of a pointer map
 	};
 } // namespace Scripting

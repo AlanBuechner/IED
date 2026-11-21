@@ -1,5 +1,6 @@
 #include "Backend/Reflection/RegistrationEmitter.h"
 #include "Backend/Reflection/ReflectionScope.h"
+#include "Backend/CodeGen/PointerMaps.h"
 #include "Backend/CodeGen/ModuleContext.h"
 #include "Backend/HIR/InvokeThunk.h"
 #include "Backend/HIR/TypeOperations.h"
@@ -80,7 +81,7 @@ namespace Scripting
 					U64(object.GetAlignment()), fields.count, fields.rows, methods.count, methods.rows,
 					Text(!bases.Empty() && bases[0] ? QualifiedName(bases[0]) : std::string()), U32(0), Null(),
 					groups.count, groups.rows, annotations.count, annotations.rows,
-					Symbol(entry.construct), Symbol(entry.destroy), Symbol(entry.copy), U32(entry.flags) });
+					Symbol(entry.construct), Symbol(entry.destroy), Symbol(entry.copy), U32(entry.flags), GcType(&object) });
 			}
 
 			void AddUnion(const UnionType& un)
@@ -94,7 +95,7 @@ namespace Scripting
 				const Table annotations = Annotations(un.GetDeclNode(), AnnotationPlace::Union, un.GetDeclScope());
 				m_Types.push_back({ U32(reflect_KIND_UNION), TypeText(&un), U64(un.GetSize()),
 					U64(un.GetAlignment()), fields.count, fields.rows, U32(0), Null(), Text(""), U32(0), Null(),
-					groups.count, groups.rows, annotations.count, annotations.rows, Null(), Null(), Null(), U32(PlainTypeFlags(&un)) });
+					groups.count, groups.rows, annotations.count, annotations.rows, Null(), Null(), Null(), U32(PlainTypeFlags(&un)), GcType(&un) });
 			}
 
 			void AddEnum(const EnumType& en)
@@ -106,7 +107,7 @@ namespace Scripting
 				m_Types.push_back({ U32(reflect_KIND_ENUM), TypeText(&en), U64(en.GetSize()),
 					U64(en.GetAlignment()), U32(0), Null(), U32(0), Null(), Text(""), U32(en.GetMemberCount()),
 					m_Image.Table(ImageShape::EnumValue, std::move(values)), U32(0), Null(), annotations.count, annotations.rows,
-					Null(), Null(), Null(), U32(PlainTypeFlags(&en)) });
+					Null(), Null(), Null(), U32(PlainTypeFlags(&en)), Null() });
 			}
 
 			void AddVariable(const SymbolInfo& variable)
@@ -167,6 +168,17 @@ namespace Scripting
 			ImageValue I64(int64 value) const { return m_Image.Integer(static_cast<uint64>(value)); }
 			ImageValue F64(double value) const { return m_Image.Real(value); }
 			ImageValue Null() const { return m_Image.Null(); }
+
+			// The type's c4_gc_type for the collector (R16): its name and pointer map, no counter; null for a type read whole.
+			ImageValue GcType(const Type* type)
+			{
+				const std::optional<PointerMap> map = PointerMap::Of(type);
+				if (!map) return Null();
+				std::vector<ImageRow> words;
+				for (uint64 bits : map->bits) words.push_back({ m_Image.Integer(bits) });
+				const ImageValue table = m_Image.Table(ImageShape::Word, std::move(words));
+				return m_Image.Table(ImageShape::GcType, { { TypeText(type), Null(), table, U32(map->words), m_Image.Integer(0), m_Image.Integer(0) } });
+			}
 			ImageValue Text(std::string text) { return m_Image.Text(std::move(text)); }
 			// A type's name is one text however many rows name it.
 			ImageValue TypeText(const Type* type)

@@ -60,20 +60,27 @@ static size_t ReservedAfter(void* buffer, size_t committed)
 	return (size_t)region.size;
 }
 
-static void Register(bool scanned, void* buffer, size_t bytes)
+// A scanned buffer is a scan region, read by its element's map when it has one (R16).
+typedef struct Scan
 {
-	if (scanned) c4_gc_register_region(buffer, bytes);
+	bool scanned;
+	const c4_gc_type* element;
+} Scan;
+
+static void Register(Scan scan, void* buffer, size_t bytes)
+{
+	if (scan.scanned) c4_gc_register_typed_region(buffer, bytes, scan.element);
 }
 
 // A scanned buffer's bytes from `from` to `to` that hold nothing yet: zero, whatever the memory held before.
-static void ClearUnkept(bool scanned, void* buffer, size_t from, size_t to)
+static void ClearUnkept(Scan scan, void* buffer, size_t from, size_t to)
 {
-	if (scanned && to > from) memset((char*)buffer + from, 0, to - from);
+	if (scan.scanned && to > from) memset((char*)buffer + from, 0, to - from);
 }
 
 // A large buffer resized in place: the pages after it committed, or its tail given back. False when its reservation
 // has no room for the growth. Newly committed pages are zero already.
-static bool ResizeInPlace(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes, bool scanned)
+static bool ResizeInPlace(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes, Scan scan)
 {
 	const size_t committed = ToPages(oldBytes);
 	const size_t needed = ToPages(newBytes);
@@ -82,22 +89,22 @@ static bool ResizeInPlace(void* buffer, size_t oldBytes, size_t keepBytes, size_
 		if (needed - committed > ReservedAfter(buffer, committed)) return false;
 		if (c4_vm_commit((char*)buffer + committed, (int64_t)(needed - committed), kProtectReadWrite) != 0) return false;
 	}
-	ClearUnkept(scanned, buffer, keepBytes, newBytes < committed ? newBytes : committed);
-	Register(scanned, buffer, newBytes);
+	ClearUnkept(scan, buffer, keepBytes, newBytes < committed ? newBytes : committed);
+	Register(scan, buffer, newBytes);
 	if (needed < committed) c4_vm_decommit((char*)buffer + needed, (int64_t)(committed - needed));
 	return true;
 }
 
 // The kept bytes copied into a new block, the rest of it cleared, before it is registered; the old block, registered
 // while they move, is unregistered before it goes.
-static void* Move(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes, bool scanned)
+static void* Move(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes, Scan scan)
 {
 	void* moved = Allocate(newBytes);
 	if (!moved) return NULL;
 	if (keepBytes) memcpy(moved, buffer, keepBytes);
-	ClearUnkept(scanned, moved, keepBytes, newBytes);
-	Register(scanned, moved, newBytes);
-	if (scanned && buffer) c4_gc_unregister_region(buffer);
+	ClearUnkept(scan, moved, keepBytes, newBytes);
+	Register(scan, moved, newBytes);
+	if (scan.scanned && buffer) c4_gc_unregister_region(buffer);
 	Release(buffer, oldBytes);
 	return moved;
 }
@@ -108,18 +115,18 @@ static void Free(void* buffer, size_t bytes, bool scanned)
 	Release(buffer, bytes);
 }
 
-static void* Resize(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes, bool scanned)
+static void* Resize(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes, Scan scan)
 {
 	if (!buffer) oldBytes = 0;
 	if (keepBytes > oldBytes) keepBytes = oldBytes;
 	if (keepBytes > newBytes) keepBytes = newBytes;
 	if (newBytes == 0)
 	{
-		Free(buffer, oldBytes, scanned);
+		Free(buffer, oldBytes, scan.scanned);
 		return NULL;
 	}
-	if (IsLarge(oldBytes) && IsLarge(newBytes) && ResizeInPlace(buffer, oldBytes, keepBytes, newBytes, scanned)) return buffer;
-	return Move(buffer, oldBytes, keepBytes, newBytes, scanned);
+	if (IsLarge(oldBytes) && IsLarge(newBytes) && ResizeInPlace(buffer, oldBytes, keepBytes, newBytes, scan)) return buffer;
+	return Move(buffer, oldBytes, keepBytes, newBytes, scan);
 }
 
 // A resize that succeeded, as native memory taken or given back (c4_gc_native_taken / _given).
@@ -129,9 +136,9 @@ static void Count(size_t oldBytes, size_t newBytes)
 	else if (oldBytes > newBytes) c4_gc_native_given(oldBytes - newBytes);
 }
 
-static void* CountedResize(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes, bool scanned)
+static void* CountedResize(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes, Scan scan)
 {
-	void* resized = Resize(buffer, oldBytes, keepBytes, newBytes, scanned);
+	void* resized = Resize(buffer, oldBytes, keepBytes, newBytes, scan);
 	if (resized || newBytes == 0) Count(buffer ? oldBytes : 0, newBytes);
 	return resized;
 }
@@ -144,14 +151,19 @@ static void CountedFree(void* buffer, size_t bytes, bool scanned)
 
 void* c4_buffer_resize(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes)
 {
-	return CountedResize(buffer, oldBytes, keepBytes, newBytes, false);
+	return CountedResize(buffer, oldBytes, keepBytes, newBytes, (Scan){ false, NULL });
 }
 
 void c4_buffer_free(void* buffer, size_t bytes) { CountedFree(buffer, bytes, false); }
 
 void* c4_buffer_resize_scanned(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes)
 {
-	return CountedResize(buffer, oldBytes, keepBytes, newBytes, true);
+	return CountedResize(buffer, oldBytes, keepBytes, newBytes, (Scan){ true, NULL });
+}
+
+void* c4_buffer_resize_scanned_typed(void* buffer, size_t oldBytes, size_t keepBytes, size_t newBytes, const c4_gc_type* element)
+{
+	return CountedResize(buffer, oldBytes, keepBytes, newBytes, (Scan){ true, element });
 }
 
 void c4_buffer_free_scanned(void* buffer, size_t bytes) { CountedFree(buffer, bytes, true); }

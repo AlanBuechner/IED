@@ -45,6 +45,7 @@ namespace Scripting
 		case HIRNode::Kind::Atomic:             return EmitAtomic(static_cast<const AtomicNode*>(node));
 		case HIRNode::Kind::Simd:               return EmitSimd(static_cast<const SimdNode*>(node));
 		case HIRNode::Kind::Ternary:            return EmitTernary(static_cast<const TernaryNode*>(node));
+		case HIRNode::Kind::GcType:             return ObjectEmitter(m_Ctx, *this).EmitGcType(static_cast<const GcTypeNode*>(node));
 		default:
 			// Region/ternary/new/delete/is-as and statement nodes are not rvalue expressions here; the
 			// RegionEmitter or StmtEmitter owns them. Reaching one is an emission-shape bug.

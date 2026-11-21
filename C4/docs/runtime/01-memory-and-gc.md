@@ -165,8 +165,12 @@ callback of an enumerator) accepts any pointer into the object.
 
 These exist so an engine can use custom allocators and handle-based storage without fighting the GC.
 
-- **Scan regions**: conservative scanning of memory you own (native buffers, FFI state). Unregister before
-  freeing. Registering the same start again replaces its size. A region is not write-watched (it is not GC heap): a
+- **Scan regions**: scanning of memory you own (native buffers, FFI state): whole, conservatively, or - registered with
+  the type of its values (`c4_gc_register_typed_region(start, size, gc_type_of(T))`, `c4_buffer_resize_scanned_typed`;
+  R16) - only the words the type's map names, element after element, read at each stop as a mapped root is. Bedrock's
+  containers (Array, HashMap/HashSet entries, List nodes, the job queue) and its reflected-value serializers register
+  theirs typed. Unregister before freeing. Registering the same start again replaces its size. A region is not
+  write-watched (it is not GC heap): a
   concurrent cycle copies it whole at every stop and the final stop scans it whole, so a large one lengthens every
   stop (one 256 MiB region took the longest stop from about 1 ms to 30-36 ms, BUG-386). Register only memory that
   holds pointers (Bedrock's containers register a buffer only when `holds_pointers` of the element is true); native
@@ -203,7 +207,7 @@ enumerators or callbacks.
 | Gap | Status |
 |---|---|
 | Win32 only (`GCPlatformWin32.c`). Linux needs a `GCPlatformPosix.c` (B31). | **Planned** |
-| Stacks, registers and scan regions are read conservatively: an object stays alive while a stale copy of its address sits in a register, a dead stack slot or a region's unused memory. Heap objects of known type and global roots are read by their pointer maps (R16 phases 1 and 2). Precise stack maps are designed and prototyped, not landed: LLVM's statepoints need managed pointers in an address space of their own, which C4's emitter does not give them yet, and they land only if they cost no measurable speed ([compiler/04](../compiler/04-codegen-and-abi.md), "Not implemented here yet", with the prototype's findings). A region of known element type (Bedrock's scanned buffers, B70; reflected values, B71) could be read by its element's map too, once C4 code can name a type's record. | Planned |
+| Stacks, registers and scan regions are read conservatively: an object stays alive while a stale copy of its address sits in a register, a dead stack slot or a region's unused memory. Heap objects of known type and global roots are read by their pointer maps (R16 phases 1 and 2). Precise stack maps are designed and prototyped, not landed: LLVM's statepoints need managed pointers in an address space of their own, which C4's emitter does not give them yet, and they land only if they cost no measurable speed ([compiler/04](../compiler/04-codegen-and-abi.md), "Not implemented here yet", with the prototype's findings). Bedrock's scanned buffers (B70) and reflected values (B71) are read by their element type's map (`gc_type_of`, typed regions). | Planned |
 
 ---
 
