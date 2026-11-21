@@ -593,5 +593,20 @@ allowed (unions, bytes, `memcpy`, bit casts) where the optimizer cannot see that
   value live across it (5646 statepoints in the Bedrock benchmark, 5446 in the GC benchmark), against the same
   compiler without, median of 7 alternating runs: Bedrock kernels -2.9% to +1.6% (one +6.4%), gemm +0.3%, math
   per-vector -9% to +3% and batch -3.7% to +0.4% (kernels of 0.3-5 ms move as much between runs), GC benchmark frames
-  -0.6% stop-the-world and 0.0% concurrent. The cost of live values across calls - the real one - is not measured:
-  it needs (1) first. Until then stacks stay conservative.
+  -0.6% stop-the-world and 0.0% concurrent.
+  **Second prototype (R16 round 3)**: probing each function alone (a copy of the module, the rewrite under SEH) named
+  the rest of what RS4GC cannot take: (4) a statepoint at a throw (`_CxxThrowException` then `unreachable`) faults -
+  the prototype marks throws `gc-leaf-function`; (5) a stack slot's address is taken for a GC pointer and faults
+  (`QueryPerformanceCounter(&slot)`) - (1) again; (6) pointers inside first-class aggregates (a `func` value, an
+  initializer list) are not tracked. With functions that have EH code, pointer aggregates or address-taken stack slots
+  left as they are, it rewrites 71% of the Bedrock benchmark's functions (2371 of 3323: 2123 statepoints), 71% of the
+  GC benchmark's, 90% of math's and 6 of gemm's 8, and every program runs. With every pointer of them managed (an
+  upper bound on what lives across calls), against the same compiler without, median of 7 alternating runs, GC values
+  spilled to slots / up to 16 in callee-saved registers: Bedrock kernels -4.2..+3.7% / -2.9..+3.0%, math per-vector
+  -0.8..+5.0% / -1.7..+2.0%, batch -12.8..+3.6% / -3.8..+5.0% (0.3-0.5 ms kernels), gemm -1.4% / -0.8%, GC benchmark
+  frames 0.0% / -0.3% stop-the-world, +1.0% / +1.0% concurrent - the run-to-run spread of these benchmarks. So no
+  measurable cost on the code it covers. What landing needs: managed pointers in address space 1 through emission
+  (MirEmitter, ExprEmitter, calls, the ABI; casts where a stack, global or foreign address becomes a `T*` and back at
+  foreign calls), throws and funclet-EH frames handled (or kept conservative), pointer aggregates split, and in the
+  runtime the stack walk (RtlVirtualUnwind per frame, the `.llvm_stackmaps` record by return address, a frame without
+  one read whole). Until then stacks stay conservative.
