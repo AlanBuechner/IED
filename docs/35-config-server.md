@@ -270,7 +270,11 @@ NAS deploy tools install it) once the server builds for Linux (C4 D-86).
   and `test_a_browser_signs_in_and_manages_tokens` (a reader cannot sign in; the cookie's flags; the cookie refused without
   the header; `whoami`; tokens listed without digests, made and working at once, misnamed refused, revoked at once;
   a one-time link once; sign out; the last admin refused; the security log); frontend `configpage.test.js`; headless Edge
-  over every section at desktop and phone width against a local config server running the real `spark.models`.
+  over every section at desktop and phone width against a local config server running the real `spark.models`; e2e
+  `config_server_web_page` (desktop, phone: a reader refused, an admin signed in, a token name half typed when the page
+  draws itself again keeps its text, focus and caret - owner, 2026-11-21: "the name field keeps getting cleared" - Enter
+  makes it, it works at once, Sign out). What is typed in the page's forms lives in its state, not in the fields, since
+  every change it hears (and its tokens' last use, every 15 s) draws it again.
 
 ## Open items
 

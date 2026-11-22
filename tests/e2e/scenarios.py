@@ -4458,3 +4458,70 @@ def config_server_page(run):
 		# The mirror would otherwise give the next scenarios its profiles.
 		shutil.rmtree(os.path.join(run.target.root, "data", "app", "shared"), ignore_errors=True)
 		shutil.rmtree(root, ignore_errors=True)
+
+
+@scenario(viewports=("desktop", "phone"), targets=("real",))
+def config_server_web_page(run):
+	"""The config server's own page (docs/35 "The web page"): a reader token cannot sign in, an admin token can; a token
+	name being typed survives the page drawing itself again (owner, 2026-11-21: "im trying to make a new token for my
+	laptop but the name field keeps getting cleared" - every change the page heard redrew the form), with its focus and
+	caret; Enter makes the token, shown once, and it works at once; Sign out ends it."""
+	import subprocess
+	import tempfile
+	import urllib.request
+	from harness import VIEWPORTS
+	exe = run.target.executable
+	root = tempfile.mkdtemp(prefix="ied-e2e-config-page-")
+	config = os.path.join(root, "config")
+	tokens = {}
+	for role, name in (("admin", "deploy"), ("reader", "desktop")):
+		made = subprocess.run([exe, "--config-root", config, "--config-token", role, name, "--data", os.path.join(root, "token-data")], capture_output=True, text=True, timeout=60)
+		check(made.returncode == 0, "a %s token: %s" % (role, made.stderr))
+		tokens[role] = made.stdout.strip()
+	with open(os.path.join(config, "settings.json"), "w", encoding="utf-8") as f:
+		f.write('{"editor.fontSize": 13}\n')
+	server = subprocess.Popen([exe, "--host", "127.0.0.1", "--port", "0", "--config-root", config, "--data", os.path.join(root, "data"), "--app-data", os.path.join(root, "app"),
+		"--control", "ied-e2e-config-page-%d" % os.getpid(), "--test-hooks", "--quiet"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+	base = server.stdout.readline().strip().split(" ", 1)[1].rstrip("/")
+	context = run.browser.new_context(bypass_csp=True, **VIEWPORTS[run.viewport])
+	run.contexts.append(context)
+	try:
+		page = context.new_page()
+		page.on("pageerror", lambda e: run.errors.append("page error: %s" % e))
+		page.on("dialog", lambda d: d.accept())
+		run.page = page
+		page.goto(base + "/config/")
+		page.fill("#cfg-admin", tokens["reader"])
+		page.click("button[type=submit]")
+		run.wait_text(".cfg-message", "reads only")
+		page.fill("#cfg-admin", tokens["admin"])
+		page.click("button[type=submit]")
+		page.wait_for_selector(".cfg-nav")
+		page.click(".cfg-tab[data-section=tokens]")
+		page.click("#cfg-new-name")
+		page.keyboard.type("lapto")
+		page.evaluate("document.querySelector('#cfg-new-name').dataset.drawn = 'before'")
+		# A change the page hears (a hand edit of settings.json) draws it again while the name is half typed.
+		with open(os.path.join(config, "settings.json"), "w", encoding="utf-8") as f:
+			f.write('{"editor.fontSize": 14}\n')
+		page.wait_for_function("() => document.querySelector('#cfg-new-name') && !document.querySelector('#cfg-new-name').dataset.drawn", timeout=20000)
+		kept = page.evaluate("() => { const f = document.querySelector('#cfg-new-name'); return [f.value, document.activeElement === f, f.selectionStart]; }")
+		check(kept == ["lapto", True, 5], "the half-typed name, its focus and caret survive the redraw: %r" % kept)
+		page.keyboard.type("p")
+		run.shot("typing")
+		page.keyboard.press("Enter")
+		page.wait_for_selector(".cfg-once")
+		made = page.input_value(".cfg-secret")
+		check(len(made) == 64, "the token is shown once")
+		check(page.input_value("#cfg-new-name") == "", "the form is ready for the next one")
+		check(page.eval_on_selector_all(".cfg-token-row", "rows => rows.map(r => r.dataset.name)").count("laptop") == 1, "listed")
+		with urllib.request.urlopen(urllib.request.Request(base + "/config/v1/state", headers={"Authorization": "Bearer " + made}), timeout=10) as answer:
+			check(answer.status == 200, "the new token reads at once")
+		run.shot("made")
+		page.click("button:has-text('Sign out')")
+		page.wait_for_selector("#cfg-admin")
+	finally:
+		server.terminate()
+		server.wait(10)
+		server.stdout.close()
+		shutil.rmtree(root, ignore_errors=True)

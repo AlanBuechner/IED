@@ -34,6 +34,9 @@ const model = {
 };
 let section = stored(SECTION_KEY) || "overview";
 let settingsDraft = null;   // the settings editor's text while it differs from the file
+// The New token form as typed: the page draws itself again on every change it hears (and every 15 s for the tokens'
+// last use), so what is typed lives here, not in the field.
+const tokenDraft = { name: "", role: "reader", message: "" };
 let settingsMessage = { text: "", accent: "" };
 let pollVersion = "";
 let tokensTimer = 0;
@@ -210,7 +213,10 @@ async function follow() {
 function render() {
 	if (!model.me || !model.state) return;
 	app.removeAttribute("aria-busy");
-	const focused = document.activeElement && document.activeElement.id;
+	// The field being typed in keeps its focus and its caret across the redraw.
+	const active = document.activeElement;
+	const focused = active && active.id;
+	const caret = active && typeof active.selectionStart === "number" ? [active.selectionStart, active.selectionEnd] : null;
 	const scroll = document.querySelector(".cfg-main") ? document.querySelector(".cfg-main").scrollTop : 0;
 	const nav = h("nav.cfg-nav", { "aria-label": "Sections" }, ...SECTIONS.map(([id, title, glyph]) => h("button.cfg-tab" + (id === section ? ".sel" : ""), {
 		dataset: { section: id }, "aria-current": id === section ? "page" : null,
@@ -234,7 +240,17 @@ function render() {
 	if (selected && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = Math.max(0, selected.offsetLeft - (nav.clientWidth - selected.offsetWidth) / 2);
 	if (focused) {
 		const el = document.getElementById(focused);
-		if (el) el.focus();
+		if (el) {
+			el.focus();
+			if (caret && typeof el.setSelectionRange === "function") {
+				try {
+					el.setSelectionRange(caret[0], caret[1]);
+				}
+				catch {
+					// a field with no caret (a select)
+				}
+			}
+		}
 	}
 }
 
@@ -443,28 +459,46 @@ function toggle(id) {
 function tokensView() {
 	const now = Date.now();
 	const rows = tokenRows(model.tokens.tokens, model.tokens.you, now);
-	const name = h("input.input-field.mono", { id: "cfg-new-name", placeholder: "laptop", spellcheck: "false", autocomplete: "off", "aria-label": "Token name" });
-	const role = h("select.input-field", { id: "cfg-new-role", "aria-label": "Role" }, h("option", { value: "reader" }, "reader: an IED that follows"), h("option", { value: "admin" }, "admin: deploys and this page"));
-	const message = h("span.c-error", { role: "alert" });
+	const message = h("span.c-error", { role: "alert" }, tokenDraft.message);
+	const say = (text) => {
+		tokenDraft.message = text;
+		message.textContent = text;
+	};
 	const make = async () => {
-		const problem = tokenNameProblem(name.value.trim());
-		if (problem) {
-			message.textContent = problem;
-			return;
-		}
-		const taken = rows.some((t) => t.name === name.value.trim());
-		if (taken && !confirm("A token named " + name.value.trim() + " exists: making it again replaces it, and the old one stops working at once. Go on?")) return;
+		const wanted = tokenDraft.name.trim();
+		const problem = tokenNameProblem(wanted);
+		if (problem) return say(problem);
+		const taken = rows.some((t) => t.name === wanted);
+		if (taken && !confirm("A token named " + wanted + " exists: making it again replaces it, and the old one stops working at once. Go on?")) return;
 		try {
-			model.made = await api("POST", "tokens", { name: name.value.trim(), role: role.value });
+			model.made = await api("POST", "tokens", { name: wanted, role: tokenDraft.role });
 			model.link = null;
+			tokenDraft.name = "";
+			say("");
 			await reloadTokens();
 		}
 		catch (e) {
-			message.textContent = e.message;
-			return;
+			return say(e.message);
 		}
 		render();
 	};
+	const name = h("input.input-field.mono", { id: "cfg-new-name", placeholder: "laptop", spellcheck: "false", autocomplete: "off", "aria-label": "Token name",
+		on: {
+			input: (event) => {
+				tokenDraft.name = event.target.value;
+				if (tokenDraft.message) say("");
+			},
+			keydown: (event) => {
+				if (event.key === "Enter") {
+					event.preventDefault();
+					make();
+				}
+			},
+		} });
+	name.value = tokenDraft.name;
+	const role = h("select.input-field", { id: "cfg-new-role", "aria-label": "Role", on: { change: (event) => { tokenDraft.role = event.target.value; } } },
+		h("option", { value: "reader" }, "reader: an IED that follows"), h("option", { value: "admin" }, "admin: deploys and this page"));
+	role.value = tokenDraft.role;
 	return h("section.cfg-section", null, ...heading("Tokens", "A reader token lets an IED follow this server (Settings > Environment > Config Server); an admin token deploys and signs in here. Only their hashes are kept: a token is shown once, when it is made."),
 		model.made ? shownOnce("Token " + model.made.name + " (" + model.made.role + ")", model.made.token, model.made.role === "reader" ? "Paste it in that IED: Settings > Environment > Config Server > Reader token, then Connect." : "Keep it where your deploy tooling reads it (IED_CONFIG_ADMIN_TOKEN).", () => {
 			model.made = null;
