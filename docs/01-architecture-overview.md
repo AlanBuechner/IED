@@ -32,7 +32,7 @@ ied-server.exe                    the master: one per user, the single instance 
 +- ied-server.exe --role workspace --ws-id w2 ...   git, browser pages, profiler; loopback only, reached through the master
 ```
 
-What this buys: a workspace's crash, hang or memory growth (language servers, chats, builds) stays in its process, and one workspace server restarts alone (`ws.restart`, or by itself after a crash: `docs/12` "Restart behavior") while the others go on. The master is small - no workspace, no language server, no chat turn runs in it - so it is the part least likely to fall over; when it stops, its workspace servers stop with it (they run in its job) and come back with it.
+What this buys: a workspace's crash, hang or memory growth (language servers, chats, builds) stays in its process, and one workspace server restarts alone (`ws.restart`, or by itself after a crash: `docs/12` "Restart behavior") while the others go on. The master is small - no workspace, no language server, no chat turn runs in it - so it is the part least likely to fall over; when it stops, its workspace servers stop with it and come back with it. On Windows they run in its job; on Linux, which has none, each watches the master it was started by (`--master-pid`; `src/Main.cf` `WatchMaster`, every 2 s): it stops when nothing answers on the master's pipe, or when the master answering there is another process - the desktop app starts a new master at once after a crash, and a workspace server left running for the old one would keep its own pipe name from the new master's server for that workspace, which then never comes up (2026-11-21, the owner's Linux install).
 
 **Who owns what** (one owner each; the others reach it as the last column says):
 

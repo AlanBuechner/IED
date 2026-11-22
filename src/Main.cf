@@ -6,6 +6,10 @@ include "host/Control.ch"
 include "web/Front.ch"
 include "Programs.ch"
 
+// How often a workspace server looks for its master, and how long it waits for the master's status (WatchMaster).
+const int64 c_MasterWatchMs = 2000;
+const int32 c_MasterAskMs = 1000;
+
 static Core::Array<Core::String> Arguments(int32 argc, char8** argv) {
 	Core::Array<Core::String> arguments;
 	for (int32 i = 1; i < argc; ++i) arguments.Push(Core::String((const char*)argv[i]));
@@ -190,16 +194,34 @@ static bool TakeSecret(Ied::ServerConfig& config) {
 	return config.m_Secret.ByteLength() == 64;
 }
 
-// A workspace server ends when its master is gone: it runs in the master's job, so this is for a master that left
-// without ending it.
+// The pid the master on the pipe `master` gives in its status; 0 when none answers in time (a busy master is not gone).
+static int64 MasterPid(Core::StringView master) {
+	Core::String name = Launch::ControlName(master);
+	Net::LocalStream stream = Net::LocalStream::Connect(name.CStr(), c_MasterAskMs);
+	if (!stream.IsOpen()) return 0;
+	Launch::Reply reply = Launch::AskWithin(stream, Core::StringView("status"), Core::StringView(""), c_MasterAskMs);
+	return reply.m_Ok ? Launch::ResultInt(reply, "pid") : 0;
+}
+
+// A workspace server ends when its master is gone. On Windows it runs in the master's job, so this is for a master that
+// left without ending it; on Linux nothing ends it with its master. A master that died is soon replaced by another on
+// the same pipe (the desktop app starts one at once), so the master is the process it was started by (--master-pid),
+// never whatever answers on that pipe: a workspace server left running for a dead master would keep its pipe name from
+// the new master's server for its workspace, which then never comes up.
 static void WatchMaster(Ied::Server* server, Ied::Control* control) {
 	if (server->IsMaster()) return;
 	Core::String master = server->m_Config.m_MasterControl;
-	Threading::Thread::Run([master, control]() {
+	const int64 started = server->m_Config.m_MasterPid;
+	Threading::Thread::Run([master, started, control]() {
 		for (;;) {
-			Threading::Thread::Sleep(2000000000);
+			Threading::Thread::Sleep(c_MasterWatchMs * 1000000);
 			if (Launch::ServerGone(master.View())) {
 				control->StopFor(Core::StringView("stopped: its master server is gone"));
+				return;
+			}
+			const int64 answering = started > 0 ? MasterPid(master.View()) : 0;
+			if (answering > 0 && answering != started) {
+				control->StopFor(Core::StringView("stopped: its master server is gone (another master now has its pipe)"));
 				return;
 			}
 		}

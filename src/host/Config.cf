@@ -87,6 +87,7 @@ namespace Ied
 			config.m_Port = (int32)number;
 			config.m_PortGiven = true;
 		}
+		else if (option == "--master-pid") config.m_MasterPid = number;
 		else if (option == "--idle-timeout") config.m_IdleTimeoutMs = number * 1000;
 		else if (option == "--outbound-budget-mb") config.m_OutboundBudget = number * c_Kilobyte * c_Kilobyte;
 		else if (option == "--coalesce-kb") config.m_CoalesceBytes = number * c_Kilobyte;

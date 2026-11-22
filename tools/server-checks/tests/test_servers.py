@@ -379,6 +379,25 @@ class RestartedMasterTests(ServerTestCase):
 		folded = lambda path: os.path.normcase(os.path.realpath(path))
 		return {folded(w["root"]): w["wsId"] for w in await_servers(self.server, count)}
 
+	def test_a_master_that_died_leaves_no_workspace_server_behind(self):
+		"""A master that ends without stopping its workspace servers (a crash) is replaced at once by another on the same
+		pipe - the desktop app starts one. Its workspace servers end too: their master is the process they were started by
+		(--master-pid), not whatever answers on its pipe, so the new master's servers get their pipe names and come up.
+		(Windows ends them with the master's job; on Linux one left running kept its workspace from ever opening again.)"""
+		self.start(self.alpha, self.beta)
+		old = [w["server"]["pid"] for w in await_servers(self.server, 2)]
+		crashed = self.server
+		crashed.process.kill()
+		crashed.process.wait(15)
+		self.server = IedServer(data=self.data, control=crashed.control)
+		self.assertTrue(self.server.started, self.server.error)
+		listed = await_servers(self.server, 2, timeout=90)
+		self.assertTrue(all(w["server"]["pid"] not in old for w in listed), "new servers, not the old ones")
+		self.assertTrue(all(w["server"]["restarts"] == 0 for w in listed), "each came up at its first start")
+		for pid in old:
+			await_gone(pid)
+		crashed.stop(remove_data=False)
+
 	def test_each_folder_gets_its_id_back_and_the_others_open_again(self):
 		self.start(self.alpha, self.beta)
 		first = self.ids(2)

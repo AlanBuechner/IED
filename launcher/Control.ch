@@ -24,6 +24,8 @@ namespace Launch
 	Reply ParseReply(Core::StringView line);
 	// One string member of a reply's result; empty when it has none.
 	Core::String ResultField(const Reply& reply, const char* name);
+	// One number member of a reply's result; 0 when it has none.
+	int64 ResultInt(const Reply& reply, const char* name);
 	// One boolean member of a reply's result; false when it has none.
 	bool ResultFlag(const Reply& reply, const char* name);
 

@@ -25,6 +25,7 @@ namespace Ied
 		public ServerRole m_Role;                        // --role: master (the default) or workspace
 		public Core::String m_WsId;                      // a workspace server's workspace (--ws-id)
 		public Core::String m_MasterControl;             // a workspace server's master's pipe (--master)
+		public int64 m_MasterPid;                        // and that master's process (--master-pid): the one it ends with
 		public Core::String m_StateDir;                  // the server's own state (--state); empty: the data folder
 		public Core::String m_LogPath;                   // its log (--log); empty: <data>/logs/server.log
 		public Core::String m_RestartedAfter;            // how the run before this one ended, when the master restarted it

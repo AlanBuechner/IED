@@ -35,6 +35,9 @@ class LauncherTests {
 		Launch::Reply flagged = Launch::ParseReply(Core::StringView("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"revealed\":true,\"url\":\"u\"}}"));
 		assert_true(Launch::ResultFlag(flagged, "revealed"), "a result's flag");
 		assert_true(!Launch::ResultFlag(flagged, "missing") && !Launch::ResultFlag(good, "url"), "one it lacks, or not a flag, is false");
+		Launch::Reply status = Launch::ParseReply(Core::StringView("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"pid\":4242,\"url\":\"u\"}}"));
+		assert_eq((int64)4242, Launch::ResultInt(status, "pid"), "a result's number, not the response's own members");
+		assert_eq((int64)0, Launch::ResultInt(status, "missing"), "one it lacks is 0");
 	}
 
 	[test("open_params")]

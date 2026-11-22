@@ -125,6 +125,11 @@ namespace Ied
 		argv.Push(m_MasterControl);
 		argv.Push(Core::String("--control"));
 		argv.Push(record->m_Control);
+		// This master's process: another one may take its pipe name once it is gone (Main.cf, WatchMaster).
+		Core::StringBuilder pid;
+		pid.AppendInt((int64)Platform::ProcessId());
+		argv.Push(Core::String("--master-pid"));
+		argv.Push(pid.ToString());
 		argv.Push(Core::String("--data"));
 		argv.Push(config.m_DataDir);
 		argv.Push(Core::String("--app-data"));
