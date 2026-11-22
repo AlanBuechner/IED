@@ -77,5 +77,9 @@ namespace Sandbox
 
 	const int64 c_EngineCacheMs = 15000;
 	const int64 c_EngineStartMs = 180000;
+	// How long `docker desktop start` may take to show an engine before Docker Desktop's program is started itself.
+	const int64 c_LaunchAfterMs = 30000;
+	// Docker Desktop's engine runs in a WSL VM, which Windows starts only with enough memory free.
+	const char* c_LowMemoryAdvice = " If its VM cannot start (`wsl -d docker-desktop -e true` says 'insufficient system resources'), free some memory and start it again.";
 	const char* c_DockerSetting = "sandbox.docker";
 }

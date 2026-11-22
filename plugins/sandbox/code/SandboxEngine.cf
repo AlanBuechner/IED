@@ -202,6 +202,31 @@ namespace Sandbox
 		return Last();
 	}
 
+	// Docker Desktop's own program, beside the resources docker.exe is in.
+	static Core::String DesktopProgram(const EngineInfo& info) {
+		return Slashes(FS::Path(info.m_Program.View()).Parent().Parent().Parent().View()) + "/Docker Desktop.exe";
+	}
+
+	// Starts Docker Desktop's program; one already running only comes to the front.
+	static void LaunchDesktop(const EngineInfo& info) {
+		Core::String desktop = DesktopProgram(info);
+		if (!FS::FileExists(desktop.CStr())) return;
+		Process::StartInfo start;
+		start.program = desktop;
+		start.input = Process::Redirect::Null;
+		start.output = Process::Redirect::Null;
+		start.errors = Process::Redirect::Null;
+		start.killOnClose = false;
+		Process::Child child = Process::Child::Start(start);
+		child.Close();
+	}
+
+	// Docker Desktop runs, but its engine did not start (its VM did not: too little memory free, most often): `docker
+	// desktop start` leaves it so; a restart tries the engine again.
+	static bool EngineDidNotStart(const EngineInfo& info) {
+		return info.m_Error.View().Contains(Core::StringView("Docker Desktop is unable to start"));
+	}
+
 	bool SandboxEngine::StartEngine(const bool* cancelled, Core::String& problem) {
 		EngineInfo now = Look(true);
 		if (now.m_State == "ready") return true;
@@ -216,22 +241,14 @@ namespace Sandbox
 			}
 			m_Starting = true;
 		}
-		m_Context->Log(Core::StringView("starting Docker Desktop"));
-		Process::Output started = Run(Words("desktop", "start", "--detach"), 60000);
-		if (started.exitCode != 0) {
-			// An older Docker Desktop has no `docker desktop` command: start its program beside docker's resources.
-			Core::String desktop = Slashes(FS::Path(now.m_Program.View()).Parent().Parent().Parent().View()) + "/Docker Desktop.exe";
-			if (FS::FileExists(desktop.CStr())) {
-				Process::StartInfo info;
-				info.program = desktop;
-				info.input = Process::Redirect::Null;
-				info.output = Process::Redirect::Null;
-				info.errors = Process::Redirect::Null;
-				info.killOnClose = false;
-				Process::Child child = Process::Child::Start(info);
-				child.Close();
-			}
-		}
+		const bool restart = EngineDidNotStart(now);
+		m_Context->Log(Core::StringView(restart ? "restarting Docker Desktop: its engine did not start" : "starting Docker Desktop"));
+		Process::Output started = Run(restart ? Words("desktop", "restart", nullptr) : Words("desktop", "start", "--detach"), 60000);
+		// An older Docker Desktop has no `docker desktop` command; a newer one may say it started and not: its program is
+		// started too when nothing answers in c_LaunchAfterMs.
+		bool launched = started.exitCode != 0;
+		if (launched) LaunchDesktop(now);
+		const int64 launchAt = UnixMs() + c_LaunchAfterMs;
 		const int64 deadline = UnixMs() + c_EngineStartMs;
 		bool ready = false;
 		while (UnixMs() < deadline && !(cancelled != nullptr && *cancelled)) {
@@ -239,6 +256,10 @@ namespace Sandbox
 			if (Look(true).m_State == "ready") {
 				ready = true;
 				break;
+			}
+			if (!launched && UnixMs() >= launchAt) {
+				LaunchDesktop(now);
+				launched = true;
 			}
 		}
 		{
@@ -249,7 +270,8 @@ namespace Sandbox
 			EngineInfo last = Look(true);
 			ready = last.m_State == "ready";
 			if (!ready) {
-				problem = (Core::String("Docker Desktop did not start within 3 minutes: ") + (last.m_Error.IsEmpty() ? FirstLine(started.errors.View()).View() : last.m_Error.View()));
+				problem = (Core::String("Docker Desktop did not start within 3 minutes: ") + (last.m_Error.IsEmpty() ? FirstLine(started.errors.View()).View() : last.m_Error.View())) +
+					c_LowMemoryAdvice;
 				Threading::LockGuard guard(m_Lock);
 				m_Info.m_State = Core::String("failed");
 				m_Info.m_Error = problem;
@@ -285,10 +307,12 @@ namespace Sandbox
 	Core::String EngineAdvice(const EngineInfo& info) {
 		if (info.m_State == "missing")
 			return Core::String("Docker is not installed (or sandbox.docker names no program). Install Docker Desktop with its WSL2 backend - winget install Docker.DockerDesktop, or https://www.docker.com/products/docker-desktop/ - then open IED's Sandboxes window again.");
+		if (info.m_State == "stopped" && EngineDidNotStart(info))
+			return Core::String("Docker Desktop runs, but its engine did not start: sandbox_engine(action: \"start\") restarts it.") + c_LowMemoryAdvice;
 		if (info.m_State == "stopped")
 			return Core::String("Docker's engine is not running. Start Docker Desktop: the Sandboxes window's Start Docker, or sandbox_engine(action: \"start\").");
 		if (info.m_State == "starting") return Core::String("Docker Desktop is starting; it takes up to a minute or two.");
-		if (info.m_State == "failed") return (Core::String("Docker's engine failed: ") + info.m_Error.View()) + " - restart Docker Desktop, or see its troubleshoot page.";
+		if (info.m_State == "failed") return ((Core::String("Docker's engine failed: ") + info.m_Error.View()) + " - restart Docker Desktop, or see its troubleshoot page.") + c_LowMemoryAdvice;
 		if (info.m_Os == "windows") return Core::String("Docker runs Windows containers now: Linux sandboxes need its Linux engine (docker desktop engine use linux).");
 		return Core::String("");
 	}

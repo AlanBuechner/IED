@@ -398,7 +398,7 @@
 			},
 			{
 				"name": "sandbox_engine",
-				"description": "Docker itself: status; start (Docker Desktop, when its engine is not running; up to 3 minutes); install_emulators (QEMU's handlers for every platform, a privileged container of tonistiigi/binfmt - only when sandbox_catalog marks a needed platform with !). Every call asks the owner.",
+				"description": "Docker itself: status; start (Docker Desktop, when its engine is not running - a restart of Docker Desktop when it runs but its engine did not start, its program started when `docker desktop start` brings nothing up; up to 3 minutes; an engine whose VM Windows has too little memory to start needs memory freed first); install_emulators (QEMU's handlers for every platform, a privileged container of tonistiigi/binfmt - only when sandbox_catalog marks a needed platform with !). Every call asks the owner.",
 				"class": "exec",
 				"group": "sandbox",
 				"approval": "ask",
