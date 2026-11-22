@@ -44,4 +44,5 @@ test("browser: which new pages are told, and how", () => {
 test("browser: a workspace file as a file: URL", () => {
 	assertEqual(fileUrl("C:\\Users\\me\\site", "index.html"), "file:///C:/Users/me/site/index.html");
 	assertEqual(fileUrl("C:/site/", "/pages/a b#1.html"), "file:///C:/site/pages/a%20b%231.html", "spaces and a hash escaped");
+	assertEqual(fileUrl("/home/me/site", "pages/a b.html"), "file:///home/me/site/pages/a%20b.html", "a Linux root: three slashes, not four");
 });

@@ -424,6 +424,15 @@ def main():
 		if not flag("DIST_NO_REGISTER"):
 			run_all(target.get("register"), folder, "register")
 
+	# The built-in browser (docs/27 "Engine") runs a Chromium browser headless - the Browser tab's pages and the AI's, on a
+	# server without a desktop too: the system's Chromium when no Chrome, Chromium or Edge is where IED looks.
+	browsers = target.get("browsers") or []
+	if browsers and not any(os.path.isfile(path) for path in browsers):
+		if not flag("DIST_NO_PACKAGES"):
+			install_packages(target.get("browserPackages"))
+		if not any(os.path.isfile(path) for path in browsers):
+			say("warning: the built-in browser needs Chromium or Google Chrome; install one with your package manager, or set IED's browser.executable to one")
+
 	if path_folders and not flag("DIST_NO_PATH"):
 		for path in change_startup(env_file, add=True):
 			say("PATH line added to %s" % path)

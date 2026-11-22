@@ -67,6 +67,12 @@ LINUX_DESKTOP_PACKAGES = {
 	"pacman": ["webkit2gtk-4.1"],
 	"zypper": ["libwebkit2gtk-4_1-0"],
 }
+# The browser the browser plugin runs headless, for the Browser tab and the AI's pages (docs/27 "Engine"): where its
+# server code looks, in its order (plugins/browser/code/Engine.cf FindBrowser), and the system's Chromium when none is.
+LINUX_BROWSERS = ("/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/opt/google/chrome/chrome", "/usr/bin/chromium",
+	"/snap/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/microsoft-edge", "/usr/bin/microsoft-edge-stable",
+	"/opt/microsoft/msedge/msedge")
+LINUX_BROWSER_PACKAGES = {"apt": ["chromium"], "dnf": ["chromium"], "pacman": ["chromium"], "zypper": ["chromium"]}
 # The libraries the Linux programs load (ldd): the server's TLS and its script host's LLVM dependencies, the
 # toolchain's clang and ld.lld with theirs (zlib is also Tor's); python3 runs Nuke; curl is web fetch's fallback
 # (docs/29: when it does not impersonate a browser).
@@ -359,6 +365,9 @@ def release_record(version, commit, windows, linux):
 			"unregister": [["ied-desktop", "--unregister"]],
 			"desktopLibraries": [list(LINUX_DESKTOP_LIBRARIES)],
 			"desktopPackages": LINUX_DESKTOP_PACKAGES,
+			# The built-in browser's engine, on a machine with a desktop or without: Chromium when no Chromium browser is there.
+			"browsers": list(LINUX_BROWSERS),
+			"browserPackages": LINUX_BROWSER_PACKAGES,
 			# The installer says "IED is in your applications menu" itself where it put it there.
 			"hint": "`ied` opens this folder in the desktop app (over SSH: `ied url --no-browser` prints a sign-in link)",
 		}

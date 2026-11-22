@@ -89,8 +89,8 @@ namespace Browser
 		m_Engine.Stop();
 		m_Contexts.Clear();
 		FS::Path executable = FindBrowser(SettingText(m_Context, "browser.executable").View());
-		if (executable.IsEmpty()) throw Unavailable(Core::StringView("no browser to run pages in: install Microsoft Edge, or set browser.executable"));
-		FS::Path profile = FS::Path(m_Context->StateFolder().View()) / "profile";
+		if (executable.IsEmpty()) throw Unavailable(NoBrowserText().View());
+		FS::Path profile = ProfileFolder(executable, FS::Path(m_Context->StateFolder().View()), Platform::GetEnvironmentVariable("HOME").View());
 		Core::String error;
 		if (!m_Engine.Start(executable, profile, error)) throw Unavailable(error.View());
 		Browsers* self = this;

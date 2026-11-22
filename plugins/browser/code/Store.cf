@@ -100,8 +100,14 @@ namespace Browser
 			else path.AppendByte((char8)c);
 		}
 		Core::String text = path.ToString();
-		// A drive ("C:/...") is the only kind of path a file: URL names here, and never one that climbs out of a folder.
+		// A drive's path on Windows ("file:///C:/..."), one from the root on Linux ("file:///home/..."); never one that
+		// climbs out of a folder.
 		if (text.View().Contains(Core::StringView("/..")) || text.View().Contains(Core::StringView("\\.."))) return Core::String();
-		return text.ByteLength() >= 3 && text.View().ByteAt(1) == ':' ? text : Core::String();
+		if (text.ByteLength() >= 3 && text.View().ByteAt(1) == ':') return text;
+#if defined(PLATFORM_LINUX)
+		return text.IsEmpty() ? Core::String() : Core::String("/") + text.View();
+#else
+		return Core::String();
+#endif
 	}
 }

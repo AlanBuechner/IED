@@ -1,4 +1,5 @@
-// The browser (docs/27): web pages that live on the server, in Edge's engine run headless - the AI renders, reads and
+// The browser (docs/27): web pages that live on the server, in a Chromium browser run headless (Edge on Windows;
+// Chrome, Chromium or Edge on Linux) - the AI renders, reads and
 // drives them with its browser tools, and any window shows them in a Browser tab (frames pulled from the server, input
 // sent back), the AI's actions drawn over them. Its server code (code/) is compiled into the server: the browser.*
 // methods, the browser: and page: topics, the browser.* bindings and the AI tools.
@@ -7,7 +8,7 @@
 	"id": "ied.browser",
 	"name": "Browser",
 	"version": "0.1.0",
-	"description": "Web pages on the server: a Browser tab for people and browser tools for the AI, in Edge's engine.",
+	"description": "Web pages on the server: a Browser tab for people and browser tools for the AI, in a headless Chromium browser (Edge, Chrome or Chromium).",
 	"publisher": "IED",
 	"ied": { "api": "^1" },
 	"runtime": { "kind": "builtin", "entry": "Browser::Activate", "ui": "ui/index.js" },

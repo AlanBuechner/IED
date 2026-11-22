@@ -12,17 +12,24 @@ namespace Browser
 	const int64 c_EngineHandOffNs = 5000000000;    // after the started process exits, how long another may take to open the port
 	const int64 c_EngineCloseHeldNs = 10000000000;  // how long a browser left on the profile may take to close
 
-	// The browser to run: `configured` (the browser.executable setting) when it is a file, else the first of Edge and
-	// Chrome found where they install; empty when there is none.
+	// The browser to run: `configured` (the browser.executable setting) when it is a file, else the first found where
+	// they install - on Windows Edge, then Chrome; on Linux Chrome, Chromium, then Edge; empty when there is none.
 	FS::Path FindBrowser(Core::StringView configured);
+	// Where the browser keeps IED's profile: `stateFolder`/profile, the workspace server's own (docs/27 "Engine"); for a
+	// snap's browser (/snap/bin/<name>, Ubuntu's Chromium) a folder of that snap's own under `home`, since a snap reaches
+	// no hidden folder of the home and IED's state is under ~/.local - one per state folder, as the plugin's own is.
+	FS::Path ProfileFolder(const FS::Path& executable, const FS::Path& stateFolder, Core::StringView home);
+	// What to say when FindBrowser found none: what to install on this system, or the setting to point at one.
+	Core::String NoBrowserText();
 	// The command line after the program: headless, the profile, the DevTools port (0: the browser picks).
 	Core::Array<Core::String> BrowserArguments(Core::StringView profile);
 	// "ws://127.0.0.1:<port><path>" from the text of a profile's DevToolsActivePort file; empty when it is not one.
 	Core::String EndpointFromActivePort(Core::StringView text);
 
-	// The command that ends every process whose command line names `profile` (Windows PowerShell): the last resort for a
-	// browser left on IED's profile whose DevTools port is not known.
-	Core::String EndProfileHoldersScript(Core::StringView profile);
+	// The command that ends every process whose command line names `profile` (Windows PowerShell; on Linux sh reading
+	// /proc for `--user-data-dir=<profile>`): the last resort for a browser left on IED's profile whose DevTools port is
+	// not known.
+	Process::StartInfo EndHoldersCommand(Core::StringView profile);
 
 	class Engine
 	{

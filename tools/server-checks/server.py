@@ -84,8 +84,12 @@ def remove_tree(path):
 	def writable(function, target, error):
 		os.chmod(target, stat.S_IWRITE)
 		function(target)
-	if os.path.isdir(path):
+	if not os.path.isdir(path):
+		return
+	if sys.version_info >= (3, 12):
 		shutil.rmtree(path, onexc=writable)
+	else:   # Debian 12's Python 3.11, where the Linux checks run: the same handler, given the exception's info
+		shutil.rmtree(path, onerror=writable)
 
 
 @atexit.register

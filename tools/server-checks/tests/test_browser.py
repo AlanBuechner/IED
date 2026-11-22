@@ -37,7 +37,14 @@ PAGE = """<!doctype html>
 LOAD_SECONDS = 30
 
 
+# Where the server looks for its browser (plugins/browser/code/Engine.cf FindBrowser), in its order.
+LINUX_BROWSERS = ("/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/opt/google/chrome/chrome", "/usr/bin/chromium", "/snap/bin/chromium",
+	"/usr/bin/chromium-browser", "/usr/bin/microsoft-edge", "/usr/bin/microsoft-edge-stable", "/opt/microsoft/msedge/msedge")
+
+
 def installed_browser():
+	if os.name != "nt":
+		return next((path for path in LINUX_BROWSERS if os.path.isfile(path)), None)
 	for variable, rest in (("ProgramFiles(x86)", "Microsoft/Edge/Application/msedge.exe"), ("ProgramFiles", "Microsoft/Edge/Application/msedge.exe"),
 		("LOCALAPPDATA", "Microsoft/Edge/Application/msedge.exe"), ("ProgramFiles", "Google/Chrome/Application/chrome.exe")):
 		root = os.environ.get(variable)
@@ -83,7 +90,7 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
 		pass
 
 
-@unittest.skipUnless(browser_installed(), "needs Microsoft Edge or Google Chrome")
+@unittest.skipUnless(browser_installed(), "needs Microsoft Edge, Google Chrome or Chromium")
 class BrowserTests(ServerTestCase):
 	def setUp(self):
 		self.root = tempfile.mkdtemp(prefix="ied-browser-")
@@ -230,11 +237,13 @@ class BrowserTests(ServerTestCase):
 		self.assertEqual({"text": 'Value: "?again=1"', "isError": False}, await self.call("browser.eval", page=page, js="location.search"))
 
 	async def test_only_the_web_and_the_workspace_open(self):
-		for url, code in (("javascript:alert(1)", "bad_request"), ("file:///C:/Windows/win.ini", "forbidden"), ("chrome://settings", "bad_request")):
+		for url, code in (("javascript:alert(1)", "bad_request"), ("file:///C:/Windows/win.ini", "forbidden"), ("file:///etc/passwd", "forbidden"),
+				("file:///" + self.site.replace("\\", "/").lstrip("/") + "/../../x.html", "forbidden"), ("chrome://settings", "bad_request")):
 			with self.subTest(url=url), self.assertRaises(RpcFailure) as refused:
 				await self.client.request("browser.open", {"wsId": self.ws, "url": url})
 			self.assertEqual(code, refused.exception.code)
-		local = "file:///" + os.path.join(self.site, "index.html").replace("\\", "/")
+		# The workspace's own file as a browser writes it: file:///C:/... on Windows, file:///tmp/... on Linux.
+		local = "file:///" + os.path.join(self.site, "index.html").replace("\\", "/").lstrip("/")
 		page = await self.open(local)
 		await self.titled(page, "Fixture")
 
@@ -332,7 +341,7 @@ class BrowserTests(ServerTestCase):
 		self.assertIsNotNone(left.returncode, "the browser left behind was ended")
 
 
-@unittest.skipUnless(browser_installed(), "needs Microsoft Edge or Google Chrome")
+@unittest.skipUnless(browser_installed(), "needs Microsoft Edge, Google Chrome or Chromium")
 class BrowserToolTests(ServerTestCase):
 	"""The browser tools in a chat turn (docs/27 "AI tools"), against the fake model: open, act, and a screenshot that
 	reaches a model that sees images."""

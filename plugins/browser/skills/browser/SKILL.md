@@ -13,7 +13,7 @@ triggers:
 
 # The browser
 
-IED runs web pages in a headless Edge on the server. A page you open has an id (`pg-...`) that the other tools take,
+IED runs web pages in a headless Chromium browser on the server (Edge, Chrome or Chromium). A page you open has an id (`pg-...`) that the other tools take,
 lives until you close it (or the user does), and the user can watch it live in a Browser tab while you work: each of
 your clicks and keystrokes is drawn on the page for them.
 

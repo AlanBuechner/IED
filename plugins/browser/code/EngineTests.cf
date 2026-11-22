@@ -1,0 +1,63 @@
+// browser engine: the browser's command line and DevTools port, ending what holds its profile as this system does, what
+// to say when no browser is installed, and the file: URLs a page may open (docs/27 "Engine", "Pages").
+
+include "Engine.ch"
+include "Store.ch"
+
+[test("server.browser.engine")]
+class BrowserEngineTests {
+	[test("arguments_and_port")]
+	public static void TestArgumentsAndPort() {
+		Core::Array<Core::String> arguments = Browser::BrowserArguments(Core::StringView("/p/profile"));
+		assert_true(arguments.Contains(Core::String("--headless=new")) && arguments.Contains(Core::String("--user-data-dir=/p/profile")), "headless, on IED's own profile");
+		assert_se("ws://127.0.0.1:9222/devtools/browser/abc", Browser::EndpointFromActivePort(Core::StringView("9222\n/devtools/browser/abc\n")).CStr(), "the port file's endpoint");
+		assert_true(Browser::EndpointFromActivePort(Core::StringView("x\n/devtools/browser/abc")).IsEmpty() && Browser::EndpointFromActivePort(Core::StringView("9222")).IsEmpty(), "not a port file");
+	}
+
+	[test("ending_what_holds_the_profile")]
+	public static void TestEndingHolders() {
+		Process::StartInfo command = Browser::EndHoldersCommand(Core::StringView("/home/me/it's/profile"));
+#if defined(PLATFORM_LINUX)
+		assert_true(command.program == "/bin/sh" && command.arguments.Count() == 4 && command.arguments[0] == "-c", "sh running its script");
+		assert_true(command.arguments[3] == "--user-data-dir=/home/me/it's/profile", "the profile as an argument: nothing in it quoted");
+#else
+		assert_true(command.program == "powershell.exe", "Windows PowerShell");
+		assert_true(command.arguments[command.arguments.Count() - 1].View().Contains(Core::StringView("'/home/me/it''s/profile'")), "the profile in a quoted string");
+#endif
+	}
+
+	[test("profile_folder")]
+	public static void TestProfileFolder() {
+		FS::Path state = FS::Path("/home/me/.local/state/ied/servers/abc/plugins/ied.browser");
+		assert_se((state / "profile").CStr(), Browser::ProfileFolder(FS::Path("/usr/bin/chromium"), state, Core::StringView("/home/me")).CStr(), "the plugin's own state folder");
+		FS::Path snap = Browser::ProfileFolder(FS::Path("/snap/bin/chromium"), state, Core::StringView("/home/me"));
+		Core::StringView prefix = Core::StringView("/home/me/snap/chromium/common/ied-browser-");
+		assert_true(snap.View().StartsWith(prefix) && snap.View().ByteLength() == prefix.ByteLength() + 16, snap.CStr());
+		FS::Path other = Browser::ProfileFolder(FS::Path("/snap/bin/chromium"), FS::Path("/home/me/.local/state/ied/servers/def/plugins/ied.browser"), Core::StringView("/home/me"));
+		assert_true(other.View() != snap.View(), "one per workspace server, as its own is");
+		assert_se((state / "profile").CStr(), Browser::ProfileFolder(FS::Path("/snap/bin/chromium"), state, Core::StringView("")).CStr(), "no home: the plugin's own");
+	}
+
+	[test("no_browser")]
+	public static void TestNoBrowser() {
+#if defined(PLATFORM_LINUX)
+		assert_true(Browser::NoBrowserText().View().Contains(Core::StringView("install Chromium")), "Linux: Chromium, from the system's packages");
+#else
+		assert_true(Browser::NoBrowserText().View().Contains(Core::StringView("install Microsoft Edge")), "Windows: Edge");
+#endif
+		assert_true(Browser::NoBrowserText().View().Contains(Core::StringView("browser.executable")), "and the setting");
+	}
+
+	[test("file_urls")]
+	public static void TestFileUrls() {
+		assert_se("C:/a b/x.html", Browser::FilePath(Core::StringView("file:///C:/a%20b/x.html")).CStr(), "a drive's path, unescaped");
+		assert_true(Browser::FilePath(Core::StringView("file:///C:/site/../x.html")).IsEmpty(), "never one that climbs out of a folder");
+		assert_true(Browser::FilePath(Core::StringView("http://x/a.html")).IsEmpty(), "not a file: URL");
+#if defined(PLATFORM_LINUX)
+		assert_se("/home/me/a b.html", Browser::FilePath(Core::StringView("file:///home/me/a%20b.html#top")).CStr(), "a path from the root on Linux");
+		assert_true(Browser::FilePath(Core::StringView("file:///home/me/../x.html")).IsEmpty(), "and none that climbs out");
+#else
+		assert_true(Browser::FilePath(Core::StringView("file:///home/me/a.html")).IsEmpty(), "without a drive, none on Windows");
+#endif
+	}
+}

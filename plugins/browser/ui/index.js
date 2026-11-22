@@ -112,10 +112,12 @@ function watchSaves(ied, path, saved) {
 	};
 }
 
-// A workspace file as a file: URL ("C:\\site" + "pages/a b.html" -> "file:///C:/site/pages/a%20b.html").
+// A workspace file as a file: URL ("C:\\site" + "pages/a b.html" -> "file:///C:/site/pages/a%20b.html"; a Linux root,
+// "/home/me/site", -> "file:///home/me/site/pages/a%20b.html").
 export function fileUrl(root, path) {
 	const full = (root.replace(/[\\/]+$/, "") + "/" + path.replace(/^[\\/]+/, "")).replace(/\\/g, "/");
-	return "file:///" + full.split("/").map((part, i) => (i === 0 && /^[A-Za-z]:$/.test(part) ? part : encodeURIComponent(part))).join("/");
+	const encoded = full.split("/").map((part, i) => (i === 0 && /^[A-Za-z]:$/.test(part) ? part : encodeURIComponent(part))).join("/");
+	return (full.startsWith("/") ? "file://" : "file:///") + encoded;
 }
 
 async function openPage(ied, url) {

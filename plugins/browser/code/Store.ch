@@ -12,7 +12,8 @@ namespace Browser
 	Core::Array<Page*> ParsePages(Core::StringView json, Core::StringView wsId);
 	Core::Array<Page*> LoadPages(const IED::Workspace& ws);
 	void SavePages(const IED::Workspace& ws, Core::StringView json);
-	// The local path a file: URL names ("file:///C:/a%20b/x.html" -> "C:/a b/x.html"); empty when it names none.
+	// The local path a file: URL names ("file:///C:/a%20b/x.html" -> "C:/a b/x.html"; on Linux "file:///home/a.html" ->
+	// "/home/a.html"); empty when it names none.
 	Core::String FilePath(Core::StringView url);
 	// Where a workspace's browser files go: <root>/.ied/local/browser.
 	FS::Path BrowserFolder(const IED::Workspace& ws);

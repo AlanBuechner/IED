@@ -19,8 +19,9 @@ namespace Browser
 		candidates.Push(FS::Path(Core::StringView("/usr/bin/google-chrome-stable")));
 		candidates.Push(FS::Path(Core::StringView("/opt/google/chrome/chrome")));
 		candidates.Push(FS::Path(Core::StringView("/usr/bin/chromium")));
-		candidates.Push(FS::Path(Core::StringView("/usr/bin/chromium-browser")));
+		// Ubuntu's chromium-browser starts the snap: named by its own path, the snap gets its profile where it may write.
 		candidates.Push(FS::Path(Core::StringView("/snap/bin/chromium")));
+		candidates.Push(FS::Path(Core::StringView("/usr/bin/chromium-browser")));
 		candidates.Push(FS::Path(Core::StringView("/usr/bin/microsoft-edge")));
 		candidates.Push(FS::Path(Core::StringView("/usr/bin/microsoft-edge-stable")));
 		candidates.Push(FS::Path(Core::StringView("/opt/microsoft/msedge/msedge")));
@@ -34,6 +35,22 @@ namespace Browser
 		for (const FS::Path& candidate : candidates)
 			if (!candidate.IsEmpty() && FS::FileExists(candidate.CStr())) return candidate;
 		return FS::Path();
+	}
+
+	FS::Path ProfileFolder(const FS::Path& executable, const FS::Path& stateFolder, Core::StringView home) {
+		FS::Path own = stateFolder / "profile";
+		if (!executable.View().StartsWith(Core::StringView("/snap/bin/")) || home.IsEmpty()) return own;
+		Crypto::Sha256Digest digest = Crypto::Sha256((const void*)own.View().Data(), own.View().ByteLength());
+		Core::String folder = Core::String("ied-browser-") + digest.ToHex().View().Substring(0, 16);
+		return FS::Path(home) / "snap" / executable.FileName() / "common" / folder.View();
+	}
+
+	Core::String NoBrowserText() {
+#if defined(PLATFORM_LINUX)
+		return Core::String("no browser to run pages in: install Chromium (apt, dnf, pacman or zypper: chromium) or Google Chrome, or set browser.executable");
+#else
+		return Core::String("no browser to run pages in: install Microsoft Edge, or set browser.executable");
+#endif
 	}
 
 	Core::Array<Core::String> BrowserArguments(Core::StringView profile) {
@@ -72,14 +89,36 @@ namespace Browser
 		return opened.IsOpen() ? opened.ReadText() : Core::String();
 	}
 
-	Core::String EndProfileHoldersScript(Core::StringView profile) {
+#if defined(PLATFORM_LINUX)
+	// sh reads /proc: every process but itself whose command line holds $1 is killed. The profile is an argument, so
+	// nothing in it is quoted.
+	const char* c_EndHoldersShell = "for d in /proc/[0-9]*; do p=${d#/proc/}; [ \"$p\" = \"$$\" ] && continue; tr '\\000' ' ' < \"$d/cmdline\" 2>/dev/null | grep -qF -- \"$1\" && kill -9 \"$p\" 2>/dev/null; done; exit 0";
+
+	Process::StartInfo EndHoldersCommand(Core::StringView profile) {
+		Process::StartInfo info;
+		info.program = Core::String("/bin/sh");
+		info.arguments.Push(Core::String("-c"));
+		info.arguments.Push(Core::String(c_EndHoldersShell));
+		info.arguments.Push(Core::String("ied-browser"));
+		info.arguments.Push(Core::String("--user-data-dir=") + profile);
+		return info;
+	}
+#else
+	Process::StartInfo EndHoldersCommand(Core::StringView profile) {
 		Core::StringBuilder quoted;
 		for (int64 i = 0; i < profile.ByteLength(); ++i) {
 			if (profile.ByteAt(i) == '\'') quoted.AppendByte('\'');
 			quoted.AppendByte(profile.ByteAt(i));
 		}
-		return (Core::String("$p = '") + quoted.View()) + "'; Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and ($_.CommandLine.Replace('\\', '/')).Contains($p.Replace('\\', '/')) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
+		Process::StartInfo info;
+		info.program = Core::String("powershell.exe");
+		info.arguments.Push(Core::String("-NoProfile"));
+		info.arguments.Push(Core::String("-NonInteractive"));
+		info.arguments.Push(Core::String("-Command"));
+		info.arguments.Push((Core::String("$p = '") + quoted.View()) + "'; Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and ($_.CommandLine.Replace('\\', '/')).Contains($p.Replace('\\', '/')) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }");
+		return info;
 	}
+#endif
 
 	static bool Answers(Core::StringView endpoint) {
 		CdpConnection probe;
@@ -107,13 +146,7 @@ namespace Browser
 
 	// Every process whose command line names `profile` ended; the last resort.
 	static void EndHolders(const FS::Path& profile) {
-		Process::StartInfo info;
-		info.program = Core::String("powershell.exe");
-		info.arguments.Push(Core::String("-NoProfile"));
-		info.arguments.Push(Core::String("-NonInteractive"));
-		info.arguments.Push(Core::String("-Command"));
-		info.arguments.Push(EndProfileHoldersScript(profile.View()));
-		Process::Run(info, 30000);
+		Process::Run(EndHoldersCommand(profile.View()), 30000);
 		Threading::Thread::Sleep(500000000);
 	}
 
