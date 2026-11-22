@@ -44,6 +44,21 @@ namespace Scripting
 		const llvm::DataLayout& layout() const { return m_DataLayout; }
 		Abi& abi() { return m_Abi; }
 
+		/// `-fstack-maps` (R16 phase 3): a pointer the collector must find - a C4 pointer or reference, `this`, the sret
+		/// pointer, a func's environment - is a managed pointer, in address space 1, whose values live across calls the
+		/// stack maps record (Compiler/StackMaps); a stack slot's, a global's or code's address is a raw one, in 0, and
+		/// becomes a managed one by an addrspacecast where a pointer value is made of it. Without it both are 0 and the IR
+		/// is what it always was. Before anything is lowered.
+		void UseStackMaps();
+		bool StackMaps() const { return m_ManagedSpace != 0; }
+		llvm::PointerType* ManagedPtr() const { return llvm::PointerType::get(m_Context, m_ManagedSpace); }
+		llvm::PointerType* RawPtr() const { return llvm::PointerType::get(m_Context, 0); }
+		/// `value` as `type` where both are pointers of different address spaces (an addrspacecast); else `value` as it is.
+		static llvm::Value* InSpace(llvm::IRBuilder<>& B, llvm::Value* value, llvm::Type* type);
+		static llvm::Constant* InSpace(llvm::Constant* value, llvm::Type* type);
+		/// `args` as a call of `type` takes them: each pointer in its parameter's address space.
+		static std::vector<llvm::Value*> Arguments(llvm::IRBuilder<>& B, llvm::FunctionType* type, llvm::ArrayRef<llvm::Value*> args);
+
 		// The single C4 -> LLVM type map, cached by const Type*. Primitives -> exact-width int/float;
 		// pointers/references/string/funcptr -> opaque ptr; arrays -> [N x elem]; objects/unions -> a named
 		// StructType (opaque until FillStruct); enums -> their integer base; swizzle -> the SIMD vector.
@@ -195,6 +210,7 @@ namespace Scripting
 		std::unique_ptr<CensusTypes> m_Census;
 		std::unique_ptr<class DebugInfo> m_Debug;
 		AliasTags m_AliasTags;
+		unsigned m_ManagedSpace = 0; // 1 with stack maps
 		bool m_Split = false;
 		bool m_Importing = false;
 		std::function<bool(const SymbolInfo&)> m_DefinesGlobal;

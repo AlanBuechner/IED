@@ -24,6 +24,8 @@ namespace Scripting
 		void EnableDebugInfo() { m_Emit.modules.debugInfo = true; }
 		/// `-fno-strict-aliasing` (D-64): loads and stores carry no alias tags, so any may touch any memory.
 		void DisableStrictAliasing() { m_Emit.modules.strictAliasing = false; }
+		/// `-fstack-maps` (R16 phase 3): the collector reads a C4 frame's managed pointers from stack maps (Compiler/StackMaps).
+		void UseStackMaps() { m_Emit.modules.stackMaps = true; }
 		/// `-reflect-tag`: the program's reflection registers under `tag` (a hot-reload source) instead of "".
 		void SetReflectionTag(const Core::String& tag) { m_Emit.reflectionTag = tag; }
 		/// `--script-host` (docs/runtime/04 section 3.1): every class with virtual methods gets its vtables whether or not

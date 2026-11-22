@@ -41,6 +41,7 @@ namespace Scripting
 	std::vector<std::string> targetFlags; // -march=<cpu>, -m<feature>, -mno-<feature>, in order (D-62)
 	CpuTarget target;                     // what targetFlags select
 	bool strictAliasing = true;           // -fno-strict-aliasing turns it off: no alias tags (D-64)
+	bool stackMaps = false;               // -fstack-maps: the collector reads C4 frames by stack maps (R16 phase 3)
 	bool runTests = false; // -test: emit a synthetic main that runs [test] functions instead of user main
 	Core::String testJsonPath; // -test-json <path>: write a machine-readable summary next to the console output
 	Core::String reflectTag;   // -reflect-tag <tag>: source tag for reflection registration (scripting hot reload)

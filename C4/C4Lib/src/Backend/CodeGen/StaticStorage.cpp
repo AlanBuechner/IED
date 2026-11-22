@@ -23,7 +23,7 @@ namespace Scripting
 
 		void CallDestroy(llvm::IRBuilder<>& B, llvm::Function* destroy, llvm::Value* object)
 		{
-			llvm::CallInst* call = B.CreateCall(destroy, { object });
+			llvm::CallInst* call = B.CreateCall(destroy, ModuleContext::Arguments(B, destroy->getFunctionType(), { object }));
 			call->setCallingConv(destroy->getCallingConv());
 		}
 

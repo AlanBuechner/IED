@@ -65,6 +65,12 @@
     "mustNotContain": ["SHOULD NOT REACH HERE"],
     "reason": "An exception escaping a collection-result callback stops the program (BUG-367): collection-result callbacks run after the collection, and it never unwinds through the collector into the caller of the collection."
   },
+  "MemoryGC/StackMaps": {
+    "exit": 0,
+    "compileFlags": ["-fstack-maps"],
+    "mustContain": ["STACK MAPS OK"],
+    "reason": "R16 phase 3: with stack maps a frame is read by its record, so an address left in a dead slot of it (a local no longer read, a register a callee saved) keeps nothing alive, and a live one keeps its target."
+  },
   "MemoryGC/RootEnumeratorException": {
     "exit": 1,
     "mustContain": ["an exception escaped a root enumerator"],

@@ -4,7 +4,7 @@ RunTests.ps1 checks it on Windows: the exit code ExpectedExit.json records ("lin
 otherwise) and its output substrings. NegativeTests.json's cases are compile-only and the same on every system, so they
 are left to RunTests.ps1; SkipTests.json's and LinuxSkipTests.json's are reported as skipped.
 
-Usage: python -I run_linux.py [--corpus IsolatedTest] [--filter Types,Calls/Variadic] [--jobs 3] [--image ied-linux-runner] [-O2] [--keep]
+Usage: python -I run_linux.py [--corpus IsolatedTest] [--filter Types,Calls/Variadic] [--jobs 3] [--image ied-linux-runner] [-O2] [--stack-maps] [--keep]
 Needs Docker (Docker Desktop's Linux engine) and the compiler built (build/bin/Development-windows-x64/C4/C4.exe)."""
 
 import argparse
@@ -64,8 +64,8 @@ def source_text(folder):
 	return "\n".join(text)
 
 
-def compile_case(rel, expected, optimize):
-	"""Builds one case into WORK/rel/out; (rel, None) or (rel, why it failed)."""
+def compile_case(rel, expected, optimize, stack_maps=False):
+	"""Builds one case into WORK/rel/out (with -fstack-maps when `stack_maps`); (rel, None) or (rel, why it failed)."""
 	source = os.path.join(HERE, rel)
 	build = os.path.join(WORK, rel)
 	if os.path.isdir(build):
@@ -77,6 +77,8 @@ def compile_case(rel, expected, optimize):
 	flags = ["--target", "linux-x64"]
 	if optimize:
 		flags.append("-O2")
+	if stack_maps:
+		flags.append("-fstack-maps")
 	text = source_text(build)
 	if re.search(r"\[test", text):
 		if re.search(r"(?<![\w])main\s*\(", text):
@@ -154,6 +156,7 @@ def main():
 	parser.add_argument("--corpus", default="IsolatedTest", help="a folder of assets/ holding one program a folder")
 	parser.add_argument("--image", default="ied-linux-runner", help="tools/linux/runner: Debian 12 with OpenSSL")
 	parser.add_argument("-O2", dest="optimize", action="store_true")
+	parser.add_argument("--stack-maps", dest="stack_maps", action="store_true", help="build every case with -fstack-maps (R16)")
 	parser.add_argument("--keep", action="store_true", help="keep the builds of passing cases")
 	args = parser.parse_args()
 	global HERE, WORK
@@ -179,7 +182,7 @@ def main():
 	os.makedirs(WORK, exist_ok=True)
 	built = []
 	with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
-		for rel, failure in pool.map(lambda r: compile_case(r, expected, args.optimize), todo):
+		for rel, failure in pool.map(lambda r: compile_case(r, expected, args.optimize, args.stack_maps), todo):
 			if failure:
 				results[rel] = ("FAIL", failure)
 			else:

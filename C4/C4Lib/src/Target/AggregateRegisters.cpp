@@ -71,12 +71,27 @@ namespace Scripting
 			return offset == 0 ? type : nullptr;
 		}
 
-		// The register type of the eightbyte at `offset` of an aggregate of `size` bytes: an integer of the bytes it
-		// holds, or the float type its floats need (float, <2 x float>, double).
-		llvm::Type* EightbyteType(llvm::LLVMContext& ctx, const llvm::DataLayout& layout, llvm::Type* type, Class cls, uint64_t offset, uint64_t size)
+		// The managed pointer an eightbyte at `offset` of `type` is exactly, or null.
+		llvm::Type* ManagedAt(const AggregateShape& aggregate, llvm::Type* type, uint64_t offset)
 		{
-			const uint64_t bytes = std::min(kEightbyte, size - offset);
-			if (cls != Class::Sse) return llvm::IntegerType::get(ctx, static_cast<unsigned>(bytes * 8));
+			if (!aggregate.managedSpace || !type) return nullptr;
+			llvm::Type* scalar = ScalarAt(aggregate.layout, type, offset);
+			if (!scalar || !scalar->isPointerTy() || scalar->getPointerAddressSpace() != aggregate.managedSpace) return nullptr;
+			return aggregate.layout.getTypeStoreSize(scalar) == kEightbyte ? scalar : nullptr;
+		}
+
+		// The register type of the eightbyte at `offset` of an aggregate of `size` bytes: a managed pointer it is exactly,
+		// an integer of the bytes it holds, or the float type its floats need (float, <2 x float>, double).
+		llvm::Type* EightbyteType(const AggregateShape& aggregate, llvm::Type* type, Class cls, uint64_t offset)
+		{
+			llvm::LLVMContext& ctx = aggregate.context;
+			const llvm::DataLayout& layout = aggregate.layout;
+			const uint64_t bytes = std::min(kEightbyte, aggregate.size - offset);
+			if (cls != Class::Sse)
+			{
+				if (llvm::Type* managed = ManagedAt(aggregate, type, offset)) return managed;
+				return llvm::IntegerType::get(ctx, static_cast<unsigned>(bytes * 8));
+			}
 			llvm::Type* first = ScalarAt(layout, type, offset);
 			if (first && first->isFloatTy()) return bytes <= 4 ? first : llvm::FixedVectorType::get(first, 2);
 			return llvm::Type::getDoubleTy(ctx);
@@ -86,6 +101,8 @@ namespace Scripting
 	llvm::Type* Win64AggregateRegisters(const AggregateShape& aggregate)
 	{
 		const uint64_t s = aggregate.size;
+		if (s == kEightbyte && aggregate.managedSpace)
+			if (llvm::Type* managed = ManagedAt(aggregate, aggregate.storage(), 0)) return managed;
 		if (s == 1 || s == 2 || s == 4 || s == 8) return llvm::IntegerType::get(aggregate.context, static_cast<unsigned>(s * 8)); // one GPR (bytes -> bits)
 		return nullptr; // not a single-register size -> hidden pointer
 	}
@@ -97,8 +114,8 @@ namespace Scripting
 		llvm::Type* storage = aggregate.storage();
 		Classes classes = { Class::None, Class::None };
 		if (!storage || !Classify(aggregate.layout, storage, 0, classes)) return nullptr;
-		llvm::Type* low = EightbyteType(aggregate.context, aggregate.layout, storage, classes[0], 0, size);
+		llvm::Type* low = EightbyteType(aggregate, storage, classes[0], 0);
 		if (size <= kEightbyte) return low;
-		return llvm::StructType::get(aggregate.context, { low, EightbyteType(aggregate.context, aggregate.layout, storage, classes[1], kEightbyte, size) });
+		return llvm::StructType::get(aggregate.context, { low, EightbyteType(aggregate, storage, classes[1], kEightbyte) });
 	}
 } // namespace Scripting

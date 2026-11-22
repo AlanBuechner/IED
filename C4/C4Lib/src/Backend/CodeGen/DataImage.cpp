@@ -25,7 +25,12 @@ namespace Scripting
 		llvm::Constant* PointerAt(llvm::PointerType* type, const ConstantData& data, uint64 offset, const llvm::DataLayout& layout,
 			const StringConstant& stringAt)
 		{
-			if (auto text = data.strings.find(offset); text != data.strings.end()) return stringAt(text->second);
+			if (auto text = data.strings.find(offset); text != data.strings.end())
+			{
+				// A string's bytes are a global (address space 0); a C4 pointer to them is a managed one with stack maps (R16).
+				llvm::Constant* string = stringAt(text->second);
+				return string->getType() == type ? string : llvm::ConstantExpr::getAddrSpaceCast(string, type);
+			}
 			return AllZero(data.bytes.data() + offset, layout.getTypeAllocSize(type)) ? llvm::ConstantPointerNull::get(type) : nullptr;
 		}
 

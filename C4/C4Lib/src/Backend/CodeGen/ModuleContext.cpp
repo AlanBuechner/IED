@@ -7,6 +7,7 @@
 #include "Backend/CodeGen/StableNames.h"
 #include "Backend/CodeGen/VtableEmitter.h"
 #include "Compiler/ModulePartitions.h"
+#include "Compiler/StackMaps.h"
 #include "Model/ProgramModel.h"
 #include "Model/TypeHandle.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
@@ -37,6 +38,33 @@ namespace Scripting
 	}
 
 	ModuleContext::~ModuleContext() = default;
+
+	void ModuleContext::UseStackMaps()
+	{
+		m_ManagedSpace = c_ManagedAddressSpace;
+		m_Abi.SetManagedSpace(m_ManagedSpace);
+		MarkForStackMaps(*m_Module);
+		m_DataLayout = m_Module->getDataLayout();
+	}
+
+	llvm::Value* ModuleContext::InSpace(llvm::IRBuilder<>& B, llvm::Value* value, llvm::Type* type)
+	{
+		if (!value || !type || value->getType() == type || !value->getType()->isPointerTy() || !type->isPointerTy()) return value;
+		return B.CreateAddrSpaceCast(value, type);
+	}
+
+	llvm::Constant* ModuleContext::InSpace(llvm::Constant* value, llvm::Type* type)
+	{
+		if (!value || !type || value->getType() == type || !value->getType()->isPointerTy() || !type->isPointerTy()) return value;
+		return llvm::ConstantExpr::getAddrSpaceCast(value, type);
+	}
+
+	std::vector<llvm::Value*> ModuleContext::Arguments(llvm::IRBuilder<>& B, llvm::FunctionType* type, llvm::ArrayRef<llvm::Value*> args)
+	{
+		std::vector<llvm::Value*> passed(args.begin(), args.end());
+		for (size_t i = 0; i < passed.size() && i < type->getNumParams(); ++i) passed[i] = InSpace(B, passed[i], type->getParamType(static_cast<unsigned>(i)));
+		return passed;
+	}
 
 	Abi::Signature ModuleContext::SignatureOf(const FunctionRecord& rec) const
 	{
@@ -78,9 +106,10 @@ namespace Scripting
 		case TypeKind::Float64: result = llvm::Type::getDoubleTy(m_Context); break;
 		case TypeKind::Pointer: // opaque pointers on LLVM 22
 		case TypeKind::Reference: // T& is an address - it lowers to a pointer (the pointee's address)
+			result = ManagedPtr(); break;
 		case TypeKind::FunPtr:
 		case TypeKind::Function:
-			result = llvm::PointerType::get(m_Context, 0); break;
+			result = RawPtr(); break;
 		case TypeKind::Array:
 		{
 			const ArrayType* a = static_cast<const ArrayType*>(base);
@@ -137,12 +166,11 @@ namespace Scripting
 		{
 			// __init_list<T> is the std::initializer_list ABI: a 16-byte aggregate { const T* data, uint64 size }.
 			// It lowers to that two-field struct so field GEPs (data @0, size @8) and by-value copies are correct.
-			result = llvm::StructType::get(m_Context,
-				{ llvm::PointerType::get(m_Context, 0), llvm::Type::getInt64Ty(m_Context) });
+			result = llvm::StructType::get(m_Context, { ManagedPtr(), llvm::Type::getInt64Ty(m_Context) });
 			break;
 		}
 		case TypeKind::Func: // { code, environment } (docs/language/07)
-			result = llvm::StructType::get(m_Context, { llvm::PointerType::get(m_Context, 0), llvm::PointerType::get(m_Context, 0) });
+			result = llvm::StructType::get(m_Context, { RawPtr(), ManagedPtr() });
 			break;
 		default:
 			result = llvm::Type::getInt8Ty(m_Context); break; // TemplateParam/Invalid: never concrete in HIR
@@ -179,15 +207,14 @@ namespace Scripting
 		// Hidden parameters in MSVC x64 order (`this`, then the sret pointer, for an instance method), then the
 		// declared parameters per the Abi brick.
 		const Abi::Signature sig = SignatureOf(rec);
-		auto* ptr = llvm::PointerType::get(m_Context, 0);
-		std::vector<llvm::Type*> paramTys(sig.firstParam, ptr);
+		std::vector<llvm::Type*> paramTys(sig.firstParam, ManagedPtr()); // `this` and the sret pointer may point into the heap
 		if (ft)
 			for (uint32 i = 0; i < ft->GetParameterCount(); ++i)
 			{
 				const Type* p = ft->GetParameters()[i].m_Type;
 				llvm::Type* pt = m_Abi.ParamType(p); // aggregate special case, or null for scalars
 				if (!pt && rec.isLinked && p && p->GetKind() == TypeKind::InitList)
-					pt = ptr; // MSVC passes std::initializer_list by hidden pointer (see EmitCall)
+					pt = RawPtr(); // MSVC passes std::initializer_list by hidden pointer to the caller's temporary (see EmitCall)
 				paramTys.push_back(pt ? pt : Lower(p));
 			}
 
@@ -300,7 +327,7 @@ namespace Scripting
 		// initializer folded to a value (const OR non-const) starts with that value; anything else starts zero.
 		llvm::Type* ty = Lower(sym.type);
 		llvm::Constant* init = nullptr;
-		if (sym.constValue.kind == ConstantValue::Kind::String) init = StringGlobal(sym.constValue);
+		if (sym.constValue.kind == ConstantValue::Kind::String) init = InSpace(StringGlobal(sym.constValue), ty);
 		else if (!sym.constValue.IsNone() && sym.constValue.kind != ConstantValue::Kind::Guid) init = NumberConstant(sym.constValue, sym.type, ty);
 		// A global function pointer initialized with a function address (`funcptr<R(a)> g = F;`) must start
 		// at @F, not null - the first call through it would otherwise fault. Lowering resolved the function
@@ -484,7 +511,7 @@ namespace Scripting
 
 		// A string literal is the address of its code units (char8* / char16* / char32*).
 		if (value.kind == ConstantValue::Kind::String)
-			return StringGlobal(value);
+			return InSpace(StringGlobal(value), ty);
 
 		// A __uuidof(T) constant is a pointer to the 16-byte COM GUID: emit (or reuse) a private
 		// [16 x i8] global holding the bytes in Win32 _GUID layout and return its address.
@@ -494,7 +521,7 @@ namespace Scripting
 			std::string name = ".guid.";
 			for (int i = 0; i < 16; ++i) { std::string d = std::to_string(value.guidBytes[i]); name += d; name += "_"; }
 			if (auto* existing = module.getNamedGlobal(name.c_str()))
-				return existing;
+				return InSpace(existing, ty);
 			llvm::Type* byteTy = llvm::Type::getInt8Ty(ctx);
 			llvm::Constant* inits[16];
 			for (int i = 0; i < 16; ++i)
@@ -502,7 +529,7 @@ namespace Scripting
 			auto* data = llvm::ConstantArray::get(llvm::ArrayType::get(byteTy, 16), inits);
 			auto* gv = new llvm::GlobalVariable(module, data->getType(), true,
 				llvm::GlobalValue::PrivateLinkage, data, name);
-			return gv;
+			return InSpace(gv, ty);
 		}
 
 		// A pointer-typed constant is always the null value (C4 has no raw addresses): `null` lowers to a void*

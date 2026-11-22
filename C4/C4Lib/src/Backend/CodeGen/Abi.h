@@ -24,6 +24,10 @@ namespace Scripting
 			std::function<uint64_t()> vectorBytes)
 			: m_Ctx(ctx), m_Target(target), m_Layout(layout), m_Lower(std::move(lower)), m_VectorBytes(std::move(vectorBytes)) {}
 
+		/// With stack maps (ModuleContext::UseStackMaps): an aggregate's eightbyte that is exactly a pointer of `space`
+		/// crosses a call as that pointer (AggregateShape::managedSpace).
+		void SetManagedSpace(unsigned space) { m_ManagedSpace = space; }
+
 		// --- classification (pure over model types) -------------------------------------
 		// A by-value aggregate is an object, union, or array (after alias/reference unwrapping). These are
 		// the only types whose passing convention depends on size. Scalars (ints/floats/pointers/string
@@ -93,5 +97,6 @@ namespace Scripting
 		const llvm::DataLayout& m_Layout;
 		std::function<llvm::Type*(const Type*)> m_Lower;
 		std::function<uint64_t()> m_VectorBytes;
+		unsigned m_ManagedSpace = 0;
 	};
 } // namespace Scripting

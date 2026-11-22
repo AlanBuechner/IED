@@ -293,7 +293,7 @@ bool ProgramOutput::Link(const std::vector<std::string>& programObjects, const s
 	// The C4 runtime linked into every executable (Compiler/RuntimeObjects.h).
 	const Scripting::TargetAbi& target = m_In.options.target.Abi();
 	Core::Vector<Core::String> runtime;
-	if (!Scripting::EnsureRuntimeObjects(m_In.options.verbose, target, runtime))
+	if (!Scripting::EnsureRuntimeObjects(m_In.options.verbose, target, m_In.options.stackMaps, runtime))
 	{
 		m_In.result.AddBackendError("the C4 runtime could not be built");
 		return false;

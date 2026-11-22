@@ -171,12 +171,12 @@ namespace Scripting
 		auto& B = m_Ctx.builder();
 		llvm::Value* src = Emit(n->src);
 		llvm::Type* target = m_Ctx.mctx().Lower(n->to);
-		if (n->keepsBits) return B.CreateBitCast(src, target);
+		if (n->keepsBits) return src->getType()->isPointerTy() && target->isPointerTy() ? ModuleContext::InSpace(B, src, target) : B.CreateBitCast(src, target);
 		// A packed vector converts lane by lane (D-62): the lanes' types pick the instruction, which works on vectors.
 		const Type* from = LaneType(n->from);
 		const Type* to = LaneType(n->to);
 
-		if (IsPointerLike(from) && IsPointerLike(to)) return AdjustObjectPointer(src, n->from, n->to);
+		if (IsPointerLike(from) && IsPointerLike(to)) return ModuleContext::InSpace(B, AdjustObjectPointer(src, n->from, n->to), target);
 
 		bool fromInt = from && from->IsIntegral();
 		bool toInt = to && to->IsIntegral();

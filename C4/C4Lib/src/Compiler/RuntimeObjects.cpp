@@ -19,6 +19,9 @@ namespace Scripting
 		constexpr const char* kOptimization = "-O2";
 		constexpr uint64_t kContentSeed = 14695981039346656037ull; // FNV-1a
 		constexpr uint64_t kContentPrime = 1099511628211ull;
+		// A program built with stack maps (`-fstack-maps`, R16) links the runtime built with them, beside the other one.
+		constexpr const char* kStackMapsDefine = "-DC4_STACK_MAPS=1";
+		constexpr const char* kStackMapsFolder = "stack-maps";
 
 		// Objects are cached per install (keyed by its runtime folder), so two C4 installs never link each
 		// other's objects, and an install folder that cannot be written still builds.
@@ -94,13 +97,13 @@ namespace Scripting
 		// Compiles into a private file first and renames it into place, so a parallel compiler process never
 		// links a half-written object.
 		bool Compile(const fs::path& root, const fs::path& source, const fs::path& object, const TargetAbi& target, const fs::path& sysroot,
-			bool verbose)
+			bool stackMaps, bool verbose)
 		{
 			const std::string clang = ClangPath();
 			if (clang.empty()) return false;
 			const fs::path partial = object.string() + "." + std::to_string(llvm::sys::Process::getProcessId()) + ".tmp";
 			const std::vector<std::string> args = RuntimeCompileCommand(clang, root.string(), source.string(), partial.string(),
-				target, sysroot.string());
+				target, sysroot.string(), stackMaps);
 			if (verbose)
 			{
 				std::string line = "Compiling C4 runtime:";
@@ -128,10 +131,16 @@ namespace Scripting
 		return target.BuildsRuntimeSource(fs::path(relativeSource).stem().string());
 	}
 
+	bool RuntimeSourceIsForStackMaps(const std::string& relativeSource)
+	{
+		return fs::path(relativeSource).stem().string().rfind("GCStack", 0) == 0;
+	}
+
 	std::vector<std::string> RuntimeCompileCommand(const std::string& clang, const std::string& runtimeRoot,
-		const std::string& source, const std::string& output, const TargetAbi& target, const std::string& sysroot)
+		const std::string& source, const std::string& output, const TargetAbi& target, const std::string& sysroot, bool stackMaps)
 	{
 		std::vector<std::string> args = { clang, "-c", "-target", target.Triple(), kOptimization, "-Werror", "-I", runtimeRoot };
+		if (stackMaps) args.push_back(kStackMapsDefine);
 		const std::vector<std::string> flags = target.RuntimeSourceFlags(sysroot);
 		args.insert(args.end(), flags.begin(), flags.end());
 		if (fs::path(source).extension() == ".cpp") args.push_back("-std=c++20");
@@ -141,7 +150,7 @@ namespace Scripting
 		return args;
 	}
 
-	bool EnsureRuntimeObjects(bool verbose, const TargetAbi& target, Core::Vector<Core::String>& objects)
+	bool EnsureRuntimeObjects(bool verbose, const TargetAbi& target, bool stackMaps, Core::Vector<Core::String>& objects)
 	{
 		const fs::path root = Toolchain::Runtime();
 		if (root.empty())
@@ -152,7 +161,7 @@ namespace Scripting
 		}
 		const std::optional<fs::path> sysroot = target.Sysroot();
 		if (!sysroot) return false;
-		const fs::path objectDir = ObjectFolder(root, target);
+		const fs::path objectDir = stackMaps ? ObjectFolder(root, target) / kStackMapsFolder : ObjectFolder(root, target);
 		CreateFolders(PathText(objectDir));
 		const uint64_t headersKey = SysrootKey(*sysroot, target, HeadersKey(root));
 		struct Missing
@@ -165,7 +174,7 @@ namespace Scripting
 		for (const fs::path& source : FilesUnder(root, { ".c", ".cpp" }))
 		{
 			const std::string relative = RelativeName(source, root);
-			if (!RuntimeSourceIsFor(relative, target)) continue;
+			if (!RuntimeSourceIsFor(relative, target) || (!stackMaps && RuntimeSourceIsForStackMaps(relative))) continue;
 			const fs::path object = objectDir / RuntimeObjectName(relative, RuntimeContentKey(Bytes(source), headersKey));
 			if (!FileExists(PathText(object))) missing.push_back({ source, object, ObjectStem(relative) });
 			objects.Push(Core::String(object.string().c_str()));
@@ -173,7 +182,7 @@ namespace Scripting
 		// A toolchain's first build compiles every source: one clang each, at once.
 		std::vector<char> failed(missing.size(), 0);
 		ParallelFor(missing.size(), std::max(1u, std::thread::hardware_concurrency()), [&](size_t i) {
-			if (!Compile(root, missing[i].source, missing[i].object, target, *sysroot, verbose)) failed[i] = 1;
+			if (!Compile(root, missing[i].source, missing[i].object, target, *sysroot, stackMaps, verbose)) failed[i] = 1;
 			else RemoveOtherVersions(objectDir, missing[i].stem, missing[i].object);
 		});
 		for (size_t i = 0; i < missing.size(); ++i)

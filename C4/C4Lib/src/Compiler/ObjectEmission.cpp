@@ -5,6 +5,7 @@
 #include "Compiler/ModulePartitions.h"
 #include "Compiler/ObjectCache.h"
 #include "Compiler/ParallelFor.h"
+#include "Compiler/StackMaps.h"
 #include "Target/TargetAbi.h"
 #include <llvm/Analysis/TargetLibraryInfo.h>
 #include <llvm/Analysis/TargetTransformInfo.h>
@@ -139,13 +140,15 @@ namespace Scripting
 			options.UseInitArray = abi.ConstructorsInInitArray();
 			std::unique_ptr<llvm::TargetMachine> machine(target->createTargetMachine(triple, settings.target->Cpu(),
 				settings.target->LlvmFeatures(), options, abi.Relocation(), std::nullopt, CodeGenLevel(settings.optLevel)));
-			module.setDataLayout(machine->createDataLayout());
+			if (UsesStackMaps(module)) module.setDataLayout(StackMapsLayout(machine->createDataLayout().getStringRepresentation()));
+			else module.setDataLayout(machine->createDataLayout());
 			return machine;
 		}
 
 		// The pipeline `clang -O<n>` runs: unrolling and both vectorizers from -O2 on.
 		void RunPipeline(llvm::Module& module, llvm::TargetMachine& machine, int optLevel)
 		{
+			KeepLibraryCallsAsWritten(module);
 			llvm::LoopAnalysisManager loops;
 			llvm::FunctionAnalysisManager functions;
 			llvm::CGSCCAnalysisManager sccs;
@@ -167,8 +170,32 @@ namespace Scripting
 			DropPartialConstantLocations(module);
 		}
 
-		void WriteObject(llvm::Module& module, llvm::TargetMachine& machine, const std::string& objPath, std::vector<ObjectDiagnostic>& diagnostics)
+		bool EmitObject(llvm::Module& module, llvm::TargetMachine& machine, llvm::raw_pwrite_stream& out, std::vector<ObjectDiagnostic>& diagnostics)
 		{
+			llvm::legacy::PassManager backend;
+			backend.add(new llvm::TargetLibraryInfoWrapperPass(module.getTargetTriple()));
+			backend.add(llvm::createTargetTransformInfoWrapperPass(machine.getTargetIRAnalysis()));
+			if (machine.addPassesToEmitFile(backend, out, nullptr, llvm::CodeGenFileType::ObjectFile))
+			{
+				diagnostics.push_back({ 0, "the target cannot write object files" });
+				return false;
+			}
+			backend.run(module);
+			return true;
+		}
+
+		// An ELF object's stack map is made ready for the link before the object is written (PrepareElfStackMaps).
+		void WriteElfWithStackMaps(llvm::Module& module, llvm::TargetMachine& machine, const std::string& objPath, std::vector<ObjectDiagnostic>& diagnostics)
+		{
+			llvm::SmallVector<char, 0> buffer;
+			llvm::raw_svector_ostream stream(buffer);
+			if (!EmitObject(module, machine, stream, diagnostics)) return;
+			std::string object(buffer.begin(), buffer.end());
+			if (!PrepareElfStackMaps(object))
+			{
+				diagnostics.push_back({ 0, "the object for '" + objPath + "' is no ELF object its stack map could be prepared in" });
+				return;
+			}
 			std::error_code ec;
 			llvm::raw_fd_ostream out(objPath, ec, llvm::sys::fs::OF_None);
 			if (ec)
@@ -176,15 +203,25 @@ namespace Scripting
 				diagnostics.push_back({ 0, "cannot write the object file '" + objPath + "': " + ec.message() });
 				return;
 			}
-			llvm::legacy::PassManager backend;
-			backend.add(new llvm::TargetLibraryInfoWrapperPass(module.getTargetTriple()));
-			backend.add(llvm::createTargetTransformInfoWrapperPass(machine.getTargetIRAnalysis()));
-			if (machine.addPassesToEmitFile(backend, out, nullptr, llvm::CodeGenFileType::ObjectFile))
+			out << object;
+			out.flush();
+		}
+
+		void WriteObject(llvm::Module& module, llvm::TargetMachine& machine, const std::string& objPath, std::vector<ObjectDiagnostic>& diagnostics)
+		{
+			if (UsesStackMaps(module) && module.getTargetTriple().isOSBinFormatELF())
 			{
-				diagnostics.push_back({ 0, "the target cannot write object files" });
+				WriteElfWithStackMaps(module, machine, objPath, diagnostics);
 				return;
 			}
-			backend.run(module);
+			std::error_code ec;
+			llvm::raw_fd_ostream out(objPath, ec, llvm::sys::fs::OF_None);
+			if (ec)
+			{
+				diagnostics.push_back({ 0, "cannot write the object file '" + objPath + "': " + ec.message() });
+				return;
+			}
+			if (!EmitObject(module, machine, out, diagnostics)) return;
 			out.flush();
 		}
 
@@ -196,6 +233,7 @@ namespace Scripting
 			const size_t before = diagnostics.size();
 			if (settings.optimizePartitions && settings.optLevel == 0) LowerAggregateCopies(module);
 			if (settings.optimizePartitions) RunPipeline(module, *machine, settings.optLevel);
+			InsertStatepoints(module, machine.get());
 			if (diagnostics.size() == before) WriteObject(module, *machine, objPath, diagnostics);
 		}
 

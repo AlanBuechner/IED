@@ -1,0 +1,53 @@
+// R16 phase 3 (-fstack-maps): a C4 frame is read by its stack map, not whole, so an address left in a slot of it that
+// is dead - a local no longer read, a register a callee saved - keeps nothing alive, and what the frame still reads stays.
+// Without stack maps the same program keeps some of the dead targets (18 of 20 go, at -O0 and -O2, when it was written).
+include "Memory/gc.ch"
+
+int32 g_finalized = 0;
+int64 g_sink = 0;
+int32 g_depth = 0;
+
+struct Target {
+	public int32 value;
+	[operator("delete")] void Finalize() { g_finalized++; }
+}
+
+void Use(Target* target) { g_sink += target->value; }
+
+// The collection runs below 256 frames of this function, each read by its stack map: the collector's own frames, which
+// are read whole, are in stack memory the allocations above never used, so no address they left there is read.
+int32 Deep(int32 depth) {
+	if (depth == 0) {
+		GC::Collect();
+		GC::Collect();
+		return 0;
+	}
+	const int32 below = Deep(depth - 1);
+	g_depth++;
+	return below;
+}
+
+// `t` is dead once the loop ends, but the last target's address is still where it was kept (its slot, a register the
+// calls below saved): only the stack map says it is dead. `kept` is read after the collections: its target stays.
+int32 Dead(int32 count, Target* kept) {
+	Target* t = null;
+	for (int32 i = 0; i < count; i++) {
+		t = new Target;
+		t->value = i;
+		Use(t);
+	}
+	Deep(256);
+	return kept->value;
+}
+
+int32 main() {
+	const int32 count = 20;
+	Target* kept = new Target;
+	kept->value = 7;
+	const int32 value = Dead(count, kept);
+	printf("finalized %d of %d dead targets\n", g_finalized, count);
+	if (value != 7) return 1;           // a live pointer's target was collected
+	if (g_finalized != count) return 2; // a dead slot kept one alive
+	printf("STACK MAPS OK\n");
+	return 0;
+}

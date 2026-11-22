@@ -1,4 +1,7 @@
 #include "GC/GCPlatform.h"
+#if C4_STACK_MAPS
+#include "GC/GCStackMaps.h"
+#endif
 #include "PlatformRuntimeC.h"
 #include <windows.h>
 #include <stdio.h>
@@ -323,6 +326,14 @@ static void scan_committed(gc_scan_range_fn scan, void* ctx, uintptr_t from, uin
 
 void gc_os_scan_stack(gc_scan_range_fn scan, void* ctx)
 {
+#if C4_STACK_MAPS
+	if (gc_stack_maps_present())
+	{
+		const uintptr_t teb = __readgsqword(0x30);
+		gc_stack_walk_own(*(const uintptr_t*)(teb + 0x8), scan, ctx);
+		return;
+	}
+#endif
 	// Optimized code keeps pointers in callee-saved registers across the call into the collector: capture them
 	// here, and start the stack scan at this frame's own locals so a value a prologue saved on the way in is
 	// covered too.
@@ -346,6 +357,13 @@ void gc_os_scan_suspended(const GCOsThread* thread, gc_scan_range_fn scanNow, gc
 	memset(&registers, 0, sizeof(registers));
 	registers.ContextFlags = CONTEXT_ALL;
 	if (!GetThreadContext((HANDLE)thread->handle, &registers)) gc_os_fatal("the collector could not read a stopped thread");
+#if C4_STACK_MAPS
+	if (gc_stack_maps_present())
+	{
+		gc_stack_walk(&registers, (uintptr_t)thread->stackTop, scanNow, scanStack, ctx);
+		return;
+	}
+#endif
 	scanNow(ctx, &registers, (const uint8_t*)&registers + sizeof(registers));
 	const uintptr_t top = (uintptr_t)thread->stackTop;
 	if (registers.Rsp < top) scan_committed(scanStack, ctx, (uintptr_t)registers.Rsp, top);

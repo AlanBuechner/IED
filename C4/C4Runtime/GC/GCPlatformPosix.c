@@ -5,6 +5,9 @@
 
 #include "GC/GCPlatform.h"
 #include "GC/GCMemoryPosix.h"
+#if C4_STACK_MAPS
+#include "GC/GCStackMaps.h"
+#endif
 #include "PlatformRuntimeC.h"
 #include <errno.h>
 #include <linux/futex.h>
@@ -334,6 +337,13 @@ void gc_os_resume(const GCOsThread* thread)
 
 void gc_os_scan_stack(gc_scan_range_fn scan, void* ctx)
 {
+#if C4_STACK_MAPS
+	if (gc_stack_maps_present())
+	{
+		gc_stack_walk_own((uintptr_t)(t_self ? t_self->stackTop : stack_top_of_this_thread()), scan, ctx);
+		return;
+	}
+#endif
 	// Optimized code keeps pointers in callee-saved registers across the call into the collector: they are saved into
 	// this frame's jmp_buf, and the scan starts at the jmp_buf so everything above it is covered too.
 	jmp_buf registers;
@@ -348,6 +358,16 @@ void gc_os_scan_suspended(const GCOsThread* thread, gc_scan_range_fn scanNow, gc
 {
 	PosixThread* record = (PosixThread*)thread->handle;
 	mcontext_t registers = record->registers;
+#if C4_STACK_MAPS
+	if (gc_stack_maps_present())
+	{
+		// The vector registers (all volatile) are in the kernel's copy on the stopped handler's stack, which only the
+		// whole scan reads.
+		if (registers.fpregs) scanNow(ctx, registers.fpregs, (const uint8_t*)registers.fpregs + sizeof(*registers.fpregs));
+		gc_stack_walk(&registers, (uintptr_t)record->stackTop, scanNow, scanStack, ctx);
+		return;
+	}
+#endif
 	scanNow(ctx, &registers, (const uint8_t*)&registers + sizeof(registers));
 	if (record->stopSp < record->stackTop) scanStack(ctx, record->stopSp, record->stackTop);
 }

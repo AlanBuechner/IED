@@ -118,6 +118,7 @@ namespace Scripting
 		auto& B = m_Ctx.builder();
 		if (v->getType() == memory) return v;
 		if (v->getType()->isIntegerTy(1)) return B.CreateZExt(v, memory);
+		if (v->getType()->isPointerTy() && memory->isPointerTy()) return ModuleContext::InSpace(B, v, memory); // a slot's address stored as a pointer
 		return B.CreateBitCast(v, memory);
 	}
 

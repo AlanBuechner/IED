@@ -1,4 +1,7 @@
 #include "GC/GCThreads.h"
+#if C4_STACK_MAPS
+#include "GC/GCStackMaps.h"
+#endif
 #include <string.h>
 
 // The program's thread_local roots: the compiler writes the calling thread's copies (CodeGen/GcRoots.cpp).
@@ -50,6 +53,9 @@ static void stop(GCThread* thread)
 
 void gc_threads_stop(GCThreads* threads, const GCThread* self)
 {
+#if C4_STACK_MAPS
+	if (gc_stack_maps_present()) gc_os_prepare_stack_walk();
+#endif
 	for (GCThread* thread = threads->all; thread; thread = thread->next)
 		if (thread != self) stop(thread);
 }

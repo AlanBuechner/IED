@@ -27,6 +27,7 @@ namespace Scripting
 	{
 		bool debugInfo = false;      // `-g` (B28): CodeView debug information
 		bool strictAliasing = true;  // `-fno-strict-aliasing` (D-64) turns the alias tags off
+		bool stackMaps = false;      // `-fstack-maps` (R16): managed pointers in their own address space (ModuleContext::UseStackMaps)
 	};
 
 	/// The modules a program is emitted into (D-81): partition 0, the program's module, with its own code and data, and

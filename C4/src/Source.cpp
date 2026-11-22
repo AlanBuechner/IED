@@ -188,6 +188,7 @@ namespace
 			if (!m_Options.projectsFile.empty()) tests.ownUnit = [this](uint32 unit) { return InRootProject(unit); };
 			if (m_Options.debugInfo) driver.EnableDebugInfo();
 			if (!m_Options.strictAliasing) driver.DisableStrictAliasing();
+			if (m_Options.stackMaps) driver.UseStackMaps();
 			if (m_Options.scriptHost) driver.ShareVtables();
 			if (ProgramOutput::Links(m_Options)) driver.VerifyLater();
 			if (const unsigned count = EmittedPartitions(); count > 1) driver.SplitInto(count, CopiesBetweenPartitions());

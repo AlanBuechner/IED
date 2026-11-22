@@ -422,11 +422,73 @@ The runtime contract is in [../runtime/01-memory-and-gc.md](../runtime/01-memory
 4. **Roots.** `__c4_gc_roots` for global storage, each range with its pointer map (assembly step 8); everything
    else is found by the runtime, which captures the register file and then scans the stack conservatively, so
    pointers that optimized code keeps only in callee-saved registers are roots too (no per-slot anchors are needed).
-   Stack maps (R16 phase 3) wait for the MIR (R5): section "Not implemented here yet".
+   With `-fstack-maps` (off by default) a C4 frame is read by its stack map instead: section "Stack maps" below.
 5. **Value locals** are not GC objects: their `create`/`delete` are RAII, emitted as scope-exit defers by HIR.
 
 6. **Statistics.** With `-gc-stats`, `StartupEmitter::InstallGcStatsPrinter` adds a last-priority global
    constructor that calls `c4_gc_install_default_stats_printer()`, so the printer is in place before `main`.
+
+## Stack maps
+
+R16 phase 3, `-fstack-maps` (`ProgramBackend::UseStackMaps`), **off by default**: the collector reads a C4 frame waiting
+in a call only at the places LLVM's stack map names for that call, so an address left in a dead slot or register of the
+frame keeps nothing alive. The runtime's side is [runtime/01 "Stacks"](../runtime/01-memory-and-gc.md#stacks).
+
+- **The managed address space.** With the flag `ModuleContext::UseStackMaps` makes a C4 pointer or reference, `this`, the
+  sret pointer, a func's environment and an `__init_list`'s data a `ptr addrspace(1)` (`ManagedPtr`); a stack slot's, a
+  global's and code's address stays a `ptr` (`RawPtr`). Where a raw address becomes a pointer value (`&x`, a slot passed
+  as `this` or by reference, a string literal, a constant table's entry) it is cast: `ModuleContext::InSpace` at the
+  value (`EmitAddressOf`, `GcStore`, a ternary's arms, a conversion, a return, an atomic's operand, `DataImage`) and
+  `ModuleContext::Arguments` at every call (`IRContext::Call`, the thunks). Runtime entry points that take or return
+  objects are declared with managed pointers. An aggregate's eightbyte that is exactly a managed pointer crosses a call
+  as that pointer, not an integer (`AggregateShape::managedSpace`), since the optimizer may not make one from an integer.
+  The module gets the flag `c4.stack_maps` and its layout `ni:1` (`MarkForStackMaps`): the managed space is
+  non-integral, so the optimizer never carries a managed pointer in an integer, which no record could name. A C library
+  function declared with managed pointers (`memcmp` from the prelude) is `nobuiltin` before the optimizer
+  (`KeepLibraryCallsAsWritten`): LLVM rewrites a builtin's call into library calls it declares with raw pointers
+  (`memcmp(..) == 0` into `bcmp` on Linux) and hands them the managed ones, invalid IR. Without the
+  flag both spaces are 0 and every cast is none: the output is byte for byte what it was (checked on the benchmarks and
+  test programs at `-O0`, `-O2` and `-g`, objects and linked executables, both targets).
+- **Statepoints** (`Compiler/StackMaps`, `InsertStatepoints`, after the optimizer in `ObjectEmission`'s `Assemble`, so
+  every path - partitions, `-c`, the Dist merge - has them). Each function with a body gets `gc "c4"` (a GCStrategy whose
+  managed pointers are address space 1) and RewriteStatepointsForGC makes its calls statepoints, first:
+  - calls left leaves (no record; a frame waiting in one is read whole): an invoke and a call in a funclet (LLVM 22's
+    RS4GC faults on funclet invokes and makes invalid IR for landing-pad ones), inline assembly, a variadic call (a
+    statepoint loses Windows' variadic double in both registers), a call that never returns, one in tail position
+    (it keeps its sibling-call optimization), `returns_twice`, one passing a `byval` aggregate;
+  - a raw address cast to the managed space is made again as `inttoptr(ptrtoint)` right before each use, so it never
+    lives across a call (RS4GC takes an addrspacecast's raw operand for the base, which it cannot relocate);
+  - a first-class aggregate holding managed pointers (a func value, a cmpxchg's result) is split into its parts where it
+    is made and rebuilt before each use that needs it whole: RS4GC tracks no pointer inside one;
+  - each statepoint's deopt bundle lists the frame's stack slots that may hold a managed pointer there
+    (`Compiler/StackMapSlots`): each alloca whose type may (a managed pointer, bytes, a 64-bit integer), its word count
+    (bit 31: read every word, past 1024 words) and a 32-bit mask per 32 words; code generation records the slot as a
+    `Direct` location. A slot reached only by its own loads, stores, copies and lifetime markers is listed where it is
+    live (a later load reads it before a store over all of it, by backward liveness over the blocks); any other at every
+    call. Live managed values are spilled to recorded slots (LLVM's `max-registers-for-gc-values` stays 0: in registers
+    a dead value a callee saved would keep its object, and it costs as much).
+- **Objects.** LLVM writes `.llvm_stackmaps`: a COFF image keeps it as `.llvm_st`; an ELF object's is made writable
+  (it holds absolute function addresses a position-independent program relocates), kept by `--gc-sections`
+  (`SHF_GNU_RETAIN`) and named `llvm_stackmaps` (`PrepareElfStackMaps`), which the linker brackets with
+  `__start_`/`__stop_` symbols. A program with the flag links the runtime built with `C4_STACK_MAPS`
+  (`EnsureRuntimeObjects`, a folder of its own; `GC/GCStack*` only there).
+- **Measured** (R16, 2026-11-21, worktree at 935658a9 with the final compiler; the same compiler with and without the
+  flag, `-O2`, median of 7 alternating runs, twice in each order): math (per vector and batch) and gemm at parity (their
+  sub-millisecond kernels -20% to +3%); the Bedrock benchmark json_read +12-13%, json_write +7-9%, map_int_find_hit -2%
+  to +9%, map_int_remove +44-50%, map_text_find +24-60%, map_text_insert +14-19%, the others -6% to +4% (one run's
+  +10-11% outliers aside); the GC benchmark's frames +22-27% in both modes with pauses within -2% to +6%. Of that, the
+  `nobuiltin` C library calls (`KeepLibraryCallsAsWritten`: the optimizer no longer expands `memcmp`) cost the string
+  keys: without them (Windows makes valid IR either way) map_text_find is +9-10%, json_read -0% to +2%, map_text_insert
+  -3% to +3%. Not done: passing a C library function raw pointers instead (each argument cast at the call and the cast
+  made again before each use, so the managed pointer stays live) would keep the optimizer's library knowledge. Split by
+  part (first measurement, before `nobuiltin`): the managed address space alone costs up to +28% (LLVM treats null as
+  defined outside address space 0, so null folds are lost), non-integral up to +23% more in string-keyed maps, the statepoints the rest (a managed value live across a
+  call is stored before and loaded after it; the GC benchmark's allocation loops). Values in up to 16 callee-saved
+  registers instead of spill slots: the GC benchmark +11%, Bedrock kernels +4% to +55%, so no better. Compile time with
+  the flag: +8-13% at `-O0`, +2-3% at `-O2`; without it at parity. Hence off by default.
+- Tests: C4Testing `Compiler.StackMaps`; IsolatedTest `MemoryGC/StackMaps` (20 of 20 dead targets go at `-O0` and `-O2`
+  with the flag; 18 of 20 without it); `RunTests.ps1 -StackMaps` runs the whole corpus with the flag on Windows,
+  `run_linux.py --stack-maps` (with and without `-O2`) on Linux.
 
 ## Test harness (`-test`)
 
@@ -568,45 +630,10 @@ allowed (unions, bytes, `memcpy`, bit casts) where the optimizer cannot see that
 
 - Any C4-side optimization pass (deliberately none; revisit only if a benchmark shows C4 slower than C++).
 - Additional targets (ARM64): one more `TargetAbi` implementation, with its convention's `AggregateRegisters` - **Planned**.
-- Stack maps (R16 phase 3) - **Designed and prototyped, not landed** (findings below): it waits for the MIR (R5), since safepoints belong to how
-  functions are emitted, and it lands only if it costs no measurable run-time speed. The design: a collection stops
-  threads anywhere (D-48, `SuspendThread`), not at polls, so as Go does since its asynchronous preemption the
-  innermost frame of a stopped thread and its registers stay conservative and every caller frame is read precisely.
-  Its call sites are LLVM `gc.statepoint`s (RewriteStatepointsForGC over managed pointers moved to address space 1,
-  raw ones and FFI arguments cast back to 0) whose live managed values the stack map (`.llvm_stackmaps`, one record
-  per return address) names as frame slots; the collector walks each stopped thread's frames by their unwind data
-  (`RtlVirtualUnwind`, as the sampler does), finds each C4 frame's record by its return address and reads only those
-  slots, and reads a frame of code without a record (C, C++, the runtime, a script compiled before) whole. The
-  collector is non-moving, so a statepoint relocates nothing: its cost is that a managed pointer live across a call
-  lives in a stack slot instead of a callee-saved register (LLVM's `max-registers-for-gc-values` lets it stay in one,
-  which a collector that unwinds frames with their registers can read), and the optimizer's view of the rewritten
-  calls (none: the rewrite runs after the optimizer).
-  **Prototype (R16, 2026-11-21; kept out of the tree)**: a `c4-statepoint` GC strategy and `RewriteStatepointsForGC`
-  after `OptimizeModule`, on Windows x64. Findings: (1) C4 emits every pointer in address space 0, so the strategy
-  must call every pointer managed, stack and global and integer-made ones included, and RS4GC's base-pointer search
-  crashes on that IR (an access violation in `RewriteStatepointsForGC::runOnFunction`, in every benchmark, gemm's 8
-  functions too): precise stacks need the emitter (MIR emission, `ExprEmitter`, calls) to give managed pointers an
-  address space of their own, with casts at raw and foreign boundaries - the prerequisite of any honest measurement.
-  (2) Statepoint lowering also crashes in functions with funclet EH (catchswitch, cleanuppad, invoke); after
-  optimization those are few (30 of 3322 functions in the Bedrock benchmark, none in gemm or math), and could stay
-  conservative frames. (3) The cost of the rewrite itself is not measurable: with every call a statepoint and no GC
-  value live across it (5646 statepoints in the Bedrock benchmark, 5446 in the GC benchmark), against the same
-  compiler without, median of 7 alternating runs: Bedrock kernels -2.9% to +1.6% (one +6.4%), gemm +0.3%, math
-  per-vector -9% to +3% and batch -3.7% to +0.4% (kernels of 0.3-5 ms move as much between runs), GC benchmark frames
-  -0.6% stop-the-world and 0.0% concurrent.
-  **Second prototype (R16 round 3)**: probing each function alone (a copy of the module, the rewrite under SEH) named
-  the rest of what RS4GC cannot take: (4) a statepoint at a throw (`_CxxThrowException` then `unreachable`) faults -
-  the prototype marks throws `gc-leaf-function`; (5) a stack slot's address is taken for a GC pointer and faults
-  (`QueryPerformanceCounter(&slot)`) - (1) again; (6) pointers inside first-class aggregates (a `func` value, an
-  initializer list) are not tracked. With functions that have EH code, pointer aggregates or address-taken stack slots
-  left as they are, it rewrites 71% of the Bedrock benchmark's functions (2371 of 3323: 2123 statepoints), 71% of the
-  GC benchmark's, 90% of math's and 6 of gemm's 8, and every program runs. With every pointer of them managed (an
-  upper bound on what lives across calls), against the same compiler without, median of 7 alternating runs, GC values
-  spilled to slots / up to 16 in callee-saved registers: Bedrock kernels -4.2..+3.7% / -2.9..+3.0%, math per-vector
-  -0.8..+5.0% / -1.7..+2.0%, batch -12.8..+3.6% / -3.8..+5.0% (0.3-0.5 ms kernels), gemm -1.4% / -0.8%, GC benchmark
-  frames 0.0% / -0.3% stop-the-world, +1.0% / +1.0% concurrent - the run-to-run spread of these benchmarks. So no
-  measurable cost on the code it covers. What landing needs: managed pointers in address space 1 through emission
-  (MirEmitter, ExprEmitter, calls, the ABI; casts where a stack, global or foreign address becomes a `T*` and back at
-  foreign calls), throws and funclet-EH frames handled (or kept conservative), pointer aggregates split, and in the
-  runtime the stack walk (RtlVirtualUnwind per frame, the `.llvm_stackmaps` record by return address, a frame without
-  one read whole). Until then stacks stay conservative.
+- Stack maps by default - **Behind `-fstack-maps`** (section "Stack maps"): built and measured, off by default for its
+  run-time cost. Prototype history (R16, kept out of the tree, F): every pointer in address space 0 crashed RS4GC's
+  base search; the rewrite alone, with nothing live across calls, cost nothing measurable - the cost measured since is
+  the managed address space's (null and integral semantics) and the values live across calls.
+- A statepoint at an invoke or a call in a funclet: LLVM 22's RS4GC faults on funclet invokes and makes invalid IR for
+  landing-pad ones, so those calls are leaves and their frames are read whole - **Open** (a statepoint of our own
+  without relocations would do, the collector being non-moving).

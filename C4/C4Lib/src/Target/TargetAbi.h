@@ -39,6 +39,9 @@ namespace Scripting
 		const llvm::DataLayout& layout;
 		uint64_t size = 0;
 		llvm::function_ref<llvm::Type*()> storage;
+		/// With stack maps (R16) the address space of managed pointers: an eightbyte that is one crosses as that pointer, not
+		/// as an integer the optimizer may not make it from. 0: none, an eightbyte is an integer.
+		unsigned managedSpace = 0;
 	};
 
 	/// What a program's link takes.

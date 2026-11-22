@@ -30,6 +30,7 @@ namespace Scripting
 	void PartitionSet::PrepareOne(unsigned i, const ProgramModel& model, const LoweredProgram& program, const ModuleSettings& settings)
 	{
 		ModuleContext& partition = Partition(i);
+		if (settings.stackMaps) partition.UseStackMaps();
 		partition.SetModel(&model);
 		partition.UseFunctionPointerStarts(&program.functionPointerStarts);
 		partition.census().Use(program);

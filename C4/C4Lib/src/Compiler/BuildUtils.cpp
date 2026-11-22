@@ -89,6 +89,10 @@ namespace Scripting
 					[](CompileOptions& o, const std::string& v) { o.targetFlags.push_back("-m" + v); }, true },
 				{ { "-fno-strict-aliasing" }, nullptr, "Any load or store may touch any memory: no type-based alias information (D-64)",
 					[](CompileOptions& o, const std::string&) { o.strictAliasing = false; } },
+				{ { "-fstack-maps" }, nullptr, "The collector reads each C4 frame's pointers from stack maps, not the whole frame: a stale address in a dead slot keeps nothing alive",
+					[](CompileOptions& o, const std::string&) { o.stackMaps = true; } },
+				{ { "-fno-stack-maps" }, nullptr, "The collector reads every frame whole (the default)",
+					[](CompileOptions& o, const std::string&) { o.stackMaps = false; } },
 				{ { "--int-dir" }, "<dir>", "Write the intermediates (.obj, .ll, .bc) here, not next to the output", [](CompileOptions& o, const std::string& v) {
 					o.intermediateDir = v; } },
 				{ { "-l" }, "<lib>", "Link the library <lib> (<lib>.lib), or a compiled resource file (<file>.res: icons, version information)",
