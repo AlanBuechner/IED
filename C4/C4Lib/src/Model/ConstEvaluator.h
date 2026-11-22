@@ -4,7 +4,7 @@
 #include "Core/Core.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct LiteralNode;
 	struct TypeOfExpressionNode;
@@ -109,4 +109,4 @@ namespace Scripting
 		const Scope* m_Context;
 	};
 
-} // namespace Scripting
+} // namespace C4Compiler

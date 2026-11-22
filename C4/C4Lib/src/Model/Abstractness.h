@@ -1,7 +1,7 @@
 #pragma once
 #include "Model/ProgramModel.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Whether an object of a type can exist on its own (D-29). An `abstract` type, an interface, or a type with
 	/// a virtual method nothing implements is only ever a base: it is used through pointers and references.
@@ -24,4 +24,4 @@ namespace Scripting
 		/// Creating an object of `type` (`T(...)`, `new T`): the message when it is abstract, or empty.
 		Core::String Creation(const ProgramModel& model, const Type* type);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

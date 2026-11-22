@@ -5,7 +5,7 @@
 #include <chrono>
 #include <optional>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -73,4 +73,4 @@ namespace Scripting
 		for (std::string& violation : model.Making().TakeViolations())
 			if (std::find(m_Violations.begin(), m_Violations.end(), violation) == m_Violations.end()) m_Violations.push_back(std::move(violation));
 	}
-} // namespace Scripting
+} // namespace C4Compiler

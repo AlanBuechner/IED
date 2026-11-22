@@ -4,7 +4,7 @@
 #include "Backend/CodeGen/StaticStorage.h"
 #include <llvm/IR/Constants.h>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -164,4 +164,4 @@ namespace Scripting
 		B.CreateCall(violation, {}, { llvm::OperandBundleDef("funclet", std::vector<llvm::Value*>{ m_Emitter.CurrentFunclet() }) });
 		B.CreateUnreachable();
 	}
-} // namespace Scripting
+} // namespace C4Compiler

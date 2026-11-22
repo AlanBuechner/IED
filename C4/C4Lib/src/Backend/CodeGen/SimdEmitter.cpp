@@ -11,7 +11,7 @@
 #include <functional>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -202,4 +202,4 @@ namespace Scripting
 			return element->IsFloatingPoint() ? FloatReduction(B, v[0], n->op, element) : IntegerReduction(B, v[0], n->op, element);
 		}
 	}
-} // namespace Scripting
+} // namespace C4Compiler

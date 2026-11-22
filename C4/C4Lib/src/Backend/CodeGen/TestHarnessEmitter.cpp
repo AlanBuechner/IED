@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <map>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -108,4 +108,4 @@ namespace Scripting
 		m_Texts[text] = global;
 		return global;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

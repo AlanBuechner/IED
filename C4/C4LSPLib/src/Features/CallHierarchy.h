@@ -6,7 +6,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace Scripting { struct AstNode; }
+namespace C4Compiler { struct AstNode; }
 
 namespace C4LSP::Server { class CompilationSession; }
 
@@ -25,9 +25,9 @@ namespace C4LSP::Features
 		static Core::Vector<HierarchyCall> Outgoing(Server::CompilationSession& session, const HierarchyItem& item);
 
 	private:
-		using Grouped = std::unordered_map<const Scripting::AstNode*, uint32>; // function -> its entry in the result
-		static const Scripting::AstNode* FunctionAt(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position);
-		static void AddCall(Server::CompilationSession& session, const Scripting::AstNode& function, const ReferenceScanner::NameRange& name, Grouped& grouped, Core::Vector<HierarchyCall>& out);
-		static void CollectCalls(Server::CompilationSession& session, const Scripting::AstNode& node, const Core::Vector<const Scripting::AstNode*>& pathIn, Grouped& grouped, Core::Vector<HierarchyCall>& out);
+		using Grouped = std::unordered_map<const C4Compiler::AstNode*, uint32>; // function -> its entry in the result
+		static const C4Compiler::AstNode* FunctionAt(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position);
+		static void AddCall(Server::CompilationSession& session, const C4Compiler::AstNode& function, const ReferenceScanner::NameRange& name, Grouped& grouped, Core::Vector<HierarchyCall>& out);
+		static void CollectCalls(Server::CompilationSession& session, const C4Compiler::AstNode& node, const Core::Vector<const C4Compiler::AstNode*>& pathIn, Grouped& grouped, Core::Vector<HierarchyCall>& out);
 	};
 } // namespace C4LSP::Features

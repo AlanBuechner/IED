@@ -4,7 +4,7 @@
 #include "Compiler/Toolchain.h"
 #include <cstdio>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

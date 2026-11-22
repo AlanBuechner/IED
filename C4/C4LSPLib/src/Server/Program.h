@@ -12,7 +12,7 @@
 #include <utility>
 #include <vector>
 
-namespace Scripting { class PriorParses; }
+namespace C4Compiler { class PriorParses; }
 
 namespace C4LSP::Server
 {
@@ -26,7 +26,7 @@ namespace C4LSP::Server
 	using EditorDocuments = std::vector<std::pair<std::string, std::string>>;
 
 	// A file's size and time as an analysis read it.
-	using DiskStamps = std::vector<std::pair<std::string, Scripting::FileStamp>>;
+	using DiskStamps = std::vector<std::pair<std::string, C4Compiler::FileStamp>>;
 
 	// The workspace symbols an analysis found in one file. Programs share a file's (most of Claymore's programs hold the
 	// engine, its C bindings and the default library): one copy serves each index it is in.
@@ -83,7 +83,7 @@ namespace C4LSP::Server
 		// A fresh analysis of the program, with the editor's text of `documents` over their files; each file whose text is
 		// as `prior` (the parses of the analysis before, or null) parsed it takes its tree from there.
 		std::shared_ptr<CompilationSession> Analyze(const std::string& rootFolder, const EditorDocuments& documents,
-			std::shared_ptr<const Scripting::PriorParses> prior = nullptr) const;
+			std::shared_ptr<const C4Compiler::PriorParses> prior = nullptr) const;
 
 		// Whether the last analysis is of `taken` (uri -> hash of the editor's text of each open document it takes now): it
 		// compiled their text as it is, and each document it took that is closed now as its file is on disk. An editor that
@@ -102,7 +102,7 @@ namespace C4LSP::Server
 		void ReadDescription();
 
 		ProgramOptions m_Options;
-		std::optional<Scripting::ProjectSet> m_Projects;
+		std::optional<C4Compiler::ProjectSet> m_Projects;
 		std::string m_Stamp; // the description file's size and time when it was read
 		mutable std::map<std::string, bool> m_Owned; // path -> Owns, found once per description (every pass asks for each open document)
 	};

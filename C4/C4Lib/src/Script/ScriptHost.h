@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// What stopped a guarded call (C4Runtime's c4_script_fault, docs/runtime/04 section 7).
 	struct ScriptFault
@@ -193,4 +193,4 @@ namespace Scripting
 		std::once_flag m_DllFolderMade;
 		std::shared_ptr<std::recursive_mutex> m_Loading = std::make_shared<std::recursive_mutex>(); // an exit may compile
 	};
-} // namespace Scripting
+} // namespace C4Compiler

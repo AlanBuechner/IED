@@ -1,7 +1,7 @@
 #pragma once
 #include "Model/ProgramModel.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	// =====================================================================
 	// TYPE RESOLVER (doc 04) - the subsystem behind every type position in the AST. One entry point,
@@ -62,4 +62,4 @@ namespace Scripting
 		const SymbolInfo* WalkQualified(const ProgramModel& model, const Core::String& name, uint32 unitId, const Scope* scope) const;
 		const SymbolInfo* FindVisibleQualified(const ProgramModel& model, const Core::String& name, uint32 unitId, const Scope* context = nullptr) const;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

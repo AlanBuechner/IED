@@ -23,8 +23,8 @@ namespace C4LSP::Server
 	// A host interface read for a scope's scripts, or why it did not read.
 	struct LoadedInterface
 	{
-		Scripting::HostInterface host;
-		std::unique_ptr<Scripting::HostIndex> index;
+		C4Compiler::HostInterface host;
+		std::unique_ptr<C4Compiler::HostIndex> index;
 		std::string error;
 	};
 

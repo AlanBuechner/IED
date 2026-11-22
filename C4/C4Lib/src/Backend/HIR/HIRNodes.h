@@ -6,7 +6,7 @@
 #include <deque>
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	// =====================================================================
 	// HIR NODE TAXONOMY (03.5) - the closed set. Every node carries a concrete
@@ -636,4 +636,4 @@ namespace Scripting
 		HIRFunction& m_Function;
 		SourceLocation m_Outer;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

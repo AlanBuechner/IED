@@ -2,7 +2,7 @@
 #include "ParameterNode.h"
 #include "QualTypeNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	bool ParenGroupIsFollowedByBody(Lexer& lexer)
 	{
@@ -36,4 +36,4 @@ namespace Scripting
 			lexer.NextCompoundToken();
 		}
 	}
-} // namespace Scripting
+} // namespace C4Compiler

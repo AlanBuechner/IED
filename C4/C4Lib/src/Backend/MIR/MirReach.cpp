@@ -1,6 +1,6 @@
 #include "Backend/MIR/MirReach.h"
 
-namespace Scripting::MirReach
+namespace C4Compiler::MirReach
 {
 	namespace
 	{
@@ -97,4 +97,4 @@ namespace Scripting::MirReach
 		}
 		return QueryResult<void>::Success();
 	}
-} // namespace Scripting::MirReach
+} // namespace C4Compiler::MirReach

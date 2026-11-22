@@ -27,7 +27,7 @@
 #include "Nodes/Declarations/QualTypeNode.h"
 #include "Nodes/Declarations/NamespaceQualifiedNameNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	bool PrattParser::IsFoldOperator(TokenType type)
 	{
@@ -325,4 +325,4 @@ namespace Scripting
 
 		return node;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -9,7 +9,7 @@
 #include "Model/TypeHandle.h"
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	QueryResult<void> DestructuringLowerer::Lower(const DestructuringNode& n, BlockNode* block)
 	{
@@ -169,4 +169,4 @@ namespace Scripting
 		block->stmts.push_back(m_Ctx.out->NewNode<ExprStmtNode>(Lifecycle(m_Ctx).Discarded(stored.value)));
 		return QueryResult<void>::Success();
 	}
-} // namespace Scripting
+} // namespace C4Compiler

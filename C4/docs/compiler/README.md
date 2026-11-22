@@ -85,7 +85,11 @@ emission, so its body diagnostics are the build's by construction.
 | `Backend/Lowering/` | What a program lowers and in what order (R2, [03-hir.md](03-hir.md#what-a-program-lowers-programlowering)) - the one driver C4.exe, the language server and scripts share: `ProgramLowering` (the steps), `ProgramReach` (the D-16 closure: what lowered bodies need is lowered next), `BodyNeeds` (what a tree names), `VtableEntries`, `InvokeThunkPlan`, `TypeThunkPlan`, `GlobalStarts`, `GlobalStorage`, `ScriptLowering`, `ParallelLowering` (bodies on threads in one pass, sharing the model), `UseSites`; its result is a `LoweredProgram` |
 | `Backend/CodeGen/` | LLVM emission of a `LoweredProgram`; it lowers nothing ([04](04-codegen-and-abi.md)): `ProgramEmitter` (the assembly order), `PartitionSet` (the modules, placement, emission on threads), `StartupEmitter`, `ReflectionEmitter`, `ImportEmitter`, `ModuleContext`, `IRContext`, `Abi`, `ExprEmitter`, `MirEmitter` (a function's MIR), `EhLowering` (`FuncletLowering`, `LandingPadLowering`), `FunctionEmitter`, `TestHarnessEmitter` |
 | `Backend/ProgramBackend` | The backend C4.exe and a script's compile run: `ProgramLowering`, then `ProgramEmitter` |
-| `Testing/` | Empty (test-mode support lives in the model's test registry and `TestHarnessEmitter`) |
+| `Backend/Reflection/` | What reflection registers and how: `ReflectionTables`, `RegistrationEmitter`, `ImageDescription`, and the scope that takes declarations out (R13): `ReflectionScope`, `ReflectsCheck` |
+| `Outline/` | `SourceOutline`: what one source declares and what its syntax gets wrong, from the macro pass and the parser alone - no include read, no name resolved; the C API's parse ([tools/06](../tools/06-c4-api.md)) is made of it |
+| `Script/` | Compiling and running scripts in a host (D-49): `ScriptCompiler`, `ScriptHost`, `ScriptJit`, `ScriptDll`, the host's interface (`HostInterface`, `InterfaceBuilder`, `InterfaceText`, `HostTable`, `HostAssumptions`, `InlineBodies`), `ScriptCache`, `ScriptSources`, `ScriptReach`; see [runtime/04](../runtime/04-scripting.md) |
+
+The C++ namespace of all of it is `C4Compiler` (R14; it was `Scripting`, a name Bedrock's script API also has). Test-mode support lives in the model's test registry and `TestHarnessEmitter`.
 
 Runtime C sources linked into every program live outside the library in `C4Runtime/` (see
 [../runtime/01-memory-and-gc.md](../runtime/01-memory-and-gc.md)).

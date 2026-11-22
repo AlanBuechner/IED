@@ -3,7 +3,7 @@
 #include "Core/Core.h"
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Safe cast expression: operand as Type.
 	struct SafeCastNode : public AstNode

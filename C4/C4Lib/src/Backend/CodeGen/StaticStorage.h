@@ -2,7 +2,7 @@
 #include "Backend/CodeGen/ModuleContext.h"
 #include <llvm/IR/IRBuilder.h>
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct FunctionRecord;
 
@@ -39,4 +39,4 @@ namespace Scripting
 		/// `void(ptr object)` running `destroy` on each of `count` elements `stride` bytes apart, last first.
 		llvm::Function* ExitDestroyer(ModuleContext& m, const FunctionRecord& destroy, uint64 count, uint64 stride);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	using namespace MacroText;
 

@@ -6,7 +6,7 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/Transforms/Utils/ModuleUtils.h>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -146,4 +146,4 @@ namespace Scripting
 		ReflectionTables(*module).Build(m_Image);
 		return module;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

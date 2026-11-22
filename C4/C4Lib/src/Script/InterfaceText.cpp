@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -128,4 +128,4 @@ namespace Scripting
 		out.append(text, at, std::string::npos);
 		return out;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

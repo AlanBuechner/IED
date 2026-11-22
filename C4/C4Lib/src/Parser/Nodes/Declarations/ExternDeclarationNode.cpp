@@ -2,7 +2,7 @@
 #include "Core/StringFormat.h"
 #include "Compiler/CompilerMessageQueue.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	Ref<ExternDeclarationNode> ExternDeclarationNode::TryParse(ParserState& state)
 	{
@@ -231,4 +231,4 @@ namespace Scripting
 		return Core::StringFormat::Format("extern \"{0}\" {1} \"{2}\"", m_Language, kindStr, FilePath());
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

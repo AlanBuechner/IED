@@ -10,7 +10,7 @@
 
 namespace fs = std::filesystem;
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -427,4 +427,4 @@ namespace Scripting
 		return { 0, OutOfReach(project, written) };
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

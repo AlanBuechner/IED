@@ -224,7 +224,7 @@ analyzed every program (25 s, the request's whole budget). Now:
 - **An edit parses what it changed.** An analysis takes, for each file whose text (as written and as its macros expand
   it) is the same as the last analysis of the program compiled, that analysis's tree, and asks for the file's includes
   again as its parse did - so its include closure and its include errors are what a parse would give now
-  (`Scripting::PriorParses`, `CompilerInstance::UsePriorParses`; trees are never changed once parsed, so two analyses
+  (`C4Compiler::PriorParses`, `CompilerInstance::UsePriorParses`; trees are never changed once parsed, so two analyses
   share them). On LS's client program (2595 files) an edit's analysis went from 4.7 s (parse 2.5 s) to 2.4 s (parse
   0.4 s, `parse 364 (2594 kept)` in the log line); with its bodies checked (BUG-475) it is 3.3 s. What is left is made
   for the whole program: the macros 0.6 s, reading 0.3 s, the model 0.9 s, the bodies 1 s ("Open items").

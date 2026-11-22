@@ -26,7 +26,7 @@ namespace C4LSP::Features
 
 	namespace
 	{
-		const Scripting::AstNode* DeclarationOf(Server::CompilationSession& session, const Core::Vector<const Scripting::AstNode*>& path, const Scripting::AstNode& node)
+		const C4Compiler::AstNode* DeclarationOf(Server::CompilationSession& session, const Core::Vector<const C4Compiler::AstNode*>& path, const C4Compiler::AstNode& node)
 		{
 			return session.GetResolver().ResolveReference(node, path).declaration;
 		}
@@ -35,23 +35,23 @@ namespace C4LSP::Features
 		// the compiler's own query verbs through the shared SemanticResolver, so this is exact for
 		// resolved names. Unresolved identifiers have no declaration and never match - a parse-error
 		// document gets no false positives from tidy.
-		bool ResolvesToSameDeclaration(Server::CompilationSession& session, const Core::Vector<const Scripting::AstNode*>& path, const Scripting::AstNode& a, const Scripting::AstNode& b)
+		bool ResolvesToSameDeclaration(Server::CompilationSession& session, const Core::Vector<const C4Compiler::AstNode*>& path, const C4Compiler::AstNode& a, const C4Compiler::AstNode& b)
 		{
 			const auto* declA = DeclarationOf(session, path, a);
 			if (!declA) return false;
 			return (DeclarationOf(session, path, b) == declA); // pointer identity with the same declaration node
 		}
 
-		bool IsVariableDefinition(const Scripting::AstNode& node) { return node.Type() == Scripting::NodeType::VariableDefinition; }
-		bool IsIdentifierExpression(const Scripting::AstNode& node) { return node.Type() == Scripting::NodeType::IdentifierExpression; }
+		bool IsVariableDefinition(const C4Compiler::AstNode& node) { return node.Type() == C4Compiler::NodeType::VariableDefinition; }
+		bool IsIdentifierExpression(const C4Compiler::AstNode& node) { return node.Type() == C4Compiler::NodeType::IdentifierExpression; }
 	} // namespace
 
-	void Tidy::CheckExpressionTautologies(Server::CompilationSession& session, uint32 sourceId, const Core::Vector<const Scripting::AstNode*>& path, const Scripting::AstNode& node, Core::Vector<Protocol::Diagnostic>& out)
+	void Tidy::CheckExpressionTautologies(Server::CompilationSession& session, uint32 sourceId, const Core::Vector<const C4Compiler::AstNode*>& path, const C4Compiler::AstNode& node, Core::Vector<Protocol::Diagnostic>& out)
 	{
 		// `==` / `!=` comparisons live in BinaryExpression; plain assignment is its own node type.
-		if (node.Type() == Scripting::NodeType::BinaryExpression)
+		if (node.Type() == C4Compiler::NodeType::BinaryExpression)
 		{
-			auto bin = static_cast<const Scripting::BinaryExpressionNode*>(&node);
+			auto bin = static_cast<const C4Compiler::BinaryExpressionNode*>(&node);
 			const std::string opText = bin->GetOperatorToken().GetText(); // '==' / '!=' as one token
 			if (opText != "==" && opText != "!=")
 				return;
@@ -63,9 +63,9 @@ namespace C4LSP::Features
 			return;
 		}
 
-		if (node.Type() == Scripting::NodeType::AssignmentExpression)
+		if (node.Type() == C4Compiler::NodeType::AssignmentExpression)
 		{
-			auto assign = static_cast<const Scripting::AssignmentExpressionNode*>(&node);
+			auto assign = static_cast<const C4Compiler::AssignmentExpressionNode*>(&node);
 			const std::string opText = assign->GetOperatorToken().GetText(); // '=' / '+=' etc. as one token
 			if (opText != "=")
 				return; // compound self-assignment (`v += v`) is meaningful, not a no-op
@@ -78,7 +78,7 @@ namespace C4LSP::Features
 		}
 	}
 
-	void Tidy::CheckUnusedLocals(Server::CompilationSession& session, uint32 sourceId, const Ref<Scripting::AstNode>& root, Core::Vector<Protocol::Diagnostic>& out)
+	void Tidy::CheckUnusedLocals(Server::CompilationSession& session, uint32 sourceId, const Ref<C4Compiler::AstNode>& root, Core::Vector<Protocol::Diagnostic>& out)
 	{
 		auto unit = session.GetCompiler().GetCompilationUnit(sourceId);
 		if (!unit)
@@ -92,23 +92,23 @@ namespace C4LSP::Features
 		// whether a FunctionDefinition ancestor exists (C4 has no nested functions, so everything below
 		// one is function-local; parameters are Parameter nodes and never match here). Multi-declarator
 		// lines (`int32 a, b;`) declare several names in one node, so we key by the DECLARATOR's name token.
-		std::vector<std::pair<const Scripting::AstNode*, const Scripting::Token*>> localNames; // (definition node, declarator name token)
-		std::set<std::pair<const Scripting::AstNode*, std::string>> usedRefs;                  // (declaration node, referenced name)
+		std::vector<std::pair<const C4Compiler::AstNode*, const C4Compiler::Token*>> localNames; // (definition node, declarator name token)
+		std::set<std::pair<const C4Compiler::AstNode*, std::string>> usedRefs;                  // (declaration node, referenced name)
 
-		struct Frame { const Scripting::AstNode* Node; bool InFunction; Core::Vector<const Scripting::AstNode*> Path; };
+		struct Frame { const C4Compiler::AstNode* Node; bool InFunction; Core::Vector<const C4Compiler::AstNode*> Path; };
 		std::vector<Frame> stack{{root.Get(), false, {}}};
 		while (!stack.empty())
 		{
 			auto [nodePtr, inFunction, parentPath] = stack.back();
 			stack.pop_back();
 
-			Core::Vector<const Scripting::AstNode*> path = parentPath;
+			Core::Vector<const C4Compiler::AstNode*> path = parentPath;
 			path.Push(nodePtr);
 
-			const bool selfIsFunction = (nodePtr->Type() == Scripting::NodeType::FunctionDefinition);
+			const bool selfIsFunction = (nodePtr->Type() == C4Compiler::NodeType::FunctionDefinition);
 			if (inFunction && IsVariableDefinition(*nodePtr))
 			{
-				auto var = static_cast<const Scripting::VariableDefinitionNode*>(nodePtr);
+				auto var = static_cast<const C4Compiler::VariableDefinitionNode*>(nodePtr);
 				for (const auto& declarator : var->GetDeclarators())
 					localNames.emplace_back(nodePtr, &declarator.m_NameToken);
 			}
@@ -117,11 +117,11 @@ namespace C4LSP::Features
 			{
 				const Server::NodeResolution res = session.GetResolver().ResolveReference(*nodePtr, path);
 				if (res.declaration)
-					usedRefs.insert({ res.declaration, std::string(static_cast<const Scripting::IdentifierExpressionNode*>(nodePtr)->GetNameToken().GetText()) });
+					usedRefs.insert({ res.declaration, std::string(static_cast<const C4Compiler::IdentifierExpressionNode*>(nodePtr)->GetNameToken().GetText()) });
 			}
 
 			const bool childInFunction = inFunction || selfIsFunction; // children of a function are local to it
-			Server::ForEachWrittenChild(*nodePtr, [&](const Scripting::AstNode& child) { stack.push_back({ &child, childInFunction, path }); });
+			Server::ForEachWrittenChild(*nodePtr, [&](const C4Compiler::AstNode& child) { stack.push_back({ &child, childInFunction, path }); });
 		}
 
 		// Phase 2: report every local whose (definition node, name) pair no reference resolved to. A
@@ -154,22 +154,22 @@ namespace C4LSP::Features
 
 		// Single top-down pass for expression-level checks (self-assignment / tautology). The AST pool
 		// keeps nodes alive until this session is swapped out, so references into it stay valid here.
-		std::vector<std::pair<const Scripting::AstNode*, Core::Vector<const Scripting::AstNode*>>> stack{{&root, {}}};
+		std::vector<std::pair<const C4Compiler::AstNode*, Core::Vector<const C4Compiler::AstNode*>>> stack{{&root, {}}};
 		while (!stack.empty())
 		{
 			auto [node, parentPath] = stack.back();
 			stack.pop_back();
-			Core::Vector<const Scripting::AstNode*> path = parentPath;
+			Core::Vector<const C4Compiler::AstNode*> path = parentPath;
 			path.Push(node);
 			CheckExpressionTautologies(session, targetId, path, *node, result);
-			Server::ForEachWrittenChild(*node, [&](const Scripting::AstNode& child) { stack.push_back({ &child, path }); });
+			Server::ForEachWrittenChild(*node, [&](const C4Compiler::AstNode& child) { stack.push_back({ &child, path }); });
 		}
 
 		CheckUnusedLocals(session, targetId, unit->GetRootAST(), result);
 		return result;
 	}
 
-	Protocol::Diagnostic Tidy::MakeDiag(const Server::CompilationSession& session, uint32 sourceId, const Scripting::SourceLocation& start, const Scripting::SourceLocation& end, Protocol::DiagnosticSeverity severity, const std::string& message)
+	Protocol::Diagnostic Tidy::MakeDiag(const Server::CompilationSession& session, uint32 sourceId, const C4Compiler::SourceLocation& start, const C4Compiler::SourceLocation& end, Protocol::DiagnosticSeverity severity, const std::string& message)
 	{
 		Protocol::Diagnostic diag;
 		diag.range = session.ToEditorRange(sourceId, start, end);

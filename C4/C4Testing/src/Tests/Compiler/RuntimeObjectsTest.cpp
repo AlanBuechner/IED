@@ -4,7 +4,7 @@
 
 namespace Testing
 {
-	using namespace Scripting;
+	using namespace C4Compiler;
 
 	static bool Has(const std::vector<std::string>& args, const char* arg)
 	{

@@ -10,7 +10,7 @@ namespace llvm
 	class Module;
 }
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct FunctionRecord;
 
@@ -36,4 +36,4 @@ namespace Scripting
 	/// function is defined. Sorted by name, so the order does not depend on where the calls are.
 	std::vector<const FunctionRecord*> ImportsOf(unsigned partition, const std::vector<const FunctionRecord*>& own, const FactsByRecord& facts,
 		const std::function<unsigned(const FunctionRecord&)>& home, bool onlyAlwaysInline);
-} // namespace Scripting
+} // namespace C4Compiler

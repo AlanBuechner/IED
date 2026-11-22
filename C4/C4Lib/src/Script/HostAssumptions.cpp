@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <string_view>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -91,4 +91,4 @@ namespace Scripting
 		}
 		return true;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

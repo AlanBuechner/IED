@@ -11,7 +11,7 @@
 
 namespace C4LSP::Features
 {
-	const Scripting::ObjectType* TypeHierarchy::TypeAt(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position)
+	const C4Compiler::ObjectType* TypeHierarchy::TypeAt(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position)
 	{
 		const uint32 sourceId = session.FindSourceIdByUri(uri);
 		if (sourceId == 0)
@@ -19,7 +19,7 @@ namespace C4LSP::Features
 		auto unit = session.GetCompiler().GetCompilationUnit(sourceId);
 		if (!unit || !unit->GetRootAST())
 			return nullptr;
-		const Scripting::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
+		const C4Compiler::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
 		const Server::LocatedNode located = Server::NodeLocator::Locate(source, sourceId, unit->GetRootAST(), position);
 		return located.Found() && NamesAType(located) ? Implementation::TypeUnderCursor(session, located) : nullptr;
 	}
@@ -28,10 +28,10 @@ namespace C4LSP::Features
 	{
 		for (uint32 i = located.path.Count(); i-- > 0;)
 		{
-			const Scripting::NodeType type = located.path[i]->Type();
-			if (type == Scripting::NodeType::QualType)
+			const C4Compiler::NodeType type = located.path[i]->Type();
+			if (type == C4Compiler::NodeType::QualType)
 				return true;
-			if (type == Scripting::NodeType::ObjectDefinition)
+			if (type == C4Compiler::NodeType::ObjectDefinition)
 				return i + 1 == located.path.Count(); // its own name, not somewhere in its body
 		}
 		return false;
@@ -40,7 +40,7 @@ namespace C4LSP::Features
 	Core::Vector<HierarchyItem> TypeHierarchy::Prepare(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position)
 	{
 		Core::Vector<HierarchyItem> items;
-		const Scripting::ObjectType* type = TypeAt(session, uri, position);
+		const C4Compiler::ObjectType* type = TypeAt(session, uri, position);
 		if (type && type->GetDeclNode())
 			items.Push(HierarchyItem::Of(session, *type->GetDeclNode()));
 		return items;
@@ -49,10 +49,10 @@ namespace C4LSP::Features
 	Core::Vector<HierarchyItem> TypeHierarchy::Supertypes(Server::CompilationSession& session, const HierarchyItem& item)
 	{
 		Core::Vector<HierarchyItem> items;
-		const Scripting::ObjectType* type = TypeAt(session, item.uri, item.selectionRange.start);
+		const C4Compiler::ObjectType* type = TypeAt(session, item.uri, item.selectionRange.start);
 		if (!type)
 			return items;
-		for (const Scripting::ObjectType* base : type->GetBaseTypes())
+		for (const C4Compiler::ObjectType* base : type->GetBaseTypes())
 			if (base && base->GetDeclNode())
 				items.Push(HierarchyItem::Of(session, *base->GetDeclNode()));
 		return items;
@@ -61,12 +61,12 @@ namespace C4LSP::Features
 	Core::Vector<HierarchyItem> TypeHierarchy::Subtypes(Server::CompilationSession& session, const HierarchyItem& item)
 	{
 		Core::Vector<HierarchyItem> items;
-		const Scripting::ObjectType* type = TypeAt(session, item.uri, item.selectionRange.start);
+		const C4Compiler::ObjectType* type = TypeAt(session, item.uri, item.selectionRange.start);
 		if (!type)
 			return items;
 		std::vector<Server::SemanticResolver::ObjectDecl> types;
 		session.GetResolver().CollectObjectTypes(types);
-		std::set<const Scripting::AstNode*> seen;
+		std::set<const C4Compiler::AstNode*> seen;
 		for (const auto& candidate : types)
 		{
 			if (!candidate.object || !candidate.decl || seen.count(candidate.decl))

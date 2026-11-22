@@ -1,7 +1,7 @@
 #pragma once
 #include "Parser/AstNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Abstract callback interface for AST processing.
 	///

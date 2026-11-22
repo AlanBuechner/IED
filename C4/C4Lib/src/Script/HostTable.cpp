@@ -14,7 +14,7 @@
 #include <tuple>
 #include <unordered_set>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -337,4 +337,4 @@ namespace Scripting
 	{
 		BuildIdIn(module)->setInitializer(llvm::ConstantDataArray::get(module.getContext(), llvm::ArrayRef<uint8_t>(buildId.data(), buildId.size())));
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -2,7 +2,7 @@
 #include "Backend/Lowering/ProgramReach.h"
 #include "Backend/Lowering/ScriptLowering.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 
@@ -34,4 +34,4 @@ namespace Scripting
 		StartedGlobals m_Started;
 		bool m_Checked = false; // the constant starts were checked
 	};
-} // namespace Scripting
+} // namespace C4Compiler

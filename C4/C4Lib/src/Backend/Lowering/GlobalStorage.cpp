@@ -5,7 +5,7 @@
 #include "Parser/Nodes/Declarations/NamespaceQualifiedNameNode.h"
 #include "Parser/Nodes/Expressions/IdentifierExpressionNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -51,4 +51,4 @@ namespace Scripting
 		const auto found = model.QueryFunction(name, nullptr, nullptr, parameters, LookupContext{ global.definingUnit, nullptr, nullptr }, &record);
 		return found.Ok() ? record : nullptr;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -15,7 +15,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel; // GlobalAddress resolves function-pointer initializers against it
 	class RttiEmitter;
@@ -215,4 +215,4 @@ namespace Scripting
 		bool m_Importing = false;
 		std::function<bool(const SymbolInfo&)> m_DefinesGlobal;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

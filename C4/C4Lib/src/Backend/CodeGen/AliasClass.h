@@ -4,7 +4,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The memory classes of strict aliasing (D-64): an access touches only memory of its own class, except Bytes,
 	/// which may touch any. None is what has no memory at all (an empty object); it takes the class it meets.
@@ -37,4 +37,4 @@ namespace Scripting
 		std::function<bool(const Type*)> m_HasVptrs;
 		std::unordered_map<const Type*, AliasClass> m_Parts;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

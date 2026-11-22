@@ -4,7 +4,7 @@
 #include "Model/Types/NativeMemory.h"
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -131,4 +131,4 @@ namespace Scripting
 		Collect(body, needs);
 		return needs;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

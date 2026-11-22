@@ -2,7 +2,7 @@
 #include "Model/Templates/TemplateArguments.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct NamespaceQualifiedNameNode;
 	struct FunPtrTypeNode;
@@ -56,4 +56,4 @@ namespace Scripting
 		bool m_PackWritten = false;   // the call wrote them (explicit arguments past the fixed ones)
 		uint32 m_Element = 0;         // the pack element the match in progress decides
 	};
-} // namespace Scripting
+} // namespace C4Compiler

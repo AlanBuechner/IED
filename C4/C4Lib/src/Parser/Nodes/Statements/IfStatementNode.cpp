@@ -4,7 +4,7 @@
 #include "Parser/PrattParser.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	std::span<const Ref<AstNode>> IfStatementNode::Children() const
 	{
@@ -147,4 +147,4 @@ namespace Scripting
 			m_Children.Push(m_ElseBranch);
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

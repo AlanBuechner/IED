@@ -6,12 +6,12 @@ namespace Testing
 {
 	void QualTypeTest::TestPlainType()
 	{
-		auto stream = Scripting::Source::FromMemory("int");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("int");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::QualTypeNode::TryParse(state);
+		auto node = C4Compiler::QualTypeNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(!node->IsLeadingConst());
 		TEST_ASSERT(node->BaseName() != nullptr);
@@ -23,12 +23,12 @@ namespace Testing
 
 	void QualTypeTest::TestLeadingConst()
 	{
-		auto stream = Scripting::Source::FromMemory("const int");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("const int");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::QualTypeNode::TryParse(state);
+		auto node = C4Compiler::QualTypeNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->IsLeadingConst());
 		TEST_ASSERT(node->GetLeadingConstToken().GetText() == "const");
@@ -40,19 +40,19 @@ namespace Testing
 
 	void QualTypeTest::TestPointer()
 	{
-		auto stream = Scripting::Source::FromMemory("int*");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("int*");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::QualTypeNode::TryParse(state);
+		auto node = C4Compiler::QualTypeNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(!node->IsLeadingConst());
 		TEST_ASSERT(node->BaseName()->ToString() == "int");
 		TEST_ASSERT(node->IndirectionCount() == 1);
 
 		const auto& indirections = node->GetIndirections();
-		TEST_ASSERT(indirections[0].indirectionToken == Scripting::TokenType::Star);
+		TEST_ASSERT(indirections[0].indirectionToken == C4Compiler::TokenType::Star);
 		TEST_ASSERT(!indirections[0].isConst);
 		TEST_ASSERT(node->ToString() == "int*");
 		TEST_PASSED();
@@ -60,19 +60,19 @@ namespace Testing
 
 	void QualTypeTest::TestConstPointer()
 	{
-		auto stream = Scripting::Source::FromMemory("int const*");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("int const*");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::QualTypeNode::TryParse(state);
+		auto node = C4Compiler::QualTypeNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(!node->IsLeadingConst());
 		TEST_ASSERT(node->BaseName()->ToString() == "int");
 		TEST_ASSERT(node->IndirectionCount() == 1);
 
 		const auto& indirections = node->GetIndirections();
-		TEST_ASSERT(indirections[0].indirectionToken == Scripting::TokenType::Star);
+		TEST_ASSERT(indirections[0].indirectionToken == C4Compiler::TokenType::Star);
 		TEST_ASSERT(indirections[0].isConst);
 		TEST_ASSERT(node->ToString() == "int const*");
 		TEST_PASSED();
@@ -80,19 +80,19 @@ namespace Testing
 
 	void QualTypeTest::TestPointerToConst()
 	{
-		auto stream = Scripting::Source::FromMemory("const int*");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("const int*");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::QualTypeNode::TryParse(state);
+		auto node = C4Compiler::QualTypeNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->IsLeadingConst());
 		TEST_ASSERT(node->BaseName()->ToString() == "int");
 		TEST_ASSERT(node->IndirectionCount() == 1);
 
 		const auto& indirections = node->GetIndirections();
-		TEST_ASSERT(indirections[0].indirectionToken == Scripting::TokenType::Star);
+		TEST_ASSERT(indirections[0].indirectionToken == C4Compiler::TokenType::Star);
 		TEST_ASSERT(!indirections[0].isConst); // leading const applies to base, not the pointer
 		TEST_ASSERT(node->ToString() == "const int*");
 		TEST_PASSED();
@@ -101,19 +101,19 @@ namespace Testing
 	void QualTypeTest::TestGCRef()
 	{
 		// All pointers are GC-managed: `T*` is the only pointer type (the old `T^` syntax was removed).
-		auto stream = Scripting::Source::FromMemory("String*");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("String*");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::QualTypeNode::TryParse(state);
+		auto node = C4Compiler::QualTypeNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(!node->IsLeadingConst());
 		TEST_ASSERT(node->BaseName()->ToString() == "String");
 		TEST_ASSERT(node->IndirectionCount() == 1);
 
 		const auto& indirections = node->GetIndirections();
-		TEST_ASSERT(indirections[0].indirectionToken == Scripting::TokenType::Star);
+		TEST_ASSERT(indirections[0].indirectionToken == C4Compiler::TokenType::Star);
 		TEST_ASSERT(!indirections[0].isConst);
 		TEST_ASSERT(node->ToString() == "String*");
 		TEST_PASSED();
@@ -121,19 +121,19 @@ namespace Testing
 
 	void QualTypeTest::TestCPPRef()
 	{
-		auto stream = Scripting::Source::FromMemory("int&");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("int&");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::QualTypeNode::TryParse(state);
+		auto node = C4Compiler::QualTypeNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(!node->IsLeadingConst());
 		TEST_ASSERT(node->BaseName()->ToString() == "int");
 		TEST_ASSERT(node->IndirectionCount() == 1);
 
 		const auto& indirections = node->GetIndirections();
-		TEST_ASSERT(indirections[0].indirectionToken == Scripting::TokenType::Ampersand);
+		TEST_ASSERT(indirections[0].indirectionToken == C4Compiler::TokenType::Ampersand);
 		TEST_ASSERT(!indirections[0].isConst);
 		TEST_ASSERT(node->ToString() == "int&");
 		TEST_PASSED();
@@ -141,19 +141,19 @@ namespace Testing
 
 	void QualTypeTest::TestArray()
 	{
-		auto stream = Scripting::Source::FromMemory("int[10]");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("int[10]");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::QualTypeNode::TryParse(state);
+		auto node = C4Compiler::QualTypeNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(!node->IsLeadingConst());
 		TEST_ASSERT(node->BaseName()->ToString() == "int");
 		TEST_ASSERT(node->IndirectionCount() == 1);
 
 		const auto& indirections = node->GetIndirections();
-		TEST_ASSERT(indirections[0].indirectionToken == Scripting::TokenType::OpenBracket);
+		TEST_ASSERT(indirections[0].indirectionToken == C4Compiler::TokenType::OpenBracket);
 		TEST_ASSERT(!indirections[0].isConst);
 		TEST_ASSERT(indirections[0].arraySizeExpr != nullptr);
 		TEST_ASSERT(indirections[0].arraySizeExpr->ToString() == "10");
@@ -163,12 +163,12 @@ namespace Testing
 
 	void QualTypeTest::TestComplexChain()
 	{
-		auto stream = Scripting::Source::FromMemory("const int* const &");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("const int* const &");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::QualTypeNode::TryParse(state);
+		auto node = C4Compiler::QualTypeNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->IsLeadingConst());
 		TEST_ASSERT(node->BaseName()->ToString() == "int");
@@ -176,10 +176,10 @@ namespace Testing
 
 		const auto& indirections = node->GetIndirections();
 		// Layer 0: * (no const)
-		TEST_ASSERT(indirections[0].indirectionToken == Scripting::TokenType::Star);
+		TEST_ASSERT(indirections[0].indirectionToken == C4Compiler::TokenType::Star);
 		TEST_ASSERT(!indirections[0].isConst);
 		// Layer 1: const & (const applies to this layer)
-		TEST_ASSERT(indirections[1].indirectionToken == Scripting::TokenType::Ampersand);
+		TEST_ASSERT(indirections[1].indirectionToken == C4Compiler::TokenType::Ampersand);
 		TEST_ASSERT(indirections[1].isConst);
 
 		TEST_ASSERT(node->ToString() == "const int* const&");
@@ -188,12 +188,12 @@ namespace Testing
 
 	void QualTypeTest::TestQualifiedNameWithTemplateArgs()
 	{
-		auto stream = Scripting::Source::FromMemory("NC::SomeClass<float>");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("NC::SomeClass<float>");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::QualTypeNode::TryParse(state);
+		auto node = C4Compiler::QualTypeNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(!node->IsLeadingConst());
 		TEST_ASSERT(node->BaseName() != nullptr);
@@ -212,12 +212,12 @@ namespace Testing
 
 	void QualTypeTest::TestFullComplex()
 	{
-		auto stream = Scripting::Source::FromMemory("const NC::SomeClass<float>::SubType&");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("const NC::SomeClass<float>::SubType&");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::QualTypeNode::TryParse(state);
+		auto node = C4Compiler::QualTypeNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->IsLeadingConst());
 
@@ -235,7 +235,7 @@ namespace Testing
 		// Indirection: &
 		TEST_ASSERT(node->IndirectionCount() == 1);
 		const auto& indirections = node->GetIndirections();
-		TEST_ASSERT(indirections[0].indirectionToken == Scripting::TokenType::Ampersand);
+		TEST_ASSERT(indirections[0].indirectionToken == C4Compiler::TokenType::Ampersand);
 		TEST_ASSERT(!indirections[0].isConst);
 
 		TEST_ASSERT(node->ToString() == "const NC::SomeClass<float>::SubType&");
@@ -244,26 +244,26 @@ namespace Testing
 
 	void QualTypeTest::TestNonTypeTokenReturnsNullptr()
 	{
-		auto stream = Scripting::Source::FromMemory("+ x");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("+ x");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::QualTypeNode::TryParse(state);
+		auto node = C4Compiler::QualTypeNode::TryParse(state);
 		TEST_ASSERT(node == nullptr);
 		// No tokens consumed - the '+' is still available
-		TEST_ASSERT(lexer.Peek().GetType() == Scripting::TokenType::Plus);
+		TEST_ASSERT(lexer.Peek().GetType() == C4Compiler::TokenType::Plus);
 		TEST_PASSED();
 	}
 
 	void QualTypeTest::TestMissingTypeNameAfterConst()
 	{
-		auto stream = Scripting::Source::FromMemory("const +");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("const +");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::QualTypeNode::TryParse(state);
+		auto node = C4Compiler::QualTypeNode::TryParse(state);
 		// Should return nullptr because no valid base name after const
 		TEST_ASSERT(node == nullptr);
 		TEST_PASSED();

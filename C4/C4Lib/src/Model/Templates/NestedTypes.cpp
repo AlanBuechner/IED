@@ -6,7 +6,7 @@
 #include "Parser/Nodes/Declarations/EnumDefinitionNode.h"
 #include "Parser/Nodes/Declarations/TemplateDefinitionNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	QueryResult<void> NestedTypes::AddObject(const ProgramModel& model, const Owner& owner, const ObjectDefinitionNode& nested)
 	{
@@ -96,4 +96,4 @@ namespace Scripting
 		names.Push(QualifiedName(owner.type));
 		return names;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

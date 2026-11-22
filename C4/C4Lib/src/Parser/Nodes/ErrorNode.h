@@ -2,7 +2,7 @@
 #include "Parser/AstNode.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// What a declaration or statement that did not parse leaves in the tree: the tokens the parser skipped to get to the
 	/// next one, and why. The model and lowering pass it by; what comes after it parses on its own.

@@ -2,7 +2,7 @@
 #include "Model/SymbolTable.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 
@@ -14,4 +14,4 @@ namespace Scripting
 	/// The function a function-pointer global starts at when its initializer names one (`funcptr<R(A)> g = F;`, or a
 	/// qualified name): the overload of the global's signature, as its unit sees the name; null for any other global.
 	const FunctionRecord* FunctionPointerStart(ProgramModel& model, const SymbolInfo& global);
-} // namespace Scripting
+} // namespace C4Compiler

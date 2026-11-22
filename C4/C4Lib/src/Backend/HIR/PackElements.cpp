@@ -1,6 +1,6 @@
 #include "Backend/HIR/PackElements.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	QueryResult<PackElements> PackElements::Of(LoweringContext& ctx, const AstNode& pattern)
 	{
@@ -13,4 +13,4 @@ namespace Scripting
 	{
 		for (const NamedPack& pack : m_Packs) m_Ctx->queries().RegisterLocal(pack.name, (*pack.elements)[index]);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

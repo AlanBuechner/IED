@@ -3,7 +3,7 @@
 #include "Model/Types/ClassHierarchy.h"
 #include "Model/Types/VirtualTables.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	const LValue* SubobjectLValue(LoweringContext& ctx, const LValue* base, const ObjectType* owner, int64 offset)
 	{
@@ -46,4 +46,4 @@ namespace Scripting
 		if (at.found) call->receiver = SubobjectLValue(ctx, receiver, owner, at.offset);
 		return QueryResult<void>::Success();
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -1,7 +1,7 @@
 #pragma once
 #include "Backend/HIR/SimdOperands.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The SIMD intrinsics that move lanes to and from memory (D-62): `simd_load(p, N)`, `simd_store(p, v)`, their
 	/// masked forms, and `simd_gather(p, indices)` / `simd_gather_masked(p, indices, mask)`. `p` points to the
@@ -10,4 +10,4 @@ namespace Scripting
 	{
 		SimdOperands::Result Lower(const SimdOperands::Call& call, SimdNode::Op op);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

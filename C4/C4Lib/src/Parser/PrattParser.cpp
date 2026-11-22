@@ -19,7 +19,7 @@
 #include "Nodes/Expressions/ParenthesizedExpressionNode.h"
 #include "Nodes/Expressions/BracedInitializerNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -159,4 +159,4 @@ namespace Scripting
 	// =========================================================================
 	// Prefix parsing - primary expressions and unary prefix operators
 	// =========================================================================
-} // namespace Scripting
+} // namespace C4Compiler

@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <array>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -118,4 +118,4 @@ namespace Scripting
 		if (size <= kEightbyte) return low;
 		return llvm::StructType::get(aggregate.context, { low, EightbyteType(aggregate, storage, classes[1], kEightbyte) });
 	}
-} // namespace Scripting
+} // namespace C4Compiler

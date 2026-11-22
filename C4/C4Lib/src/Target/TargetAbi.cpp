@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <iostream>
 
-namespace Scripting
+namespace C4Compiler
 {
 	const TargetAbi& TargetAbi::For(TargetSystem system)
 	{
@@ -37,4 +37,4 @@ namespace Scripting
 		std::cerr << "error: cannot write the link's inputs to " << path << std::endl;
 		return false;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-namespace Scripting { struct MacroDefinition; }
+namespace C4Compiler { struct MacroDefinition; }
 
 namespace C4LSP::Server { class CompilationSession; }
 
@@ -40,7 +40,7 @@ namespace C4LSP::Features
 		/// macro is used there (a `#define` line defines, it does not use).
 		static Use At(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position);
 		/// `#define NAME(params) body`, as the table holds it.
-		static std::string Rendered(const Scripting::MacroDefinition& macro);
+		static std::string Rendered(const C4Compiler::MacroDefinition& macro);
 
 	private:
 		/// The end of the call whose `(` is the first character from `at` past spaces: one past its `)`; npos when

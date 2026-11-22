@@ -1,6 +1,6 @@
 #include "Backend/HIR/ConstantOperands.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -87,4 +87,4 @@ namespace Scripting
 		return "the index " + std::to_string(*value) + " is outside the '" + array.GetName() + "' (0 to " +
 			std::to_string(array.GetElementCount() - 1) + ")";
 	}
-} // namespace Scripting
+} // namespace C4Compiler

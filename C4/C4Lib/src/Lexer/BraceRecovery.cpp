@@ -1,7 +1,7 @@
 #include "Lexer/BraceRecovery.h"
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

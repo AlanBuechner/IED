@@ -6,95 +6,95 @@ namespace Testing
 {
 	void LiteralTest::TestIntegerLiteral()
 	{
-		auto stream = Scripting::Source::FromMemory("42");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("42");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::LiteralNode::TryParse(state);
+		auto node = C4Compiler::LiteralNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
-		TEST_ASSERT(node->GetKind() == Scripting::LiteralNode::LiteralKind::Number);
+		TEST_ASSERT(node->GetKind() == C4Compiler::LiteralNode::LiteralKind::Number);
 		TEST_ASSERT(node->GetValue() == "42");
 		TEST_PASSED();
 	}
 
 	void LiteralTest::TestFloatLiteral()
 	{
-		auto stream = Scripting::Source::FromMemory("3.14f");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("3.14f");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::LiteralNode::TryParse(state);
+		auto node = C4Compiler::LiteralNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
-		TEST_ASSERT(node->GetKind() == Scripting::LiteralNode::LiteralKind::Number);
+		TEST_ASSERT(node->GetKind() == C4Compiler::LiteralNode::LiteralKind::Number);
 		TEST_ASSERT(node->GetValue() == "3.14f");
 		TEST_PASSED();
 	}
 
 	void LiteralTest::TestStringLiteral()
 	{
-		auto stream = Scripting::Source::FromMemory("\"hello\"");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("\"hello\"");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::LiteralNode::TryParse(state);
+		auto node = C4Compiler::LiteralNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
-		TEST_ASSERT(node->GetKind() == Scripting::LiteralNode::LiteralKind::String);
+		TEST_ASSERT(node->GetKind() == C4Compiler::LiteralNode::LiteralKind::String);
 		TEST_PASSED();
 	}
 
 	void LiteralTest::TestBooleanTrue()
 	{
-		auto stream = Scripting::Source::FromMemory("true");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("true");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::LiteralNode::TryParse(state);
+		auto node = C4Compiler::LiteralNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
-		TEST_ASSERT(node->GetKind() == Scripting::LiteralNode::LiteralKind::Boolean);
+		TEST_ASSERT(node->GetKind() == C4Compiler::LiteralNode::LiteralKind::Boolean);
 		TEST_PASSED();
 	}
 
 	void LiteralTest::TestBooleanFalse()
 	{
-		auto stream = Scripting::Source::FromMemory("false");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("false");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::LiteralNode::TryParse(state);
+		auto node = C4Compiler::LiteralNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
-		TEST_ASSERT(node->GetKind() == Scripting::LiteralNode::LiteralKind::Boolean);
+		TEST_ASSERT(node->GetKind() == C4Compiler::LiteralNode::LiteralKind::Boolean);
 		TEST_PASSED();
 	}
 
 	void LiteralTest::TestNullLiteral()
 	{
-		auto stream = Scripting::Source::FromMemory("null");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("null");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::LiteralNode::TryParse(state);
+		auto node = C4Compiler::LiteralNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
-		TEST_ASSERT(node->GetKind() == Scripting::LiteralNode::LiteralKind::Null);
+		TEST_ASSERT(node->GetKind() == C4Compiler::LiteralNode::LiteralKind::Null);
 		TEST_PASSED();
 	}
 
 	void LiteralTest::TestIdentifierReturnsNullptr()
 	{
-		auto stream = Scripting::Source::FromMemory("x");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("x");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::LiteralNode::TryParse(state);
+		auto node = C4Compiler::LiteralNode::TryParse(state);
 		TEST_ASSERT(node == nullptr);
 		// No tokens consumed - the identifier is still available
-		TEST_ASSERT(lexer.Peek().GetType() == Scripting::TokenType::Identifier);
+		TEST_ASSERT(lexer.Peek().GetType() == C4Compiler::TokenType::Identifier);
 		TEST_PASSED();
 	}
 }

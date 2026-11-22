@@ -27,7 +27,7 @@
 
 LLD_HAS_DRIVER(coff)
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -275,5 +275,5 @@ namespace Scripting
 		if (const ImageFn add = host.Function<ImageFn>("c4_script_image_add")) add(reinterpret_cast<const void*>(image.low), reinterpret_cast<const void*>(image.high));
 		return std::make_unique<DllScript>(module, dll, image, host.Function<ImageRemoveFn>("c4_script_image_remove"));
 	}
-} // namespace Scripting
+} // namespace C4Compiler
 #endif

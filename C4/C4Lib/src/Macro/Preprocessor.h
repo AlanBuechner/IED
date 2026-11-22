@@ -2,7 +2,7 @@
 #include "Macro/MacroPreprocessor.h"
 #include "Macro/ConditionalStack.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// One file's preprocessing (MacroPreprocessor::Process): the reading position, the open #if groups, whether a block
 	/// comment is open, and the layout made so far. Lines and uses: MacroPreprocessor.cpp; directives: MacroDirectives.cpp.

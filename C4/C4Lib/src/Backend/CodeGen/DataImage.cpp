@@ -3,7 +3,7 @@
 #include <cstring>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -86,4 +86,4 @@ namespace Scripting
 		}
 		return nullptr;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

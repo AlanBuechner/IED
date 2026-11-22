@@ -6,7 +6,7 @@
 #include "Parser/Nodes/Declarations/ParameterNode.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A signature type: `funcptr<ReturnType(Parameters)>` (a function pointer) or `func<ReturnType(Parameters)>`
 	/// (a callable value: docs/language/07). Examples: `funcptr<void(int32 code)>`, `func<int32(float x)>`.

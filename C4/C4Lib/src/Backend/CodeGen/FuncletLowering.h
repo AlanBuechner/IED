@@ -2,7 +2,7 @@
 #include "Backend/CodeGen/EhLowering.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Exceptions as MSVC's funclets (Windows, docs/compiler/04 "Exceptions"): a cleanup step is a cleanuppad running
 	/// the cleanup's copy, left by cleanupret to what is below it; a dispatch is a catchswitch whose handlers are
@@ -32,4 +32,4 @@ namespace Scripting
 		std::vector<llvm::CatchSwitchInst*> m_Switches;  // by step: a dispatch's catchswitch
 		std::vector<llvm::FuncletPadInst*> m_Pads;       // by funclet: a handler's catchpad, a cleanup's cleanuppad
 	};
-} // namespace Scripting
+} // namespace C4Compiler

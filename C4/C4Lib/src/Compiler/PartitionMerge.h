@@ -10,7 +10,7 @@ namespace llvm
 	class Module;
 }
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A whole-program build's cross-partition step (R12): the program, emitted in partitions as every linked build is
 	/// (D-81), becomes one module again before it is optimized, so the optimizer sees all of it at once, as it did when

@@ -4,7 +4,7 @@
 #include "Compiler/ErrorTracker.h"
 #include <span>
 
-namespace Scripting
+namespace C4Compiler
 {
 	enum class AccessModifier
 	{
@@ -131,4 +131,4 @@ namespace Scripting
 
 	Core::String NodeTypeToName(NodeType type);
 
-} // namespace Scripting
+} // namespace C4Compiler

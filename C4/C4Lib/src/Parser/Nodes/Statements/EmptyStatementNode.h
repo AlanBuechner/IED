@@ -4,7 +4,7 @@
 #include "Lexer/Token.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Represents a bare semicolon `;` (empty/null statement).
 	struct EmptyStatementNode : public AstNode

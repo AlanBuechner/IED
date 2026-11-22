@@ -7,6 +7,7 @@
 #include <intrin.h>
 #include <process.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 #pragma comment(lib, "Synchronization.lib")
@@ -136,8 +137,19 @@ static DWORD milliseconds(int64_t ns)
 
 // Each thread sleeps on a high-resolution waitable timer of its own (Windows 10 1803 and later): it ends within about
 // half a millisecond of its time, where Sleep ends on the system's tick (15.6 ms unless a process raised the timer
-// resolution), so a frame limiter that waits 3 ms waited 15.6. Systems without such timers fall back to Sleep.
+// resolution), so a frame limiter that waits 3 ms waited 15.6. Systems without such timers fall back to Sleep, said once on standard error.
 static _Thread_local HANDLE t_sleepTimer;
+static volatile LONG s_sleepFallbackReported;
+
+// A sleep that cannot use the timer ends on the tick: said once on standard error, with the call that failed (BUG-441).
+static void ReportSleepFallback(const char* call, DWORD error)
+{
+	if (InterlockedExchange(&s_sleepFallbackReported, 1)) return;
+	char text[200];
+	const int length = snprintf(text, sizeof(text), "c4: %s failed (error %lu): Thread::Sleep ends on the system tick, up to 15.6 ms late\n", call, (unsigned long)error);
+	DWORD written = 0;
+	if (length > 0) WriteFile(GetStdHandle(STD_ERROR_HANDLE), text, (DWORD)length, &written, NULL);
+}
 
 void c4_thread_sleep_ns(int64_t ns)
 {
@@ -147,14 +159,21 @@ void c4_thread_sleep_ns(int64_t ns)
 		return;
 	}
 	if (!t_sleepTimer) t_sleepTimer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
-	LARGE_INTEGER due;
-	due.QuadPart = -((ns + 99) / 100); // relative, in 100 ns units
-	if (t_sleepTimer && SetWaitableTimer(t_sleepTimer, &due, 0, NULL, NULL, FALSE))
+	if (!t_sleepTimer)
 	{
-		WaitForSingleObject(t_sleepTimer, INFINITE);
+		ReportSleepFallback("CreateWaitableTimerExW", GetLastError());
+		Sleep(milliseconds(ns));
 		return;
 	}
-	Sleep(milliseconds(ns));
+	LARGE_INTEGER due;
+	due.QuadPart = -((ns + 99) / 100); // relative, in 100 ns units
+	if (!SetWaitableTimer(t_sleepTimer, &due, 0, NULL, NULL, FALSE))
+	{
+		ReportSleepFallback("SetWaitableTimer", GetLastError());
+		Sleep(milliseconds(ns));
+		return;
+	}
+	WaitForSingleObject(t_sleepTimer, INFINITE);
 }
 
 // The calling thread on one logical processor of core number `core` of those this process may run on, so that no two threads pinned to

@@ -3,7 +3,7 @@
 #include "Model/OverloadResolution.h"
 #include "Model/Templates/TemplateArguments.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A call that may name function templates: what QueryFunction knows about it.
 	struct TemplateCall
@@ -71,4 +71,4 @@ namespace Scripting
 		static void AttachAsMethod(const ProgramModel& model, const ObjectType* instance, const FunctionRecord* rec,
 			const FunctionDefinitionNode& fn);
 	};
-} // namespace Scripting
+} // namespace C4Compiler

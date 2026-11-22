@@ -18,7 +18,7 @@
 #include "Model/Types/InitListType.h"
 #include "Model/Types/ReferenceType.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -430,4 +430,4 @@ namespace Scripting
 			node->step = m_Ctx.out->NewNode<StoreNode>(it, next);
 		return QueryResult<void>::Success();
 	}
-} // namespace Scripting
+} // namespace C4Compiler

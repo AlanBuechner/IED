@@ -1,7 +1,7 @@
 #include "Backend/MIR/MirBody.h"
 #include "Backend/MIR/MirBuilder.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	void DeleteMirBody(MirBody* body)
 	{
@@ -13,4 +13,4 @@ namespace Scripting
 		if (fn.complete && !fn.mir) fn.mir.reset(new MirBody(MirBuilder(fn, nullptr).Build()));
 		for (const std::unique_ptr<HIRFunction>& nested : fn.nestedFunctions) EnsureMir(*nested);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

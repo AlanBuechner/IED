@@ -3,7 +3,7 @@
 #include "Lexer/Lexer.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	Ref<ExpressionStatementNode> ExpressionStatementNode::TryParse(ParserState& state)
 	{
@@ -55,4 +55,4 @@ namespace Scripting
 	}
 
 
-} // namespace Scripting
+} // namespace C4Compiler

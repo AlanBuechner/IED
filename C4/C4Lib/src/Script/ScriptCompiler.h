@@ -20,7 +20,7 @@ namespace llvm
 	class TargetMachine;
 }
 
-namespace Scripting
+namespace C4Compiler
 {
 	class CompilerInstance;
 	class ErrorTracker;
@@ -89,4 +89,4 @@ namespace Scripting
 	/// file when the list is empty and not `onlyAllowed`, else a file whose project is named on the list or whose path
 	/// starts with an entry.
 	bool IncludeAllowed(const HostInterface& host, const InterfaceFile& include, const std::vector<std::string>& allow, bool onlyAllowed);
-} // namespace Scripting
+} // namespace C4Compiler

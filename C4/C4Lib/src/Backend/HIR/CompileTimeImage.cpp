@@ -8,7 +8,7 @@
 #include "Model/Types/ObjectType.h"
 #include "Model/Types/UnionType.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -49,4 +49,4 @@ namespace Scripting
 		data.bytes = std::move(bytes.value);
 		return data;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

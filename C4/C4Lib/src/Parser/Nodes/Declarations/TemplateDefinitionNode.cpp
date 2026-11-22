@@ -1,7 +1,7 @@
 #include "TemplateDefinitionNode.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 
 	Ref<TemplateDefinitionNode> TemplateDefinitionNode::TryParse(ParserState& state)
@@ -135,4 +135,4 @@ namespace Scripting
 			if (Ref<TemplateParameterNode> parameter = GetParameter(i); parameter && parameter->Kind() == TemplateParameterKind::Type)
 				scope.Add(parameter->GetName());
 	}
-} // namespace Scripting
+} // namespace C4Compiler

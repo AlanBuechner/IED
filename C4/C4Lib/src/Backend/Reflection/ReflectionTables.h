@@ -10,7 +10,7 @@
 
 namespace llvm { class Module; }
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The reflection wire format (C4Runtime/ReflectABI.h) as LLVM constants: one struct type per table row, in
 	/// the field order and C layout of its C struct, plus the strings and arrays the rows point at. The rows
@@ -60,4 +60,4 @@ namespace Scripting
 		llvm::StructType* m_GcType;         // c4_gc_type (GCRuntimeC.h)
 		llvm::StructType* m_Word;           // one uint64 of a pointer map
 	};
-} // namespace Scripting
+} // namespace C4Compiler

@@ -4,7 +4,7 @@
 #include "Core/Core.h"
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A compile-time query (docs/language/10 4): `sizeof(T)` / `sizeof(expr)` / `sizeof expr`, `alignof(T)` /
 	/// `alignof(expr)`, `offsetof(T, field.field)`, `holds_native_bytes(T)`, `holds_pointers(T)`, `gc_type_of(T)`, `__uuidof(T)`,

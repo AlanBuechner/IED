@@ -5,7 +5,7 @@
 #include "Model/Types/QualifiedName.h"
 #include "Model/Types/SwizzleType.h"
 
-namespace Scripting::CastRules
+namespace C4Compiler::CastRules
 {
 	namespace
 	{

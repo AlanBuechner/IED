@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 	struct ScriptLowering;
@@ -81,4 +81,4 @@ namespace Scripting
 		std::vector<std::unique_ptr<PartitionEmitter>> m_Others; // partitions 1..n-1 of a split program
 		std::optional<ProgramPlacement> m_Placement;            // where a split program's functions and globals go
 	};
-} // namespace Scripting
+} // namespace C4Compiler

@@ -3,7 +3,7 @@
 #include "Backend/CodeGen/ModuleContext.h"
 #include <llvm/IR/LLVMContext.h>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A partition of a split program other than the first (D-81): an LLVM context of its own, the module context
 	/// that fills its module, and the emitter of its functions.
@@ -20,4 +20,4 @@ namespace Scripting
 		ModuleContext m_MCtx;
 		FunctionEmitter m_Emitter;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

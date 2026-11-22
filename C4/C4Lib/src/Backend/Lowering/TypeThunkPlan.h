@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 
@@ -60,4 +60,4 @@ namespace Scripting
 		std::unordered_map<const ObjectType*, Entry> m_Entries;
 		uint32 m_TypesPlanned = 0; // the model's object types looked at so far
 	};
-} // namespace Scripting
+} // namespace C4Compiler

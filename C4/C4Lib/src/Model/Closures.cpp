@@ -2,7 +2,7 @@
 #include "Model/ProgramModel.h"
 #include "Model/TypeStore.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

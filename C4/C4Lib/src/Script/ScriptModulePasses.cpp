@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -202,4 +202,4 @@ namespace Scripting
 			Redirect(module, "_CxxThrowException", llvm::cast<llvm::Function>(scriptThrow.getCallee()));
 		}
 	}
-} // namespace Scripting
+} // namespace C4Compiler

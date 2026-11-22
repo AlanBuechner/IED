@@ -5,7 +5,7 @@
 #include <memory>
 #include <mutex>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A list that only grows at its end, walked without a lock while it is added to (see GrowOnlyMap): an element
 	/// never moves or goes away, and a walk sees the elements added before it reached the end. It answers to
@@ -67,4 +67,4 @@ namespace Scripting
 
 		std::unique_ptr<State> m_State; // behind a pointer, so the list moves with what owns it
 	};
-} // namespace Scripting
+} // namespace C4Compiler

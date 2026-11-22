@@ -1,7 +1,7 @@
 #pragma once
 #include "Backend/HIR/LoweringContext.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Why `location` cannot be written (docs/language/04 4.2, D-30, D-31), or empty when it can: a const
 	/// variable or parameter, a location reached through a pointer or reference to const, `this` in a const
@@ -13,4 +13,4 @@ namespace Scripting
 
 	/// The type of `&location`: a pointer to const when the location is read-only.
 	const Type* AddressType(LoweringContext& ctx, const LValue* location);
-} // namespace Scripting
+} // namespace C4Compiler

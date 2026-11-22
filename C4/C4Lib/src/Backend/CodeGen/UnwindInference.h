@@ -6,7 +6,7 @@ namespace llvm
 	class Module;
 }
 
-namespace Scripting
+namespace C4Compiler
 {
 	class WorkerPool;
 
@@ -17,4 +17,4 @@ namespace Scripting
 	/// function never does. LLVM's function-attrs infers the same within one module once it optimizes; this sees the
 	/// whole program, where a split one's other partitions are only declarations to each, and runs at -O0 too.
 	void InferNoUnwind(const std::vector<llvm::Module*>& modules, WorkerPool& pool);
-} // namespace Scripting
+} // namespace C4Compiler

@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The program's code around main, in partition 0: `__c4_global_init`, which runs the rounds of starts before main
 	/// (a global whose start is constant data starts holding it instead), `__c4_thread_start`, which a thread runs as it
@@ -57,4 +57,4 @@ namespace Scripting
 		std::vector<llvm::Function*> m_FirstUseStarts; // a script's thread_locals' starts on first use
 		std::deque<FunctionRecord> m_Records; // the starts' records: compiler-written, no model record
 	};
-} // namespace Scripting
+} // namespace C4Compiler

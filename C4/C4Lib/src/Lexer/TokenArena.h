@@ -3,7 +3,7 @@
 #include <memory>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The tokens a lexer has read, in order. They live in chunks that never move, so a token's address (and a
 	/// reference the parser holds while it peeks further ahead) stays valid for the arena's life; a chunk's tokens
@@ -26,4 +26,4 @@ namespace Scripting
 		std::vector<std::unique_ptr<Token[]>> m_Chunks;
 		uint32 m_Count = 0;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

@@ -5,7 +5,7 @@
 
 namespace C4LSP::Features
 {
-	HierarchyItem HierarchyItem::Of(Server::CompilationSession& session, const Scripting::AstNode& declaration)
+	HierarchyItem HierarchyItem::Of(Server::CompilationSession& session, const C4Compiler::AstNode& declaration)
 	{
 		HierarchyItem item;
 		item.name = DeclarationText::NameOf(declaration);

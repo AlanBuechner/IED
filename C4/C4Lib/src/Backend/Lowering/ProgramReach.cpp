@@ -5,7 +5,7 @@
 #include "Model/ProgramModel.h"
 #include "Model/Types/QualifiedName.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -141,4 +141,4 @@ namespace Scripting
 		const Core::String note = UseNote(m_Model, record, user == m_FirstUsers.end() ? nullptr : user->second);
 		for (CompilationError& error : errors.GetErrorsMutable()) error.message += note;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

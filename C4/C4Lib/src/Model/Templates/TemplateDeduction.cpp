@@ -12,7 +12,7 @@
 #include "Parser/Nodes/Declarations/ParameterNode.h"
 #include "Parser/Nodes/Expressions/IdentifierExpressionNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -249,4 +249,4 @@ namespace Scripting
 			if (m_Params.GetParameter(i)->GetName() == name) return static_cast<int>(i);
 		return -1;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

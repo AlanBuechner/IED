@@ -5,7 +5,7 @@
 #include <thread>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// `body(i)` for each i below `count`, on up to `threads` threads (the calling one among them), each taking the next
 	/// index as it finishes one: for work whose items take very different times.
@@ -22,4 +22,4 @@ namespace Scripting
 		work();
 		for (std::thread& worker : workers) worker.join();
 	}
-} // namespace Scripting
+} // namespace C4Compiler

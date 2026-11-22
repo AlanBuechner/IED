@@ -4,7 +4,7 @@
 #include "Parser/Nodes/Expressions/LiteralNode.h"
 #include "Model/TypeHandle.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	void CollectOperatorAnnotations(const AnnotationNode* ann, uint32 parameterCount, Core::Vector<Core::String>& out)
 	{
@@ -49,4 +49,4 @@ namespace Scripting
 					if (const auto* lit = dynamic_cast<const LiteralNode*>(item->GetArguments()[0].Get()))
 						out.Push(lit->GetValue()); // [group("components")] -> components
 	}
-} // namespace Scripting
+} // namespace C4Compiler

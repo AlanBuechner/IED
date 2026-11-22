@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <optional>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

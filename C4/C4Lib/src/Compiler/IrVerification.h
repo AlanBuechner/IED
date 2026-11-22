@@ -4,7 +4,7 @@
 
 namespace llvm { class Module; }
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// What is wrong with `module`'s IR (the first function the verifier rejects, else the module-level complaint), or
 	/// nothing when it verifies: invalid IR is a compiler bug, reported before LLVM is handed it.

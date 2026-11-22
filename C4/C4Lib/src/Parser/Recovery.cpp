@@ -1,6 +1,6 @@
 #include "Parser/Recovery.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

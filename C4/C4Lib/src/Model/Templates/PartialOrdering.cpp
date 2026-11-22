@@ -12,7 +12,7 @@
 #include <algorithm>
 #include <unordered_map>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -245,4 +245,4 @@ namespace Scripting
 		if (bAsSpecialized && !aAsSpecialized) return -1;
 		return 0;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

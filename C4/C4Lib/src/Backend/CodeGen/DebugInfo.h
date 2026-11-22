@@ -7,7 +7,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class IRContext;
 	class SignatureType;

@@ -5,7 +5,7 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/Transforms/Utils/ModuleUtils.h>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -187,4 +187,4 @@ namespace Scripting
 		B.CreateRetVoid();
 		llvm::appendToGlobalCtors(program.module(), starter, kLastConstructorPriority);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

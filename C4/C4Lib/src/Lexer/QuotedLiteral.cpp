@@ -1,6 +1,6 @@
 #include "Lexer/LiteralScanner.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

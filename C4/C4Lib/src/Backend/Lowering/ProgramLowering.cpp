@@ -4,7 +4,7 @@
 #include "Model/ProgramModel.h"
 #include <cstring>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -175,4 +175,4 @@ namespace Scripting
 			}
 		m_StepSeconds.push_back({ step, seconds });
 	}
-} // namespace Scripting
+} // namespace C4Compiler

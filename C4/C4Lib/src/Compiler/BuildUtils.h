@@ -11,7 +11,7 @@
 
 namespace fs = std::filesystem;
 
-namespace Scripting
+namespace C4Compiler
 {
 	// Common CLI options for the C4 compiler
 	struct CompileOptions

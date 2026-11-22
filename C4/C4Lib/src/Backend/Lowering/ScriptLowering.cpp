@@ -4,7 +4,7 @@
 #include "Parser/AstNode.h"
 #include "Script/ScriptModulePasses.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	bool ScriptLowering::HostHas(const std::string& symbol) const
 	{
@@ -27,4 +27,4 @@ namespace Scripting
 		const AstNode* declaration = type.GetDeclNode();
 		return declaration && type.GetTemplateArguments().Empty() && IsHostUnit(declaration->startLocation.sourceId);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

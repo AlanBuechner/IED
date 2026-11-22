@@ -5,7 +5,7 @@
 
 namespace llvm { class Module; }
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The symbol of a host thread_local's accessor (Script/HostTable.h): `__c4_tls_<symbol>`.
 	std::string ThreadLocalAccessor(const std::string& symbol);
@@ -35,4 +35,4 @@ namespace Scripting
 
 	/// The global the loader stores the script's c4_script_module in.
 	inline constexpr const char* kScriptModuleSymbol = "__c4_script_module";
-} // namespace Scripting
+} // namespace C4Compiler

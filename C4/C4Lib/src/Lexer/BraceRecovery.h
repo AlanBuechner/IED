@@ -2,7 +2,7 @@
 #include "Lexer/Token.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// What brace recovery reads of one token (comments are left out): a brace or not, and the indentation of its line.
 	struct BraceFact

@@ -3,7 +3,7 @@
 #include "Protocol/LspTypes.h"
 #include <string>
 
-namespace Scripting { struct FunctionDefinitionNode; struct FunctionRecord; struct ObjectDefinitionNode; }
+namespace C4Compiler { struct FunctionDefinitionNode; struct FunctionRecord; struct ObjectDefinitionNode; }
 
 namespace C4LSP::Server { class CompilationSession; }
 
@@ -12,8 +12,8 @@ namespace C4LSP::Features
 	/// A function declared without a body that no file of its program defines.
 	struct MissingDefinition
 	{
-		const Scripting::FunctionDefinitionNode* declaration = nullptr;
-		const Scripting::FunctionRecord* record = nullptr; // the compiler's function; null for a template no use made yet
+		const C4Compiler::FunctionDefinitionNode* declaration = nullptr;
+		const C4Compiler::FunctionRecord* record = nullptr; // the compiler's function; null for a template no use made yet
 	};
 
 	/// Visual Studio's "Function definition for 'Name' not found": a warning on the name of each function a document
@@ -33,12 +33,12 @@ namespace C4LSP::Features
 		/// A body written out of line that could be the template `declaration`'s, a member of `owner` (null for a free
 		/// function): the same name, owned by a type of its type's name, as many parameters unless a pack makes them any.
 		/// What finds a template's definition before any use made a function of it. Null when there is none.
-		static const Scripting::FunctionDefinitionNode* TemplateBodyFor(Server::CompilationSession& session,
-			const Scripting::FunctionDefinitionNode& declaration, const Scripting::ObjectDefinitionNode* owner);
+		static const C4Compiler::FunctionDefinitionNode* TemplateBodyFor(Server::CompilationSession& session,
+			const C4Compiler::FunctionDefinitionNode& declaration, const C4Compiler::ObjectDefinitionNode* owner);
 
 		/// Where the warning goes: the declaration's simple name.
-		static Protocol::Range NameRange(const Server::CompilationSession& session, const Scripting::FunctionDefinitionNode& declaration);
-		static std::string MessageFor(const Scripting::FunctionDefinitionNode& declaration);
+		static Protocol::Range NameRange(const Server::CompilationSession& session, const C4Compiler::FunctionDefinitionNode& declaration);
+		static std::string MessageFor(const C4Compiler::FunctionDefinitionNode& declaration);
 
 		static void SetEnabled(bool enabled);
 		static bool IsEnabled();

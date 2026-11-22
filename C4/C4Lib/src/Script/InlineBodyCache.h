@@ -7,7 +7,7 @@
 
 namespace llvm { class Module; }
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A split program's inline bodies kept between builds in a folder of their own (docs/compiler/05): a partition's
 	/// chunks (InlineBodies) are named after the hash of its bitcode and of `salt` (the compiler, the target and the
@@ -33,4 +33,4 @@ namespace Scripting
 	/// What the names every table lists beside the runtime's (HostEntries' `alsoListed`) add to an InlineBodyCache's
 	/// salt: a body may name them whether or not its partition does.
 	std::string HostNamesSalt(const std::vector<std::string>& names);
-} // namespace Scripting
+} // namespace C4Compiler

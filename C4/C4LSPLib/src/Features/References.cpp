@@ -18,21 +18,21 @@ namespace C4LSP::Features
 		if (!unit || !unit->GetRootAST())
 			return {};
 
-		const Scripting::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
+		const C4Compiler::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
 		Server::LocatedNode located = Server::NodeLocator::Locate(source, sourceId, unit->GetRootAST(), position);
 		if (!located.Found())
 			return {};
 
-		const Scripting::AstNode* targetDecl = Definition::TargetAt(session, sourceId, located, position);
+		const C4Compiler::AstNode* targetDecl = Definition::TargetAt(session, sourceId, located, position);
 		if (!targetDecl)
 			return {};
 
 		Core::Vector<Protocol::Location> result;
 		if (includeDeclaration)
 		{
-			std::vector<const Scripting::AstNode*> declarations;
+			std::vector<const C4Compiler::AstNode*> declarations;
 			session.GetResolver().CollectFunctionDeclarations(targetDecl, declarations);
-			for (const Scripting::AstNode* declaration : declarations)
+			for (const C4Compiler::AstNode* declaration : declarations)
 				result.Push(Definition::LocationForDeclaration(session, *declaration));
 		}
 		for (const ReferenceScanner::Occurrence& occurrence : ReferenceScanner::FindEverywhere(session, targetDecl))

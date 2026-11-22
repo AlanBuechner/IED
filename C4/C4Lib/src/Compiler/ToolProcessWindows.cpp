@@ -7,7 +7,7 @@
 #include <vector>
 #include <windows.h>
 
-namespace Scripting
+namespace C4Compiler
 {
 	bool RunTool(const std::vector<std::string>& args)
 	{
@@ -120,6 +120,6 @@ namespace Scripting
 		exitCode = static_cast<int>(code);
 		return true;
 	}
-} // namespace Scripting
+} // namespace C4Compiler
 
 #endif

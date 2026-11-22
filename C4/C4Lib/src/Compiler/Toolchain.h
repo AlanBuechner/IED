@@ -1,7 +1,7 @@
 #pragma once
 #include <filesystem>
 
-namespace Scripting::Toolchain
+namespace C4Compiler::Toolchain
 {
 	namespace fs = std::filesystem;
 

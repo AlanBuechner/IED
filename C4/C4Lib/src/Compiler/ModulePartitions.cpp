@@ -12,7 +12,7 @@
 #include <atomic>
 #include <thread>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

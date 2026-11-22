@@ -2,7 +2,7 @@
 #include "Model/Types/Type.h"
 #include "Parser/Nodes/Expressions/CastExpressionNode.h"
 
-namespace Scripting::CastRules
+namespace C4Compiler::CastRules
 {
 	/// Why the named cast `kind` cannot turn a `from` into a `to` (D-12), or empty when it can:
 	/// - static_cast: numbers (and enums, bools, characters) to numbers; pointers between related objects, to or

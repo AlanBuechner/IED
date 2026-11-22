@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A set of names a script compile asks about - its host's table, the types its host registered (docs/runtime/04
 	/// section 4.6) - that keeps each question and its answer: what the compiled code assumed of the host, which a cached
@@ -28,4 +28,4 @@ namespace Scripting
 		mutable std::mutex m_Lock;
 		mutable std::unordered_map<std::string, bool> m_Asked;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

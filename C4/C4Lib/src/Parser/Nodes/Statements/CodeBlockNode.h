@@ -4,7 +4,7 @@
 #include "Lexer/Token.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Represents a block of executable code enclosed in `{}`.
 	/// Used as function bodies, loop bodies, if/else branches, standalone scopes, etc.

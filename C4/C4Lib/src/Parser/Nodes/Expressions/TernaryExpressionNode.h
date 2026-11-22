@@ -2,7 +2,7 @@
 #include "Parser/AstNode.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Ternary conditional expression: condition ? thenBranch : elseBranch.
 	struct TernaryExpressionNode : public AstNode

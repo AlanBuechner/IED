@@ -1,7 +1,7 @@
 #pragma once
 #include "Model/Types/Type.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A function (or method) signature: return type + parameters. Size is pointer-sized (an address).
 	class FunctionType : public Type
@@ -34,4 +34,4 @@ namespace Scripting
 		Core::Vector<ParameterInfo> m_Parameters;
 		bool m_IsVariadic = false;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

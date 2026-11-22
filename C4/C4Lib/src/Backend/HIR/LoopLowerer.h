@@ -1,7 +1,7 @@
 #pragma once
 #include "Backend/HIR/LoweringContext.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class StmtLowerer;
 	class ReferenceType;
@@ -37,4 +37,4 @@ namespace Scripting
 		LoweringContext& m_Ctx;
 		StmtLowerer& m_Stmts;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

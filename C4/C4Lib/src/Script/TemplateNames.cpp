@@ -8,7 +8,7 @@
 #include "Parser/Nodes/Declarations/UnionDefinitionNode.h"
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -131,4 +131,4 @@ namespace Scripting
 			scope = outer == std::string::npos ? std::string() : scope.substr(0, outer);
 		}
 	}
-} // namespace Scripting
+} // namespace C4Compiler

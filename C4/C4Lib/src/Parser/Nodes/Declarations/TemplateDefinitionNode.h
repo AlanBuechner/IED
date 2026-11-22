@@ -5,7 +5,7 @@
 #include "Core/Core.h"
 #include "TemplateParameterNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A template definition prefix: `template<T, uint32 I>`.
 	/// Wraps a list of TemplateParameterNodes.

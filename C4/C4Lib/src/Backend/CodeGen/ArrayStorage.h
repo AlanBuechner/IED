@@ -3,7 +3,7 @@
 #include <llvm/IR/IRBuilder.h>
 #include <functional>
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct FunctionRecord;
 
@@ -20,4 +20,4 @@ namespace Scripting
 		/// (`perElement` of them in each element, `stride` bytes apart), the last first.
 		llvm::Function* Finalizer(ModuleContext& m, const FunctionRecord& destroy, uint64 perElement, uint64 stride, uint64 countBytes);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

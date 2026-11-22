@@ -2,7 +2,7 @@
 #include <string_view>
 #include <unordered_map>
 
-namespace Scripting
+namespace C4Compiler
 {
 
 	// ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <filesystem>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace fs = std::filesystem;
 
@@ -226,4 +226,4 @@ namespace Scripting
 		if (!RegisterScript(sources, files, CommonFolder(scriptFolders), units, error)) return std::nullopt;
 		return units;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

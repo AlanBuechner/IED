@@ -2,7 +2,7 @@
 #include "Backend/CodeGen/DebugInfo.h"
 #include "Backend/CodeGen/VtableEmitter.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -143,4 +143,4 @@ namespace Scripting
 		if (!m_DebugScope) return;
 		if (llvm::DILocation* at = m_MCtx.Debug()->At(location, m_DebugScope)) m_B->SetCurrentDebugLocation(at);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

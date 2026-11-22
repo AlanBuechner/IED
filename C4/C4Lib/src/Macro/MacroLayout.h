@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// One macro use the macro pass expanded (R8): the bytes [begin, end) of the file - the name, and a call's arguments - are
 	/// read as `text` in their place. `text` is the expansion's tokens, a space where one came before; each piece is one of

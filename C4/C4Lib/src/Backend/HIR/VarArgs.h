@@ -2,7 +2,7 @@
 #include "Backend/HIR/LoweringContext.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ExprLowerer;
 	struct VaArgExpressionNode;
@@ -21,4 +21,4 @@ namespace Scripting
 		/// to a foreign C function (`toForeign`: printf reads a C string, not a pointer and a length).
 		QueryResult<void> CheckPassed(LoweringContext& ctx, const Type* type, size_t position, bool toForeign);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

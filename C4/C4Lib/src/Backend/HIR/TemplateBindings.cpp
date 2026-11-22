@@ -1,6 +1,6 @@
 #include "Backend/HIR/TemplateBindings.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	void BindTemplateParameters(LoweringContext& ctx, const InstantiationBindings* bindings)
 	{
@@ -18,4 +18,4 @@ namespace Scripting
 		}
 		for (const auto& p : bindings->packParams) ctx.queries().RegisterLocal(p.first, p.second);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -3,7 +3,7 @@
 #include "Model/Types/ArrayType.h"
 #include "Model/Types/VirtualTables.h"
 
-namespace Scripting::Abstractness
+namespace C4Compiler::Abstractness
 {
 	namespace
 	{
@@ -67,4 +67,4 @@ namespace Scripting::Abstractness
 		Core::String why = WhyNoValue(model, type);
 		return why.empty() ? why : "cannot create a '" + ValueType(type)->GetName() + "': " + why;
 	}
-} // namespace Scripting::Abstractness
+} // namespace C4Compiler::Abstractness

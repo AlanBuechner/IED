@@ -12,7 +12,7 @@
 #include <llvm/IR/Intrinsics.h>
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -246,4 +246,4 @@ namespace Scripting
 		m_Ctx.Call(freeFn, { object }, false);
 		return llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx), 0);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

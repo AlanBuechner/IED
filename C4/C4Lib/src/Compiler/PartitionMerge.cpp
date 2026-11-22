@@ -9,7 +9,7 @@
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/raw_ostream.h>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

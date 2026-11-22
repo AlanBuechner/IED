@@ -2,7 +2,7 @@
 #include "Backend/CodeGen/ModuleContext.h"
 #include "Compiler/AskedNames.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 

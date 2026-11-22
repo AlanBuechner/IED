@@ -2,7 +2,7 @@
 #include "Backend/HIR/HIR.h"
 #include "Compiler/ErrorTracker.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 	struct FunctionRecord;
@@ -29,4 +29,4 @@ namespace Scripting
 	/// result stores the referent's address there. Incomplete (with the reason in `errors`) when an argument cannot be
 	/// passed, such as a by-value parameter of a type that cannot be copied.
 	HIRFunction LowerInvokeThunk(ProgramModel& model, ErrorTracker& errors, const FunctionRecord& target, const FunctionRecord& thunk, bool shared);
-} // namespace Scripting
+} // namespace C4Compiler

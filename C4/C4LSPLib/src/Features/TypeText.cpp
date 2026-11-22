@@ -4,21 +4,21 @@
 
 namespace C4LSP::Features
 {
-	Core::String TypeText(const Scripting::Type* type)
+	Core::String TypeText(const C4Compiler::Type* type)
 	{
 		if (!type)
 			return "<unknown>";
 		return type->ToString();
 	}
 
-	const Scripting::Type* NamedType(const Scripting::Type* type)
+	const C4Compiler::Type* NamedType(const C4Compiler::Type* type)
 	{
 		while (type)
 		{
-			type = Scripting::TypeHandle::UnwrapToValue(type);
-			if (const auto* pointer = dynamic_cast<const Scripting::PointerType*>(type))
+			type = C4Compiler::TypeHandle::UnwrapToValue(type);
+			if (const auto* pointer = dynamic_cast<const C4Compiler::PointerType*>(type))
 				type = pointer->GetPointeeType();
-			else if (const auto* array = dynamic_cast<const Scripting::ArrayType*>(type))
+			else if (const auto* array = dynamic_cast<const C4Compiler::ArrayType*>(type))
 				type = array->GetElementType();
 			else
 				return type;
@@ -26,19 +26,19 @@ namespace C4LSP::Features
 		return nullptr;
 	}
 
-	const Scripting::AstNode* DeclarationOfNamedType(const Scripting::Type* type)
+	const C4Compiler::AstNode* DeclarationOfNamedType(const C4Compiler::Type* type)
 	{
-		const Scripting::Type* named = NamedType(type);
-		if (const auto* object = dynamic_cast<const Scripting::ObjectType*>(named))
+		const C4Compiler::Type* named = NamedType(type);
+		if (const auto* object = dynamic_cast<const C4Compiler::ObjectType*>(named))
 			return object->GetDeclNode();
-		if (const auto* enumType = dynamic_cast<const Scripting::EnumType*>(named))
+		if (const auto* enumType = dynamic_cast<const C4Compiler::EnumType*>(named))
 			return enumType->GetDeclNode();
-		if (const auto* unionType = dynamic_cast<const Scripting::UnionType*>(named))
+		if (const auto* unionType = dynamic_cast<const C4Compiler::UnionType*>(named))
 			return unionType->GetDeclNode();
 		return nullptr;
 	}
 
-	Core::String FunctionSignature(const Scripting::FunctionType* func)
+	Core::String FunctionSignature(const C4Compiler::FunctionType* func)
 	{
 		if (!func)
 			return "";

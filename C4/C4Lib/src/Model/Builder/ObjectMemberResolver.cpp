@@ -11,7 +11,7 @@
 #include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	// The members of ModelResolver that resolve what an object declares in its body.
 
@@ -288,4 +288,4 @@ namespace Scripting
 		if (classScope) classScope->Register(name, SymbolInfo{ SymbolKind::Function }, stored);
 		return QueryResult<void>::Success();
 	}
-} // namespace Scripting
+} // namespace C4Compiler

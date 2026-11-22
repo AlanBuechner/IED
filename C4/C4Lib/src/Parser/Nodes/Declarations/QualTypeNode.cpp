@@ -5,7 +5,7 @@
 #include "Parser/PrattParser.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	bool QualTypeNode::IsTypename() const
 	{
@@ -439,4 +439,4 @@ namespace Scripting
 			node->endLocation = first->endLocation;
 		return node;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -4,7 +4,7 @@
 #include <vector>
 #include <map>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A single C/C++-style macro definition (object-like or function-like).
 	struct MacroDefinition

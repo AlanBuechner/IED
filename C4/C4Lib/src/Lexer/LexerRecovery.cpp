@@ -1,7 +1,7 @@
 #include "LexerRecovery.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 
 	const Token& LexerRecovery::RecoverToTokenType(Lexer& lexer, TokenType targetType)
@@ -57,4 +57,4 @@ namespace Scripting
 		});
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

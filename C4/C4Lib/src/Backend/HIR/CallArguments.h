@@ -1,7 +1,7 @@
 #pragma once
 #include "Backend/HIR/LoweringContext.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The value a new object of type `target` starts from (docs/language/06): a copy of an lvalue or of a
 	/// view of an existing object, a fresh object relocated as is, the base sub-object of a derived object, a
@@ -19,4 +19,4 @@ namespace Scripting
 	/// where the argument is written, for what is said about it.
 	QueryResult<const HIRNode*> BindArgument(LoweringContext& ctx, const Value& arg, const HIRNode* loaded, const Type* param,
 		const AstNode* site = nullptr);
-} // namespace Scripting
+} // namespace C4Compiler

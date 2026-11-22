@@ -1,7 +1,7 @@
 #pragma once
 #include "Backend/HIR/LoweringContext.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	// The two branches of `c ? a : b` become one type (docs/language/10 6).
 	namespace ConditionalBranches
@@ -17,4 +17,4 @@ namespace Scripting
 		/// vector, a by-value indexer's element, a named constant or part of a temporary.
 		const LValue* ChosenLocation(LoweringContext& ctx, const HIRNode* condition, const Value& a, const Value& b, const Type* type);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

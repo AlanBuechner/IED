@@ -8,19 +8,19 @@ namespace Testing
 	{
 		struct Parsed
 		{
-			Ref<Scripting::AnnotationDeclarationNode> node;
+			Ref<C4Compiler::AnnotationDeclarationNode> node;
 			uint32 errors = 0;
 			Core::String next; // the token after it
 		};
 
 		Parsed Parse(const char* text)
 		{
-			auto stream = Scripting::Source::FromMemory(text);
-			Scripting::Lexer lexer(*stream, 0);
-			Scripting::ErrorTracker errorTracker;
-			Scripting::ParserState state(lexer, errorTracker);
+			auto stream = C4Compiler::Source::FromMemory(text);
+			C4Compiler::Lexer lexer(*stream, 0);
+			C4Compiler::ErrorTracker errorTracker;
+			C4Compiler::ParserState state(lexer, errorTracker);
 			Parsed parsed;
-			parsed.node = Scripting::AnnotationDeclarationNode::TryParse(state);
+			parsed.node = C4Compiler::AnnotationDeclarationNode::TryParse(state);
 			parsed.errors = errorTracker.GetErrors().Count();
 			parsed.next = lexer.PeekCompound().GetText();
 			return parsed;

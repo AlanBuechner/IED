@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A foreign C/C++ source file that must be compiled and linked into the final binary.
 	struct ForeignObject

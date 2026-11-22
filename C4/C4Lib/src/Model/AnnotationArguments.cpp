@@ -8,7 +8,7 @@
 #include "Parser/Nodes/Expressions/StaticAccessNode.h"
 #include <limits>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -166,4 +166,4 @@ namespace Scripting
 		}
 		return segments;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

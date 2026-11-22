@@ -12,7 +12,7 @@
 #include "Parser/Nodes/Declarations/AliasDefinitionNode.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h" // complete type: bodies are stored as pointers
 
-namespace Scripting
+namespace C4Compiler
 {
 	// ---------------------------------------------------------------------------
 	// LOWERING-TIME SCOPES (doc 06)
@@ -271,4 +271,4 @@ namespace Scripting
 			return QueryResult<const FunctionRecord*>::Fail(QueryError::Ambiguous, "local function '" + name + "' already declared in this scope");
 		return QueryResult<const FunctionRecord*>::Success(stored);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

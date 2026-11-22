@@ -53,7 +53,7 @@ namespace Testing
 
 	void SourceTest::TestMemoryEmptySource()
 	{
-		Ref<Scripting::Source> src = Scripting::Source::FromMemory("");
+		Ref<C4Compiler::Source> src = C4Compiler::Source::FromMemory("");
 		TEST_ASSERT_EQ(ToU32(src->Size()), 0u);
 		TEST_ASSERT_EQ(src->ReadCharAt(0), -1);
 		TEST_ASSERT(src->Text().empty());
@@ -66,18 +66,18 @@ namespace Testing
 
 	void SourceTest::TestMemoryTextIsAsGiven()
 	{
-		Ref<Scripting::Source> src = Scripting::Source::FromMemory("abc");
+		Ref<C4Compiler::Source> src = C4Compiler::Source::FromMemory("abc");
 		TEST_ASSERT_EQ(ToU32(src->Size()), 3u);
 		TEST_ASSERT(src->Text() == "abc");
 		TEST_ASSERT_EQ(src->ReadCharAt(2), CharCode('c'));
-		TEST_ASSERT(src->SameTextAs(*Scripting::Source::FromMemory("abc")) && !src->SameTextAs(*Scripting::Source::FromMemory("abd")));
+		TEST_ASSERT(src->SameTextAs(*C4Compiler::Source::FromMemory("abc")) && !src->SameTextAs(*C4Compiler::Source::FromMemory("abd")));
 		TEST_PASSED();
 	}
 
 	void SourceTest::TestLineColumnToByteOffsetIsThePlainColumn()
 	{
 		// R8: a source is never an expanded text, so an editor's column is a byte of the line as written.
-		Ref<Scripting::Source> src = Scripting::Source::FromMemory("ab\n\tcd\nef");
+		Ref<C4Compiler::Source> src = C4Compiler::Source::FromMemory("ab\n\tcd\nef");
 		TEST_ASSERT_EQ(ToU32(src->LineColumnToByteOffset(2, 2)), 4u);
 		TEST_ASSERT_EQ(ToU32(src->LineColumnToByteOffset(3, 1)), 7u);
 		TEST_ASSERT_EQ(ToU32(src->LineColumnToByteOffset(9, 1)), ToU32(src->Size())); // clamped
@@ -89,7 +89,7 @@ namespace Testing
 
 	void SourceTest::TestMemoryReadCharAtOutOfRange()
 	{
-		Ref<Scripting::Source> src = Scripting::Source::FromMemory("xy");
+		Ref<C4Compiler::Source> src = C4Compiler::Source::FromMemory("xy");
 		TEST_ASSERT_EQ(src->ReadCharAt(0), CharCode('x'));
 		TEST_ASSERT_EQ(src->ReadCharAt(1), CharCode('y'));
 		TEST_ASSERT_EQ(src->ReadCharAt(2), -1);
@@ -103,7 +103,7 @@ namespace Testing
 		content.push_back(static_cast<char>(0xFF));
 		content.push_back(static_cast<char>(0x80));
 		content.push_back('\0');
-		Ref<Scripting::Source> src = Scripting::Source::FromMemory(content);
+		Ref<C4Compiler::Source> src = C4Compiler::Source::FromMemory(content);
 		TEST_ASSERT_EQ(src->ReadCharAt(0), 255);
 		TEST_ASSERT_EQ(src->ReadCharAt(1), 128);
 		TEST_ASSERT_EQ(src->ReadCharAt(2), 0);
@@ -118,7 +118,7 @@ namespace Testing
 		content.push_back(static_cast<char>(0xBB));
 		content.push_back(static_cast<char>(0xBF));
 		content += "abc";
-		Ref<Scripting::Source> src = Scripting::Source::FromMemory(content);
+		Ref<C4Compiler::Source> src = C4Compiler::Source::FromMemory(content);
 		TEST_ASSERT_EQ(ToU32(src->Size()), 3u);
 		TEST_ASSERT_EQ(src->ReadCharAt(0), CharCode('a'));
 		TEST_ASSERT_EQ(src->ReadCharAt(1), CharCode('b'));
@@ -130,14 +130,14 @@ namespace Testing
 		partial.push_back(static_cast<char>(0xEF));
 		partial.push_back(static_cast<char>(0xBB)); // missing the third byte 0xBF
 		partial += "a";
-		Ref<Scripting::Source> src2 = Scripting::Source::FromMemory(partial);
+		Ref<C4Compiler::Source> src2 = C4Compiler::Source::FromMemory(partial);
 		TEST_ASSERT_EQ(ToU32(src2->Size()), 3u); // nothing removed
 
 		// A lone 0xEF byte is content, not a BOM.
 		std::string lone;
 		lone.push_back(static_cast<char>(0xEF));
 		lone += "a";
-		Ref<Scripting::Source> src3 = Scripting::Source::FromMemory(lone);
+		Ref<C4Compiler::Source> src3 = C4Compiler::Source::FromMemory(lone);
 		TEST_ASSERT_EQ(ToU32(src3->Size()), 2u);
 		TEST_PASSED();
 	}
@@ -147,7 +147,7 @@ namespace Testing
 		// A file saved with a BOM (the Visual Studio / Notepad default) must read back without one.
 		TempFileGuard guard;
 		guard.path = WriteTempFile("c4_srtest_bom.cf", "\xEF\xBB\xBFint x;\n");
-		Ref<Scripting::Source> src = Ref<Scripting::Source>(new Scripting::Source(guard.path));
+		Ref<C4Compiler::Source> src = Ref<C4Compiler::Source>(new C4Compiler::Source(guard.path));
 		TEST_ASSERT_EQ(ToU32(src->Size()), 7u); // "int x;\n" - BOM removed
 		TEST_ASSERT_EQ(src->ReadCharAt(0), CharCode('i'));
 		uint32 line = 0, column = 0;
@@ -158,7 +158,7 @@ namespace Testing
 
 	void SourceTest::TestLineToByteOffsetMultiLine()
 	{
-		Ref<Scripting::Source> src = Scripting::Source::FromMemory("abc\ndef\nghi");
+		Ref<C4Compiler::Source> src = C4Compiler::Source::FromMemory("abc\ndef\nghi");
 		TEST_ASSERT_EQ(ToU32(src->LineToByteOffset(1)), 0u);
 		TEST_ASSERT_EQ(ToU32(src->LineToByteOffset(2)), 4u);
 		TEST_ASSERT_EQ(ToU32(src->LineToByteOffset(3)), 8u);
@@ -167,7 +167,7 @@ namespace Testing
 
 	void SourceTest::TestLineToByteOffsetOutOfRange()
 	{
-		Ref<Scripting::Source> src = Scripting::Source::FromMemory("a\nb");
+		Ref<C4Compiler::Source> src = C4Compiler::Source::FromMemory("a\nb");
 		TEST_ASSERT_EQ(ToU32(src->LineToByteOffset(0)), 0u);
 		TEST_ASSERT_EQ(ToU32(src->LineToByteOffset(3)), 3u);
 		TEST_ASSERT_EQ(ToU32(src->LineToByteOffset(100)), 3u);
@@ -176,7 +176,7 @@ namespace Testing
 
 	void SourceTest::TestGetLineTextExcludesNewline()
 	{
-		Ref<Scripting::Source> src = Scripting::Source::FromMemory("one\ntwo\nthree\n");
+		Ref<C4Compiler::Source> src = C4Compiler::Source::FromMemory("one\ntwo\nthree\n");
 		TEST_ASSERT(src->GetLineText(1) == "one");
 		TEST_ASSERT(src->GetLineText(2) == "two");
 		TEST_ASSERT(src->GetLineText(3) == "three");
@@ -185,14 +185,14 @@ namespace Testing
 
 	void SourceTest::TestGetLineTextLastLineNoNewline()
 	{
-		Ref<Scripting::Source> src = Scripting::Source::FromMemory("x\ny");
+		Ref<C4Compiler::Source> src = C4Compiler::Source::FromMemory("x\ny");
 		TEST_ASSERT(src->GetLineText(2) == "y");
 		TEST_PASSED();
 	}
 
 	void SourceTest::TestGetLineTextInvalidLine()
 	{
-		Ref<Scripting::Source> src = Scripting::Source::FromMemory("a\nb");
+		Ref<C4Compiler::Source> src = C4Compiler::Source::FromMemory("a\nb");
 		TEST_ASSERT(src->GetLineText(0).empty());
 		TEST_ASSERT(src->GetLineText(3).empty());
 		TEST_PASSED();
@@ -200,7 +200,7 @@ namespace Testing
 
 	void SourceTest::TestByteOffsetToLineColumn()
 	{
-		Ref<Scripting::Source> src = Scripting::Source::FromMemory("abc\ndef\nghi");
+		Ref<C4Compiler::Source> src = C4Compiler::Source::FromMemory("abc\ndef\nghi");
 		uint32 line = 0, column = 0;
 		src->ByteOffsetToLineColumn(0, line, column);
 		TEST_ASSERT_EQ(line, 1u);
@@ -219,7 +219,7 @@ namespace Testing
 
 	void SourceTest::TestByteOffsetToLineColumnEmptySource()
 	{
-		Ref<Scripting::Source> src = Scripting::Source::FromMemory("");
+		Ref<C4Compiler::Source> src = C4Compiler::Source::FromMemory("");
 		uint32 line = 99, column = 99;
 		src->ByteOffsetToLineColumn(0, line, column);
 		TEST_ASSERT_EQ(line, 1u);
@@ -233,7 +233,7 @@ namespace Testing
 		const std::string content = "line one\nline two\n";
 		guard.path = WriteTempFile("c4_source_test_file.cf", content);
 
-		Scripting::Source src(guard.path);
+		C4Compiler::Source src(guard.path);
 		TEST_ASSERT_EQ(ToU32(src.Size()), ToU32(content.size()));
 		TEST_ASSERT(src.Text() == content);
 
@@ -246,7 +246,7 @@ namespace Testing
 
 	void SourceTest::TestFileMissingPathIsEmpty()
 	{
-		Scripting::Source src(fs::temp_directory_path() / "c4_source_test_missing_zz.cf");
+		C4Compiler::Source src(fs::temp_directory_path() / "c4_source_test_missing_zz.cf");
 		TEST_ASSERT_EQ(ToU32(src.Size()), 0u);
 		TEST_ASSERT_EQ(src.ReadCharAt(0), -1);
 		TEST_PASSED();
@@ -254,13 +254,13 @@ namespace Testing
 
 	void SourceTest::TestRegisterInMemory()
 	{
-		Scripting::SourceManager manager;
+		C4Compiler::SourceManager manager;
 		uint32 id = manager.RegisterInMemory("test.cf", "int x = 1;\n");
 		TEST_ASSERT(id != 0);
 		TEST_ASSERT(manager.HasInfo(id));
 		TEST_ASSERT_EQ(manager.Count(), 1u);
 
-		const Scripting::SourceInfo& info = manager.GetInfo(id);
+		const C4Compiler::SourceInfo& info = manager.GetInfo(id);
 		TEST_ASSERT(info.displayName == "test.cf");
 		TEST_ASSERT(info.source->GetLineText(1) == "int x = 1;");
 		TEST_PASSED();
@@ -268,7 +268,7 @@ namespace Testing
 
 	void SourceTest::TestRegisterInMemoryDuplicateName()
 	{
-		Scripting::SourceManager manager;
+		C4Compiler::SourceManager manager;
 		uint32 first = manager.RegisterInMemory("dup.cf", "one\n");
 		uint32 second = manager.RegisterInMemory("dup.cf", "two\n");
 		TEST_ASSERT(first != 0);
@@ -279,7 +279,7 @@ namespace Testing
 
 	void SourceTest::TestRegisterFileNotFound()
 	{
-		Scripting::SourceManager manager;
+		C4Compiler::SourceManager manager;
 		uint32 id = manager.RegisterFile(fs::temp_directory_path() / "c4_source_test_missing_zz.cf");
 		TEST_ASSERT_EQ(id, 0u);
 		TEST_ASSERT_EQ(manager.Count(), 0u);
@@ -288,11 +288,11 @@ namespace Testing
 
 	void SourceTest::TestSetSourceTextRebuildsLineTable()
 	{
-		Scripting::SourceManager manager;
+		C4Compiler::SourceManager manager;
 		uint32 id = manager.RegisterInMemory("edit.cf", "a\nb\nc\n");
 		manager.SetSourceText(id, "hello\nworld\n");
 
-		const Scripting::SourceInfo& info = manager.GetInfo(id);
+		const C4Compiler::SourceInfo& info = manager.GetInfo(id);
 		TEST_ASSERT_EQ(ToU32(info.source->Size()), 12u);
 		TEST_ASSERT(info.source->GetLineText(1) == "hello");
 		TEST_ASSERT(info.source->GetLineText(2) == "world");
@@ -303,7 +303,7 @@ namespace Testing
 
 	void SourceTest::TestGetLineTextThroughManager()
 	{
-		Scripting::SourceManager manager;
+		C4Compiler::SourceManager manager;
 		uint32 id = manager.RegisterInMemory("lines.cf", "first\nsecond\nthird");
 		TEST_ASSERT(manager.GetLineText(id, 1) == "first");
 		TEST_ASSERT(manager.GetLineText(id, 3) == "third");
@@ -320,7 +320,7 @@ namespace Testing
 		WriteFile(guard.path / "math.ch", "// math\n");
 		WriteFile(guard.path / "cmath.ch", "// cmath\n");
 
-		Scripting::SourceManager manager;
+		C4Compiler::SourceManager manager;
 		uint32 mathId = manager.RegisterFile(guard.path / "math.ch");
 		uint32 cmathId = manager.RegisterFile(guard.path / "cmath.ch");
 		TEST_ASSERT(mathId != 0);
@@ -340,7 +340,7 @@ namespace Testing
 		guard.path = MakeTempDir("substr");
 		WriteFile(guard.path / "cmath.ch", "// cmath\n");
 
-		Scripting::SourceManager manager;
+		C4Compiler::SourceManager manager;
 		uint32 cmathId = manager.RegisterFile(guard.path / "cmath.ch");
 		TEST_ASSERT(cmathId != 0);
 
@@ -357,7 +357,7 @@ namespace Testing
 		WriteFile(guard.path / "a/main.cf", "// main\n");
 		WriteFile(guard.path / "b/util.ch", "// util\n");
 
-		Scripting::SourceManager manager;
+		C4Compiler::SourceManager manager;
 		uint32 count = manager.RegisterFolder(guard.path);
 		TEST_ASSERT(count >= 2u);
 
@@ -381,7 +381,7 @@ namespace Testing
 		for (int i = 0; i < 40; ++i)
 			WriteFile(guard.path / (i % 2 ? "nested" : "") / ("file" + std::to_string(i) + ".cf"), "// file " + std::to_string(i) + "\n");
 
-		Scripting::SourceManager manager;
+		C4Compiler::SourceManager manager;
 		TEST_ASSERT_EQ(manager.RegisterFolder(guard.path), 40u);
 		uint32 previous = 0;
 		for (const fs::directory_entry& entry : fs::recursive_directory_iterator(guard.path))
@@ -405,7 +405,7 @@ namespace Testing
 		WriteFile(guard.path / "math/math.ch", "// math\n");
 		WriteFile(guard.path / "other/math.ch", "// other math\n");
 
-		Scripting::SourceManager manager;
+		C4Compiler::SourceManager manager;
 		uint32 count = manager.RegisterFolder(guard.path);
 		TEST_ASSERT(count >= 2u);
 

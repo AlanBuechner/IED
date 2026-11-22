@@ -9,7 +9,7 @@ extern "C" void __chkstk();
 extern "C" int _fltused;
 #endif
 
-namespace Scripting
+namespace C4Compiler
 {
 	void* SupportSymbol(const std::string& name)
 	{
@@ -46,4 +46,4 @@ namespace Scripting
 		if (void* support = SupportSymbol(name)) return support;
 		return llvm::sys::DynamicLibrary::getPermanentLibrary(nullptr).getAddressOfSymbol(name.c_str());
 	}
-} // namespace Scripting
+} // namespace C4Compiler

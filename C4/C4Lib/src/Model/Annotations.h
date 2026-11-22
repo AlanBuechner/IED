@@ -5,7 +5,7 @@
 #include "Parser/Nodes/Declarations/AnnotationNode.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 	struct Scope;
@@ -44,4 +44,4 @@ namespace Scripting
 	/// no member, or whose arguments do not fold, is said once where the label is (AnnotationCheck), not at each member.
 	QueryResult<Core::Vector<ReflectedAnnotation>> ReflectedAnnotations(const ProgramModel& model,
 		const Core::Vector<const AstNode*>& declarations, AnnotationPlace place, const Scope* scope);
-} // namespace Scripting
+} // namespace C4Compiler

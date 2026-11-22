@@ -21,7 +21,7 @@
 #include <llvm/Target/TargetMachine.h>
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -336,4 +336,4 @@ namespace Scripting
 		out.module = std::move(module);
 		return out;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -1,7 +1,7 @@
 #include "Model/Types/ClassHierarchy.h"
 #include "Model/TypeHandle.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace ClassHierarchy
 	{
@@ -165,4 +165,4 @@ namespace Scripting
 			return QueryResult<void>::Success();
 		}
 	}
-} // namespace Scripting
+} // namespace C4Compiler

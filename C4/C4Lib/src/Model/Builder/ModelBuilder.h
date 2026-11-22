@@ -4,7 +4,7 @@
 #include "Core/Core.h"
 #include <functional>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class CompilerInstance;
 	class SourceManager;
@@ -197,4 +197,4 @@ private:
 	/// (`struct { float x; float y; };`, views 0, 1, ...).
 	void ForEachUnionField(const UnionDefinitionNode& un, const std::function<void(const VariableDefinitionNode&, int view)>& visit);
 
-} // namespace Scripting
+} // namespace C4Compiler

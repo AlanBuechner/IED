@@ -1,6 +1,6 @@
 #include "Compiler/TargetSystem.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	TargetSystem HostSystem()
 	{
@@ -27,4 +27,4 @@ namespace Scripting
 	{
 		return std::string(TargetName(TargetSystem::Windows)) + ", " + TargetName(TargetSystem::Linux);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

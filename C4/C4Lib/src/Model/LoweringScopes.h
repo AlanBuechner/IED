@@ -1,7 +1,7 @@
 #pragma once
 #include "Model/ProgramModel.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	// =====================================================================
 	// LOWERING SCOPES (doc 06) - the ONLY way scopes change while a function body is lowered. RAII:
@@ -32,4 +32,4 @@ namespace Scripting
 	private:
 		friend class ProgramModel; // the only caller (public verbs delegate here)
 	};
-} // namespace Scripting
+} // namespace C4Compiler

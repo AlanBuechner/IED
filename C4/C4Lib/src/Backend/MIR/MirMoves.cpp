@@ -2,7 +2,7 @@
 #include "Backend/MIR/MirReach.h"
 #include <unordered_set>
 
-namespace Scripting
+namespace C4Compiler
 {
 	MirBuildOptions MirMoveSites::BuildOptions() const
 	{
@@ -579,4 +579,4 @@ namespace Scripting
 		MovePlan plan(fn, mir, sites, boolType);
 		for (const MirTransfer* site : moves) plan.Move(*site);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -179,21 +179,21 @@ void Server::Start() {
 		const fs::path root = fs::temp_directory_path() / ("c4_lsp_constructions_" + std::to_string(llvm::sys::Process::getProcessId()));
 		const fs::path src = root / "src";
 		const auto write = [&](const char* name, const std::string& text) {
-			Scripting::CreateFolders(Scripting::PathText((src / name).parent_path()));
-			TEST_ASSERT(Scripting::WriteFileBytes(Scripting::PathText(src / name), text));
+			C4Compiler::CreateFolders(C4Compiler::PathText((src / name).parent_path()));
+			TEST_ASSERT(C4Compiler::WriteFileBytes(C4Compiler::PathText(src / name), text));
 		};
 		write("lsp/pool.ch", "namespace Ied { class Server; class Pool { public Server* server; [operator(\"create\")] public void Init(Server* s); } }\n");
 		write("lsp/pool.cf", "include \"pool.ch\"\ninclude \"host/server.ch\"\nnamespace Ied { void Pool::Init(Server* s) { server = s; } }\n");
 		write("host/server.ch", "include \"lsp/pool.ch\"\nnamespace Ied { class Server { public Pool* pool; public void Start(); } }\n");
 		write("host/server.cf", "include \"server.ch\"\nnamespace Ied { void Server::Start() { pool = new Pool(this); } }\nint32 main() { return 0; }\n");
-		const std::string projects = Scripting::PathText(root / "projects.toml");
-		std::string folder = Scripting::PathText(src);
+		const std::string projects = C4Compiler::PathText(root / "projects.toml");
+		std::string folder = C4Compiler::PathText(src);
 		for (char& c : folder) if (c == '\\') c = '/';
-		TEST_ASSERT(Scripting::WriteFileBytes(projects, "root = \"app\"\n[[project]]\nname = \"app\"\nsources = [\"" + folder + "\"]\n"));
+		TEST_ASSERT(C4Compiler::WriteFileBytes(projects, "root = \"app\"\n[[project]]\nname = \"app\"\nsources = [\"" + folder + "\"]\n"));
 		C4LSP::Server::CompilationSession session;
 		session.SetProjectsFile(projects);
-		const std::string poolUri = C4LSP::Protocol::DocumentUri::ToUri(Scripting::PathText(src / "lsp/pool.ch"));
-		const std::string poolText = Scripting::ReadFileBytes(Scripting::PathText(src / "lsp/pool.ch"));
+		const std::string poolUri = C4LSP::Protocol::DocumentUri::ToUri(C4Compiler::PathText(src / "lsp/pool.ch"));
+		const std::string poolText = C4Compiler::ReadFileBytes(C4Compiler::PathText(src / "lsp/pool.ch"));
 		session.SetOpenDocument(poolUri, poolText);
 		session.Recompile();
 		auto uses = References::At(session, poolUri, Testing::Lsp::PositionOf(poolText, "Pool {"));
@@ -203,7 +203,7 @@ void Server::Start() {
 		TEST_ASSERT_EQ(inServerHeader, 1); // `Pool* pool`
 		TEST_ASSERT_EQ(uses.Count(), 3u);  // and `Pool::Init`, `new Pool`
 		std::error_code ec;
-		fs::remove_all(Scripting::ExtendedPath(root), ec);
+		fs::remove_all(C4Compiler::ExtendedPath(root), ec);
 		TEST_PASSED();
 	}
 } // namespace Testing

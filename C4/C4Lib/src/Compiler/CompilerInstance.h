@@ -15,7 +15,7 @@
 #include <atomic>
 #include <condition_variable>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class CompileTimeEvaluator;
 

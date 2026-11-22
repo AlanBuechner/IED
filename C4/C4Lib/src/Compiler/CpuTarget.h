@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class TargetAbi;
 
@@ -61,4 +61,4 @@ namespace Scripting
 		std::map<std::string, bool> m_Features;
 		std::vector<std::string> m_Flags;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

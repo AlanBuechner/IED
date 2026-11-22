@@ -1,7 +1,7 @@
 #include "Backend/Lowering/UseSites.h"
 #include "Model/Types/QualifiedName.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

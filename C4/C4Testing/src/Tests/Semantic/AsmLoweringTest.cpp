@@ -18,13 +18,13 @@ namespace Testing
 
 		std::string Translate(std::vector<std::string> lines)
 		{
-			auto result = Scripting::AsmTemplate::Translate(lines, IndexOf);
+			auto result = C4Compiler::AsmTemplate::Translate(lines, IndexOf);
 			return result.Ok() ? result.value : "ERROR: " + std::string(result.message.c_str());
 		}
 
 		bool Fails(std::vector<std::string> lines, const char* fragment)
 		{
-			auto result = Scripting::AsmTemplate::Translate(lines, IndexOf);
+			auto result = C4Compiler::AsmTemplate::Translate(lines, IndexOf);
 			return !result.Ok() && std::string(result.message.c_str()).find(fragment) != std::string::npos;
 		}
 	}
@@ -59,21 +59,21 @@ namespace Testing
 
 	void AsmLoweringTest::RegisterKinds()
 	{
-		using Scripting::AsmRegisters::Kind;
-		using Scripting::AsmRegisters::KindOf;
+		using C4Compiler::AsmRegisters::Kind;
+		using C4Compiler::AsmRegisters::KindOf;
 		for (const char* name : { "rax", "eax", "ax", "al", "ah", "rsp", "sil", "r8", "r15d", "r9w", "r10b" })
 			TEST_ASSERT(KindOf(name) == Kind::General);
 		for (const char* name : { "xmm0", "xmm31", "ymm7", "zmm16" })
 			TEST_ASSERT(KindOf(name) == Kind::Vector);
 		for (const char* name : { "", "eaxx", "r7", "r16", "r8q", "xmm32", "xmm01", "mm0", "zmm", "k1" })
 			TEST_ASSERT(!KindOf(name).has_value());
-		TEST_ASSERT(Scripting::AsmRegisters::CallerSaved().size() == 13);
+		TEST_ASSERT(C4Compiler::AsmRegisters::CallerSaved().size() == 13);
 		TEST_PASSED();
 	}
 
 	void AsmLoweringTest::RegisterFamilies()
 	{
-		using Scripting::AsmRegisters::Family;
+		using C4Compiler::AsmRegisters::Family;
 		TEST_ASSERT(Family("eax") == "rax" && Family("al") == "rax" && Family("ah") == "rax" && Family("ax") == "rax");
 		TEST_ASSERT(Family("sil") == "rsi" && Family("esp") == "rsp");
 		TEST_ASSERT(Family("r9d") == "r9" && Family("r12b") == "r12" && Family("r15") == "r15");

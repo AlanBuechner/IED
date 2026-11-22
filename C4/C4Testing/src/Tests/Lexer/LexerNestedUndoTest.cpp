@@ -7,36 +7,36 @@ namespace Testing
 	void LexerNestedUndoTest::TestDeepNestedUndo()
 	{
 		// Three levels of StartUndo, then unwind innermost to outermost.
-		auto stream = Scripting::Source::FromMemory("a b c d e f g");
-		Scripting::Lexer lexer(*stream, 0);
+		auto stream = C4Compiler::Source::FromMemory("a b c d e f g");
+		C4Compiler::Lexer lexer(*stream, 0);
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint A at offset 0
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint A at offset 0
 		lexer.Peek(6);              // preload all identifiers + EOF
 		lexer.NextToken();          // offset = 1
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint B at offset 1
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint B at offset 1
 		lexer.NextToken();          // offset = 2
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint C at offset 2
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint C at offset 2
 		lexer.NextToken();          // offset = 3
 
 		// Undo innermost (C) -> back to offset 2
-		Scripting::LexerTestAccess::Undo(lexer);
+		C4Compiler::LexerTestAccess::Undo(lexer);
 		auto atB = lexer.Peek();
-		TEST_ASSERT(atB.GetType() == Scripting::TokenType::Identifier);
+		TEST_ASSERT(atB.GetType() == C4Compiler::TokenType::Identifier);
 		// index 2 is "c"
 
 		// Undo middle (B) -> back to offset 1
-		Scripting::LexerTestAccess::Undo(lexer);
+		C4Compiler::LexerTestAccess::Undo(lexer);
 		auto atA = lexer.Peek();
 		// index 1 is "b"
-		TEST_ASSERT(atA.GetType() == Scripting::TokenType::Identifier);
+		TEST_ASSERT(atA.GetType() == C4Compiler::TokenType::Identifier);
 
 		// Undo outermost (A) -> back to offset 0
-		Scripting::LexerTestAccess::Undo(lexer);
+		C4Compiler::LexerTestAccess::Undo(lexer);
 		auto atStart = lexer.Peek();
 		// index 0 is "a"
-		TEST_ASSERT(atStart.GetType() == Scripting::TokenType::Identifier);
+		TEST_ASSERT(atStart.GetType() == C4Compiler::TokenType::Identifier);
 
 		// Verify the actual token text values are correct
 		TEST_ASSERT(atStart.GetText() == "a");
@@ -46,20 +46,20 @@ namespace Testing
 	void LexerNestedUndoTest::TestNestedUndoThenAdvanceAgain()
 	{
 		// Undo to middle checkpoint, then advance further within outer context.
-		auto stream = Scripting::Source::FromMemory("a b c d e");
-		Scripting::Lexer lexer(*stream, 0);
+		auto stream = C4Compiler::Source::FromMemory("a b c d e");
+		C4Compiler::Lexer lexer(*stream, 0);
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint A at offset 0
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint A at offset 0
 		lexer.Peek(4);              // preload all identifiers + EOF
 		lexer.NextToken();          // offset = 1
 		lexer.NextToken();          // offset = 2
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint B at offset 2
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint B at offset 2
 		lexer.NextToken();          // offset = 3
 		lexer.NextToken();          // offset = 4
 
 		// Undo to checkpoint B (offset 2)
-		Scripting::LexerTestAccess::Undo(lexer);
+		C4Compiler::LexerTestAccess::Undo(lexer);
 		auto atB = lexer.Peek();
 		TEST_ASSERT(atB.GetText() == "c");
 
@@ -69,7 +69,7 @@ namespace Testing
 		TEST_ASSERT(afterAdvance.GetText() == "d");
 
 		// Undo to checkpoint A (offset 0)
-		Scripting::LexerTestAccess::Undo(lexer);
+		C4Compiler::LexerTestAccess::Undo(lexer);
 		auto atA = lexer.Peek();
 		TEST_ASSERT(atA.GetText() == "a");
 		TEST_PASSED();
@@ -78,21 +78,21 @@ namespace Testing
 	void LexerNestedUndoTest::TestNestedApplyUndo()
 	{
 		// Two levels: apply inner, tokens up to current offset are discarded.
-		auto stream = Scripting::Source::FromMemory("a b c d e f");
-		Scripting::Lexer lexer(*stream, 0);
+		auto stream = C4Compiler::Source::FromMemory("a b c d e f");
+		C4Compiler::Lexer lexer(*stream, 0);
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint A at offset 0
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint A at offset 0
 		lexer.Peek(5);              // preload all identifiers + EOF
 		lexer.NextToken();          // offset = 1
 		lexer.NextToken();          // offset = 2
 		lexer.NextToken();          // offset = 3
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint B at offset 3
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint B at offset 3
 		lexer.NextToken();          // offset = 4
 		lexer.NextToken();          // offset = 5
 
 		// Apply inner (B): pops B, discards 5 tokens from front, offset = 0
-		Scripting::LexerTestAccess::ApplyUndo(lexer);
+		C4Compiler::LexerTestAccess::ApplyUndo(lexer);
 
 		// Remaining deque starts at original index 5 ("f")
 		auto current = lexer.Peek();
@@ -103,21 +103,21 @@ namespace Testing
 	void LexerNestedUndoTest::TestDeepNestedApplyUndo()
 	{
 		// Three levels: apply innermost, verify remaining tokens.
-		auto stream = Scripting::Source::FromMemory("a b c d e f g h");
-		Scripting::Lexer lexer(*stream, 0);
+		auto stream = C4Compiler::Source::FromMemory("a b c d e f g h");
+		C4Compiler::Lexer lexer(*stream, 0);
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint A at offset 0
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint A at offset 0
 		lexer.Peek(7);              // preload all identifiers + EOF
 		lexer.NextToken();          // offset = 1
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint B at offset 1
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint B at offset 1
 		lexer.NextToken();          // offset = 2
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint C at offset 2
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint C at offset 2
 		lexer.NextToken();          // offset = 3
 
 		// Apply innermost (C): pops C, discards 3 tokens from front, offset = 0
-		Scripting::LexerTestAccess::ApplyUndo(lexer);
+		C4Compiler::LexerTestAccess::ApplyUndo(lexer);
 
 		// Remaining deque starts at original index 3 ("d")
 		auto current = lexer.Peek();
@@ -125,11 +125,11 @@ namespace Testing
 
 		// Outer checkpoints B and A are still on the stack but offset is 0,
 		// so further ApplyUndo calls are no-ops for discarding.
-		Scripting::LexerTestAccess::ApplyUndo(lexer);          // apply B: pops B, offset=0 -> no discard
+		C4Compiler::LexerTestAccess::ApplyUndo(lexer);          // apply B: pops B, offset=0 -> no discard
 		auto afterB = lexer.Peek();
 		TEST_ASSERT(afterB.GetText() == "d");
 
-		Scripting::LexerTestAccess::ApplyUndo(lexer);          // apply A: pops A, offset=0 -> no discard
+		C4Compiler::LexerTestAccess::ApplyUndo(lexer);          // apply A: pops A, offset=0 -> no discard
 		auto afterA = lexer.Peek();
 		TEST_ASSERT(afterA.GetText() == "d");
 		TEST_PASSED();
@@ -138,26 +138,26 @@ namespace Testing
 	void LexerNestedUndoTest::TestUndoInnerThenApplyOuter()
 	{
 		// Undo to inner checkpoint, then apply outer checkpoint.
-		auto stream = Scripting::Source::FromMemory("a b c d e f");
-		Scripting::Lexer lexer(*stream, 0);
+		auto stream = C4Compiler::Source::FromMemory("a b c d e f");
+		C4Compiler::Lexer lexer(*stream, 0);
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint A at offset 0
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint A at offset 0
 		lexer.Peek(5);              // preload all identifiers + EOF
 		lexer.NextToken();          // offset = 1
 		lexer.NextToken();          // offset = 2
 		lexer.NextToken();          // offset = 3
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint B at offset 3
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint B at offset 3
 		lexer.NextToken();          // offset = 4
 		lexer.NextToken();          // offset = 5
 
 		// Undo to inner checkpoint B (offset 3)
-		Scripting::LexerTestAccess::Undo(lexer);               // offset = 3, stack: [0]
+		C4Compiler::LexerTestAccess::Undo(lexer);               // offset = 3, stack: [0]
 		auto atB = lexer.Peek();
 		TEST_ASSERT(atB.GetText() == "d");
 
 		// Apply outer checkpoint A: pops A, discards m_UndoOffset (3) tokens, offset = 0
-		Scripting::LexerTestAccess::ApplyUndo(lexer);
+		C4Compiler::LexerTestAccess::ApplyUndo(lexer);
 		auto afterApply = lexer.Peek();
 		// Tokens at original indices 0,1,2 were discarded; index 3 ("d") is now at front
 		TEST_ASSERT(afterApply.GetText() == "d");
@@ -167,26 +167,26 @@ namespace Testing
 	void LexerNestedUndoTest::TestApplyInnerThenApplyOuter()
 	{
 		// Apply inner checkpoint first, then apply outer checkpoint.
-		auto stream = Scripting::Source::FromMemory("a b c d e f");
-		Scripting::Lexer lexer(*stream, 0);
+		auto stream = C4Compiler::Source::FromMemory("a b c d e f");
+		C4Compiler::Lexer lexer(*stream, 0);
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint A at offset 0
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint A at offset 0
 		lexer.Peek(5);              // preload all identifiers + EOF
 		lexer.NextToken();          // offset = 1
 		lexer.NextToken();          // offset = 2
 		lexer.NextToken();          // offset = 3
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint B at offset 3
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint B at offset 3
 		lexer.NextToken();          // offset = 4
 		lexer.NextToken();          // offset = 5
 
 		// Apply inner (B): pops B, discards 5 tokens from front, offset = 0, stack: [0]
-		Scripting::LexerTestAccess::ApplyUndo(lexer);
+		C4Compiler::LexerTestAccess::ApplyUndo(lexer);
 		auto afterInner = lexer.Peek();
 		TEST_ASSERT(afterInner.GetText() == "f");
 
 		// Apply outer (A): pops A, offset is 0 so no discard, stack: []
-		Scripting::LexerTestAccess::ApplyUndo(lexer);
+		C4Compiler::LexerTestAccess::ApplyUndo(lexer);
 		auto afterOuter = lexer.Peek();
 		TEST_ASSERT(afterOuter.GetText() == "f");
 		TEST_PASSED();
@@ -195,21 +195,21 @@ namespace Testing
 	void LexerNestedUndoTest::TestPeekLookaheadAfterNestedUndo()
 	{
 		// Verify Peek with lookahead offset works correctly after nested undo.
-		auto stream = Scripting::Source::FromMemory("a b c d e f");
-		Scripting::Lexer lexer(*stream, 0);
+		auto stream = C4Compiler::Source::FromMemory("a b c d e f");
+		C4Compiler::Lexer lexer(*stream, 0);
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint A at offset 0
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint A at offset 0
 		lexer.Peek(5);              // preload all identifiers + EOF
 		lexer.NextToken();          // offset = 1
 		lexer.NextToken();          // offset = 2
 		lexer.NextToken();          // offset = 3
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint B at offset 3
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint B at offset 3
 		lexer.NextToken();          // offset = 4
 		lexer.NextToken();          // offset = 5
 
 		// Undo to inner checkpoint B (offset 3)
-		Scripting::LexerTestAccess::Undo(lexer);               // offset = 3, stack: [0]
+		C4Compiler::LexerTestAccess::Undo(lexer);               // offset = 3, stack: [0]
 
 		// Peek lookahead from restored position (offset 3)
 		auto peek0 = lexer.Peek(0); // index 0 + offset 3 = "d"
@@ -225,24 +225,24 @@ namespace Testing
 	void LexerNestedUndoTest::TestUndoToMiddleThenAdvanceThenUndoOuter()
 	{
 		// Three levels: undo innermost, advance further, then undo to outermost.
-		auto stream = Scripting::Source::FromMemory("a b c d e f g");
-		Scripting::Lexer lexer(*stream, 0);
+		auto stream = C4Compiler::Source::FromMemory("a b c d e f g");
+		C4Compiler::Lexer lexer(*stream, 0);
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint A at offset 0
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint A at offset 0
 		lexer.Peek(6);              // preload all identifiers + EOF
 		lexer.NextToken();          // offset = 1
 		lexer.NextToken();          // offset = 2
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint B at offset 2
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint B at offset 2
 		lexer.NextToken();          // offset = 3
 		lexer.NextToken();          // offset = 4
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint C at offset 4
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint C at offset 4
 		lexer.NextToken();          // offset = 5
 		lexer.NextToken();          // offset = 6
 
 		// Undo innermost (C) -> offset = 4
-		Scripting::LexerTestAccess::Undo(lexer);
+		C4Compiler::LexerTestAccess::Undo(lexer);
 		auto atC = lexer.Peek();
 		TEST_ASSERT(atC.GetText() == "e");
 
@@ -252,12 +252,12 @@ namespace Testing
 		TEST_ASSERT(advanced.GetText() == "f");
 
 		// Undo to middle (B) -> offset = 2
-		Scripting::LexerTestAccess::Undo(lexer);
+		C4Compiler::LexerTestAccess::Undo(lexer);
 		auto atB = lexer.Peek();
 		TEST_ASSERT(atB.GetText() == "c");
 
 		// Undo to outermost (A) -> offset = 0
-		Scripting::LexerTestAccess::Undo(lexer);
+		C4Compiler::LexerTestAccess::Undo(lexer);
 		auto atA = lexer.Peek();
 		TEST_ASSERT(atA.GetText() == "a");
 		TEST_PASSED();
@@ -266,21 +266,21 @@ namespace Testing
 	void LexerNestedUndoTest::TestNestedUndoWithGetNextToken()
 	{
 		// Use GetNextToken (Peek + NextToken combined) within nested undo context.
-		auto stream = Scripting::Source::FromMemory("a b c d e");
-		Scripting::Lexer lexer(*stream, 0);
+		auto stream = C4Compiler::Source::FromMemory("a b c d e");
+		C4Compiler::Lexer lexer(*stream, 0);
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint A at offset 0
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint A at offset 0
 		lexer.Peek(4);              // preload all identifiers + EOF
 
 		auto t1 = lexer.NextCompoundToken(); // Peek + NextToken, offset = 1
 		TEST_ASSERT(t1.GetText() == "a");
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint B at offset 1
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint B at offset 1
 		auto t2 = lexer.NextCompoundToken(); // Peek + NextToken, offset = 2
 		TEST_ASSERT(t2.GetText() == "b");
 
 		// Undo to checkpoint B (offset 1)
-		Scripting::LexerTestAccess::Undo(lexer);
+		C4Compiler::LexerTestAccess::Undo(lexer);
 
 		auto t3 = lexer.NextCompoundToken(); // returns token at offset 1 ("b"), then offset = 2
 		TEST_ASSERT(t3.GetText() == "b");
@@ -293,32 +293,32 @@ namespace Testing
 	void LexerNestedUndoTest::TestTokensAccessibleAfterFullNestedUndoChain()
 	{
 		// Full undo chain then verify all original tokens remain accessible.
-		auto stream = Scripting::Source::FromMemory("a b c d e f g h i j");
-		Scripting::Lexer lexer(*stream, 0);
+		auto stream = C4Compiler::Source::FromMemory("a b c d e f g h i j");
+		C4Compiler::Lexer lexer(*stream, 0);
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint A at offset 0
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint A at offset 0
 		lexer.Peek(9);              // preload all identifiers + EOF
 		lexer.NextToken();          // offset = 1
 		lexer.NextToken();          // offset = 2
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint B at offset 2
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint B at offset 2
 		lexer.NextToken();          // offset = 3
 		lexer.NextToken();          // offset = 4
 
-		Scripting::LexerTestAccess::StartUndo(lexer);          // checkpoint C at offset 4
+		C4Compiler::LexerTestAccess::StartUndo(lexer);          // checkpoint C at offset 4
 		lexer.NextToken();          // offset = 5
 		lexer.NextToken();          // offset = 6
 
 		// Undo all the way back through each level
-		Scripting::LexerTestAccess::Undo(lexer);               // C -> offset = 4
+		C4Compiler::LexerTestAccess::Undo(lexer);               // C -> offset = 4
 		auto atC = lexer.Peek();
 		TEST_ASSERT(atC.GetText() == "e");
 
-		Scripting::LexerTestAccess::Undo(lexer);               // B -> offset = 2
+		C4Compiler::LexerTestAccess::Undo(lexer);               // B -> offset = 2
 		auto atB = lexer.Peek();
 		TEST_ASSERT(atB.GetText() == "c");
 
-		Scripting::LexerTestAccess::Undo(lexer);               // A -> offset = 0
+		C4Compiler::LexerTestAccess::Undo(lexer);               // A -> offset = 0
 		auto atA = lexer.Peek();
 		TEST_ASSERT(atA.GetText() == "a");
 

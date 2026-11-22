@@ -3,7 +3,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// What MirMoves may elaborate later: the cleanups whose every copy is entered through a drop guard, and the blocks
 	/// whose start is noted (where a variable without a declaration begins).
@@ -135,4 +135,4 @@ namespace Scripting
 		std::vector<Label> m_Labels;
 		MirBlockId m_FinalReturn = c_MirNone;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

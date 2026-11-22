@@ -1,7 +1,7 @@
 #pragma once
 #include "Model/Types/Type.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The invalid/unknown type sentinel. Has no size or name beyond "<invalid>".
 	class InvalidType : public Type
@@ -11,4 +11,4 @@ namespace Scripting
 		Core::String GetName() const override { return "<invalid>"; }
 		Core::String ToString() const override { return "<invalid>"; }
 	};
-} // namespace Scripting
+} // namespace C4Compiler

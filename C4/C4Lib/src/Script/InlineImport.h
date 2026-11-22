@@ -9,7 +9,7 @@
 
 namespace llvm { class LLVMContext; class Module; }
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// How many calls deep a script takes the host's inline bodies: the functions it calls, then the ones those call.
 	/// Each body taken is work for the optimizer, and one further down is rarely inlined into the script.
@@ -57,4 +57,4 @@ namespace Scripting
 	/// read or link.
 	bool ImportInlineBodies(llvm::Module& script, const std::vector<std::string>& chunks, InlineBodyIndex& index,
 		std::vector<std::string>& imported, std::string& error);
-} // namespace Scripting
+} // namespace C4Compiler

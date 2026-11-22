@@ -2,7 +2,7 @@
 #include "Backend/HIR/ImplicitConversion.h"
 #include "Backend/HIR/SimdOperands.h"
 
-namespace Scripting::BitIntrinsics
+namespace C4Compiler::BitIntrinsics
 {
 	using namespace SimdOperands;
 
@@ -89,4 +89,4 @@ namespace Scripting::BitIntrinsics
 		const Type* type = ResultType(call, form, first);
 		return Value::R(ctx.out->NewNode<IntrinsicOpNode>(type, form.op, first.node, second), type);
 	}
-} // namespace Scripting::BitIntrinsics
+} // namespace C4Compiler::BitIntrinsics

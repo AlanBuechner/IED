@@ -6,17 +6,17 @@ namespace Testing
 {
 	void TemplateDefinitionTest::TestSingleTypeParam()
 	{
-		auto stream = Scripting::Source::FromMemory("template<T>");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("template<T>");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::TemplateDefinitionNode::TryParse(state);
+		auto node = C4Compiler::TemplateDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->ParameterCount() == 1);
 		{
 			auto param = node->GetParameter(0);
-			TEST_ASSERT(param->Kind() == Scripting::TemplateParameterKind::Type);
+			TEST_ASSERT(param->Kind() == C4Compiler::TemplateParameterKind::Type);
 			TEST_ASSERT(param->GetName() == "T");
 		}
 		TEST_ASSERT(node->ToString() == "template<T>");
@@ -25,12 +25,12 @@ namespace Testing
 
 	void TemplateDefinitionTest::TestMultipleParams()
 	{
-		auto stream = Scripting::Source::FromMemory("template<T, U>");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("template<T, U>");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::TemplateDefinitionNode::TryParse(state);
+		auto node = C4Compiler::TemplateDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->ParameterCount() == 2);
 		{
@@ -45,17 +45,17 @@ namespace Testing
 
 	void TemplateDefinitionTest::TestNonTypeParam()
 	{
-		auto stream = Scripting::Source::FromMemory("template<uint32 I>");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("template<uint32 I>");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::TemplateDefinitionNode::TryParse(state);
+		auto node = C4Compiler::TemplateDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->ParameterCount() == 1);
 		{
 			auto param = node->GetParameter(0);
-			TEST_ASSERT(param->Kind() == Scripting::TemplateParameterKind::NonType);
+			TEST_ASSERT(param->Kind() == C4Compiler::TemplateParameterKind::NonType);
 			TEST_ASSERT(param->GetName() == "I");
 		}
 		TEST_ASSERT(node->ToString() == "template<uint32 I>");
@@ -64,20 +64,20 @@ namespace Testing
 
 	void TemplateDefinitionTest::TestMixedParams()
 	{
-		auto stream = Scripting::Source::FromMemory("template<T, uint32 I>");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("template<T, uint32 I>");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::TemplateDefinitionNode::TryParse(state);
+		auto node = C4Compiler::TemplateDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->ParameterCount() == 2);
 		{
 			auto param0 = node->GetParameter(0);
 			auto param1 = node->GetParameter(1);
-			TEST_ASSERT(param0->Kind() == Scripting::TemplateParameterKind::Type);
+			TEST_ASSERT(param0->Kind() == C4Compiler::TemplateParameterKind::Type);
 			TEST_ASSERT(param0->GetName() == "T");
-			TEST_ASSERT(param1->Kind() == Scripting::TemplateParameterKind::NonType);
+			TEST_ASSERT(param1->Kind() == C4Compiler::TemplateParameterKind::NonType);
 			TEST_ASSERT(param1->GetName() == "I");
 		}
 		TEST_ASSERT(node->ToString() == "template<T, uint32 I>");
@@ -86,17 +86,17 @@ namespace Testing
 
 	void TemplateDefinitionTest::TestTypenameKeyword()
 	{
-		auto stream = Scripting::Source::FromMemory("template<typename T>");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("template<typename T>");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::TemplateDefinitionNode::TryParse(state);
+		auto node = C4Compiler::TemplateDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->ParameterCount() == 1);
 		{
 			auto param = node->GetParameter(0);
-			TEST_ASSERT(param->Kind() == Scripting::TemplateParameterKind::Type);
+			TEST_ASSERT(param->Kind() == C4Compiler::TemplateParameterKind::Type);
 			TEST_ASSERT(param->GetName() == "T");
 		}
 		TEST_ASSERT(node->ToString() == "template<typename T>");
@@ -105,17 +105,17 @@ namespace Testing
 
 	void TemplateDefinitionTest::TestClassKeyword()
 	{
-		auto stream = Scripting::Source::FromMemory("template<class T>");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("template<class T>");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::TemplateDefinitionNode::TryParse(state);
+		auto node = C4Compiler::TemplateDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->ParameterCount() == 1);
 		{
 			auto param = node->GetParameter(0);
-			TEST_ASSERT(param->Kind() == Scripting::TemplateParameterKind::Type);
+			TEST_ASSERT(param->Kind() == C4Compiler::TemplateParameterKind::Type);
 			TEST_ASSERT(param->GetName() == "T");
 		}
 		TEST_ASSERT(node->ToString() == "template<class T>");
@@ -124,17 +124,17 @@ namespace Testing
 
 	void TemplateDefinitionTest::TestVariadicType()
 	{
-		auto stream = Scripting::Source::FromMemory("template<...T>");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("template<...T>");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::TemplateDefinitionNode::TryParse(state);
+		auto node = C4Compiler::TemplateDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->ParameterCount() == 1);
 		{
 			auto param = node->GetParameter(0);
-			TEST_ASSERT(param->Kind() == Scripting::TemplateParameterKind::VariadicType);
+			TEST_ASSERT(param->Kind() == C4Compiler::TemplateParameterKind::VariadicType);
 			TEST_ASSERT(param->GetName() == "T");
 		}
 		TEST_ASSERT(node->ToString() == "template<...typename T>");
@@ -143,17 +143,17 @@ namespace Testing
 
 	void TemplateDefinitionTest::TestVariadicNonType()
 	{
-		auto stream = Scripting::Source::FromMemory("template<...uint32 I>");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("template<...uint32 I>");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::TemplateDefinitionNode::TryParse(state);
+		auto node = C4Compiler::TemplateDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->ParameterCount() == 1);
 		{
 			auto param = node->GetParameter(0);
-			TEST_ASSERT(param->Kind() == Scripting::TemplateParameterKind::VariadicNonType);
+			TEST_ASSERT(param->Kind() == C4Compiler::TemplateParameterKind::VariadicNonType);
 			TEST_ASSERT(param->GetName() == "I");
 		}
 		TEST_ASSERT(node->ToString() == "template<...uint32 I>");
@@ -162,12 +162,12 @@ namespace Testing
 
 	void TemplateDefinitionTest::TestNoTemplateAtStart()
 	{
-		auto stream = Scripting::Source::FromMemory("class Foo");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("class Foo");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::TemplateDefinitionNode::TryParse(state);
+		auto node = C4Compiler::TemplateDefinitionNode::TryParse(state);
 		TEST_ASSERT(node == nullptr);
 		// No tokens consumed
 		TEST_ASSERT(lexer.Peek().GetText() == "class");
@@ -176,12 +176,12 @@ namespace Testing
 
 	void TemplateDefinitionTest::TestMissingCloseAngle()
 	{
-		auto stream = Scripting::Source::FromMemory("template<T;");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("template<T;");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::TemplateDefinitionNode::TryParse(state);
+		auto node = C4Compiler::TemplateDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->ParameterCount() == 1);
 		{

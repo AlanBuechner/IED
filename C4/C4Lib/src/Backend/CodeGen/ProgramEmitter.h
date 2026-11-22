@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 
@@ -86,4 +86,4 @@ namespace Scripting
 		std::vector<std::pair<const char*, double>> m_StepSeconds;
 		std::vector<std::pair<const SymbolInfo*, const Scope*>> m_OutOfScope; // globals out of reflection's scope, not yet defined
 	};
-} // namespace Scripting
+} // namespace C4Compiler

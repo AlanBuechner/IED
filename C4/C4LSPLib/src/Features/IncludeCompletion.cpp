@@ -174,8 +174,8 @@ namespace C4LSP::Features
 
 	Core::Vector<CompletionItem> IncludeCompletion::Items(const Server::CompilationSession& session, const std::string& uri, const Site& site)
 	{
-		const Scripting::SourceManager& sources = session.GetSourceManager();
-		const Scripting::ProjectSet& projects = sources.Projects();
+		const C4Compiler::SourceManager& sources = session.GetSourceManager();
+		const C4Compiler::ProjectSet& projects = sources.Projects();
 		const fs::path file = PathOf(Protocol::DocumentUri::FromUri(uri)).lexically_normal();
 		const std::string fileKey = Key(file);
 		const fs::path library = sources.LibraryRoot().empty() ? fs::path() : PathOf(sources.LibraryRoot());

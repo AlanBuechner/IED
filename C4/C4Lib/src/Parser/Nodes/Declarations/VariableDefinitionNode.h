@@ -6,7 +6,7 @@
 #include "AnnotationNode.h"
 #include "QualTypeNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 
 	/// One declarator in a variable definition's comma list: `int a = 1, b = 2;` has two.

@@ -10,7 +10,7 @@
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -278,4 +278,4 @@ namespace Scripting
 	{
 		binding->Register(param.GetName(), SymbolOf(arg));
 	}
-} // namespace Scripting
+} // namespace C4Compiler

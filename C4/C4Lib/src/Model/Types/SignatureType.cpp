@@ -1,7 +1,7 @@
 #include "Model/Types/SignatureType.h"
 #include "Model/Types/AliasType.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	SignatureType::SignatureType(TypeKind kind, const char* former, const Type* returnType, const Core::Vector<const Type*>& paramTypes)
 		: Type(kind), m_Former(former), m_ReturnType(returnType), m_ParameterTypes(paramTypes)
@@ -39,4 +39,4 @@ namespace Scripting
 			if (WithoutAliases(params[i]) != WithoutAliases(m_ParameterTypes[i])) return false;
 		return true;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

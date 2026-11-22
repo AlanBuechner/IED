@@ -3,7 +3,7 @@
 #include "Model/Templates/TemplateArguments.h"
 #include "Model/Templates/PartialOrdering.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The specialization a template's instance uses (docs/language/08 7, D-20).
 	class Specializations
@@ -42,4 +42,4 @@ namespace Scripting
 		static bool SamePattern(const ProgramModel::TemplateDef& a, const ProgramModel::TemplateDef& b);
 		static Core::String Spelled(const Core::String& name, const ProgramModel::TemplateDef& spec);
 	};
-} // namespace Scripting
+} // namespace C4Compiler

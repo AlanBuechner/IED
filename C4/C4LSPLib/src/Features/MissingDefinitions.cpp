@@ -13,11 +13,11 @@
 
 namespace C4LSP::Features
 {
-	using Scripting::AstNode;
-	using Scripting::FunctionDefinitionNode;
-	using Scripting::FunctionRecord;
-	using Scripting::NodeType;
-	using Scripting::ObjectDefinitionNode;
+	using C4Compiler::AstNode;
+	using C4Compiler::FunctionDefinitionNode;
+	using C4Compiler::FunctionRecord;
+	using C4Compiler::NodeType;
+	using C4Compiler::ObjectDefinitionNode;
 
 	// On by default, as Visual Studio's; the client may turn it off (`missingDefinitions`), on the message thread while the
 	// worker publishes (BUG-492): atomic.
@@ -42,7 +42,7 @@ namespace C4LSP::Features
 				return false; // a body, or no plain name of its own to define
 			if (function.IsPureVirtual())
 				return false; // `abstract` or `= 0`
-			return !owner || owner->Kind() != Scripting::ObjectKind::Interface;
+			return !owner || owner->Kind() != C4Compiler::ObjectKind::Interface;
 		}
 
 		// The declarations without a body a file writes: at its namespaces' scope and in its types' bodies, never in a
@@ -97,7 +97,7 @@ namespace C4LSP::Features
 		bool HasCode(const Core::Vector<const FunctionRecord*>& records)
 		{
 			for (const FunctionRecord* record : records)
-				if (Scripting::HasCode(*record) || record->isBuiltin)
+				if (C4Compiler::HasCode(*record) || record->isBuiltin)
 					return true;
 			return false;
 		}
@@ -201,7 +201,7 @@ namespace C4LSP::Features
 
 	Protocol::Range MissingDefinitions::NameRange(const Server::CompilationSession& session, const FunctionDefinitionNode& declaration)
 	{
-		const Scripting::Token& name = declaration.GetName()->GetLastIdentifierToken();
+		const C4Compiler::Token& name = declaration.GetName()->GetLastIdentifierToken();
 		return session.ToEditorRange(name.GetStartLocation().sourceId, name.GetStartLocation(), name.GetEndLocation());
 	}
 

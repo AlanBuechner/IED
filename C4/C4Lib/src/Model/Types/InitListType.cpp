@@ -1,7 +1,7 @@
 #include "Model/Types/InitListType.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	InitListType::InitListType(const Type* elementType)
 		: Type(TypeKind::InitList), m_ElementType(elementType)
@@ -32,4 +32,4 @@ namespace Scripting
 		if (name == "size") return &m_Size_;
 		return nullptr;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

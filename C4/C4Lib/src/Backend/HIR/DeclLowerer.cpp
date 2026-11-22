@@ -23,7 +23,7 @@
 #include "Model/Types/SwizzleType.h"
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -385,4 +385,4 @@ namespace Scripting
 		LValue lv; lv.kind = LValue::Kind::Slot; lv.type = type; lv.slot = slot;
 		return m_Ctx.NewLValue(lv);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

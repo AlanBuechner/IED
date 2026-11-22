@@ -102,7 +102,7 @@ namespace C4LSP::Features
 		// (GetAllDiagnostics) plus body-level HIR-lowering type errors (GetLoweringDiagnostics). Both are
 		// computed by the compiler itself - the LSP adds no error logic of its own - so what the editor
 		// shows is exactly what C4.exe would report for this project.
-		auto push = [&](const Scripting::CompilationError& error) {
+		auto push = [&](const C4Compiler::CompilationError& error) {
 			if (error.location.sourceId != targetId)
 				return;
 			Protocol::Diagnostic diag = ToLsp(session, error, targetId);
@@ -122,7 +122,7 @@ namespace C4LSP::Features
 		return result;
 	}
 
-	Protocol::Diagnostic Diagnostics::ToLsp(Server::CompilationSession& session, const Scripting::CompilationError& error, uint32 sourceId)
+	Protocol::Diagnostic Diagnostics::ToLsp(Server::CompilationSession& session, const C4Compiler::CompilationError& error, uint32 sourceId)
 	{
 		Protocol::Diagnostic diag;
 		diag.range = session.ToEditorRange(sourceId, error.location, error.location); // point range
@@ -132,13 +132,13 @@ namespace C4LSP::Features
 		return diag;
 	}
 
-	Protocol::DiagnosticSeverity Diagnostics::SeverityToLsp(Scripting::ErrorSeverity severity)
+	Protocol::DiagnosticSeverity Diagnostics::SeverityToLsp(C4Compiler::ErrorSeverity severity)
 	{
 		switch (severity)
 		{
-		case Scripting::ErrorSeverity::Warning: return Protocol::DiagnosticSeverity::Warning;
-		case Scripting::ErrorSeverity::Fatal:
-		case Scripting::ErrorSeverity::Error:   return Protocol::DiagnosticSeverity::Error;
+		case C4Compiler::ErrorSeverity::Warning: return Protocol::DiagnosticSeverity::Warning;
+		case C4Compiler::ErrorSeverity::Fatal:
+		case C4Compiler::ErrorSeverity::Error:   return Protocol::DiagnosticSeverity::Error;
 		default:                                 return Protocol::DiagnosticSeverity::Information;
 		}
 	}

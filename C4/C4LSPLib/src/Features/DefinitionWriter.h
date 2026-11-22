@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-namespace Scripting { struct AstNode; struct FunctionDefinitionNode; struct FunctionRecord; struct ObjectDefinitionNode; }
+namespace C4Compiler { struct AstNode; struct FunctionDefinitionNode; struct FunctionRecord; struct ObjectDefinitionNode; }
 
 namespace C4LSP::Server { class CompilationSession; }
 
@@ -31,7 +31,7 @@ namespace C4LSP::Features
 	struct DeclarationOwners
 	{
 		std::vector<std::string> namespaces;
-		std::vector<const Scripting::ObjectDefinitionNode*> types;
+		std::vector<const C4Compiler::ObjectDefinitionNode*> types;
 	};
 
 	/// Writes the definition of a function declared without a body, from the declaration as written: its return type,
@@ -49,18 +49,18 @@ namespace C4LSP::Features
 		static WrittenDefinition InPlaceBody(Server::CompilationSession& session, const MissingDefinition& missing, const DefinitionStyle& style);
 		/// The statement a new body starts with: `return 0;` for an int32, nothing for void, a reference, or a type an
 		/// instance of a template decides.
-		static std::string DefaultReturn(const Scripting::FunctionRecord* record, std::string_view writtenReturnType, bool templated);
+		static std::string DefaultReturn(const C4Compiler::FunctionRecord* record, std::string_view writtenReturnType, bool templated);
 
-		static DeclarationOwners OwnersOf(Server::CompilationSession& session, const Scripting::FunctionDefinitionNode& declaration);
+		static DeclarationOwners OwnersOf(Server::CompilationSession& session, const C4Compiler::FunctionDefinitionNode& declaration);
 		/// The text a node was parsed from.
-		static std::string TextOf(Server::CompilationSession& session, const Scripting::AstNode& node);
+		static std::string TextOf(Server::CompilationSession& session, const C4Compiler::AstNode& node);
 
 	private:
 		static std::string Signature(Server::CompilationSession& session, const MissingDefinition& missing, const DeclarationOwners& owners,
 			const std::vector<std::string>& namespaces, const DefinitionStyle& style);
-		static std::string Parameters(Server::CompilationSession& session, const Scripting::FunctionDefinitionNode& declaration);
-		static std::string TrailingQualifiers(Server::CompilationSession& session, const Scripting::FunctionDefinitionNode& declaration);
+		static std::string Parameters(Server::CompilationSession& session, const C4Compiler::FunctionDefinitionNode& declaration);
+		static std::string TrailingQualifiers(Server::CompilationSession& session, const C4Compiler::FunctionDefinitionNode& declaration);
 		static WrittenDefinition Body(const std::string& opening, const DefinitionStyle& style, const std::string& statement);
-		static bool IsTemplated(const Scripting::FunctionDefinitionNode& declaration, const DeclarationOwners& owners);
+		static bool IsTemplated(const C4Compiler::FunctionDefinitionNode& declaration, const DeclarationOwners& owners);
 	};
 } // namespace C4LSP::Features

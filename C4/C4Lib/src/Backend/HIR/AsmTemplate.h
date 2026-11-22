@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting::AsmTemplate
+namespace C4Compiler::AsmTemplate
 {
 	/// The LLVM inline-assembly template of an `asm` block's lines (docs/language/16): the lines joined by newlines,
 	/// `{name}` and `{name:m}` (or `{0}`, `{1:m}` by position) replaced by `${index}` / `${index:m}` through

@@ -7,7 +7,7 @@
 #include "Model/TypeHandle.h"
 #include "Model/Types/ClassHierarchy.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	QueryResult<void> Lifecycle::LowerSynthesized(const FunctionRecord* rec, BlockNode* root)
 	{
@@ -140,4 +140,4 @@ namespace Scripting
 		for (auto it = fields.rbegin(); it != fields.rend(); ++it) DestroyNow(region, FieldOf(object, **it));
 		if (const ObjectType* base = LifecycleFacts::ClassBase(type)) DestroyNow(region, BaseOf(object, type, base));
 	}
-} // namespace Scripting
+} // namespace C4Compiler

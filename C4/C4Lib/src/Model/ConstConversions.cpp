@@ -7,7 +7,7 @@
 #include <cmath>
 #include <cstdio>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

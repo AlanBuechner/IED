@@ -1,7 +1,7 @@
 #pragma once
 #include "Backend/HIR/LoweringContext.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class SignatureType;
 

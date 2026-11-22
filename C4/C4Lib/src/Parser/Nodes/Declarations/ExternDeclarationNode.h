@@ -4,7 +4,7 @@
 #include "Lexer/Token.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Represents a C/C++ interop declaration in C4 source.
 	///

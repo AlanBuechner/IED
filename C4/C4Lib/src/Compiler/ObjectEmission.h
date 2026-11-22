@@ -9,9 +9,9 @@
 
 namespace llvm { class LLVMContext; class Module; }
 
-namespace Scripting { class ObjectCache; }
+namespace C4Compiler { class ObjectCache; }
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// How a finished module becomes object files inside the compiler (roadmap 5.1): LLVM's default optimization
 	/// pipeline at the `-O` level, as `clang -O<n>` runs it, then the X86 backend writes COFF objects.

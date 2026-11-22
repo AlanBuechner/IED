@@ -9,7 +9,7 @@ namespace Testing
 {
 	namespace
 	{
-		using namespace Scripting;
+		using namespace C4Compiler;
 
 		// A file's tokens as brace recovery reads them, each with its line, so a test names a repair by lines.
 		struct Facts

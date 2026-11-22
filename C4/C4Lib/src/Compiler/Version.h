@@ -1,7 +1,7 @@
 #pragma once
 #include "Core/Core.h"
 
-namespace Scripting::CompilerVersion
+namespace C4Compiler::CompilerVersion
 {
 	constexpr uint32 Major = 0;
 	constexpr uint32 Minor = 1;

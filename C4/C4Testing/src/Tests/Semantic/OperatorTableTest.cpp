@@ -5,11 +5,11 @@
 
 namespace Testing
 {
-	using Scripting::OperatorTable;
+	using C4Compiler::OperatorTable;
 
 	namespace
 	{
-		const Scripting::ProgramModel& MakeModel(Scripting::CompilerInstance& compiler, const char* source)
+		const C4Compiler::ProgramModel& MakeModel(C4Compiler::CompilerInstance& compiler, const char* source)
 		{
 			uint32 id = compiler.RegisterInMemory("t.cf", source);
 			compiler.CompileAll();
@@ -55,7 +55,7 @@ namespace Testing
 
 	void OperatorTableTest::EveryNameRegisters()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"struct Flags { int32 bits;\n"
 			"  [operator(\"less\", \"greater\")] public bool Differs(const Flags& o) const { return bits != o.bits; }\n"
@@ -76,7 +76,7 @@ namespace Testing
 
 	void OperatorTableTest::PrimitiveExtensionsAreReceivers()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"struct V { float x; }\n"
 			"[operator(\"-\")] V Minus(const V& v) extends float { return v; }\n");
@@ -87,9 +87,9 @@ namespace Testing
 		TEST_ASSERT(scalarLeft.Ok());
 		TEST_ASSERT(scalarLeft.value.record != nullptr && scalarLeft.value.method == nullptr);
 		auto bothScalar = model.QueryOperator("-", f.value, f.value);
-		TEST_ASSERT(bothScalar.error == Scripting::QueryError::NotFound); // the extension cannot take a float
+		TEST_ASSERT(bothScalar.error == C4Compiler::QueryError::NotFound); // the extension cannot take a float
 		auto objectLeft = model.QueryOperator("-", v.value, f.value);
-		TEST_ASSERT(objectLeft.error == Scripting::QueryError::NotFound); // operands never swap
+		TEST_ASSERT(objectLeft.error == C4Compiler::QueryError::NotFound); // operands never swap
 		TEST_PASSED();
 	}
 } // namespace Testing

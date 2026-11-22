@@ -5,7 +5,7 @@
 #include <iomanip>
 #include <cstdio>
 
-namespace Scripting
+namespace C4Compiler
 {
 	bool CompilationResult::HasErrors() const
 	{

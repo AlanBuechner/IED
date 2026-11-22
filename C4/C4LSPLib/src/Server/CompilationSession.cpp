@@ -34,16 +34,16 @@ namespace C4LSP::Server
 		// takes 3.3 s instead of 2.0 s, an edit 1.5 s instead of 1.1 s).
 		constexpr uint32 kParseThreads = 1;
 
-		std::unique_ptr<Scripting::CompilerInstance> NewCompiler()
+		std::unique_ptr<C4Compiler::CompilerInstance> NewCompiler()
 		{
-			auto compiler = std::make_unique<Scripting::CompilerInstance>();
+			auto compiler = std::make_unique<C4Compiler::CompilerInstance>();
 			compiler->SetMaxThreads(kParseThreads);
 			return compiler;
 		}
 	}
 
 	CompilationSession::CompilationSession()
-		: m_Compiler(NewCompiler()), m_LibraryFolder(Scripting::Toolchain::Bedrock().string()) {}
+		: m_Compiler(NewCompiler()), m_LibraryFolder(C4Compiler::Toolchain::Bedrock().string()) {}
 
 	SemanticResolver& CompilationSession::GetResolver()
 	{
@@ -123,7 +123,7 @@ namespace C4LSP::Server
 		return true;
 	}
 
-	std::shared_ptr<const Scripting::PriorParses> CompilationSession::Parses() const
+	std::shared_ptr<const C4Compiler::PriorParses> CompilationSession::Parses() const
 	{
 		return m_ScriptHost || !m_Compiled ? nullptr : m_Compiler->Parses();
 	}
@@ -150,14 +150,14 @@ namespace C4LSP::Server
 		{
 			if (!sources.HasInfo(id) || sources.GetInfo(id).absPath.empty()) continue;
 			const std::string& path = sources.GetInfo(id).absPath;
-			if (const std::optional<Scripting::FileStamp> stamp = Scripting::StampOf(path))
+			if (const std::optional<C4Compiler::FileStamp> stamp = C4Compiler::StampOf(path))
 				m_DiskFiles.push_back({ path, id, *stamp }); // just after the read: a change from now on shows
 		}
 	}
 
-	std::vector<std::pair<std::string, Scripting::FileStamp>> CompilationSession::DiskStamps() const
+	std::vector<std::pair<std::string, C4Compiler::FileStamp>> CompilationSession::DiskStamps() const
 	{
-		std::vector<std::pair<std::string, Scripting::FileStamp>> stamps;
+		std::vector<std::pair<std::string, C4Compiler::FileStamp>> stamps;
 		stamps.reserve(m_DiskFiles.size());
 		for (const DiskFile& file : m_DiskFiles) stamps.emplace_back(file.path, file.stamp);
 		return stamps;
@@ -167,7 +167,7 @@ namespace C4LSP::Server
 	{
 		for (DiskFile& file : m_DiskFiles)
 		{
-			const std::optional<Scripting::FileStamp> now = stampOf(file.path);
+			const std::optional<C4Compiler::FileStamp> now = stampOf(file.path);
 			if (!now) return true;
 			if (now->size == file.stamp.size && now->modified == file.stamp.modified) continue;
 			if (TextDiffersOnDisk(file.path, file.sourceId)) return true;
@@ -178,7 +178,7 @@ namespace C4LSP::Server
 
 	bool CompilationSession::TextDiffersOnDisk(const std::string& path, uint32 sourceId) const
 	{
-		std::string text = Scripting::ReadFileBytes(path);
+		std::string text = C4Compiler::ReadFileBytes(path);
 		constexpr std::string_view kUtf8Bom = "\xEF\xBB\xBF"; // the compiler reads a file without it
 		if (std::string_view(text).substr(0, kUtf8Bom.size()) == kUtf8Bom) text.erase(0, kUtf8Bom.size());
 		return text != RawTextOf(sourceId);
@@ -187,20 +187,20 @@ namespace C4LSP::Server
 	bool CompilationSession::RecompileScript()
 	{
 		m_Compiler = NewCompiler();
-		if (m_ScriptHost->index) m_HostQuestions = std::make_unique<Scripting::HostQuestions>(*m_ScriptHost->index); // outlives the compiler's model, which asks it
+		if (m_ScriptHost->index) m_HostQuestions = std::make_unique<C4Compiler::HostQuestions>(*m_ScriptHost->index); // outlives the compiler's model, which asks it
 		m_LoweringErrors.Clear();
 		m_SetupProblem.clear();
 		if (!m_ScriptHost->error.empty())
 			m_SetupProblem = "the script interface " + m_Script.interfacePath + " does not read: " + m_ScriptHost->error;
 		else
 		{
-			Scripting::ErrorTracker checks;
-			std::optional<Scripting::ScriptUnits> units =
-				Scripting::AnalyzeScript(*m_Compiler, m_ScriptHost->host, *m_ScriptHost->index, *m_HostQuestions, ScriptOptions(),
-					Scripting::InterfaceParse::Whole, checks, &m_SetupProblem);
+			C4Compiler::ErrorTracker checks;
+			std::optional<C4Compiler::ScriptUnits> units =
+				C4Compiler::AnalyzeScript(*m_Compiler, m_ScriptHost->host, *m_ScriptHost->index, *m_HostQuestions, ScriptOptions(),
+					C4Compiler::InterfaceParse::Whole, checks, &m_SetupProblem);
 			if (units)
 			{
-				RunLoweringPass(Scripting::ScriptLowering{ &m_HostQuestions->symbols, &m_HostQuestions->types, units->interfaceUnits });
+				RunLoweringPass(C4Compiler::ScriptLowering{ &m_HostQuestions->symbols, &m_HostQuestions->types, units->interfaceUnits });
 				for (const auto& err : checks.GetErrors()) m_LoweringErrors.Push(err);
 			}
 		}
@@ -209,9 +209,9 @@ namespace C4LSP::Server
 		return true;
 	}
 
-	Scripting::ScriptCompileOptions CompilationSession::ScriptOptions() const
+	C4Compiler::ScriptCompileOptions CompilationSession::ScriptOptions() const
 	{
-		Scripting::ScriptCompileOptions options;
+		C4Compiler::ScriptCompileOptions options;
 		options.name = "script";
 		options.allow = m_Script.allow;
 		options.defines = m_Script.defines;
@@ -251,7 +251,7 @@ namespace C4LSP::Server
 			const std::string path = Protocol::DocumentUri::FromUri(uri);
 			const fs::path folder = fs::path(std::u8string(path.begin(), path.end())).parent_path();
 			if (!folder.empty() && fs::is_directory(folder))
-				m_Compiler->RegisterFolder(folder, Scripting::FolderScan::TopOnly);
+				m_Compiler->RegisterFolder(folder, C4Compiler::FolderScan::TopOnly);
 		}
 		for (const auto& dir : m_IncludePaths)
 			if (!dir.empty() && fs::is_directory(fs::path(std::u8string(dir.begin(), dir.end()))))
@@ -261,8 +261,8 @@ namespace C4LSP::Server
 	bool CompilationSession::RegisterProjects()
 	{
 		if (m_ProjectsFile.empty()) return false;
-		const Scripting::ProjectFileResult read = Scripting::ReadProjectFile(fs::path(m_ProjectsFile));
-		Scripting::ProjectSetResult checked = read.error.empty() ? Scripting::ProjectSet::Check(read.list) : Scripting::ProjectSetResult{};
+		const C4Compiler::ProjectFileResult read = C4Compiler::ReadProjectFile(fs::path(m_ProjectsFile));
+		C4Compiler::ProjectSetResult checked = read.error.empty() ? C4Compiler::ProjectSet::Check(read.list) : C4Compiler::ProjectSetResult{};
 		if (!checked.set)
 		{
 			std::fprintf(stderr, "C4LSP: the build description is not usable (%s); compiling the workspace folder\n",
@@ -278,7 +278,7 @@ namespace C4LSP::Server
 		return true;
 	}
 
-	void CompilationSession::RunLoweringPass(const std::optional<Scripting::ScriptLowering>& script)
+	void CompilationSession::RunLoweringPass(const std::optional<C4Compiler::ScriptLowering>& script)
 	{
 		m_LoweringErrors.Clear();
 		m_LoweredBodies = false;
@@ -292,16 +292,16 @@ namespace C4LSP::Server
 		// so LSP diagnostics are byte-for-byte what C4.exe reports for the project. A clean front end
 		// still lowers, surfacing genuine body-level type errors the model build does not catch.
 		for (const auto& err : m_Compiler->GetAllDiagnostics())
-			if (err.severity != Scripting::ErrorSeverity::Warning)
+			if (err.severity != C4Compiler::ErrorSeverity::Warning)
 				return; // front end has a hard error: the compiler stops before lowering
 
 		// The compiler's own lowering (ProgramLowering), with the build's options: the same functions, in the same order,
 		// so the same diagnostics. No LLVM is emitted.
-		Scripting::LoweringOptions options;
+		C4Compiler::LoweringOptions options;
 		options.threads = std::max(1u, std::thread::hardware_concurrency());
 		options.everyVtable = m_ScriptHostBuild;
 		options.script = script;
-		Scripting::ProgramLowering lowering(m_Compiler->GetProgramModelForLowering(), std::move(options));
+		C4Compiler::ProgramLowering lowering(m_Compiler->GetProgramModelForLowering(), std::move(options));
 		lowering.Run();
 		for (const auto& err : lowering.Errors().GetErrors())
 			m_LoweringErrors.Push(err);
@@ -313,7 +313,7 @@ namespace C4LSP::Server
 		if (m_LoweredBodies || m_ScriptHost) return;
 		std::set<uint32> broken; // the files this compile found a front-end error in
 		for (const auto& err : m_Compiler->GetAllDiagnostics())
-			if (err.severity != Scripting::ErrorSeverity::Warning) broken.insert(err.location.sourceId);
+			if (err.severity != C4Compiler::ErrorSeverity::Warning) broken.insert(err.location.sourceId);
 		std::map<uint32, uint32> same; // a file of `earlier` -> the same file here, 0 when its text or its errors differ
 		for (const auto& err : earlier.GetLoweringDiagnostics())
 		{
@@ -326,7 +326,7 @@ namespace C4LSP::Server
 				known = same.emplace(err.location.sourceId, kept ? id : 0).first;
 			}
 			if (known->second == 0) continue;
-			Scripting::CompilationError carried = err;
+			C4Compiler::CompilationError carried = err;
 			carried.location.sourceId = known->second;
 			m_LoweringErrors.Push(carried);
 		}
@@ -400,22 +400,22 @@ namespace C4LSP::Server
 		// As C4.exe does: each on-disk file (an open document's editor text is already its source) starts with its
 		// project's macros, and an include carries what the included file defines. TEST as a -test build has it: a
 		// program's tests (`#ifdef TEST`) are code to read and check too, and its test build is the program and more (BUG-452).
-		std::vector<Scripting::MacroDefine> defines;
+		std::vector<C4Compiler::MacroDefine> defines;
 		for (const auto& [name, value] : m_Defines)
 			defines.push_back({ name, value });
 		auto& sources = m_Compiler->GetSourceManager();
-		auto macroResults = Scripting::ExpandSourceMacros(sources, Scripting::PredefinedMacros(true, m_Target, defines));
+		auto macroResults = C4Compiler::ExpandSourceMacros(sources, C4Compiler::PredefinedMacros(true, m_Target, defines));
 		m_Compiler->AddMacroDiagnostics(macroResults);
 		// Each source keeps its text, which its parse reads through what the macro pass made of it (R8): its locations are
 		// the file's own. CBind's bindings are units of their own, which the files that bind a header include.
-		Scripting::ApplyMacroLayouts(sources, macroResults);
+		C4Compiler::ApplyMacroLayouts(sources, macroResults);
 		std::string objDir = (fs::temp_directory_path() / "c4_lsp_interop").string();
 		fs::create_directories(objDir);
-		const auto interop = Scripting::InteropPass::RunFolder(BuildPreprocessRoots(), Scripting::InteropInputsOf(sources, !m_ProjectsFile.empty()),
+		const auto interop = C4Compiler::InteropPass::RunFolder(BuildPreprocessRoots(), C4Compiler::InteropInputsOf(sources, !m_ProjectsFile.empty()),
 			m_IncludePaths, objDir, m_Target, false, true);
-		Scripting::RegisterBindings(sources, interop.files);
+		C4Compiler::RegisterBindings(sources, interop.files);
 
-		std::unordered_map<std::string, const Scripting::MacroPass::FileResult*> macroOf;
+		std::unordered_map<std::string, const C4Compiler::MacroPass::FileResult*> macroOf;
 		for (const auto& mr : macroResults) macroOf[mr.absPath] = &mr;
 		m_MacroTables.clear();
 		m_RawTexts.clear();
@@ -425,13 +425,13 @@ namespace C4LSP::Server
 			if (info.source)
 				m_RawTexts[id] = std::string(info.source->Data(), info.source->Size());
 			// The macro pass names a source by its path, or `memory:<id>` for one given as text (BUG-343).
-			const auto macro = macroOf.find(Scripting::MacroIdentity(info));
+			const auto macro = macroOf.find(C4Compiler::MacroIdentity(info));
 			if (macro != macroOf.end() && !macro->second->table.Empty())
 				m_MacroTables[id] = macro->second->table;
 		}
 	}
 
-	const Scripting::MacroTable* CompilationSession::MacroTableOf(uint32 sourceId) const
+	const C4Compiler::MacroTable* CompilationSession::MacroTableOf(uint32 sourceId) const
 	{
 		auto found = m_MacroTables.find(sourceId);
 		return found == m_MacroTables.end() ? nullptr : &found->second;
@@ -451,9 +451,9 @@ namespace C4LSP::Server
 		return std::hash<std::string_view>{}(found->second);
 	}
 
-	Protocol::Range CompilationSession::ToEditorRange(uint32 sourceId, const Scripting::SourceLocation& start, const Scripting::SourceLocation& end) const
+	Protocol::Range CompilationSession::ToEditorRange(uint32 sourceId, const C4Compiler::SourceLocation& start, const C4Compiler::SourceLocation& end) const
 	{
-		auto conv = [](const Scripting::SourceLocation& loc) -> Protocol::Position {
+		auto conv = [](const C4Compiler::SourceLocation& loc) -> Protocol::Position {
 			Protocol::Position p;
 			p.line = loc.line > 0 ? loc.line - 1 : 0;
 			p.character = loc.column > 0 ? loc.column - 1 : 0;
@@ -466,13 +466,13 @@ namespace C4LSP::Server
 		return r;
 	}
 
-	Protocol::Location CompilationSession::ToEditorLocation(const Scripting::SourceLocation& start, const Scripting::SourceLocation& end) const
+	Protocol::Location CompilationSession::ToEditorLocation(const C4Compiler::SourceLocation& start, const C4Compiler::SourceLocation& end) const
 	{
 		uint32 declSourceId = start.sourceId;
 		return Protocol::Location{ UriForSourceId(declSourceId), ToEditorRange(declSourceId, start, end) };
 	}
 
-	bool CompilationSession::InBindings(const Scripting::SourceLocation& location) const
+	bool CompilationSession::InBindings(const C4Compiler::SourceLocation& location) const
 	{
 		const auto& sources = m_Compiler->GetSourceManager();
 		return sources.HasInfo(location.sourceId) && sources.GetInfo(location.sourceId).binding;
@@ -483,7 +483,7 @@ namespace C4LSP::Server
 		// A file on disk is where it is (a project's, an -I folder's or Bedrock's); an in-memory source has only a name.
 		const auto& info = m_Compiler->GetSourceManager().GetInfo(sourceId);
 		// A script's host files are its interface's, in memory: no editor document is one of them.
-		if (info.absPath.rfind(Scripting::kInterfaceRoot, 0) == 0)
+		if (info.absPath.rfind(C4Compiler::kInterfaceRoot, 0) == 0)
 			return "";
 		if (!info.absPath.empty())
 			return Protocol::DocumentUri::ToUri(info.absPath);

@@ -1,7 +1,7 @@
 #include "Backend/Lowering/GlobalStarts.h"
 #include "Model/ProgramModel.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	bool GlobalStarts::Lower()
 	{
@@ -53,4 +53,4 @@ namespace Scripting
 			if (m_Script->IsHostStorage(variable)) m_Started.insert(&variable);
 		});
 	}
-} // namespace Scripting
+} // namespace C4Compiler

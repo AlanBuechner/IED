@@ -1,6 +1,6 @@
 #include "Model/Types/SwizzleType.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	SwizzleType::SwizzleType(const Core::String& name, const Type* elementType)
 		: Type(TypeKind::Swizzle), m_FullName(name), m_ElementType(elementType)
@@ -87,4 +87,4 @@ namespace Scripting
 			return "'" + shape + "' is " + std::to_string(lanes * element->GetSize()) + " bytes: a packed vector holds at most 64 (16 floats)";
 		return "";
 	}
-} // namespace Scripting
+} // namespace C4Compiler

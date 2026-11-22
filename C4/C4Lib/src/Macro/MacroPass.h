@@ -7,7 +7,7 @@
 #include <map>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Runs the macro preprocessor over a set of C4 source files, producing for each file where its text is left out and
 	/// its uses expanded (its MacroLayout, R8) and its final effective MacroTable. Each file is processed once, with the

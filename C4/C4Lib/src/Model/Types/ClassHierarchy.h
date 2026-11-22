@@ -4,7 +4,7 @@
 #include <functional>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Facts about an object type's base sub-objects, read from its MSVC-compatible layout: where each base
 	/// sits, whether a base is reachable along one path or several, and where a member found by name lives.
@@ -68,4 +68,4 @@ namespace Scripting
 		QueryResult<void> CheckBaseList(const ObjectType* type);
 		QueryResult<void> CheckInterfaceMembers(const ObjectType* type);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

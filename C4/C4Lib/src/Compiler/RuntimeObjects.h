@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	// The C4 runtime linked into every executable: each C and C++ source under the install's C4Runtime/ (GC,
 	// reflection, threads, tests, EH, IO, RTTI, memory) that RuntimeSourceIsFor the target, compiled by

@@ -5,7 +5,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 	class ErrorTracker;
@@ -58,4 +58,4 @@ namespace Scripting
 	/// (the conversion to its type, its warnings); failures go to `errors`.
 	void CheckConstantStarts(ProgramModel& model, ErrorTracker& errors);
 
-} // namespace Scripting
+} // namespace C4Compiler

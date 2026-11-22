@@ -3,7 +3,7 @@
 #include "Model/QueryResult.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The virtual-dispatch model of the MSVC x64 ABI for C4's single class base + interfaces: every
 	/// polymorphic sub-object has a vptr; the vtable at a vptr has the slots of the type that owns it; a slot
@@ -48,4 +48,4 @@ namespace Scripting
 		/// offending method's location.
 		QueryResult<void> CheckFinalMethods(const ObjectType* type);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

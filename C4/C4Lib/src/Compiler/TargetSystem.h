@@ -2,7 +2,7 @@
 #include <optional>
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The operating system a build's program runs on (D-86). What it decides - the object format, the calling
 	/// convention, how exceptions unwind, the C library the program links against and which runtime files it gets - is
@@ -23,4 +23,4 @@ namespace Scripting
 	std::optional<TargetSystem> TargetFromName(const std::string& name);
 	/// Every name TargetFromName reads, for a message.
 	std::string TargetNames();
-} // namespace Scripting
+} // namespace C4Compiler

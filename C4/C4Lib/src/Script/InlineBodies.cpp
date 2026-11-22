@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -147,4 +147,4 @@ namespace Scripting
 	{
 		return InlineBodies(module, HostNames(hostSymbols), maxGroups);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -2,7 +2,7 @@
 #include "Backend/HIR/LoweringContext.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The lifecycle intrinsics, called like functions (docs/language/14, D-41). A program function of the
 	/// same name wins: they are tried only when the name resolves to no function.
@@ -11,4 +11,4 @@ namespace Scripting
 	///   relocate(dst, src) moves the T at src into the raw storage at dst and leaves src zero
 	bool IsLifecycleIntrinsic(const Core::String& name);
 	QueryResult<Value> LowerLifecycleIntrinsic(LoweringContext& ctx, const Core::String& name, const std::vector<Value>& args);
-} // namespace Scripting
+} // namespace C4Compiler

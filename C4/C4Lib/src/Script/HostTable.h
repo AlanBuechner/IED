@@ -12,7 +12,7 @@ namespace llvm
 	class Module;
 }
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The runtime entry points script code may call although its host never did (docs/runtime/04 section 3.1):
 	/// the table lists them whatever the host uses. They differ by system: Windows scripts throw through
@@ -85,4 +85,4 @@ namespace Scripting
 	/// `__c4_script_build_id`, the 16 bytes of the interface's build id (InterfaceBuilder), defined in `module`: the
 	/// program's own when its inline bodies came before its code was split, else a module of its own linked with it.
 	void EmitBuildId(llvm::Module& module, const std::array<uint8, 16>& buildId);
-} // namespace Scripting
+} // namespace C4Compiler

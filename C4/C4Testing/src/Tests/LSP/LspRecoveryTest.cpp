@@ -127,7 +127,7 @@ int32 main() { Size s; return Width(s); }
 	{
 		auto session = Testing::Lsp::MakeSession("Broken.cf", kBroken);
 		std::set<uint32> lines;
-		for (const Scripting::CompilationError& error : session.GetCompiler().GetAllDiagnostics()) lines.insert(error.location.line);
+		for (const C4Compiler::CompilationError& error : session.GetCompiler().GetAllDiagnostics()) lines.insert(error.location.line);
 		TEST_ASSERT(lines == std::set<uint32>({ 4, 8, 22 })); // the member, the parameter list and the statement: nothing more
 		TEST_PASSED();
 	}

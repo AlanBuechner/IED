@@ -4,7 +4,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -173,4 +173,4 @@ namespace Scripting
 		std::sort(reached.begin(), reached.end());
 		return reached;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -48,8 +48,8 @@ namespace C4LSP::Server
 		std::shared_ptr<const LoadedInterface> Read(const std::string& path)
 		{
 			auto loaded = std::make_shared<LoadedInterface>();
-			if (Scripting::ReadInterface(path, loaded->host, &loaded->error))
-				loaded->index = std::make_unique<Scripting::HostIndex>(loaded->host);
+			if (C4Compiler::ReadInterface(path, loaded->host, &loaded->error))
+				loaded->index = std::make_unique<C4Compiler::HostIndex>(loaded->host);
 			else if (loaded->error.empty())
 				loaded->error = "it does not read";
 			return loaded;

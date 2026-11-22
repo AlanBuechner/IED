@@ -4,7 +4,7 @@
 #include <llvm/IR/Module.h>
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Building blocks of the read-only tables the MSVC runtime walks (RTTI, EH): they store 32-bit offsets
 	/// from the image base instead of pointers.
@@ -25,4 +25,4 @@ namespace Scripting
 
 		llvm::Constant* I32(llvm::LLVMContext& ctx, int64_t v);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -9,7 +9,7 @@
 
 namespace Testing
 {
-	using namespace Scripting;
+	using namespace C4Compiler;
 
 	static ProgramModel& MakeModel(CompilerInstance& compiler, const char* source)
 	{
@@ -148,10 +148,10 @@ namespace Testing
 		// `Id<int64>(5)`: the written int64 is final; the int32 argument converts instead of conflicting.
 		CompilerInstance compiler;
 		auto& model = MakeModel(compiler, "template<T> T Id(T v) { return v; }\n");
-		Ref<Scripting::Source> text = Scripting::Source::FromMemory("Id<int64>(5)");
-		Scripting::Lexer lexer(*text, 0);
+		Ref<C4Compiler::Source> text = C4Compiler::Source::FromMemory("Id<int64>(5)");
+		C4Compiler::Lexer lexer(*text, 0);
 		ErrorTracker errors;
-		Scripting::ParserState state(lexer, errors);
+		C4Compiler::ParserState state(lexer, errors);
 		Ref<AstNode> parsed = PrattParser::ParseExpression(state);
 		const auto* call = dynamic_cast<const FunctionCallNode*>(parsed.Get());
 		TEST_ASSERT(call != nullptr && call->GetTemplateArgs() != nullptr);

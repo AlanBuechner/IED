@@ -8,12 +8,12 @@ namespace Testing
 {
 	void ParameterTest::TestBasicParameter()
 	{
-		auto stream = Scripting::Source::FromMemory("int x");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("int x");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ParameterNode::TryParse(state);
+		auto node = C4Compiler::ParameterNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->GetType() != nullptr);
 		TEST_ASSERT(node->GetType()->BaseName()->ToString() == "int");
@@ -25,12 +25,12 @@ namespace Testing
 
 	void ParameterTest::TestParameterWithDefault()
 	{
-		auto stream = Scripting::Source::FromMemory("float f = 0.0f");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("float f = 0.0f");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ParameterNode::TryParse(state);
+		auto node = C4Compiler::ParameterNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->GetType() != nullptr);
 		TEST_ASSERT(node->GetType()->BaseName()->ToString() == "float");
@@ -42,12 +42,12 @@ namespace Testing
 
 	void ParameterTest::TestUnnamedParameter()
 	{
-		auto stream = Scripting::Source::FromMemory("int");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("int");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ParameterNode::TryParse(state);
+		auto node = C4Compiler::ParameterNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->GetType() != nullptr);
 		TEST_ASSERT(node->GetType()->BaseName()->ToString() == "int");
@@ -58,12 +58,12 @@ namespace Testing
 
 	void ParameterTest::TestAnnotatedParameter()
 	{
-		auto stream = Scripting::Source::FromMemory("[In] int x");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("[In] int x");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ParameterNode::TryParse(state);
+		auto node = C4Compiler::ParameterNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->GetAnnotations().Count() == 1);
 		TEST_ASSERT(node->GetType() != nullptr);
@@ -75,12 +75,12 @@ namespace Testing
 
 	void ParameterTest::TestComplexTypeWithDefault()
 	{
-		auto stream = Scripting::Source::FromMemory("const int* ptr = null");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("const int* ptr = null");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ParameterNode::TryParse(state);
+		auto node = C4Compiler::ParameterNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->GetType() != nullptr);
 		TEST_ASSERT(node->GetType()->IsLeadingConst());
@@ -94,12 +94,12 @@ namespace Testing
 
 	void ParameterTest::TestMultipleAnnotations()
 	{
-		auto stream = Scripting::Source::FromMemory("[A][B] String& s");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("[A][B] String& s");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ParameterNode::TryParse(state);
+		auto node = C4Compiler::ParameterNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->GetAnnotations().Count() == 2);
 		TEST_ASSERT(node->GetType() != nullptr);
@@ -112,15 +112,15 @@ namespace Testing
 
 	void ParameterTest::TestNonTypeTokenReturnsNullptr()
 	{
-		auto stream = Scripting::Source::FromMemory("+ x");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("+ x");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ParameterNode::TryParse(state);
+		auto node = C4Compiler::ParameterNode::TryParse(state);
 		TEST_ASSERT(node == nullptr);
 		// No tokens consumed - the '+' is still available
-		TEST_ASSERT(lexer.Peek().GetType() == Scripting::TokenType::Plus);
+		TEST_ASSERT(lexer.Peek().GetType() == C4Compiler::TokenType::Plus);
 		TEST_PASSED();
 	}
 }

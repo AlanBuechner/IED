@@ -4,7 +4,7 @@
 
 namespace llvm { class CallBase; class Function; class Value; }
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// What each of `calls` (the function's statepoints to be) lists in its deopt operands (Compiler/StackMaps): the stack
 	/// slots of the frame that may hold managed pointers while the call runs - each slot, its count of words (with

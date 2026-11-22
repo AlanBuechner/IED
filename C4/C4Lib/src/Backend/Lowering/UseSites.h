@@ -2,7 +2,7 @@
 #include "Backend/HIR/HIRNodes.h"
 #include "Model/ProgramModel.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The first place `user`'s tree (its nested functions too) calls `callee` or takes its address; a location
 	/// without a line when there is none.

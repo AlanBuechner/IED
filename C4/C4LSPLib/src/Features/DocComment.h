@@ -4,7 +4,7 @@
 #include <string>
 #include <string_view>
 
-namespace Scripting { struct AstNode; }
+namespace C4Compiler { struct AstNode; }
 
 namespace C4LSP::Server { class CompilationSession; }
 
@@ -15,9 +15,9 @@ namespace C4LSP::Features
 	class DocComment
 	{
 	public:
-		static std::string Of(Server::CompilationSession& session, const Scripting::AstNode& decl);
+		static std::string Of(Server::CompilationSession& session, const C4Compiler::AstNode& decl);
 		/// Where the comment above the declaration begins; its own start when it has none.
-		static Scripting::SourceLocation Start(Server::CompilationSession& session, const Scripting::AstNode& decl);
+		static C4Compiler::SourceLocation Start(Server::CompilationSession& session, const C4Compiler::AstNode& decl);
 		/// The comment lines above the line that begins at `lineStart`, markers removed; `commentStart` is the offset of
 		/// the first of them (`lineStart` when there are none) and `lines` how many there are.
 		static std::string Above(std::string_view text, size_t lineStart, size_t& commentStart, uint32& lines);

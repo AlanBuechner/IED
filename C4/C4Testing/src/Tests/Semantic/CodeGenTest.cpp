@@ -14,7 +14,7 @@
 
 namespace Testing
 {
-	using namespace Scripting;
+	using namespace C4Compiler;
 
 	// As C4.exe compiles a program: the source, then the default library it includes and the prelude.
 	static ProgramModel& MakeModel(CompilerInstance& compiler, const char* source)

@@ -1,6 +1,6 @@
 #include "Compiler/SourceMacros.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

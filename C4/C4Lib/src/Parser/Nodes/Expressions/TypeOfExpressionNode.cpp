@@ -3,7 +3,7 @@
 #include "Lexer/Lexer.h"
 #include "Parser/Nodes/Expressions/IdentifierExpressionNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

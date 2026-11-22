@@ -2,7 +2,7 @@
 #include "Lexer/Token.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 
 	enum class ErrorSeverity { Warning, Error, Fatal };

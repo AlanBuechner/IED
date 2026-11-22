@@ -4,7 +4,7 @@
 #include "Backend/HIR/SimdMemory.h"
 #include "Model/TargetAnnotation.h"
 
-namespace Scripting::SimdIntrinsics
+namespace C4Compiler::SimdIntrinsics
 {
 	using namespace SimdOperands;
 
@@ -280,4 +280,4 @@ namespace Scripting::SimdIntrinsics
 		default: return SimdMemory::Lower(call, form.op);
 		}
 	}
-} // namespace Scripting::SimdIntrinsics
+} // namespace C4Compiler::SimdIntrinsics

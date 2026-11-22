@@ -25,7 +25,7 @@
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
 #include "Model/TypeHandle.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	void ExprLowerer::DerefForAccess(const Value& base, const Type*& outType, const LValue*& outLoc) const
 	{
@@ -569,4 +569,4 @@ namespace Scripting
 		}
 		return m_Ctx.Fail(n, QueryResult<Value>::Fail(QueryError::NotFound, "static access resolved to nothing: " + path));
 	}
-} // namespace Scripting
+} // namespace C4Compiler

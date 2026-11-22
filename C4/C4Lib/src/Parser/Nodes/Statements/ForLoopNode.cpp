@@ -7,7 +7,7 @@
 #include "Parser/PrattParser.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	std::span<const Ref<AstNode>> ForLoopNode::Children() const
 	{
@@ -236,4 +236,4 @@ namespace Scripting
 			m_Children.Push(m_SingleStatementBody);
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

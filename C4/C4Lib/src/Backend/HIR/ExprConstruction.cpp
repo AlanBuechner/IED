@@ -18,7 +18,7 @@
 #include "Model/Types/QualifiedName.h"
 #include "Model/TypeHandle.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	QueryResult<Value> ExprLowerer::ResolveValueList(const ValueListNode* n, const ObjectType* list)
 	{
@@ -260,4 +260,4 @@ namespace Scripting
 		}
 		return QueryResult<void>::Success();
 	}
-} // namespace Scripting
+} // namespace C4Compiler

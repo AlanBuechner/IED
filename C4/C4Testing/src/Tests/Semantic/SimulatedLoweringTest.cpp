@@ -12,7 +12,7 @@ namespace Testing
 {
 	// Build the program model for one in-memory unit and hand back a NON-CONST reference: lowering
 	// mutates the scope chain (PushScope / RegisterLocal), so the simulated lowerer holds this.
-	static Scripting::ProgramModel& MakeLoweringModel(Scripting::CompilerInstance& compiler, uint32 id, const char* source)
+	static C4Compiler::ProgramModel& MakeLoweringModel(C4Compiler::CompilerInstance& compiler, uint32 id, const char* source)
 	{
 		uint32 sid = compiler.RegisterInMemory("t.cf", source);
 		compiler.CompileAll();
@@ -22,13 +22,13 @@ namespace Testing
 	}
 
 	// Find the file-scope definition of a function by name, walking the unit's root AST.
-	static const Scripting::FunctionDefinitionNode* FindFunction(Scripting::CompilerInstance& compiler, uint32 id, const char* name)
+	static const C4Compiler::FunctionDefinitionNode* FindFunction(C4Compiler::CompilerInstance& compiler, uint32 id, const char* name)
 	{
 		auto unit = compiler.GetCompilationUnit(id);
-		const Scripting::FunctionDefinitionNode* found = nullptr;
-		std::function<void(const Scripting::AstNode&)> walk = [&](const Scripting::AstNode& n) {
+		const C4Compiler::FunctionDefinitionNode* found = nullptr;
+		std::function<void(const C4Compiler::AstNode&)> walk = [&](const C4Compiler::AstNode& n) {
 			if (found) return;
-			if (const auto* fn = dynamic_cast<const Scripting::FunctionDefinitionNode*>(&n))
+			if (const auto* fn = dynamic_cast<const C4Compiler::FunctionDefinitionNode*>(&n))
 				if (fn->GetName() && fn->GetName()->GetFirstIdentifierToken().GetText() == name)
 					found = fn;
 			for (const auto& c : n.Children()) walk(*c.Get());
@@ -38,13 +38,13 @@ namespace Testing
 	}
 
 	// The first ObjectDefinitionNode in a unit's root AST (a local class declared at file scope).
-	static const Scripting::ObjectDefinitionNode* FindFirstClass(Scripting::CompilerInstance& compiler, uint32 id)
+	static const C4Compiler::ObjectDefinitionNode* FindFirstClass(C4Compiler::CompilerInstance& compiler, uint32 id)
 	{
 		auto unit = compiler.GetCompilationUnit(id);
-		const Scripting::ObjectDefinitionNode* found = nullptr;
-		std::function<void(const Scripting::AstNode&)> walk = [&](const Scripting::AstNode& n) {
+		const C4Compiler::ObjectDefinitionNode* found = nullptr;
+		std::function<void(const C4Compiler::AstNode&)> walk = [&](const C4Compiler::AstNode& n) {
 			if (found) return;
-			if (auto* o = dynamic_cast<const Scripting::ObjectDefinitionNode*>(&n)) found = o;
+			if (auto* o = dynamic_cast<const C4Compiler::ObjectDefinitionNode*>(&n)) found = o;
 			for (const auto& c : n.Children()) walk(*c.Get());
 		};
 		if (unit) walk(*unit->GetRootAST().Get());
@@ -57,7 +57,7 @@ namespace Testing
 
 	void SimulatedLoweringTest::ScopePushPopAndLocalShadowsGlobal()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		auto& model = MakeLoweringModel(compiler, 1, "int32 g_x = 5;\n");
 		TEST_ASSERT(model.IsValid());
 
@@ -69,9 +69,9 @@ namespace Testing
 
 		{
 			// Pushing a function scope and registering a local shadows the global for every query.
-			auto fn = model.PushScope(Scripting::Scope::Kind::Function, "fn");
-			Scripting::SymbolInfo info;
-			info.kind = Scripting::SymbolKind::Variable;
+			auto fn = model.PushScope(C4Compiler::Scope::Kind::Function, "fn");
+			C4Compiler::SymbolInfo info;
+			info.kind = C4Compiler::SymbolKind::Variable;
 			auto t = model.QueryType("int32");
 			TEST_ASSERT(t.Ok());
 			info.type = t.value;
@@ -83,13 +83,13 @@ namespace Testing
 
 			// A different-kind local also shadows: a local TYPE named g_x hides the variable for
 			// variable queries (NotCallable) - it does not silently fall through to the global.
-			auto blk = model.PushScope(Scripting::Scope::Kind::Block, "blk");
-			Scripting::SymbolInfo ty;
-			ty.kind = Scripting::SymbolKind::Type;
+			auto blk = model.PushScope(C4Compiler::Scope::Kind::Block, "blk");
+			C4Compiler::SymbolInfo ty;
+			ty.kind = C4Compiler::SymbolKind::Type;
 			ty.type = t.value;
 			TEST_ASSERT(model.RegisterLocal("g_x", ty));
 			auto shadowed = model.QueryVariable("g_x");
-			TEST_ASSERT(shadowed.error == Scripting::QueryError::NotCallable);
+			TEST_ASSERT(shadowed.error == C4Compiler::QueryError::NotCallable);
 		}
 
 		// The scopes popped: the name is the global again (RAII, no manual accounting).
@@ -101,14 +101,14 @@ namespace Testing
 
 	void SimulatedLoweringTest::NestedBlockDoesNotLeakIntoSibling()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		auto& model = MakeLoweringModel(compiler, 1, "int32 g;\n");
 
-		auto fn = model.PushScope(Scripting::Scope::Kind::Function, "fn");
+		auto fn = model.PushScope(C4Compiler::Scope::Kind::Function, "fn");
 		{
-			auto first = model.PushScope(Scripting::Scope::Kind::Block, "first");
-			Scripting::SymbolInfo info;
-			info.kind = Scripting::SymbolKind::Variable;
+			auto first = model.PushScope(C4Compiler::Scope::Kind::Block, "first");
+			C4Compiler::SymbolInfo info;
+			info.kind = C4Compiler::SymbolKind::Variable;
 			auto t = model.QueryType("int32");
 			TEST_ASSERT(t.Ok());
 			info.type = t.value;
@@ -117,29 +117,29 @@ namespace Testing
 		} // first pops - `x` must be gone
 
 		// Sibling scope: the previous block's local did not leak in.
-		auto second = model.PushScope(Scripting::Scope::Kind::Block, "second");
+		auto second = model.PushScope(C4Compiler::Scope::Kind::Block, "second");
 		TEST_ASSERT(model.FindLocal("x") == nullptr);
 		auto v = model.QueryVariable("x");
-		TEST_ASSERT(v.error == Scripting::QueryError::NotFound); // no global x either
+		TEST_ASSERT(v.error == C4Compiler::QueryError::NotFound); // no global x either
 		TEST_PASSED();
 	}
 
 	void SimulatedLoweringTest::InnermostScopeWinsThenOuterRestored()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		auto& model = MakeLoweringModel(compiler, 1, "int32 g;\n");
 
-		auto fn = model.PushScope(Scripting::Scope::Kind::Function, "fn");
+		auto fn = model.PushScope(C4Compiler::Scope::Kind::Function, "fn");
 		auto t = model.QueryType("int32");
 		TEST_ASSERT(t.Ok());
-		Scripting::SymbolInfo outer;
-		outer.kind = Scripting::SymbolKind::Variable;
+		C4Compiler::SymbolInfo outer;
+		outer.kind = C4Compiler::SymbolKind::Variable;
 		outer.type = t.value;
 		TEST_ASSERT(model.RegisterLocal("x", outer));
 
 		{
-			auto inner = model.PushScope(Scripting::Scope::Kind::Block, "inner");
-			Scripting::SymbolInfo in;
+			auto inner = model.PushScope(C4Compiler::Scope::Kind::Block, "inner");
+			C4Compiler::SymbolInfo in;
 			in.kind = outer.kind;
 			in.type = outer.type;
 			TEST_ASSERT(model.RegisterLocal("x", in));
@@ -159,12 +159,12 @@ namespace Testing
 
 	void SimulatedLoweringTest::RedeclarationInSameBlockIsRejected()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		auto& model = MakeLoweringModel(compiler, 1, "int32 g;\n");
 
-		auto fn = model.PushScope(Scripting::Scope::Kind::Function, "fn");
-		Scripting::SymbolInfo info;
-		info.kind = Scripting::SymbolKind::Variable;
+		auto fn = model.PushScope(C4Compiler::Scope::Kind::Function, "fn");
+		C4Compiler::SymbolInfo info;
+		info.kind = C4Compiler::SymbolKind::Variable;
 		auto t = model.QueryType("int32");
 		TEST_ASSERT(t.Ok());
 		info.type = t.value;
@@ -183,7 +183,7 @@ namespace Testing
 	{
 		// `Inner` is declared INSIDE main's body: the model builder registers only file-scope
 		// declarations, so it is NOT a global. Its name lives solely in the lowering chain.
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		uint32 id = compiler.RegisterInMemory("t.cf",
 			"void main() {\n"
 			"    class Inner { int32 x; }\n"
@@ -194,21 +194,21 @@ namespace Testing
 
 		auto fn = FindFunction(compiler, id, "main");
 		TEST_ASSERT(fn != nullptr);
-		const Scripting::AstNode* decl = nullptr;
+		const C4Compiler::AstNode* decl = nullptr;
 		for (const auto& s : fn->GetBody().Get()->GetStatements())
-			if (dynamic_cast<const Scripting::ObjectDefinitionNode*>(s.Get())) decl = s.Get();
+			if (dynamic_cast<const C4Compiler::ObjectDefinitionNode*>(s.Get())) decl = s.Get();
 		TEST_ASSERT(decl != nullptr);
 
 		// Not visible before lowering reaches the declaration.
 		auto early = model.QueryType("Inner");
-		TEST_ASSERT(early.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(early.error == C4Compiler::QueryError::NotFound);
 
-		const Scripting::Type* localType = nullptr;
+		const C4Compiler::Type* localType = nullptr;
 		{
-			auto guard = model.PushScope(Scripting::Scope::Kind::Block, "body");
+			auto guard = model.PushScope(C4Compiler::Scope::Kind::Block, "body");
 			auto t = model.RegisterLocalType(*decl);
 			TEST_ASSERT(t.Ok());
-			TEST_ASSERT(t.value->GetKind() == Scripting::TypeKind::Object);
+			TEST_ASSERT(t.value->GetKind() == C4Compiler::TypeKind::Object);
 			localType = t.value;
 
 			// Visible inside the scope: the name resolves to the SAME instance.
@@ -217,8 +217,8 @@ namespace Testing
 			TEST_ASSERT(vt.value == localType);
 
 			// A variable of the local type registers and queries normally.
-			Scripting::SymbolInfo vi;
-			vi.kind = Scripting::SymbolKind::Variable;
+			C4Compiler::SymbolInfo vi;
+			vi.kind = C4Compiler::SymbolKind::Variable;
 			vi.type = localType;
 			TEST_ASSERT(model.RegisterLocal("v", vi));
 			auto vq = model.QueryVariable("v");
@@ -234,9 +234,9 @@ namespace Testing
 		// HIR node that captured it can still read its layout.
 		TEST_ASSERT(model.FindLocal("Inner") == nullptr);
 		auto after = model.QueryType("Inner");
-		TEST_ASSERT(after.error == Scripting::QueryError::NotFound); // name is scoped, not global
+		TEST_ASSERT(after.error == C4Compiler::QueryError::NotFound); // name is scoped, not global
 
-		const Scripting::ObjectType* obj = dynamic_cast<const Scripting::ObjectType*>(localType);
+		const C4Compiler::ObjectType* obj = dynamic_cast<const C4Compiler::ObjectType*>(localType);
 		TEST_ASSERT(obj != nullptr);
 		TEST_ASSERT_EQ((int)model.SizeOf(localType).value, 4); // int32 x survives the pop
 		TEST_PASSED();
@@ -244,7 +244,7 @@ namespace Testing
 
 	void SimulatedLoweringTest::LocalFunctionQueryableOnlyInsideItsScope()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		uint32 id = compiler.RegisterInMemory("t.cf",
 			"void main() {\n"
 			"    int32 LocalFn(int32 a) { return a * 2; }\n"
@@ -258,13 +258,13 @@ namespace Testing
 		const auto& body = fn->GetBody().Get();
 
 		{
-			auto guard = model.PushScope(Scripting::Scope::Kind::Block, "body");
-			const Scripting::AstNode* localFn = nullptr;
+			auto guard = model.PushScope(C4Compiler::Scope::Kind::Block, "body");
+			const C4Compiler::AstNode* localFn = nullptr;
 			for (const auto& s : body->GetStatements())
-				if (dynamic_cast<const Scripting::FunctionDefinitionNode*>(s.Get())) localFn = s.Get();
+				if (dynamic_cast<const C4Compiler::FunctionDefinitionNode*>(s.Get())) localFn = s.Get();
 			TEST_ASSERT(localFn != nullptr);
 
-			auto r = model.RegisterLocalFunction(dynamic_cast<const Scripting::FunctionDefinitionNode&>(*localFn));
+			auto r = model.RegisterLocalFunction(dynamic_cast<const C4Compiler::FunctionDefinitionNode&>(*localFn));
 			TEST_ASSERT(r.Ok());
 			TEST_ASSERT(r.value->type != nullptr);
 			TEST_ASSERT_EQ((int)r.value->type->GetParameterCount(), 1);
@@ -280,7 +280,7 @@ namespace Testing
 
 		// Outside the scope the name does not exist.
 		auto after = model.QueryFunction("LocalFn");
-		TEST_ASSERT(after.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(after.error == C4Compiler::QueryError::NotFound);
 		TEST_PASSED();
 	}
 
@@ -288,7 +288,7 @@ namespace Testing
 	{
 		// `Inner` exists ONLY inside main's body - the model builder registers file-scope
 		// declarations, so it is NOT a global. That is what makes "used before declared" testable.
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		uint32 id = compiler.RegisterInMemory("t.cf",
 			"void main() {\n"
 			"    class Inner { int32 x; }\n"
@@ -300,18 +300,18 @@ namespace Testing
 
 		auto fn = FindFunction(compiler, id, "main");
 		TEST_ASSERT(fn != nullptr);
-		const Scripting::AstNode* decl = nullptr;
+		const C4Compiler::AstNode* decl = nullptr;
 		for (const auto& s : fn->GetBody().Get()->GetStatements())
-			if (dynamic_cast<const Scripting::ObjectDefinitionNode*>(s.Get())) decl = s.Get();
+			if (dynamic_cast<const C4Compiler::ObjectDefinitionNode*>(s.Get())) decl = s.Get();
 		TEST_ASSERT(decl != nullptr);
 
-		const Scripting::Type* localType = nullptr;
+		const C4Compiler::Type* localType = nullptr;
 		{
-			auto guard = model.PushScope(Scripting::Scope::Kind::Block, "body");
+			auto guard = model.PushScope(C4Compiler::Scope::Kind::Block, "body");
 			// Lowering walks the body IN ORDER. `Inner v;` is reached BEFORE `class Inner` is
 			// registered, so resolving the type must be a clean NotFound - no silent nullptr, crash.
 			auto early = model.QueryType("Inner");
-			TEST_ASSERT(early.error == Scripting::QueryError::NotFound);
+			TEST_ASSERT(early.error == C4Compiler::QueryError::NotFound);
 
 			// Once lowering reaches the declaration and registers it, the SAME spelling resolves.
 			auto t = model.RegisterLocalType(*decl);
@@ -322,8 +322,8 @@ namespace Testing
 			TEST_ASSERT(late.value == localType);
 
 			// And a variable of it now registers and queries normally.
-			Scripting::SymbolInfo vi;
-			vi.kind = Scripting::SymbolKind::Variable;
+			C4Compiler::SymbolInfo vi;
+			vi.kind = C4Compiler::SymbolKind::Variable;
 			vi.type = localType;
 			TEST_ASSERT(model.RegisterLocal("v", vi));
 			auto vq = model.QueryVariable("v");
@@ -331,7 +331,7 @@ namespace Testing
 		} // guard pops here: the name is gone (it was never a global)
 
 		auto after = model.QueryType("Inner");
-		TEST_ASSERT(after.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(after.error == C4Compiler::QueryError::NotFound);
 		// The concrete type survives the pop with its layout intact (doc 03 ownership invariant).
 		TEST_ASSERT_EQ((int)model.SizeOf(localType).value, 4); // int32 x
 		TEST_PASSED();
@@ -343,7 +343,7 @@ namespace Testing
 
 	void SimulatedLoweringTest::LowerRealBodyTracksLocalsAcrossBlocks()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		uint32 id = compiler.RegisterInMemory("t.cf",
 			"int32 g;\n"
 			"void main() {\n"
@@ -363,32 +363,32 @@ namespace Testing
 		TEST_ASSERT(fn != nullptr);
 
 		// Lower the real body: every declaration registers; structured constructs push/pop a layer.
-		auto fnScope = model.PushScope(Scripting::Scope::Kind::Function, "main");
-		std::function<bool(const Scripting::AstNode&)> lowerStmt = [&](const Scripting::AstNode& stmt) -> bool {
+		auto fnScope = model.PushScope(C4Compiler::Scope::Kind::Function, "main");
+		std::function<bool(const C4Compiler::AstNode&)> lowerStmt = [&](const C4Compiler::AstNode& stmt) -> bool {
 			switch (stmt.Type())
 			{
-			case Scripting::NodeType::VariableDefinition: {
-				const auto& v = dynamic_cast<const Scripting::VariableDefinitionNode&>(stmt);
+			case C4Compiler::NodeType::VariableDefinition: {
+				const auto& v = dynamic_cast<const C4Compiler::VariableDefinitionNode&>(stmt);
 				auto t = model.ResolveType(*v.GetType());
 				if (!t.Ok()) return false;
-				Scripting::SymbolInfo info;
-				info.kind = Scripting::SymbolKind::Variable;
+				C4Compiler::SymbolInfo info;
+				info.kind = C4Compiler::SymbolKind::Variable;
 				info.type = t.value;
 				return model.RegisterLocal(v.GetNameToken().GetText(), info);
 			}
-			case Scripting::NodeType::IfStatement: {
-				const auto& ifn = dynamic_cast<const Scripting::IfStatementNode&>(stmt);
+			case C4Compiler::NodeType::IfStatement: {
+				const auto& ifn = dynamic_cast<const C4Compiler::IfStatementNode&>(stmt);
 				if (ifn.GetThenBody())
 				{
-					auto guard = model.PushScope(Scripting::Scope::Kind::Block, "if");
+					auto guard = model.PushScope(C4Compiler::Scope::Kind::Block, "if");
 					for (const auto& s : ifn.GetThenBody()->GetStatements())
 						if (!lowerStmt(*s.Get())) return false;
 				}
 				return true;
 			}
-			case Scripting::NodeType::ForLoop: {
-				const auto& f = dynamic_cast<const Scripting::ForLoopNode&>(stmt);
-				auto guard = model.PushScope(Scripting::Scope::Kind::Block, "for");
+			case C4Compiler::NodeType::ForLoop: {
+				const auto& f = dynamic_cast<const C4Compiler::ForLoopNode&>(stmt);
+				auto guard = model.PushScope(C4Compiler::Scope::Kind::Block, "for");
 				if (f.GetBody())
 					for (const auto& s : f.GetBody()->GetStatements())
 						if (!lowerStmt(*s.Get())) return false;
@@ -408,9 +408,9 @@ namespace Testing
 		auto a = model.QueryVariable("a");
 		TEST_ASSERT(a.Ok());
 		auto b = model.QueryVariable("b"); // was in the if block - popped
-		TEST_ASSERT(b.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(b.error == C4Compiler::QueryError::NotFound);
 		auto f = model.QueryVariable("f"); // was in the for block - popped
-		TEST_ASSERT(f.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(f.error == C4Compiler::QueryError::NotFound);
 		TEST_PASSED();
 	}
 
@@ -420,7 +420,7 @@ namespace Testing
 
 	void SimulatedLoweringTest::LoweringGetsEveryFactItNeeds()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		uint32 id = compiler.RegisterInMemory("t.cf",
 			"const int32 K = 40;\n"
 			"enum Color { Red = 1, Green = 5 };\n"
@@ -433,9 +433,9 @@ namespace Testing
 		compiler.AnalyzeProgram();
 		auto& model = compiler.GetCompilationUnit(id)->GetProgramModelForLowering();
 
-		auto fnScope = model.PushScope(Scripting::Scope::Kind::Function, "main");
-		Scripting::SymbolInfo info;
-		info.kind = Scripting::SymbolKind::Variable;
+		auto fnScope = model.PushScope(C4Compiler::Scope::Kind::Function, "main");
+		C4Compiler::SymbolInfo info;
+		info.kind = C4Compiler::SymbolKind::Variable;
 		auto nt = model.QueryType("int32");
 		TEST_ASSERT(nt.Ok());
 		info.type = nt.value;

@@ -5,7 +5,7 @@
 #include "Lexer/Token.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// One of the compiler's own annotations (docs/language/12 section 2), which no declaration declares.
 	bool IsCompilerAnnotationName(const Core::String& name);

@@ -9,7 +9,7 @@
 
 namespace Testing
 {
-	using namespace Scripting;
+	using namespace C4Compiler;
 
 	namespace
 	{

@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A program's backend (docs/compiler/01): ProgramLowering lowers what the program needs, then ProgramEmitter emits
 	/// it as LLVM modules - what C4.exe and a script's compile run. The language server runs the same lowering alone.
@@ -82,4 +82,4 @@ namespace Scripting
 		ErrorTracker m_Errors;
 		std::vector<std::pair<const char*, double>> m_StepSeconds;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

@@ -2,7 +2,7 @@
 #include "Lexer/Token.h"
 #include <string_view>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A numeric literal's spelling split into its parts: `0x1Fu` is radix 16, digits `1F`, suffix `u`. The
 	/// lexer and literal typing split the same way, so a suffix is never read as a digit or the reverse.

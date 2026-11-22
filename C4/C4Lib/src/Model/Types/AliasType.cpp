@@ -1,6 +1,6 @@
 #include "Model/Types/AliasType.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	AliasType::AliasType(const Core::String& name, const Type* aliasedType)
 		: Type(TypeKind::Alias), m_FullName(name), m_AliasedType(aliasedType)
@@ -15,4 +15,4 @@ namespace Scripting
 	{
 		return m_FullName;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

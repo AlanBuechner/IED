@@ -3,7 +3,7 @@
 #include <llvm/IR/Module.h>
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

@@ -15,7 +15,7 @@
 #include "Model/OperatorAnnotations.h" // [group("name")] collection for reflection (plan 14)
 #include <functional>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -360,4 +360,4 @@ namespace Scripting
 				return static_cast<const AliasType*>(entry->type);
 		return nullptr;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

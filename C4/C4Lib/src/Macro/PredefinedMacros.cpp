@@ -1,7 +1,7 @@
 #include "Macro/PredefinedMacros.h"
 #include "Compiler/Version.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	MacroDefine ParseMacroDefine(const std::string& text)
 	{

@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct AsmStatementNode; struct AsmOperand;
 
@@ -49,4 +49,4 @@ namespace Scripting
 
 		LoweringContext& m_Ctx;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

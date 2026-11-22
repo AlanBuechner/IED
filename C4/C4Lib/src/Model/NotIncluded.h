@@ -3,7 +3,7 @@
 #include "Model/SymbolTable.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 
@@ -36,4 +36,4 @@ namespace Scripting
 	/// instance is written: its sentences name the template's file (`is visible in box.ch`, `which box.ch does not
 	/// include`) instead of "here" and "this file".
 	Core::String NotIncludedIn(const ProgramModel& model, uint32 unit, Core::String message);
-} // namespace Scripting
+} // namespace C4Compiler

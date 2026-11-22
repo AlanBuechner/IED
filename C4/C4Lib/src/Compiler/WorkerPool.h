@@ -8,7 +8,7 @@
 #include <thread>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Threads kept for many short rounds of parallel work, where ParallelFor would start its own each round: Run calls
 	/// `body(i)` for each i below `count` on the pool's threads and the calling one, each taking the next index as it
@@ -93,4 +93,4 @@ namespace Scripting
 		unsigned m_Busy = 0; // workers not done with this round
 		bool m_Stop = false;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

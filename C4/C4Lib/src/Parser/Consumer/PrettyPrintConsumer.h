@@ -2,7 +2,7 @@
 #include "Parser/Consumer/ASTConsumer.h"
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// ASTConsumer that produces a tree-formatted debug dump of the AST,
 	/// similar to the output of a terminal `tree` command.

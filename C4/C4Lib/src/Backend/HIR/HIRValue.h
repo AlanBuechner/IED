@@ -6,7 +6,7 @@
 #include <span>
 #include <type_traits>
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct HIRNode; // a node in the function's tree (HIRNodes.h)
 	struct SymbolInfo; // model symbol record (Model/SymbolTable.h); referenced by Global lvalues
@@ -104,4 +104,4 @@ namespace Scripting
 
 		bool IsRValue() const { return !isLValue; }
 	};
-} // namespace Scripting
+} // namespace C4Compiler

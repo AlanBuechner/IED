@@ -1,7 +1,7 @@
 #include "Backend/ProgramBackend.h"
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	void ProgramBackend::SplitInto(unsigned count, PartitionCopies copies)
 	{
@@ -52,4 +52,4 @@ namespace Scripting
 	{
 		return m_Emitter.Reflection().BuildImageModule(context);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

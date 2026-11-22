@@ -7,7 +7,7 @@
 #include "Parser/Nodes/Expressions/BracedInitializerNode.h"
 #include <memory>
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct VariableDefinitionNode; struct Declarator; class ReferenceType;
 
@@ -115,4 +115,4 @@ namespace Scripting
 
 		LoweringContext& m_Ctx;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

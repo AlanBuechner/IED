@@ -3,7 +3,7 @@
 #include "Compiler/ErrorTracker.h"
 #include "Backend/HIR/HIRNodes.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	// =====================================================================
 	// LOWERING DRIVER - one function at a time. LowerFunction sets up the transient context, pushes
@@ -15,4 +15,4 @@ namespace Scripting
 	// (complete == false) with diagnostics already in the tracker; codegen skips trees not complete.
 	// =====================================================================
 	HIRFunction LowerFunction(ProgramModel& model, ErrorTracker& errors, const FunctionRecord* record);
-} // namespace Scripting
+} // namespace C4Compiler

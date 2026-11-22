@@ -5,7 +5,7 @@
 #include "Core/Core.h"
 #include "AnnotationNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct VariableDefinitionNode;
 

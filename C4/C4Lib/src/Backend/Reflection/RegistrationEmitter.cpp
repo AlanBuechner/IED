@@ -24,7 +24,7 @@
 #include <string_view>
 #include <unordered_map>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -460,4 +460,4 @@ namespace Scripting
 		errors.Append(scope.Errors());
 		return writer.Finish();
 	}
-} // namespace Scripting
+} // namespace C4Compiler

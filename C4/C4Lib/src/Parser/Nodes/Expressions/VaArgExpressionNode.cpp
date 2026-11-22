@@ -2,7 +2,7 @@
 #include "Parser/PrattParser.h"
 #include "Lexer/Lexer.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	bool VaArgExpressionNode::StartsHere(ParserState& state)
 	{

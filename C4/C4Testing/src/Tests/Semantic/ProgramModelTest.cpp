@@ -8,7 +8,7 @@ namespace Testing
 	// Build the program model for one in-memory unit and hand back a reference to it (the model is
 	// move-only - it owns its data, doc 03 - so phases hold a reference to the one shared model). The
 	// caller keeps the compiler alive for as long as it uses the returned reference.
-	static const Scripting::ProgramModel& MakeModel(Scripting::CompilerInstance& compiler, const char* source)
+	static const C4Compiler::ProgramModel& MakeModel(C4Compiler::CompilerInstance& compiler, const char* source)
 	{
 		uint32 id = compiler.RegisterInMemory("t.cf", source);
 		compiler.CompileAll();   // parsing is per-unit threaded; the model build reads parsed ASTs
@@ -19,14 +19,14 @@ namespace Testing
 
 	void ProgramModelTest::TestQueryTypeSuccessAndAliasUnwrap()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, "struct Point { int32 x; int32 y; }\nalias Pt = Point;\n");
 		TEST_ASSERT(model.IsValid());
 
 		auto t = model.QueryType("Point");
 		TEST_ASSERT(t.Ok());
 		TEST_ASSERT(t.value != nullptr);
-		TEST_ASSERT(t.value->GetKind() == Scripting::TypeKind::Object);
+		TEST_ASSERT(t.value->GetKind() == C4Compiler::TypeKind::Object);
 
 		// An alias is transparent: QueryType("Pt") unwraps to the SAME Point type.
 		auto a = model.QueryType("Pt");
@@ -37,39 +37,39 @@ namespace Testing
 
 	void ProgramModelTest::TestQueryTypeNotFound()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, "struct Point { int32 x; }\nint32 Fa() { return 1; }\n");
 
 		auto missing = model.QueryType("DoesNotExist");
-		TEST_ASSERT(missing.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(missing.error == C4Compiler::QueryError::NotFound);
 
 		// A function name is not a type: it exists, but QueryType reports NotFound (not NotCallable).
 		auto fnAsType = model.QueryType("Fa");
-		TEST_ASSERT(fnAsType.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(fnAsType.error == C4Compiler::QueryError::NotFound);
 		TEST_PASSED();
 	}
 
 	void ProgramModelTest::TestQuerySymbolKind()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, "struct Point { int32 x; }\nint32 Fa() { return 1; }\n");
 
 		auto ty = model.QuerySymbol("Point");
 		TEST_ASSERT(ty.Ok());
-		TEST_ASSERT(ty.value->kind == Scripting::SymbolKind::Type);
+		TEST_ASSERT(ty.value->kind == C4Compiler::SymbolKind::Type);
 
 		auto fn = model.QuerySymbol("Fa");
 		TEST_ASSERT(fn.Ok());
-		TEST_ASSERT(fn.value->kind == Scripting::SymbolKind::Function);
+		TEST_ASSERT(fn.value->kind == C4Compiler::SymbolKind::Function);
 
 		auto missing = model.QuerySymbol("Nope");
-		TEST_ASSERT(missing.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(missing.error == C4Compiler::QueryError::NotFound);
 		TEST_PASSED();
 	}
 
 	void ProgramModelTest::TestQueryFunctionSuccess()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, "int32 Fa(int32 a) { return a; }\n");
 		auto f = model.QueryFunction("Fa");
 		TEST_ASSERT(f.Ok());
@@ -80,64 +80,64 @@ namespace Testing
 
 	void ProgramModelTest::TestQueryFunctionNotCallableWhenNameIsAType()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, "struct Point { int32 x; }\n");
 		auto f = model.QueryFunction("Point");
-		TEST_ASSERT(f.error == Scripting::QueryError::NotCallable); // exists, but is a type
+		TEST_ASSERT(f.error == C4Compiler::QueryError::NotCallable); // exists, but is a type
 		TEST_PASSED();
 	}
 
 	void ProgramModelTest::TestQueryFunctionNotFound()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, "struct Point { int32 x; }\n");
 		auto f = model.QueryFunction("Nope");
-		TEST_ASSERT(f.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(f.error == C4Compiler::QueryError::NotFound);
 		TEST_PASSED();
 	}
 
 	void ProgramModelTest::TestQueryConstantEnumMemberAndConstVar()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"enum Color { Red = 1, Green = 5 };\n"
 			"const int32 K = 40;\n");
 
 		auto green = model.QueryConstant("Green");
 		TEST_ASSERT(green.Ok());
-		TEST_ASSERT(green.value.kind == Scripting::ConstantValue::Kind::Int64);
+		TEST_ASSERT(green.value.kind == C4Compiler::ConstantValue::Kind::Int64);
 		TEST_ASSERT_EQ((int)green.value.intValue, 5);
 
 		auto k = model.QueryConstant("K");
 		TEST_ASSERT(k.Ok());
-		TEST_ASSERT(k.value.kind == Scripting::ConstantValue::Kind::Int64);
+		TEST_ASSERT(k.value.kind == C4Compiler::ConstantValue::Kind::Int64);
 		TEST_ASSERT_EQ((int)k.value.intValue, 40);
 		TEST_PASSED();
 	}
 
 	void ProgramModelTest::TestQueryConstantNotAValueForNonConst()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"int32 notConst = 7;\n"
 			"struct Point { int32 x; }\n");
 
 		// A mutable variable is not a compile-time constant.
 		auto v = model.QueryConstant("notConst");
-		TEST_ASSERT(v.error == Scripting::QueryError::NotAValue);
+		TEST_ASSERT(v.error == C4Compiler::QueryError::NotAValue);
 
 		// A type name is certainly not a constant either.
 		auto t = model.QueryConstant("Point");
-		TEST_ASSERT(t.error == Scripting::QueryError::NotAValue);
+		TEST_ASSERT(t.error == C4Compiler::QueryError::NotAValue);
 		TEST_PASSED();
 	}
 
 	void ProgramModelTest::TestQueryConstantNotFound()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, "struct Point { int32 x; }\n");
 		auto v = model.QueryConstant("Nope");
-		TEST_ASSERT(v.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(v.error == C4Compiler::QueryError::NotFound);
 		TEST_PASSED();
 	}
 
@@ -145,20 +145,20 @@ namespace Testing
 	{
 		// A model with no data reports errors and never crashes (doc 03: queries return a value or an
 		// error, never a bare nullptr). The default-constructed model is the "not built" state.
-		Scripting::ProgramModel empty;
+		C4Compiler::ProgramModel empty;
 		TEST_ASSERT(!empty.IsValid());
 		auto r1 = empty.QueryType("Point");
-		TEST_ASSERT(r1.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(r1.error == C4Compiler::QueryError::NotFound);
 		auto r2 = empty.QueryFunction("Fa");
-		TEST_ASSERT(r2.error == Scripting::QueryError::NotCallable); // invalid model, function query
+		TEST_ASSERT(r2.error == C4Compiler::QueryError::NotCallable); // invalid model, function query
 		TEST_PASSED();
 	}
 
 	void ProgramModelTest::TestQueryMemberFieldAndMethod()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, "struct P { int32 x; int32 GetX() { return x; } }\n");
-		const Scripting::Type* p = nullptr;
+		const C4Compiler::Type* p = nullptr;
 		{
 			auto t = model.QueryType("P");
 			TEST_ASSERT(t.Ok());
@@ -180,12 +180,12 @@ namespace Testing
 
 	void ProgramModelTest::TestQueryMemberInheritedMostDerivedFirst()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"struct Base { int32 v; int32 GetV() { return v; } }\n"
 			"struct Derived : Base { int32 v; int32 GetV() { return v + 1; } }\n");
-		const Scripting::Type* base = nullptr;
-		const Scripting::Type* derived = nullptr;
+		const C4Compiler::Type* base = nullptr;
+		const C4Compiler::Type* derived = nullptr;
 		{
 			auto b = model.QueryType("Base");
 			auto d = model.QueryType("Derived");
@@ -212,26 +212,26 @@ namespace Testing
 
 	void ProgramModelTest::TestQueryMemberNotAnObjectType()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, "int32 Fa(int32 a) { return a; }\n");
 
 		// A function's type is a FunctionType, not an object type: members cannot be asked of it.
 		auto f = model.QueryFunction("Fa");
 		TEST_ASSERT(f.Ok() && f.value != nullptr);
-		auto fnAsBase = model.QueryMember(static_cast<const Scripting::Type*>(f.value), "x");
-		TEST_ASSERT(fnAsBase.error == Scripting::QueryError::NotCallable);
+		auto fnAsBase = model.QueryMember(static_cast<const C4Compiler::Type*>(f.value), "x");
+		TEST_ASSERT(fnAsBase.error == C4Compiler::QueryError::NotCallable);
 
 		// A null base is also rejected, not a crash.
 		auto nullBase = model.QueryMember(nullptr, "x");
-		TEST_ASSERT(nullBase.error == Scripting::QueryError::NotCallable);
+		TEST_ASSERT(nullBase.error == C4Compiler::QueryError::NotCallable);
 		TEST_PASSED();
 	}
 
 	void ProgramModelTest::TestQueryMemberNotFound()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, "struct P { int32 x; }\n");
-		const Scripting::Type* p = nullptr;
+		const C4Compiler::Type* p = nullptr;
 		{
 			auto t = model.QueryType("P");
 			TEST_ASSERT(t.Ok());
@@ -239,19 +239,19 @@ namespace Testing
 		}
 
 		auto missing = model.QueryMember(p, "DoesNotExist");
-		TEST_ASSERT(missing.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(missing.error == C4Compiler::QueryError::NotFound);
 		TEST_PASSED();
 	}
 
 	void ProgramModelTest::TestQueryOperatorBinaryLeftReceiver()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"struct Plain { int32 v; }\n"
 			"struct HasAdd { int32 v; }\n"
 			"[operator(\"add\")] HasAdd Add(const HasAdd& o) extends HasAdd { return o; }\n");
-		const Scripting::Type* hasAdd = nullptr;
-		const Scripting::Type* plain = nullptr;
+		const C4Compiler::Type* hasAdd = nullptr;
+		const C4Compiler::Type* plain = nullptr;
 		{
 			auto a = model.QueryType("HasAdd");
 			auto p = model.QueryType("Plain");
@@ -263,7 +263,7 @@ namespace Testing
 		// "add" is declared on HasAdd only: with HasAdd as the LHS (and an argument it takes) it resolves.
 		auto r = model.QueryOperator("add", hasAdd, hasAdd);
 		TEST_ASSERT(r.Ok());
-		TEST_ASSERT(model.QueryOperator("add", hasAdd, plain).error == Scripting::QueryError::NotFound); // Add cannot take a Plain
+		TEST_ASSERT(model.QueryOperator("add", hasAdd, plain).error == C4Compiler::QueryError::NotFound); // Add cannot take a Plain
 		TEST_ASSERT(r.value.method != nullptr);
 		TEST_ASSERT(r.value.record != nullptr);
 		TEST_PASSED();
@@ -271,13 +271,13 @@ namespace Testing
 
 	void ProgramModelTest::TestQueryOperatorNeverSwapsOperands()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"struct Plain { int32 v; }\n"
 			"struct HasAdd { int32 v; }\n"
 			"[operator(\"add\")] HasAdd Add(const HasAdd& o) extends HasAdd { return o; }\n");
-		const Scripting::Type* hasAdd = nullptr;
-		const Scripting::Type* plain = nullptr;
+		const C4Compiler::Type* hasAdd = nullptr;
+		const C4Compiler::Type* plain = nullptr;
 		{
 			auto a = model.QueryType("HasAdd");
 			auto p = model.QueryType("Plain");
@@ -288,17 +288,17 @@ namespace Testing
 
 		// Same operator, but now HasAdd is the RHS: `plain + hasAdd` looks on Plain only (D-25).
 		auto r = model.QueryOperator("add", plain, hasAdd);
-		TEST_ASSERT(r.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(r.error == C4Compiler::QueryError::NotFound);
 		TEST_PASSED();
 	}
 
 	void ProgramModelTest::TestQueryOperatorUnary()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"struct Neg { int32 v; }\n"
 			"[operator(\"negate\")] Neg DoNeg() extends Neg { return Neg(); }\n");
-		const Scripting::Type* neg = nullptr;
+		const C4Compiler::Type* neg = nullptr;
 		{
 			auto t = model.QueryType("Neg");
 			TEST_ASSERT(t.Ok());
@@ -314,9 +314,9 @@ namespace Testing
 
 	void ProgramModelTest::TestQueryOperatorNotFoundForPrimitives()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, "struct Plain { int32 v; }\n");
-		const Scripting::Type* plain = nullptr;
+		const C4Compiler::Type* plain = nullptr;
 		{
 			auto t = model.QueryType("Plain");
 			TEST_ASSERT(t.Ok());
@@ -325,22 +325,22 @@ namespace Testing
 
 		// No operand declares "add": a clean NotFound, not a crash or a wrong pick.
 		auto r = model.QueryOperator("add", plain, plain);
-		TEST_ASSERT(r.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(r.error == C4Compiler::QueryError::NotFound);
 		TEST_PASSED();
 	}
 
 	void ProgramModelTest::TestQueryOperatorCompoundInPlaceAndFallback()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"struct A { int32 v; }\n"
 			"[operator(\"add_assign\")] void AddAssign(const A& o) extends A { }\n"
 			"struct B { int32 v; }\n"
 			"[operator(\"multiply\")] B Mul(const B& o) extends B { return o; }\n");
 
-		const Scripting::Type* a = nullptr;
-		const Scripting::Type* b = nullptr;
-		const Scripting::Type* plain = nullptr;
+		const C4Compiler::Type* a = nullptr;
+		const C4Compiler::Type* b = nullptr;
+		const C4Compiler::Type* plain = nullptr;
 		{
 			auto ta = model.QueryType("A");
 			auto tb = model.QueryType("B");
@@ -364,13 +364,13 @@ namespace Testing
 
 		// Neither in-place nor fallback declared: a clean NotFound.
 		auto none = model.QueryOperator("divide_assign", plain, plain);
-		TEST_ASSERT(none.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(none.error == C4Compiler::QueryError::NotFound);
 		TEST_PASSED();
 	}
 
 	void ProgramModelTest::TestQueryVariableConstAndStatic()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"const int32 K = 5;\n"
 			"static float S = 1.0f;\n");
@@ -390,34 +390,34 @@ namespace Testing
 
 	void ProgramModelTest::TestQueryVariableNotAVariable()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"int32 Fa(int32 a) { return a; }\n"
 			"struct P { int32 x; }\n");
 
 		// A function name is not a variable: NotCallable (exists, wrong kind).
 		auto fn = model.QueryVariable("Fa");
-		TEST_ASSERT(fn.error == Scripting::QueryError::NotCallable);
+		TEST_ASSERT(fn.error == C4Compiler::QueryError::NotCallable);
 
 		// A type name is not a variable either.
 		auto ty = model.QueryVariable("P");
-		TEST_ASSERT(ty.error == Scripting::QueryError::NotCallable);
+		TEST_ASSERT(ty.error == C4Compiler::QueryError::NotCallable);
 
 		// A missing name is NotFound.
 		auto none = model.QueryVariable("Nope");
-		TEST_ASSERT(none.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(none.error == C4Compiler::QueryError::NotFound);
 		TEST_PASSED();
 	}
 
 	void ProgramModelTest::TestLayoutSizeOfAndAlignOf()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"struct P { int32 x; float y; }\n"   // size 8, align 4
 			"struct Fwd;\n");                     // forward-declared: incomplete
 
-		const Scripting::Type* p = nullptr;
-		const Scripting::Type* fwd = nullptr;
+		const C4Compiler::Type* p = nullptr;
+		const C4Compiler::Type* fwd = nullptr;
 		{
 			auto tp = model.QueryType("P");
 			auto tf = model.QueryType("Fwd");
@@ -444,15 +444,15 @@ namespace Testing
 
 	void ProgramModelTest::TestElementOfArrayPointerAndScalar()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"int32[4] g_arr;\n"
 			"int32* g_ptr;\n"
 			"float g_s;\n");
 
-		const Scripting::Type* arr = nullptr;
-		const Scripting::Type* ptr = nullptr;
-		const Scripting::Type* scalar = nullptr;
+		const C4Compiler::Type* arr = nullptr;
+		const C4Compiler::Type* ptr = nullptr;
+		const C4Compiler::Type* scalar = nullptr;
 		{
 			auto va = model.QueryVariable("g_arr");
 			auto vp = model.QueryVariable("g_ptr");
@@ -464,12 +464,12 @@ namespace Testing
 		}
 
 		// An array's element is its element type (int32, size 4).
-		const Scripting::Type* aelem = model.ElementOf(arr);
+		const C4Compiler::Type* aelem = model.ElementOf(arr);
 		TEST_ASSERT(aelem != nullptr);
 		TEST_ASSERT_EQ((int)aelem->GetSize(), 4);
 
 		// A pointer's element is its pointee type.
-		const Scripting::Type* pelem = model.ElementOf(ptr);
+		const C4Compiler::Type* pelem = model.ElementOf(ptr);
 		TEST_ASSERT(pelem != nullptr);
 		TEST_ASSERT_EQ((int)pelem->GetSize(), 4);
 
@@ -480,7 +480,7 @@ namespace Testing
 
 	void ProgramModelTest::TestQualifiedTypeAndFunction()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"namespace Math {\n"
 			"    struct Vec { int32 x; int32 y; }\n"
@@ -491,7 +491,7 @@ namespace Testing
 		auto q = model.QueryType("Math::Vec");
 		TEST_ASSERT(q.Ok());
 		TEST_ASSERT(q.value != nullptr);
-		TEST_ASSERT(q.value->GetKind() == Scripting::TypeKind::Object);
+		TEST_ASSERT(q.value->GetKind() == C4Compiler::TypeKind::Object);
 
 		// A qualified function name resolves to its signature (2 params).
 		auto f = model.QueryFunction("Math::AddX");
@@ -502,17 +502,17 @@ namespace Testing
 		// QuerySymbol sees the qualified name too, and reports the right kind.
 		auto s = model.QuerySymbol("Math::Vec");
 		TEST_ASSERT(s.Ok());
-		TEST_ASSERT(s.value->kind == Scripting::SymbolKind::Type);
+		TEST_ASSERT(s.value->kind == C4Compiler::SymbolKind::Type);
 
 		// A bogus qualified path is NotFound, not a crash or a wrong hit.
 		auto none = model.QueryType("Math::Nope");
-		TEST_ASSERT(none.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(none.error == C4Compiler::QueryError::NotFound);
 		TEST_PASSED();
 	}
 
 	void ProgramModelTest::TestQualifiedConstantFolds()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"namespace Math {\n"
 			"    const int32 K = 7;\n"
@@ -531,23 +531,23 @@ namespace Testing
 
 		// A bogus qualified constant is NotFound, not a silent fold.
 		auto none = model.QueryConstant("Math::Nope");
-		TEST_ASSERT(none.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(none.error == C4Compiler::QueryError::NotFound);
 		TEST_PASSED();
 	}
 
 	void ProgramModelTest::TestQueryInstantiationReturnsConcreteType()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"template<T> class TBox { public T v; }\n"
 			"TBox<int32> g;\n"
 			"int32 h;\n");
 
-		const Scripting::QualTypeNode* spec = nullptr;   // the `TBox<int32>` type node
-		const Scripting::QualTypeNode* plain = nullptr;  // the plain `int32` type node
-		std::function<void(const Scripting::AstNode&)> walk = [&](const Scripting::AstNode& n) {
+		const C4Compiler::QualTypeNode* spec = nullptr;   // the `TBox<int32>` type node
+		const C4Compiler::QualTypeNode* plain = nullptr;  // the plain `int32` type node
+		std::function<void(const C4Compiler::AstNode&)> walk = [&](const C4Compiler::AstNode& n) {
 			if (spec && plain) return;
-			if (const auto* v = dynamic_cast<const Scripting::VariableDefinitionNode*>(&n)) {
+			if (const auto* v = dynamic_cast<const C4Compiler::VariableDefinitionNode*>(&n)) {
 				const auto& t = v->GetType();
 				if (t) {
 					if (t->HasTemplateArgs() && !spec) spec = t.Get();
@@ -567,7 +567,7 @@ namespace Testing
 		auto r = model.QueryInstantiation(*spec);
 		TEST_ASSERT(r.Ok());
 		TEST_ASSERT(r.value != nullptr);
-		TEST_ASSERT(r.value->GetKind() == Scripting::TypeKind::Object);
+		TEST_ASSERT(r.value->GetKind() == C4Compiler::TypeKind::Object);
 
 		auto again = model.QueryInstantiation(*spec);
 		TEST_ASSERT(again.Ok());
@@ -575,7 +575,7 @@ namespace Testing
 
 		// A plain (non-specialization) type node is rejected, not treated as an instantiation.
 		auto notSpec = model.QueryInstantiation(*plain);
-		TEST_ASSERT(notSpec.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(notSpec.error == C4Compiler::QueryError::NotFound);
 		TEST_PASSED();
 	}
 } // namespace Testing

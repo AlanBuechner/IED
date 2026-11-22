@@ -1,7 +1,7 @@
 #pragma once
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class Type;
 	class ObjectType;
@@ -38,4 +38,4 @@ namespace Scripting
 	/// A template value argument as names write it: `true`, `-3`, and a float in its shortest exact form with a
 	/// point (`2.5`, `1.0`), so distinct values never print alike (BUG-235).
 	Core::String ConstantText(const ConstantValue& value);
-} // namespace Scripting
+} // namespace C4Compiler

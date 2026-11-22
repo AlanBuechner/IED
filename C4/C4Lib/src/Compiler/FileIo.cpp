@@ -5,7 +5,7 @@
 #include <llvm/Support/raw_ostream.h>
 #include <chrono>
 
-namespace Scripting
+namespace C4Compiler
 {
 	std::string ReadFileBytes(const std::string& path)
 	{

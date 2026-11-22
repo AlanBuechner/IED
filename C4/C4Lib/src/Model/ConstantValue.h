@@ -2,7 +2,7 @@
 #include "Core/Core.h"
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A folded compile-time constant (doc 04: QueryConstant returns one of these).
 	/// Order-independent: a const may name another const, an enum member, or sizeof(T);
@@ -38,4 +38,4 @@ namespace Scripting
 			}
 		}
 	};
-} // namespace Scripting
+} // namespace C4Compiler

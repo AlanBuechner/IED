@@ -9,7 +9,7 @@
 #include "Core/Core.h"
 #include <thread>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class CompilerInstance;
 	class CompilerMessageQueue;

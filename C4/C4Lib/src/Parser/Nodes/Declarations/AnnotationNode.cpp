@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 
 	// --- AnnotationItem ---
@@ -387,4 +387,4 @@ namespace Scripting
 		return result;
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

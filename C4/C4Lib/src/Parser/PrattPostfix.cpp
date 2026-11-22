@@ -24,7 +24,7 @@
 #include "Nodes/Declarations/QualTypeNode.h"
 #include "Nodes/Declarations/NamespaceQualifiedNameNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	Ref<AstNode> PrattParser::ParsePostfix(ParserState& state, Ref<AstNode> base)
 	{
@@ -270,4 +270,4 @@ namespace Scripting
 	// =========================================================================
 	// Parenthesized expression vs C-style cast disambiguation
 	// =========================================================================
-} // namespace Scripting
+} // namespace C4Compiler

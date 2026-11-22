@@ -2,7 +2,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The open #if groups of a file: whether the current line is live, and the error of a misplaced #elif,
 	/// #else or #endif. A condition is read only where it can matter: inside a skipped region, or after a

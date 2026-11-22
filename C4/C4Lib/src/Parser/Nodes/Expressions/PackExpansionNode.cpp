@@ -1,6 +1,6 @@
 #include "Parser/Nodes/Expressions/PackExpansionNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	Ref<PackExpansionNode> PackExpansionNode::Around(const Ref<AstNode>& pattern, const Token& ellipsis)
 	{
@@ -35,4 +35,4 @@ namespace Scripting
 		if (m_Last) text += op + m_Last->ToString();
 		return text + ")";
 	}
-} // namespace Scripting
+} // namespace C4Compiler

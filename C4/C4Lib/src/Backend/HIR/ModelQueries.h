@@ -2,7 +2,7 @@
 #include "Model/ProgramModel.h"
 #include "Backend/HIR/HIRNodes.h" // IntrinsicOp (the token -> op maps return these)
 
-namespace Scripting
+namespace C4Compiler
 {
 	// =====================================================================
 	// MODEL QUERIES (HIR) - the ONE model-facing surface for lowering. Every node lowerer talks
@@ -134,4 +134,4 @@ namespace Scripting
 	private:
 		ProgramModel* m_Model;   // read-only except the scope API
 	};
-} // namespace Scripting
+} // namespace C4Compiler

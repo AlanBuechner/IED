@@ -5,7 +5,7 @@
 #include <utility>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -188,4 +188,4 @@ namespace Scripting
 		B.SetInsertPoint(done);
 		return succeeded;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

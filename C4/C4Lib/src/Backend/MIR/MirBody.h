@@ -2,7 +2,7 @@
 #include "Backend/HIR/HIRNodes.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	// =====================================================================
 	// MIR (docs/compiler/06-mir.md): one function's control-flow graph, built from its HIR tree by MirBuilder where
@@ -209,4 +209,4 @@ namespace Scripting
 	/// Builds the MIR of a complete tree lowering made without LowerFunction (a thunk, a round of starts, a census
 	/// counter), and of its nested functions, where it has none: every tree codegen emits has its MIR.
 	void EnsureMir(HIRFunction& fn);
-} // namespace Scripting
+} // namespace C4Compiler

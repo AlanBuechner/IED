@@ -3,7 +3,7 @@
 #include "Model/Types/ClassHierarchy.h"
 #include "Model/Types/PointerType.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -76,4 +76,4 @@ namespace Scripting
 			return QueryResult<void>::Fail(QueryError::NotAValue, "dropping const is not allowed");
 		return PointeeConverts(fromPointer->GetPointeeType(), toPointer->GetPointeeType(), toPointer->IsConstReferent());
 	}
-} // namespace Scripting
+} // namespace C4Compiler

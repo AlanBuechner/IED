@@ -15,7 +15,7 @@
 
 extern char** environ;
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -160,6 +160,6 @@ namespace Scripting
 		exitCode = WaitForExit(process);
 		return true;
 	}
-} // namespace Scripting
+} // namespace C4Compiler
 
 #endif

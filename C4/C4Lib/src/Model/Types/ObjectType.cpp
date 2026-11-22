@@ -4,7 +4,7 @@
 #include "Model/Types/ClassHierarchy.h" // inherited field offsets
 #include "Parser/AstNode.h"           // a packed region's declaration position
 
-namespace Scripting
+namespace C4Compiler
 {
 	ObjectType::ObjectType(TypeKind kind, const Core::String& name)
 		: Type(kind), m_FullName(name)
@@ -281,5 +281,5 @@ namespace Scripting
 		m_Size = offset;
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler
 

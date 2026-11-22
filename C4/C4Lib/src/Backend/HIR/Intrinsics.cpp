@@ -4,7 +4,7 @@
 #include "Model/TypeHandle.h"
 #include "Model/Types/PointerType.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -85,4 +85,4 @@ namespace Scripting
 		if (name == "destroy") return Destroy(ctx, args);
 		return Relocate(ctx, args);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

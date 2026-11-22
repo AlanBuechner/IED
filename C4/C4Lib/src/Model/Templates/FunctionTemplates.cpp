@@ -14,7 +14,7 @@
 #include "Parser/Nodes/Declarations/NamespaceQualifiedNameNode.h"
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -333,4 +333,4 @@ namespace Scripting
 		const_cast<ObjectType*>(instance)->AddMethod(m);
 		model.m_MethodRecords[instance].Push(rec);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -6,7 +6,7 @@
 
 namespace Testing
 {
-	using namespace Scripting;
+	using namespace C4Compiler;
 
 	static ProgramModel& MakeModel(CompilerInstance& compiler, const char* source)
 	{

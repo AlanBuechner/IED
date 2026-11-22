@@ -2,7 +2,7 @@
 #include "Backend/HIR/LoweringContext.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// `location` with every value it is computed from (a pointer, an index, an indexer's receiver) evaluated once
 	/// into temporaries by `steps`, so a read and then a write of the result run nothing twice: `f().x += 1` calls `f`

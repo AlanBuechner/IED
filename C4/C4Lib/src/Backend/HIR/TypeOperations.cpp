@@ -14,7 +14,7 @@
 #include "ReflectABI.h"
 #include <unordered_set>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -203,4 +203,4 @@ namespace Scripting
 		fn.complete = TypeThunkBuilder(ctx, type).Build(op).Ok() && errors.GetErrors().Empty();
 		return fn;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

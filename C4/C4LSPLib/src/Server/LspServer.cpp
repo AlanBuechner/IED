@@ -77,7 +77,7 @@ namespace C4LSP::Server
 		{
 			for (const auto& [path, stamp] : files)
 			{
-				const std::optional<Scripting::FileStamp> now = stampOf(path);
+				const std::optional<C4Compiler::FileStamp> now = stampOf(path);
 				if (!now || now->size != stamp.size || now->modified != stamp.modified) return true;
 			}
 			return false;
@@ -99,7 +99,7 @@ namespace C4LSP::Server
 		// The library a program builds with: its options', else the server's own.
 		std::string LibraryOf(const ProgramOptions& options)
 		{
-			return options.libraryFolder.empty() ? Scripting::Toolchain::Bedrock().generic_string() : options.libraryFolder;
+			return options.libraryFolder.empty() ? C4Compiler::Toolchain::Bedrock().generic_string() : options.libraryFolder;
 		}
 
 		// Whether `programs` has the default library at `folder`'s own program.
@@ -515,7 +515,7 @@ namespace C4LSP::Server
 		// A file whose text is the same takes its tree from the last analysis: an edit parses the files it changed, not the
 		// program. Read while requests read it too, without the query lock (a request waiting for it would wait for the
 		// copy): a program's analysis made a unit for every file it registered, so nothing a request does changes them.
-		std::shared_ptr<const Scripting::PriorParses> prior = program.session ? program.session->Parses() : nullptr;
+		std::shared_ptr<const C4Compiler::PriorParses> prior = program.session ? program.session->Parses() : nullptr;
 		std::shared_ptr<CompilationSession> fresh = program.Analyze(m_RootUri.empty() ? "" : PathOfUri(m_RootUri), taken, std::move(prior));
 		++m_AnalysesMade;
 		// The worker alone swaps analyses: reading the last one here (what requests never change of it) needs no lock.
@@ -545,10 +545,10 @@ namespace C4LSP::Server
 				if (program->session && !program->stale) analyzed.push_back(program);
 				else if (!program->session && program->symbols) indexed.push_back(program);
 		}
-		std::unordered_map<std::string, std::optional<Scripting::FileStamp>> looked; // each file once, whoever read it
+		std::unordered_map<std::string, std::optional<C4Compiler::FileStamp>> looked; // each file once, whoever read it
 		const CompilationSession::StampLookup stampOf = [&looked](const std::string& path) {
 			auto known = looked.find(path);
-			return known != looked.end() ? known->second : looked.emplace(path, Scripting::StampOf(path)).first->second;
+			return known != looked.end() ? known->second : looked.emplace(path, C4Compiler::StampOf(path)).first->second;
 		};
 		bool changed = false;
 		for (const auto& program : analyzed)

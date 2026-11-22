@@ -16,7 +16,7 @@
 
 namespace C4LSP::Features
 {
-	using Scripting::NodeType;
+	using C4Compiler::NodeType;
 
 	// Cap so a large project (Bedrock + user code) cannot flood the client's symbol picker.
 	static constexpr size_t kMaxResults = 500;
@@ -131,19 +131,19 @@ namespace C4LSP::Features
 		}
 	}
 
-	void WorkspaceSymbols::AddEach(Walk& walk, const Core::Vector<Ref<Scripting::AstNode>>& nodes, uint32 sourceId, const std::string& container, bool member)
+	void WorkspaceSymbols::AddEach(Walk& walk, const Core::Vector<Ref<C4Compiler::AstNode>>& nodes, uint32 sourceId, const std::string& container, bool member)
 	{
 		for (const auto& node : nodes)
 			if (node && node->startLocation.sourceId == sourceId && walk.out.Count() < walk.limit)
 				AddDeclaration(walk, *node.Get(), sourceId, container, member);
 	}
 
-	void WorkspaceSymbols::AddDeclaration(Walk& walk, const Scripting::AstNode& node, uint32 sourceId, const std::string& container, bool member)
+	void WorkspaceSymbols::AddDeclaration(Walk& walk, const C4Compiler::AstNode& node, uint32 sourceId, const std::string& container, bool member)
 	{
 		switch (node.Type())
 		{
 		case NodeType::Namespace: {
-			const auto& ns = static_cast<const Scripting::NamespaceNode&>(node);
+			const auto& ns = static_cast<const C4Compiler::NamespaceNode&>(node);
 			if (!ns.IsRoot())
 				Push(walk, node, container, false);
 			// Keep descending when the namespace did not match: "Player" must still find Player inside it.
@@ -156,13 +156,13 @@ namespace C4LSP::Features
 		case NodeType::ObjectDefinition: {
 			Push(walk, node, container, member);
 			// Always descend: a query for a field name ("x") must find Point.x though "Point" does not match.
-			AddEach(walk, static_cast<const Scripting::ObjectDefinitionNode&>(node).GetBodyMembers(), sourceId, Joined(container, DeclarationText::NameOf(node)), true);
+			AddEach(walk, static_cast<const C4Compiler::ObjectDefinitionNode&>(node).GetBodyMembers(), sourceId, Joined(container, DeclarationText::NameOf(node)), true);
 			break;
 		}
 		case NodeType::EnumDefinition: {
 			Push(walk, node, container, member);
 			const std::string inner = Joined(container, DeclarationText::NameOf(node));
-			for (const auto& value : static_cast<const Scripting::EnumDefinitionNode&>(node).GetMembers())
+			for (const auto& value : static_cast<const C4Compiler::EnumDefinitionNode&>(node).GetMembers())
 				if (value)
 					Push(walk, *value.Get(), inner, true);
 			break;
@@ -191,7 +191,7 @@ namespace C4LSP::Features
 		}
 	}
 
-	void WorkspaceSymbols::Push(Walk& walk, const Scripting::AstNode& node, const std::string& container, bool member)
+	void WorkspaceSymbols::Push(Walk& walk, const C4Compiler::AstNode& node, const std::string& container, bool member)
 	{
 		const std::string name = DeclarationText::NameOf(node);
 		if (walk.out.Count() >= walk.limit || name.empty() || !Matches(name, walk.query))

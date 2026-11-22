@@ -1,6 +1,6 @@
 #include "Backend/CodeGen/PeTables.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace PeTables
 	{
@@ -105,4 +105,4 @@ namespace Scripting
 			return llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx), static_cast<uint64_t>(v), true);
 		}
 	}
-} // namespace Scripting
+} // namespace C4Compiler

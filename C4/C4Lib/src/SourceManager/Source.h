@@ -3,7 +3,7 @@
 #include <string>
 #include <cstddef>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// One file's text, as written, with a precomputed line table. Never changed once made: a compile reads the file through
 	/// what its macro pass made of it (MacroLayout, R8), so locations are always the file's own.

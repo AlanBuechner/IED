@@ -1,7 +1,7 @@
 #pragma once
 #include "Model/Types/ObjectType.h" // FieldInfo (unions reuse the object field descriptor)
 
-namespace Scripting
+namespace C4Compiler
 {
 	class Scope;
 
@@ -48,4 +48,4 @@ namespace Scripting
 		Core::Vector<Core::String> m_EnclosingNames;
 		Core::Vector<Core::String> m_Groups;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

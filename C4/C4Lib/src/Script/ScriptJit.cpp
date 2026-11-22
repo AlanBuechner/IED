@@ -33,7 +33,7 @@
 #include <llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h>
 #endif
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -442,4 +442,4 @@ namespace Scripting
 #endif
 		return linked;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

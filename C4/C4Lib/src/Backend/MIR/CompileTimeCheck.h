@@ -3,7 +3,7 @@
 #include "Model/CompileTimeMark.h"
 #include "Model/QueryResult.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Whether compile-time evaluation may run `record`'s body: it is marked, or the compiler wrote it (a create, copy or
 	/// delete runs when what it calls can).
@@ -16,4 +16,4 @@ namespace Scripting
 	/// value or a vtable, no call of a function that is not marked itself - and the mark takes no arguments. Its first
 	/// breach, or success. Only what runs while nothing is thrown counts: an exception ends the evaluation.
 	QueryResult<void> CheckCompileTimeBody(const HIRFunction& fn);
-} // namespace Scripting
+} // namespace C4Compiler

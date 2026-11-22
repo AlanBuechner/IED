@@ -6,7 +6,7 @@
 #include <tuple>
 #include <unordered_set>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ObjectType;
 	class ProgramModel;
@@ -52,4 +52,4 @@ namespace Scripting
 		std::unordered_set<const void*> m_Checked;               // the types, globals and functions checked
 		std::set<std::tuple<uint32, uint32, uint32>> m_Reported; // diagnostics said, by location: a template's once for all instances
 	};
-} // namespace Scripting
+} // namespace C4Compiler

@@ -3,7 +3,7 @@
 #include "SourceManager/SourceManager.h"
 #include <unordered_map>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The identity the macro pass knows a source by: its absolute path, or `memory:<id>` for one given as text.
 	std::string MacroIdentity(const SourceInfo& info);

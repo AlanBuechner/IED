@@ -2,10 +2,10 @@
 #include "Core/Core.h"
 #include "Protocol/LspTypes.h"
 #include "Server/NodeLocator.h"
-#include "Model/SymbolTable.h" // Scripting::SymbolKind for the global-symbol completion list
+#include "Model/SymbolTable.h" // C4Compiler::SymbolKind for the global-symbol completion list
 #include <optional>
 
-namespace Scripting { class Type; }
+namespace C4Compiler { class Type; }
 
 namespace C4LSP::Server { class CompilationSession; class SemanticResolver; }
 
@@ -45,7 +45,7 @@ namespace C4LSP::Features
 	private:
 		static bool IsIdentChar(char);
 		/// Whether the innermost declaration around the caret is a type's body (not a function or lambda in it).
-		static bool InTypeBody(const Core::Vector<const Scripting::AstNode*>& path);
+		static bool InTypeBody(const Core::Vector<const C4Compiler::AstNode*>& path);
 
 		/// The identifier characters immediately before byte `offset` (the word being completed).
 		static std::string WordBefore(const std::string& text, size_t offset);
@@ -55,18 +55,18 @@ namespace C4LSP::Features
 
 		/// Add the members visible on `type` (fields + methods for objects/unions, constants for enums), including what
 		/// every base declares; a pointer's are its pointee's. The most derived wins a name.
-		static void CollectMembersOf(const Scripting::Type* type, CompletionCandidates& out);
+		static void CollectMembersOf(const C4Compiler::Type* type, CompletionCandidates& out);
 
 		/// Add one object's own fields / methods / extension methods to `out`.
-		static void AddMembersOf(const Scripting::ObjectType* obj, CompletionCandidates& out);
+		static void AddMembersOf(const C4Compiler::ObjectType* obj, CompletionCandidates& out);
 
 		/// Render a method as `ret(p1, p2)` from its semantic MethodInfo (types only).
-		static std::string MethodSignature(const Scripting::ObjectType::MethodInfo& method);
+		static std::string MethodSignature(const C4Compiler::ObjectType::MethodInfo& method);
 
 		/// Add parameters of the innermost enclosing function and locals declared in enclosing blocks.
-		static void CollectEnclosingContext(const Core::Vector<const Scripting::AstNode*>& path, CompletionCandidates& out);
+		static void CollectEnclosingContext(const Core::Vector<const C4Compiler::AstNode*>& path, CompletionCandidates& out);
 		/// Add fields and methods of the innermost enclosing class/struct.
-		static void CollectClassMembers(const Core::Vector<const Scripting::AstNode*>& path, CompletionCandidates& out);
+		static void CollectClassMembers(const Core::Vector<const C4Compiler::AstNode*>& path, CompletionCandidates& out);
 		/// Add every symbol registered in file/namespace scopes (globals, functions, types).
 		static void CollectGlobalSymbols(const Server::SemanticResolver& resolver, CompletionCandidates& out);
 
@@ -75,11 +75,11 @@ namespace C4LSP::Features
 		static std::string QualifierBefore(const std::string& text, size_t offset);
 		/// Add what `qualifier` names holds, as seen from `path`: a namespace's names, or a type's members. False, adding
 		/// nothing, when it names neither.
-		static bool CollectQualified(const Server::SemanticResolver& resolver, uint32 unitId, const Core::Vector<const Scripting::AstNode*>& path,
+		static bool CollectQualified(const Server::SemanticResolver& resolver, uint32 unitId, const Core::Vector<const C4Compiler::AstNode*>& path,
 			const std::string& qualifier, CompletionCandidates& out);
 		/// Add every name registered in `scope` itself (a namespace's).
-		static void AddScopeSymbols(const Scripting::Scope& scope, CompletionCandidates& out);
+		static void AddScopeSymbols(const C4Compiler::Scope& scope, CompletionCandidates& out);
 
-		static int SymbolKindToLsp(Scripting::SymbolKind kind);
+		static int SymbolKindToLsp(C4Compiler::SymbolKind kind);
 	};
 } // namespace C4LSP::Features

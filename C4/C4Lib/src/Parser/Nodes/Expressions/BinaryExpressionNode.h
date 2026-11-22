@@ -2,7 +2,7 @@
 #include "Parser/AstNode.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Binary operator expression: left OP right.
 	/// Created inline by the Pratt parser for arithmetic, comparison, equality, bitwise, and shift operators.

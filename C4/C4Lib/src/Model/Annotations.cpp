@@ -11,7 +11,7 @@
 #include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
 #include "Parser/Nodes/Expressions/LiteralNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -191,4 +191,4 @@ namespace Scripting
 					if (node) CollectInherited(model, *node, place, scope, out);
 		return Result::Success(std::move(out));
 	}
-} // namespace Scripting
+} // namespace C4Compiler

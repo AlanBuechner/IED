@@ -4,7 +4,7 @@
 #include "Backend/Lowering/LoweredProgram.h"
 #include "Model/Types/NativeMemory.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	llvm::Constant* CensusTypes::ObjectRecord(const Type* type, const std::string& name)
 	{
@@ -68,4 +68,4 @@ namespace Scripting
 	{
 		return llvm::ConstantPointerNull::get(llvm::PointerType::get(m_MCtx.module().getContext(), 0));
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -8,7 +8,7 @@
 #include "Parser/Nodes/Expressions/LiteralNode.h"
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

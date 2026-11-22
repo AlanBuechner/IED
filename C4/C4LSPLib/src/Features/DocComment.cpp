@@ -7,7 +7,7 @@
 
 namespace C4LSP::Features
 {
-	using Scripting::NodeType;
+	using C4Compiler::NodeType;
 
 	static bool IsBlank(char c) { return c == ' ' || c == '\t' || c == '\r'; }
 
@@ -91,12 +91,12 @@ namespace C4LSP::Features
 	}
 
 	// Where a field, constant, enum value, alias or annotation declaration ends; npos for a declaration that is not one.
-	static size_t TrailingFrom(const Scripting::AstNode& decl)
+	static size_t TrailingFrom(const C4Compiler::AstNode& decl)
 	{
 		switch (decl.Type())
 		{
 		case NodeType::VariableDefinition: {
-			const auto& var = static_cast<const Scripting::VariableDefinitionNode&>(decl);
+			const auto& var = static_cast<const C4Compiler::VariableDefinitionNode&>(decl);
 			return var.GetSemicolonToken().GetStartLocation().line != 0 ? var.GetSemicolonToken().GetEndLocation().byteOffset : decl.endLocation.byteOffset;
 		}
 		case NodeType::EnumMember:
@@ -108,7 +108,7 @@ namespace C4LSP::Features
 		}
 	}
 
-	std::string DocComment::Of(Server::CompilationSession& session, const Scripting::AstNode& decl)
+	std::string DocComment::Of(Server::CompilationSession& session, const C4Compiler::AstNode& decl)
 	{
 		std::string_view text = DeclarationText::SourceText(session, decl.startLocation.sourceId);
 		if (text.empty() || decl.startLocation.byteOffset > text.size())
@@ -122,7 +122,7 @@ namespace C4LSP::Features
 		return end <= text.size() ? After(text, end) : std::string();
 	}
 
-	Scripting::SourceLocation DocComment::Start(Server::CompilationSession& session, const Scripting::AstNode& decl)
+	C4Compiler::SourceLocation DocComment::Start(Server::CompilationSession& session, const C4Compiler::AstNode& decl)
 	{
 		std::string_view text = DeclarationText::SourceText(session, decl.startLocation.sourceId);
 		if (text.empty() || decl.startLocation.byteOffset > text.size())
@@ -132,7 +132,7 @@ namespace C4LSP::Features
 		Above(text, LineStartOf(text, decl.startLocation.byteOffset), commentStart, lines);
 		if (lines == 0 || lines >= decl.startLocation.line)
 			return decl.startLocation;
-		Scripting::SourceLocation start = decl.startLocation;
+		C4Compiler::SourceLocation start = decl.startLocation;
 		start.line -= lines;
 		start.column = 1;
 		start.byteOffset = commentStart;

@@ -70,8 +70,11 @@ Next ID: **BUG-500**
   or whether the case asks more than a loaded machine can give.
   2026-11-21 (chat J): not reproduced - the case (now the fastest of up to ten runs) passed in two full `nuke gates`
   runs and 8 of 8 times alone under a full server-checks run (26-29 ms for ten 2 ms sleeps: the high-resolution timer
-  held). Still open: `c4_thread_sleep_ns` falls back to `Sleep` without a word when the high-resolution timer cannot be
-  made, which would explain the tick-length sleeps; make that fallback visible before closing this.
+  held). Still open, not reproduced: `c4_thread_sleep_ns` fell back to `Sleep` without a word when the high-resolution timer
+  could not be made, which would explain the tick-length sleeps. 2026-11-22 (chat L): the fallback now says so once on
+  standard error (`c4: CreateWaitableTimerExW failed (error N): Thread::Sleep ends on the system tick`); the case passed in
+  two more full `nuke gates` runs. Close this when a loaded run fails without that line (the cause is then the case's
+  demand on a busy machine, not the timer), or fix what the line names.
 
 ### BUG-435 Intermittent internal compiler error (0xC0000005) or corrupt partition bitcode compiling a large split program
 - **Area:** Codegen
@@ -161,19 +164,6 @@ Next ID: **BUG-500**
   kept the folder from opening again: that part was IED's and is fixed (`--master-pid`, `src/Main.cf` `WatchMaster`).
 
 ## Tools
-
-### BUG-495 `Dap.Session.PauseBreaksInAndTerminateEnds` fails when its pause lands before the program reaches `Spin`
-- **Area:** Tests
-- **Severity:** Low
-- **Status:** Open
-- **Found:** 2026-11-21
-- **Symptom:** `nuke gates` stopped once at unit-tests on `DapSessionTest.cpp(451): assertion "inSpin" failed` (chat I,
-  the worktree IED-i10, the machine busy with other builds); the same build passed it 6 runs of 6 alone right after.
-- **Where:** C4Testing `Tests/DAP/DapSessionTest.cpp` `PauseBreaksInAndTerminateEnds`: it sends `pause` right after
-  `configurationDone`, so on a busy machine the pause can stop the program in its start (the runtime, the global starts)
-  before `main` calls `Spin`, and no frame is `Spin`.
-- **Notes:** fix the test, not the adapter: pause until a frame is `Spin` (pause, look, `continue`, a few times), or wait
-  for the program to be in `Spin` first (a breakpoint on its loop line, removed before the pause).
 
 ### BUG-421 C4LSP puts a dependency's declarations in the root project of a multi-project program
 - **Area:** Tools

@@ -1,6 +1,6 @@
 #include "Model/OperatorTable.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	// The catalog: token -> (binary annotation, unary annotation). A null entry means "not an operator
 	// of that arity". Canonical names match the language spec's operator registry exactly, so a method
@@ -102,4 +102,4 @@ namespace Scripting
 			if (assignAnnotation == kBitwiseOrLogical[i]) return Core::String(kPlainNames[i]);
 		return assignAnnotation.substr(0, assignAnnotation.size() - 7);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

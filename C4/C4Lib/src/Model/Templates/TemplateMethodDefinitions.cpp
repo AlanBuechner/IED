@@ -12,7 +12,7 @@
 #include <cctype>
 #include <unordered_map>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -191,4 +191,4 @@ namespace Scripting
 		for (uint32 i = 0; i + 1 < segments.Count(); ++i) qualifier += (i ? "::" : "") + segments[i].nameToken.GetText();
 		return qualifier;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

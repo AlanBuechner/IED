@@ -6,7 +6,7 @@
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	// An unqualified qualifier (`C` in `C::Set` written inside a namespace) resolves from the declaring scope, where the
 	// type lives; a qualified one (`Ns::C`) from the program root.
@@ -69,4 +69,4 @@ namespace Scripting
 		if (declared.empty()) return start + "'" + f.prefix + "' declares no method named '" + f.last + "'";
 		return start + "it is " + sig.type->ToString() + (f.fn->IsConstMethod() ? " const" : "") + "; '" + f.prefix + "' declares " + declared;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

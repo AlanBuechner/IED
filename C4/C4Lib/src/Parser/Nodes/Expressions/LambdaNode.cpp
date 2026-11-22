@@ -4,7 +4,7 @@
 #include "Parser/PrattParser.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -204,4 +204,4 @@ namespace Scripting
 		result += " { ... }";
 		return result;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

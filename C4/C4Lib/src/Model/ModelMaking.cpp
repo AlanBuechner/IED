@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <utility>
 
-namespace Scripting
+namespace C4Compiler
 {
 	ModelMaking::Request::Request(const ModelMaking& making, const char* what) : m_Making(making)
 	{
@@ -77,4 +77,4 @@ namespace Scripting
 		const std::lock_guard<std::recursive_mutex> reading(m_Lock);
 		return m_Requests;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

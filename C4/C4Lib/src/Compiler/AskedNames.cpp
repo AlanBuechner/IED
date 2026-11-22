@@ -1,6 +1,6 @@
 #include "Compiler/AskedNames.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	bool AskedNames::Has(const std::string& name) const
 	{
@@ -15,4 +15,4 @@ namespace Scripting
 		std::lock_guard<std::mutex> asking(m_Lock);
 		return std::vector<std::pair<std::string, bool>>(m_Asked.begin(), m_Asked.end());
 	}
-} // namespace Scripting
+} // namespace C4Compiler

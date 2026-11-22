@@ -6,7 +6,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class AstNode;
 	class ObjectType;

@@ -4,7 +4,7 @@
 #include "Model/TypeHandle.h"
 #include <cstring>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -190,4 +190,4 @@ namespace Scripting
 		if (!image.Run(&start)) return std::nullopt;
 		return image.Take();
 	}
-} // namespace Scripting
+} // namespace C4Compiler

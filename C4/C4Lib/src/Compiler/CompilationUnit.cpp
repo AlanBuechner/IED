@@ -3,7 +3,7 @@
 #include "Compiler/CompilerInstance.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	CompilationUnit::CompilationUnit(uint32 sourceId, SourceManager& sourceManager, CompilerInstance* compilerInstance) :
 		m_SourceId(sourceId), m_SourceManager(sourceManager), m_CompilerInstance(compilerInstance),

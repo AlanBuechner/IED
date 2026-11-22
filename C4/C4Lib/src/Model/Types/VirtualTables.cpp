@@ -2,7 +2,7 @@
 #include "Model/Types/ClassHierarchy.h"
 #include "Model/Types/AliasType.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace VirtualTables
 	{
@@ -163,4 +163,4 @@ namespace Scripting
 
 		bool IsVirtual(const ObjectType* owner, const ObjectType::MethodInfo& method) { return DispatchFor(owner, owner, &method).isVirtual; }
 	}
-} // namespace Scripting
+} // namespace C4Compiler

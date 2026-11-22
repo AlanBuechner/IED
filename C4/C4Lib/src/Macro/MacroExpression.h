@@ -3,7 +3,7 @@
 #include "Core/Core.h"
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The value of a #if / #elif condition, or the error that stops it.
 	struct ConditionValue

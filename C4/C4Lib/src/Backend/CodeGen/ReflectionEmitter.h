@@ -10,7 +10,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The program's reflection (docs/runtime/02): its thunks made locals that only the image names, the image of every
 	/// type, function and global it registers, and `__c4_reflect_init`, which registers it under the program's tag before
@@ -62,4 +62,4 @@ namespace Scripting
 		// its thread is done before what it reads goes, also when nothing asked for the key (BUG-494).
 		std::future<std::string> m_ImageKeying;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

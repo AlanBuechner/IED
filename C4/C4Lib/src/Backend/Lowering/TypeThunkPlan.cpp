@@ -3,7 +3,7 @@
 #include "Model/ReflectedEntities.h"
 #include "ReflectABI.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -87,4 +87,4 @@ namespace Scripting
 		if (op != TypeOperation::Copy) flags &= ~reflect_TYPE_DEFAULT_CONSTRUCTIBLE;
 		if (op != TypeOperation::Construct) flags &= ~reflect_TYPE_COPYABLE;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

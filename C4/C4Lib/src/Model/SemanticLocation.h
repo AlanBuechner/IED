@@ -1,7 +1,7 @@
 #pragma once
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class CompilationUnit;
 	struct Scope;
@@ -52,4 +52,4 @@ namespace Scripting
 		const ObjectType* ContainingType() const { return fn ? fn->containingType : nullptr; }
 	};
 
-} // namespace Scripting
+} // namespace C4Compiler

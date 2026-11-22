@@ -2,7 +2,7 @@
 #include "Parser/PrattParser.h"
 #include "Compiler/ErrorTracker.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -120,4 +120,4 @@ namespace Scripting
 		}
 		return result + "] = " + (m_Value ? m_Value->ToString() : Core::String()) + ";";
 	}
-} // namespace Scripting
+} // namespace C4Compiler

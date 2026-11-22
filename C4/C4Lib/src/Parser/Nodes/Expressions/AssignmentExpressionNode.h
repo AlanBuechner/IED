@@ -2,7 +2,7 @@
 #include "Parser/AstNode.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Assignment expression: left OP right (where OP is =, +=, -=, *=, /=, %=).
 	struct AssignmentExpressionNode : public AstNode

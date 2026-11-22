@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 	class SymbolTable;
@@ -146,4 +146,4 @@ namespace Scripting
 	Core::String DescribeArgument(const ReflectedArgument& argument);
 	/// `a string`, `an integer`, `a type`: what a folded argument is.
 	Core::String ArgumentKindNoun(const ReflectedArgument& argument);
-} // namespace Scripting
+} // namespace C4Compiler

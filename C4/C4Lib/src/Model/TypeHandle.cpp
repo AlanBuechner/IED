@@ -6,7 +6,7 @@
 #include "Model/Types/ObjectType.h"
 #include "Model/Types/UnionType.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	const Type* TypeHandle::GetPointedType(const Type* t)
 	{
@@ -178,4 +178,4 @@ namespace Scripting
 		return obj ? obj->GetFieldByName(name) : nullptr;
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

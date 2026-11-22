@@ -3,7 +3,7 @@
 #include "Model/TypeHandle.h"
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	Core::String ReturnLists::FieldName(uint32 index)
 	{
@@ -43,4 +43,4 @@ namespace Scripting
 		model.m_ReturnLists.Add(elements, type);
 		return Result(static_cast<const ObjectType*>(type));
 	}
-} // namespace Scripting
+} // namespace C4Compiler

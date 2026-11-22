@@ -4,7 +4,7 @@
 #include "Backend/HIR/Lifecycle.h"
 #include "Model/Types/SignatureType.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

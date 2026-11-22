@@ -2,7 +2,7 @@
 #include "Backend/HIR/LoweringContext.h"
 #include "Model/Templates/Packs.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The copies a pack expansion stands for in a body (docs/language/08 6): copy i is the pattern lowered with
 	/// each pack it names meaning that pack's element i.
@@ -41,4 +41,4 @@ namespace Scripting
 		const AstNode* m_Pattern = nullptr;
 		std::vector<NamedPack> m_Packs;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

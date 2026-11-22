@@ -1,7 +1,7 @@
 #pragma once
 #include "Parser/Nodes/Expressions/LambdaNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// What a lambda's body refers to outside itself (D-22): the names that no parameter and no declaration
 	/// inside the body introduces first, each once in first-use order, and whether it uses `this`. Whether a

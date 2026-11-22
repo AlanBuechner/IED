@@ -11,16 +11,16 @@ namespace Testing
 {
 	void FunctionDefinitionTest::TestSimpleDeclaration()
 	{
-		auto stream = Scripting::Source::FromMemory("void DoThing();");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("void DoThing();");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::FunctionDefinitionNode::TryParse(state);
+		auto node = C4Compiler::FunctionDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->IsDeclaration());
 		TEST_ASSERT(!node->IsDefinition());
-		TEST_ASSERT(node->GetAccessModifier() == Scripting::AccessModifier::None);
+		TEST_ASSERT(node->GetAccessModifier() == C4Compiler::AccessModifier::None);
 		TEST_PASSED();
 	}
 
@@ -28,18 +28,18 @@ namespace Testing
 	{
 		struct ParsedFunction
 		{
-			Ref<Scripting::FunctionDefinitionNode> node;
+			Ref<C4Compiler::FunctionDefinitionNode> node;
 			uint32 errors = 0;
 		};
 
 		ParsedFunction ParseFunction(const char* source)
 		{
-			auto stream = Scripting::Source::FromMemory(source);
-			Scripting::Lexer lexer(*stream, 0);
-			Scripting::ErrorTracker errorTracker;
-			Scripting::ParserState state(lexer, errorTracker);
+			auto stream = C4Compiler::Source::FromMemory(source);
+			C4Compiler::Lexer lexer(*stream, 0);
+			C4Compiler::ErrorTracker errorTracker;
+			C4Compiler::ParserState state(lexer, errorTracker);
 			ParsedFunction parsed;
-			parsed.node = Scripting::FunctionDefinitionNode::TryParse(state);
+			parsed.node = C4Compiler::FunctionDefinitionNode::TryParse(state);
 			parsed.errors = errorTracker.GetErrors().Count();
 			return parsed;
 		}
@@ -102,12 +102,12 @@ namespace Testing
 
 	void FunctionDefinitionTest::TestWithBody()
 	{
-		auto stream = Scripting::Source::FromMemory("void DoThing() { }");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("void DoThing() { }");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::FunctionDefinitionNode::TryParse(state);
+		auto node = C4Compiler::FunctionDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->IsDefinition());
 		TEST_ASSERT(!node->IsDeclaration());
@@ -117,25 +117,25 @@ namespace Testing
 
 	void FunctionDefinitionTest::TestWithAccessModifier()
 	{
-		auto stream = Scripting::Source::FromMemory("public void DoThing();");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("public void DoThing();");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::FunctionDefinitionNode::TryParse(state);
+		auto node = C4Compiler::FunctionDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
-		TEST_ASSERT(node->GetAccessModifier() == Scripting::AccessModifier::Public);
+		TEST_ASSERT(node->GetAccessModifier() == C4Compiler::AccessModifier::Public);
 		TEST_PASSED();
 	}
 
 	void FunctionDefinitionTest::TestStaticFunction()
 	{
-		auto stream = Scripting::Source::FromMemory("static void DoThing();");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("static void DoThing();");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::FunctionDefinitionNode::TryParse(state);
+		auto node = C4Compiler::FunctionDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->IsStatic());
 		TEST_PASSED();
@@ -143,12 +143,12 @@ namespace Testing
 
 	void FunctionDefinitionTest::TestVirtualFunction()
 	{
-		auto stream = Scripting::Source::FromMemory("virtual void DoThing();");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("virtual void DoThing();");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::FunctionDefinitionNode::TryParse(state);
+		auto node = C4Compiler::FunctionDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->IsVirtual());
 		TEST_PASSED();
@@ -156,12 +156,12 @@ namespace Testing
 
 	void FunctionDefinitionTest::TestWithParameters()
 	{
-		auto stream = Scripting::Source::FromMemory("void DoThing(int i, float f);");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("void DoThing(int i, float f);");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::FunctionDefinitionNode::TryParse(state);
+		auto node = C4Compiler::FunctionDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->ParameterCount() == 2);
 		TEST_PASSED();
@@ -169,12 +169,12 @@ namespace Testing
 
 	void FunctionDefinitionTest::TestWithTemplate()
 	{
-		auto stream = Scripting::Source::FromMemory("template<T> void DoThing();");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("template<T> void DoThing();");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::FunctionDefinitionNode::TryParse(state);
+		auto node = C4Compiler::FunctionDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->IsTemplated());
 		TEST_PASSED();
@@ -182,12 +182,12 @@ namespace Testing
 
 	void FunctionDefinitionTest::TestWithAnnotation()
 	{
-		auto stream = Scripting::Source::FromMemory("[Test] void DoThing();");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("[Test] void DoThing();");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::FunctionDefinitionNode::TryParse(state);
+		auto node = C4Compiler::FunctionDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->GetAnnotations().Count() == 1);
 		TEST_PASSED();
@@ -195,12 +195,12 @@ namespace Testing
 
 	void FunctionDefinitionTest::TestConstQualifier()
 	{
-		auto stream = Scripting::Source::FromMemory("void DoThing() const;");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("void DoThing() const;");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::FunctionDefinitionNode::TryParse(state);
+		auto node = C4Compiler::FunctionDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->IsConstMethod() && !node->IsNoexcept());
 		TEST_PASSED();
@@ -208,12 +208,12 @@ namespace Testing
 
 	void FunctionDefinitionTest::TestNoexceptQualifier()
 	{
-		auto stream = Scripting::Source::FromMemory("void DoThing() noexcept;");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("void DoThing() noexcept;");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::FunctionDefinitionNode::TryParse(state);
+		auto node = C4Compiler::FunctionDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->IsNoexcept() && !node->IsConstMethod());
 		TEST_PASSED();
@@ -222,12 +222,12 @@ namespace Testing
 	void FunctionDefinitionTest::TestQualifiersCombine()
 	{
 		// BUG-109: the qualifiers were one enum, so a later one replaced an earlier one.
-		auto stream = Scripting::Source::FromMemory("virtual int32 Get() const noexcept = 0;");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("virtual int32 Get() const noexcept = 0;");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::FunctionDefinitionNode::TryParse(state);
+		auto node = C4Compiler::FunctionDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->IsConstMethod() && node->IsNoexcept() && node->IsPureVirtual());
 		TEST_PASSED();
@@ -235,12 +235,12 @@ namespace Testing
 
 	void FunctionDefinitionTest::TestPureVirtual()
 	{
-		auto stream = Scripting::Source::FromMemory("virtual void DoThing() = 0;");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("virtual void DoThing() = 0;");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::FunctionDefinitionNode::TryParse(state);
+		auto node = C4Compiler::FunctionDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->IsVirtual());
 		TEST_PASSED();
@@ -248,12 +248,12 @@ namespace Testing
 
 	void FunctionDefinitionTest::TestVariadic()
 	{
-		auto stream = Scripting::Source::FromMemory("void Printf(const char* fmt, ...);");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("void Printf(const char* fmt, ...);");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::FunctionDefinitionNode::TryParse(state);
+		auto node = C4Compiler::FunctionDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->IsVariadic());
 		TEST_PASSED();
@@ -261,36 +261,36 @@ namespace Testing
 
 	void FunctionDefinitionTest::TestComplexQualifiedName()
 	{
-		auto stream = Scripting::Source::FromMemory("void NC::SomeClass<float>::DoThing();");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("void NC::SomeClass<float>::DoThing();");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::FunctionDefinitionNode::TryParse(state);
+		auto node = C4Compiler::FunctionDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_PASSED();
 	}
 
 	void FunctionDefinitionTest::TestNoMatch()
 	{
-		auto stream = Scripting::Source::FromMemory("while (x > 0) { }");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("while (x > 0) { }");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::FunctionDefinitionNode::TryParse(state);
+		auto node = C4Compiler::FunctionDefinitionNode::TryParse(state);
 		TEST_ASSERT(node == nullptr);
 		TEST_PASSED();
 	}
 
 	void FunctionDefinitionTest::TestParameterPack()
 	{
-		auto stream = Scripting::Source::FromMemory("template<T, ...Ts> int32 F(T first, Ts... rest);");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("template<T, ...Ts> int32 F(T first, Ts... rest);");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::FunctionDefinitionNode::TryParse(state);
+		auto node = C4Compiler::FunctionDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr && node->GetParameters().Count() == 2);
 		TEST_ASSERT(!node->GetParameters()[0]->IsPack() && node->GetParameters()[1]->IsPack());
 		TEST_ASSERT(node->GetParameters()[1]->GetNameToken().GetText() == "rest");
@@ -301,12 +301,12 @@ namespace Testing
 	void FunctionDefinitionTest::TestOwnerTemplateHeader()
 	{
 		// BUG-117: an out-of-line member template of a class template has the class's header, then its own.
-		auto stream = Scripting::Source::FromMemory("template<T> template<U> U Box<T>::Get(U u) { return u; }");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("template<T> template<U> U Box<T>::Get(U u) { return u; }");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::FunctionDefinitionNode::TryParse(state);
+		auto node = C4Compiler::FunctionDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr && node->GetOwnerTemplateDefinition() && node->GetTemplateDefinition());
 		TEST_ASSERT(node->GetOwnerTemplateDefinition()->GetParameter(0)->GetName() == "T");
 		TEST_ASSERT(node->GetTemplateDefinition()->GetParameter(0)->GetName() == "U");

@@ -3,7 +3,7 @@
 #include "Model/Types/Type.h"
 #include <cmath>
 
-namespace Scripting::NormalizedConversion
+namespace C4Compiler::NormalizedConversion
 {
 	namespace
 	{
@@ -119,4 +119,4 @@ namespace Scripting::NormalizedConversion
 		const double scaled = std::nearbyint(x * range.scale); // the default rounding mode: ties to even
 		return range.isUnsigned ? static_cast<int64>(static_cast<uint64>(scaled)) : static_cast<int64>(scaled);
 	}
-} // namespace Scripting::NormalizedConversion
+} // namespace C4Compiler::NormalizedConversion

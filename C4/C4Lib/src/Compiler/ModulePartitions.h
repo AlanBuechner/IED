@@ -10,7 +10,7 @@ namespace llvm
 	class Module;
 }
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// What a split program's local symbols are named with, as hidden globals another partition can name: no C or C++
 	/// symbol contains a '.', so they meet no foreign object's names in the link.

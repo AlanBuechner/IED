@@ -12,7 +12,7 @@
 
 namespace Testing
 {
-	using namespace Scripting;
+	using namespace C4Compiler;
 
 	namespace
 	{
@@ -27,16 +27,16 @@ namespace Testing
 		// The parser state a lambda expression is read with; members are declared in initialization order.
 		struct ParsedLambda
 		{
-			Ref<Scripting::Source> text;
-			Scripting::Lexer lexer;
-			Scripting::ErrorTracker errors;
-			std::unique_ptr<Scripting::ParserState> state;
+			Ref<C4Compiler::Source> text;
+			C4Compiler::Lexer lexer;
+			C4Compiler::ErrorTracker errors;
+			std::unique_ptr<C4Compiler::ParserState> state;
 			Ref<AstNode> node;
 
 			explicit ParsedLambda(const char* source)
-				: text(Scripting::Source::FromMemory(std::string(source))), lexer(*text, 0)
+				: text(C4Compiler::Source::FromMemory(std::string(source))), lexer(*text, 0)
 			{
-				state = std::make_unique<Scripting::ParserState>(lexer, errors);
+				state = std::make_unique<C4Compiler::ParserState>(lexer, errors);
 				node = PrattParser::ParseExpression(*state);
 			}
 

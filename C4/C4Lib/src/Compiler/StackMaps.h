@@ -3,7 +3,7 @@
 
 namespace llvm { class Module; class TargetMachine; }
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Stack maps (R16 phase 3, `-fstack-maps`, docs/compiler/04 "GC emission"): the collector reads a C4 frame's managed
 	/// pointers from the slots LLVM's stack map names for the call the frame waits in, instead of the whole frame.

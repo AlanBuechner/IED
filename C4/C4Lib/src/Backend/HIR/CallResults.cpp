@@ -1,7 +1,7 @@
 #include "Backend/HIR/CallResults.h"
 #include "Model/Types/ReferenceType.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	Value CallResult(LoweringContext& ctx, const HIRNode* call, const Type* returned)
 	{
@@ -12,4 +12,4 @@ namespace Scripting
 		referent.addr = call;
 		return Value::L(ctx.NewLValue(referent));
 	}
-} // namespace Scripting
+} // namespace C4Compiler

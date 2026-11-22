@@ -4,7 +4,7 @@
 #include "Model/TypeHandle.h"
 #include "Model/Types/PointerType.h"
 
-namespace Scripting::Atomics
+namespace C4Compiler::Atomics
 {
 	namespace
 	{
@@ -205,4 +205,4 @@ namespace Scripting::Atomics
 		if (form.op == Op::CompareExchange || form.op == Op::CompareExchangeWeak) return CompareExchange(ctx, args, name, node);
 		return Access(ctx, form, args, name, node);
 	}
-} // namespace Scripting::Atomics
+} // namespace C4Compiler::Atomics

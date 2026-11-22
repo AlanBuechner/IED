@@ -10,7 +10,7 @@
 #include <algorithm>
 #include <unordered_map>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -180,4 +180,4 @@ namespace Scripting
 		}
 		return starts;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -1,7 +1,7 @@
 #pragma once
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The ONE operator catalog (doc 08): the data-driven token -> canonical-annotation map, aligned
 	/// with the language spec's operator registry (docs/language/06-lifecycle-and-operators.md).
@@ -33,4 +33,4 @@ namespace Scripting
 		/// simple suffix strip - bitwise/logical assigns map to their bitwise_/logical_ plain names.
 		static Core::String PlainFormFor(const Core::String& assignAnnotation);
 	};
-} // namespace Scripting
+} // namespace C4Compiler

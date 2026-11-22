@@ -1,6 +1,6 @@
 #include "Model/TypeNotFound.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -22,4 +22,4 @@ namespace Scripting
 			if (name == cpp.name) return "type not found: " + name + ": " + cpp.hint;
 		return "type not found: " + name;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

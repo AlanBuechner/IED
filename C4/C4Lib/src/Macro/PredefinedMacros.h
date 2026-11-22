@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A `-D NAME` or `-D NAME=VALUE` definition.
 	struct MacroDefine

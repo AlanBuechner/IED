@@ -1,6 +1,6 @@
 #pragma once
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ErrorTracker;
 	class ProgramModel;

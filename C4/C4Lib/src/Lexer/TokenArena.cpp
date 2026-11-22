@@ -1,6 +1,6 @@
 #include "TokenArena.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	Token* TokenArena::Alloc()
 	{
@@ -16,4 +16,4 @@ namespace Scripting
 		m_Chunks.shrink_to_fit();
 		m_Count = 0;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

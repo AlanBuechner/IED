@@ -2,7 +2,7 @@
 #include "Core/StringFormat.h"
 #include "Compiler/CompilerMessageQueue.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 
 	Ref<IncludeDeclarationNode> IncludeDeclarationNode::TryParse(ParserState& state)
@@ -89,4 +89,4 @@ namespace Scripting
 		return Core::StringFormat::Format("include \"{0}\"", FilePath());
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

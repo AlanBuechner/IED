@@ -1,7 +1,7 @@
 #include "MemberAccessNode.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	bool MemberAccessNode::IsArrowAccess() const
 	{

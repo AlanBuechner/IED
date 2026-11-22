@@ -3,7 +3,7 @@
 #include "Compiler/ErrorTracker.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 
@@ -23,4 +23,4 @@ namespace Scripting
 		HIRFunction LowerCensusFunction(ProgramModel& model, ErrorTracker& errors, const Type* type, uint64 countBytes,
 			const FunctionRecord& function);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

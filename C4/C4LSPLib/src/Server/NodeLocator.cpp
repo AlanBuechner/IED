@@ -5,40 +5,40 @@
 
 namespace C4LSP::Server
 {
-	LocatedNode NodeLocator::Locate(const Scripting::Source& source, uint32 sourceId,
-		const Ref<Scripting::AstNode>& root, const Protocol::Position& position)
+	LocatedNode NodeLocator::Locate(const C4Compiler::Source& source, uint32 sourceId,
+		const Ref<C4Compiler::AstNode>& root, const Protocol::Position& position)
 	{
 		LocatedNode result;
 		if (!root)
 			return result;
 
 		size_t byteOffset = PositionToByteOffset(source, position);
-		Core::Vector<const Scripting::AstNode*> path;
+		Core::Vector<const C4Compiler::AstNode*> path;
 		Find(*root.Get(), sourceId, byteOffset, path, result);
 		return result;
 	}
 
-	size_t NodeLocator::PositionToByteOffset(const Scripting::Source& source, const Protocol::Position& position)
+	size_t NodeLocator::PositionToByteOffset(const C4Compiler::Source& source, const Protocol::Position& position)
 	{
 		// The editor's column is the file's: on a line its macro uses changed, the compiled text's column differs (BUG-446).
 		return source.LineColumnToByteOffset(position.line + 1, position.character + 1); // LSP 0-based -> 1-based
 	}
 
-	bool NodeLocator::IsRootNamespace(const Scripting::AstNode& node)
+	bool NodeLocator::IsRootNamespace(const C4Compiler::AstNode& node)
 	{
-		return node.Type() == Scripting::NodeType::Namespace &&
-			static_cast<const Scripting::NamespaceNode&>(node).IsRoot();
+		return node.Type() == C4Compiler::NodeType::Namespace &&
+			static_cast<const C4Compiler::NamespaceNode&>(node).IsRoot();
 	}
 
-	bool NodeLocator::Contains(const Scripting::AstNode& node, size_t byteOffset)
+	bool NodeLocator::Contains(const C4Compiler::AstNode& node, size_t byteOffset)
 	{
 		size_t start = node.startLocation.byteOffset;
 		size_t end = node.endLocation.byteOffset;
 		return byteOffset >= start && (byteOffset < end || (end == 0 && byteOffset == 0));
 	}
 
-	void NodeLocator::Find(const Scripting::AstNode& node, uint32 sourceId, size_t byteOffset,
-		Core::Vector<const Scripting::AstNode*>& currentPath, LocatedNode& result)
+	void NodeLocator::Find(const C4Compiler::AstNode& node, uint32 sourceId, size_t byteOffset,
+		Core::Vector<const C4Compiler::AstNode*>& currentPath, LocatedNode& result)
 	{
 		bool isRoot = IsRootNamespace(node);
 		bool belongsToTarget = isRoot || (node.startLocation.sourceId == sourceId);
@@ -56,7 +56,7 @@ namespace C4LSP::Server
 			result.path = currentPath;
 		}
 
-		ForEachWrittenChild(node, [&](const Scripting::AstNode& child) { Find(child, sourceId, byteOffset, currentPath, result); });
+		ForEachWrittenChild(node, [&](const C4Compiler::AstNode& child) { Find(child, sourceId, byteOffset, currentPath, result); });
 		currentPath.Pop();
 	}
 } // namespace C4LSP::Server

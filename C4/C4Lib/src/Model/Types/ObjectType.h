@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class SwizzleType; // forward: packed SIMD region storage
 
@@ -328,4 +328,4 @@ namespace Scripting
 		GuidParts m_Guid;
 		bool m_HasGuid = false;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

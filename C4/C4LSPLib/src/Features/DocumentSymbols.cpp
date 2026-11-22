@@ -13,7 +13,7 @@
 
 namespace C4LSP::Features
 {
-	using Scripting::NodeType;
+	using C4Compiler::NodeType;
 
 	Core::Vector<DocumentSymbol> DocumentSymbols::ForDocument(Server::CompilationSession& session, const std::string& uri)
 	{
@@ -36,19 +36,19 @@ namespace C4LSP::Features
 		return symbols;
 	}
 
-	void DocumentSymbols::CollectChildren(Walk& walk, const Scripting::AstNode& parent, bool members, Core::Vector<DocumentSymbol>& out)
+	void DocumentSymbols::CollectChildren(Walk& walk, const C4Compiler::AstNode& parent, bool members, Core::Vector<DocumentSymbol>& out)
 	{
 		for (const auto& child : parent.Children())
 			if (child && child->startLocation.sourceId == walk.sourceId) // skip inlined include trees and foreign nodes
 				AddDeclaration(walk, *child.Get(), members, out);
 	}
 
-	void DocumentSymbols::AddDeclaration(Walk& walk, const Scripting::AstNode& node, bool member, Core::Vector<DocumentSymbol>& out)
+	void DocumentSymbols::AddDeclaration(Walk& walk, const C4Compiler::AstNode& node, bool member, Core::Vector<DocumentSymbol>& out)
 	{
 		switch (node.Type())
 		{
 		case NodeType::Namespace: {
-			const auto& ns = static_cast<const Scripting::NamespaceNode&>(node);
+			const auto& ns = static_cast<const C4Compiler::NamespaceNode&>(node);
 			if (ns.IsRoot())
 				return;
 			DocumentSymbol symbol = MakeSymbol(walk, node, false);
@@ -61,7 +61,7 @@ namespace C4LSP::Features
 		}
 		case NodeType::ObjectDefinition: {
 			DocumentSymbol symbol = MakeSymbol(walk, node, member);
-			for (const auto& body : static_cast<const Scripting::ObjectDefinitionNode&>(node).GetBodyMembers())
+			for (const auto& body : static_cast<const C4Compiler::ObjectDefinitionNode&>(node).GetBodyMembers())
 				if (body)
 					AddDeclaration(walk, *body.Get(), true, symbol.children);
 			out.Push(symbol);
@@ -69,7 +69,7 @@ namespace C4LSP::Features
 		}
 		case NodeType::EnumDefinition: {
 			DocumentSymbol symbol = MakeSymbol(walk, node, member);
-			for (const auto& value : static_cast<const Scripting::EnumDefinitionNode&>(node).GetMembers())
+			for (const auto& value : static_cast<const C4Compiler::EnumDefinitionNode&>(node).GetMembers())
 				if (value)
 					symbol.children.Push(MakeSymbol(walk, *value.Get(), true));
 			out.Push(symbol);
@@ -90,7 +90,7 @@ namespace C4LSP::Features
 		}
 	}
 
-	DocumentSymbol DocumentSymbols::MakeSymbol(Walk& walk, const Scripting::AstNode& node, bool member)
+	DocumentSymbol DocumentSymbols::MakeSymbol(Walk& walk, const C4Compiler::AstNode& node, bool member)
 	{
 		DocumentSymbol symbol;
 		symbol.name = DeclarationText::WrittenName(node);
@@ -106,9 +106,9 @@ namespace C4LSP::Features
 		return symbol;
 	}
 
-	bool DocumentSymbols::DefinedForType(const Walk& walk, const Scripting::AstNode& node)
+	bool DocumentSymbols::DefinedForType(const Walk& walk, const C4Compiler::AstNode& node)
 	{
-		const auto& func = static_cast<const Scripting::FunctionDefinitionNode&>(node);
+		const auto& func = static_cast<const C4Compiler::FunctionDefinitionNode&>(node);
 		if (!func.GetName() || func.GetName()->GetSegments().Count() < 2)
 			return false;
 		const std::string written = DeclarationText::WrittenName(node);

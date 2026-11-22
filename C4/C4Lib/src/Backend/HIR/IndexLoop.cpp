@@ -1,6 +1,6 @@
 #include "Backend/HIR/IndexLoop.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	void AppendIndexLoop(LoweringContext& ctx, BlockNode* region, const IndexRange& range, bool reverse,
 		const std::function<void(BlockNode*, const HIRNode*)>& visit)
@@ -28,4 +28,4 @@ namespace Scripting
 		if (!reverse) step(IntrinsicOp::Add);
 		region->stmts.push_back(loop);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

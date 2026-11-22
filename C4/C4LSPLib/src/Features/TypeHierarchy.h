@@ -4,7 +4,7 @@
 #include "Features/HierarchyItem.h"
 #include <string>
 
-namespace Scripting { class ObjectType; }
+namespace C4Compiler { class ObjectType; }
 
 namespace C4LSP::Server { class CompilationSession; struct LocatedNode; }
 
@@ -21,7 +21,7 @@ namespace C4LSP::Features
 		static Core::Vector<HierarchyItem> Subtypes(Server::CompilationSession& session, const HierarchyItem& item);
 
 	private:
-		static const Scripting::ObjectType* TypeAt(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position);
+		static const C4Compiler::ObjectType* TypeAt(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position);
 		/// Whether the position is on a type: one written (a QualType), or a class's own name - not in its body.
 		static bool NamesAType(const Server::LocatedNode& located);
 	};

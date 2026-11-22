@@ -5,7 +5,7 @@
 #include "Lexer/Token.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// `[float a, b, _] = value;` (D-34): each value of a return list goes to its element, in order - a new
 	/// variable (`float a`), an existing location (`b`, `p.x`), or nowhere (`_`). The right side is evaluated
@@ -43,4 +43,4 @@ namespace Scripting
 		Ref<AstNode> m_Value;
 		Core::Vector<Ref<AstNode>> m_Children;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

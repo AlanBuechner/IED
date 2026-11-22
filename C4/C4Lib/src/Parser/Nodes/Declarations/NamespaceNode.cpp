@@ -17,7 +17,7 @@
 #include <vector>
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -239,4 +239,4 @@ namespace Scripting
 		return Core::StringFormat::Format("namespace {0}", m_NameToken.GetText());
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

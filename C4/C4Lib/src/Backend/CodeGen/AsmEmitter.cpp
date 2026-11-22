@@ -2,7 +2,7 @@
 #include "Backend/CodeGen/ExprEmitter.h"
 #include <llvm/IR/InlineAsm.h>
 
-namespace Scripting
+namespace C4Compiler
 {
 	bool AsmEmitter::Emit(const AsmNode* n)
 	{
@@ -78,4 +78,4 @@ namespace Scripting
 		for (const LValue* output : n->outputs) types.push_back(m.Lower(output->type));
 		return types.size() == 1 ? types[0] : llvm::StructType::get(m.context(), types);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

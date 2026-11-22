@@ -8,7 +8,7 @@
 #include "Model/Types/QualifiedName.h"
 #include "Parser/Nodes/Expressions/VaArgExpressionNode.h"
 
-namespace Scripting::VarArgs
+namespace C4Compiler::VarArgs
 {
 	namespace
 	{
@@ -129,4 +129,4 @@ namespace Scripting::VarArgs
 		if (why.empty()) return QueryResult<void>::Success();
 		return QueryResult<void>::Fail(QueryError::NotAValue, "argument " + std::to_string(position + 1) + " cannot pass through '...': " + why);
 	}
-} // namespace Scripting::VarArgs
+} // namespace C4Compiler::VarArgs

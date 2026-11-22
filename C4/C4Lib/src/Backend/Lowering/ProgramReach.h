@@ -7,7 +7,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 
@@ -59,4 +59,4 @@ namespace Scripting
 		std::vector<CensusNeed> m_PendingCensus;
 		std::unordered_set<const FunctionRecord*> m_Defined;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

@@ -6,7 +6,7 @@
 #include "Model/Types/ClassHierarchy.h"
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	const std::vector<VtableEmitter::VptrSite>& VtableEmitter::VptrSites(const Type* t)
 	{
@@ -151,4 +151,4 @@ namespace Scripting
 		fn->setDoesNotReturn();
 		return fn;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

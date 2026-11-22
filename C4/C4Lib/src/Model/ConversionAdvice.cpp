@@ -4,7 +4,7 @@
 #include "Model/Types/ObjectType.h"
 #include "Model/Types/QualifiedName.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

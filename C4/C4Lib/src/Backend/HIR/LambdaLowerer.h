@@ -4,7 +4,7 @@
 #include "Backend/HIR/LambdaCaptures.h"
 #include "Model/Closures.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ExprLowerer;
 

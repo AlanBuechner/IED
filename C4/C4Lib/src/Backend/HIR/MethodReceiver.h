@@ -1,7 +1,7 @@
 #pragma once
 #include "Backend/HIR/LoweringContext.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// `base` viewed as the `owner` sub-object at `offset` inside it (no wrapper when it already is one).
 	const LValue* SubobjectLValue(LoweringContext& ctx, const LValue* base, const ObjectType* owner, int64 offset);
@@ -17,4 +17,4 @@ namespace Scripting
 	/// call of a virtual method, to the vptr the call dispatches through with its slot index. Fails when the
 	/// declaring type is more than one sub-object of the receiver.
 	QueryResult<void> BindReceiver(LoweringContext& ctx, CallNode* call, const LValue* receiver, CallDispatch dispatch = CallDispatch::Dynamic);
-} // namespace Scripting
+} // namespace C4Compiler

@@ -4,7 +4,7 @@
 #include "Model/Types/ArrayType.h"
 #include "Model/Types/PointerType.h"
 
-namespace Scripting::SimdOperands
+namespace C4Compiler::SimdOperands
 {
 	namespace
 	{
@@ -92,4 +92,4 @@ namespace Scripting::SimdOperands
 	}
 
 	Value Node(SimdNode* node) { return Value::R(node, node->type); }
-} // namespace Scripting::SimdOperands
+} // namespace C4Compiler::SimdOperands

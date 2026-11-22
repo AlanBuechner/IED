@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <functional>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// THE calling-convention brick (doc 04). Every "how does this type cross a call boundary" answer in
 	/// the whole backend goes through here, so the aggregate rules of the target's convention exist in exactly one
@@ -99,4 +99,4 @@ namespace Scripting
 		std::function<uint64_t()> m_VectorBytes;
 		unsigned m_ManagedSpace = 0;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

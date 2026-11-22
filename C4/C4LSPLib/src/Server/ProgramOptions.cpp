@@ -27,11 +27,11 @@ namespace C4LSP::Server
 		}
 	}
 
-	Scripting::CpuTarget ProgramOptions::Target() const
+	C4Compiler::CpuTarget ProgramOptions::Target() const
 	{
 		std::string error;
-		std::optional<Scripting::CpuTarget> selected = Scripting::CpuTarget::FromFlags(targetFlags, error);
-		return selected ? *selected : Scripting::CpuTarget();
+		std::optional<C4Compiler::CpuTarget> selected = C4Compiler::CpuTarget::FromFlags(targetFlags, error);
+		return selected ? *selected : C4Compiler::CpuTarget();
 	}
 
 	bool ProgramOptions::operator==(const ProgramOptions& other) const

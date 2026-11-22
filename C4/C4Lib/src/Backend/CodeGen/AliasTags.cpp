@@ -3,7 +3,7 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/MDBuilder.h>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -61,4 +61,4 @@ namespace Scripting
 		if (access && tag) access->setMetadata(llvm::LLVMContext::MD_tbaa, tag);
 		return access;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

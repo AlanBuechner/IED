@@ -13,7 +13,7 @@
 #include "Script/ScriptModulePasses.h"
 #include <cstdio>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -187,4 +187,4 @@ namespace Scripting
 		m_StepSeconds.push_back({ step, std::chrono::duration<double>(now - since).count() });
 		since = now;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

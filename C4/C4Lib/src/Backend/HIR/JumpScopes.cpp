@@ -1,6 +1,6 @@
 #include "Backend/HIR/JumpScopes.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	void JumpScopes::EnterBlock(const BlockNode* block)
 	{
@@ -71,4 +71,4 @@ namespace Scripting
 		Core::String crossed = (names != m_Declarations.end() && firstCrossed < names->second.size()) ? names->second[firstCrossed] : "a declaration";
 		return QueryResult<void>::Fail(QueryError::NotAValue, "jump to label '" + jump.name + "' crosses " + crossed, jump.loc);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

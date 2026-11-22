@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting::AsmRegisters
+namespace C4Compiler::AsmRegisters
 {
 	/// What an x86-64 register holds: integers and addresses, or SSE / AVX values.
 	enum class Kind { General, Vector };

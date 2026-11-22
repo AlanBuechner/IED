@@ -2,7 +2,7 @@
 #include "Parser/AstNode.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Member access expression: baseObject.memberName (dot or arrow).
 	struct MemberAccessNode : public AstNode

@@ -4,7 +4,7 @@
 #include "Model/Types/ObjectType.h"
 #include "Model/Types/FunctionType.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 	class TypeStore;

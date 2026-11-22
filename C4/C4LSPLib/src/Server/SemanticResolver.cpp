@@ -25,66 +25,66 @@ namespace C4LSP::Server
 {
 	namespace
 	{
-		int FindFunctionIndex(const Core::Vector<const Scripting::AstNode*>& path)
+		int FindFunctionIndex(const Core::Vector<const C4Compiler::AstNode*>& path)
 		{
 			for (int i = static_cast<int>(path.Count()) - 1; i >= 0; --i)
-				if (path[i]->Type() == Scripting::NodeType::FunctionDefinition)
+				if (path[i]->Type() == C4Compiler::NodeType::FunctionDefinition)
 					return i;
 			return -1;
 		}
 
-		uint32 UnitIdOf(const Scripting::AstNode& node) { return node.startLocation.sourceId; }
+		uint32 UnitIdOf(const C4Compiler::AstNode& node) { return node.startLocation.sourceId; }
 
 		/// Of a function name's overload set, the record whose declarations hold `fn`; else its first (overloads share
 		/// their scope and containing type); null when `info` names no function.
-		const Scripting::FunctionRecord* RecordAmong(const Scripting::SymbolInfo* info, const Scripting::AstNode& fn)
+		const C4Compiler::FunctionRecord* RecordAmong(const C4Compiler::SymbolInfo* info, const C4Compiler::AstNode& fn)
 		{
-			if (!info || info->kind != Scripting::SymbolKind::Function || info->functions.Empty())
+			if (!info || info->kind != C4Compiler::SymbolKind::Function || info->functions.Empty())
 				return nullptr;
-			for (const Scripting::FunctionRecord* rec : info->functions)
-				for (const Scripting::AstNode* declaration : rec->declarations)
+			for (const C4Compiler::FunctionRecord* rec : info->functions)
+				for (const C4Compiler::AstNode* declaration : rec->declarations)
 					if (declaration == &fn)
 						return rec;
 			return info->functions[0];
 		}
 
-		bool IsTypeDeclaration(const Scripting::AstNode* node)
+		bool IsTypeDeclaration(const C4Compiler::AstNode* node)
 		{
 			if (!node)
 				return false;
-			const Scripting::NodeType type = node->Type();
-			return type == Scripting::NodeType::ObjectDefinition || type == Scripting::NodeType::EnumDefinition ||
-				type == Scripting::NodeType::UnionDefinition || type == Scripting::NodeType::AliasDefinition;
+			const C4Compiler::NodeType type = node->Type();
+			return type == C4Compiler::NodeType::ObjectDefinition || type == C4Compiler::NodeType::EnumDefinition ||
+				type == C4Compiler::NodeType::UnionDefinition || type == C4Compiler::NodeType::AliasDefinition;
 		}
 
 		/// What calling a function of type `callee` gives: a function type's return type; a resolved method already
 		/// carries its return type.
-		const Scripting::Type* ReturnTypeOf(const Scripting::Type* callee)
+		const C4Compiler::Type* ReturnTypeOf(const C4Compiler::Type* callee)
 		{
-			if (const auto* function = dynamic_cast<const Scripting::FunctionType*>(callee))
+			if (const auto* function = dynamic_cast<const C4Compiler::FunctionType*>(callee))
 				return function->GetReturnType();
 			return callee;
 		}
 
-		const Scripting::ObjectType* UnwrapObject(const Scripting::Type* t)
+		const C4Compiler::ObjectType* UnwrapObject(const C4Compiler::Type* t)
 		{
-			return dynamic_cast<const Scripting::ObjectType*>(Scripting::TypeHandle::UnwrapToValue(t));
+			return dynamic_cast<const C4Compiler::ObjectType*>(C4Compiler::TypeHandle::UnwrapToValue(t));
 		}
 
 		/// What `->` reaches: the type a pointer points to (past aliases and references to it, BUG-353), an object's through
 		/// its [operator("->")]; `t` itself otherwise.
-		const Scripting::Type* Pointee(const Scripting::Type* t)
+		const C4Compiler::Type* Pointee(const C4Compiler::Type* t)
 		{
-			t = Scripting::ClassHierarchy::ThroughArrowOperators(t);
-			const auto* pointer = dynamic_cast<const Scripting::PointerType*>(Scripting::TypeHandle::UnwrapToValue(t));
+			t = C4Compiler::ClassHierarchy::ThroughArrowOperators(t);
+			const auto* pointer = dynamic_cast<const C4Compiler::PointerType*>(C4Compiler::TypeHandle::UnwrapToValue(t));
 			return pointer ? pointer->GetPointeeType() : t;
 		}
 
 		/// A simple or qualified name as the compiler finds it: from `context` (the enclosing namespace or class) out to
 		/// the root, a qualified name the context does not lead to from the root. The model's own QuerySymbol verb, so the
 		/// LSP never resolves a name differently.
-		const Scripting::SymbolInfo* FindVisibleQualified(const Scripting::ProgramModel& model, const std::string& name, uint32 unitId,
-			const Scripting::Scope* context = nullptr)
+		const C4Compiler::SymbolInfo* FindVisibleQualified(const C4Compiler::ProgramModel& model, const std::string& name, uint32 unitId,
+			const C4Compiler::Scope* context = nullptr)
 		{
 			auto r = model.QuerySymbol(name, unitId, context);
 			return r.Ok() ? r.value : nullptr;
@@ -92,22 +92,22 @@ namespace C4LSP::Server
 
 		/// The node that declares what `info` names: its own, else its first record's first (a function's symbol keeps
 		/// no node; its records have every one).
-		const Scripting::AstNode* DeclarationOf(const Scripting::SymbolInfo& info)
+		const C4Compiler::AstNode* DeclarationOf(const C4Compiler::SymbolInfo& info)
 		{
 			if (info.declNode)
 				return info.declNode;
-			for (const Scripting::FunctionRecord* rec : info.functions)
+			for (const C4Compiler::FunctionRecord* rec : info.functions)
 				if (rec && !rec->declarations.Empty())
 					return rec->declarations[0];
 			return nullptr;
 		}
 
-		NodeResolution SymbolResolution(const Scripting::SymbolInfo& info)
+		NodeResolution SymbolResolution(const C4Compiler::SymbolInfo& info)
 		{
 			NodeResolution res;
 			res.declaration = DeclarationOf(info);
-			res.isFunction = info.kind == Scripting::SymbolKind::Function;
-			res.type = info.type ? Scripting::TypeHandle::UnwrapToValue(info.type) : nullptr;
+			res.isFunction = info.kind == C4Compiler::SymbolKind::Function;
+			res.type = info.type ? C4Compiler::TypeHandle::UnwrapToValue(info.type) : nullptr;
 			if (res.isFunction && !res.type && !info.functions.Empty())
 				res.type = info.functions[0]->type;
 			return res;
@@ -115,10 +115,10 @@ namespace C4LSP::Server
 
 		/// A member function template `object` or a base declares (`SortBy` of `entries.SortBy(...)`): it has no method
 		/// until a call instantiates it (BUG-402).
-		NodeResolution MemberTemplateOf(const Scripting::ProgramModel& model, const Scripting::ObjectType* object, const std::string& member)
+		NodeResolution MemberTemplateOf(const C4Compiler::ProgramModel& model, const C4Compiler::ObjectType* object, const std::string& member)
 		{
 			NodeResolution res;
-			const Core::Vector<const Scripting::FunctionDefinitionNode*> templates = model.QueryMemberTemplates(object, member);
+			const Core::Vector<const C4Compiler::FunctionDefinitionNode*> templates = model.QueryMemberTemplates(object, member);
 			if (!templates.Empty())
 			{
 				res.declaration = templates[0];
@@ -129,24 +129,24 @@ namespace C4LSP::Server
 
 		/// What `Owner::member` names when `owner` is a type: an enum's member (BUG-404), else a field, a method or a
 		/// member template of the type or a base, the most derived first.
-		NodeResolution MemberOfNamedType(const Scripting::ProgramModel& model, const Scripting::SymbolInfo& owner, const std::string& member)
+		NodeResolution MemberOfNamedType(const C4Compiler::ProgramModel& model, const C4Compiler::SymbolInfo& owner, const std::string& member)
 		{
 			NodeResolution res;
-			if (owner.kind != Scripting::SymbolKind::Type || !owner.type)
+			if (owner.kind != C4Compiler::SymbolKind::Type || !owner.type)
 				return res;
-			const Scripting::Type* type = Scripting::TypeHandle::UnwrapToValue(owner.type);
-			if (const auto* enumeration = dynamic_cast<const Scripting::EnumType*>(type))
+			const C4Compiler::Type* type = C4Compiler::TypeHandle::UnwrapToValue(owner.type);
+			if (const auto* enumeration = dynamic_cast<const C4Compiler::EnumType*>(type))
 			{
-				if (const Scripting::EnumType::MemberInfo* m = enumeration->GetMemberByName(member))
+				if (const C4Compiler::EnumType::MemberInfo* m = enumeration->GetMemberByName(member))
 					return { enumeration, m->m_DeclaringNode, false };
 				return res;
 			}
-			const auto* object = dynamic_cast<const Scripting::ObjectType*>(type);
-			for (const Scripting::ObjectType* t = object; t; t = t->GetBaseTypes().Count() ? t->GetBaseTypes()[0] : nullptr)
+			const auto* object = dynamic_cast<const C4Compiler::ObjectType*>(type);
+			for (const C4Compiler::ObjectType* t = object; t; t = t->GetBaseTypes().Count() ? t->GetBaseTypes()[0] : nullptr)
 			{
 				if (const auto* f = t->GetFieldByName(member))
 					return { f->m_Type, f->m_DeclaringNode, false };
-				if (const Scripting::ObjectType::MethodInfo* m = t->FindMethodByName(member))
+				if (const C4Compiler::ObjectType::MethodInfo* m = t->FindMethodByName(member))
 					return { m->m_ReturnType, m->m_DeclaringNode, true };
 			}
 			return object ? MemberTemplateOf(model, object, member) : res;
@@ -154,9 +154,9 @@ namespace C4LSP::Server
 
 		/// What `value.member` names when `value` is an `object`: a field or a method (the model's member query), else a
 		/// member template.
-		NodeResolution MemberOfValue(const Scripting::ProgramModel& model, const Scripting::ObjectType* object, const std::string& member)
+		NodeResolution MemberOfValue(const C4Compiler::ProgramModel& model, const C4Compiler::ObjectType* object, const std::string& member)
 		{
-			auto mb = model.QueryMember(static_cast<const Scripting::Type*>(object), member);
+			auto mb = model.QueryMember(static_cast<const C4Compiler::Type*>(object), member);
 			if (!mb.Ok())
 				return MemberTemplateOf(model, object, member);
 			if (mb.value.IsField)
@@ -167,50 +167,50 @@ namespace C4LSP::Server
 		/// The declaration of `name` that `node` itself makes, as a scope a reference inside it sees: a block's local, a
 		/// for statement's variable, a lambda's init capture or parameter, a function's parameter (BUG-403). Null when it
 		/// declares none.
-		const Scripting::AstNode* DeclaredIn(const Scripting::AstNode& node, const std::string& name)
+		const C4Compiler::AstNode* DeclaredIn(const C4Compiler::AstNode& node, const std::string& name)
 		{
-			auto named = [&name](const Core::Vector<Ref<Scripting::ParameterNode>>& parameters) -> const Scripting::AstNode* {
+			auto named = [&name](const Core::Vector<Ref<C4Compiler::ParameterNode>>& parameters) -> const C4Compiler::AstNode* {
 				for (const auto& param : parameters)
 					if (param && param->HasName() && param->GetNameToken().GetText() == name)
 						return param.Get();
 				return nullptr;
 			};
-			auto declares = [&name](const Scripting::AstNode* statement) {
-				if (!statement || statement->Type() != Scripting::NodeType::VariableDefinition)
+			auto declares = [&name](const C4Compiler::AstNode* statement) {
+				if (!statement || statement->Type() != C4Compiler::NodeType::VariableDefinition)
 					return false;
-				for (const auto& d : static_cast<const Scripting::VariableDefinitionNode&>(*statement).GetDeclarators())
+				for (const auto& d : static_cast<const C4Compiler::VariableDefinitionNode&>(*statement).GetDeclarators())
 					if (d.m_NameToken.GetText() == name)
 						return true;
 				return false;
 			};
 			switch (node.Type())
 			{
-			case Scripting::NodeType::CodeBlock:
-				for (const auto& statement : static_cast<const Scripting::CodeBlockNode&>(node).GetStatements())
+			case C4Compiler::NodeType::CodeBlock:
+				for (const auto& statement : static_cast<const C4Compiler::CodeBlockNode&>(node).GetStatements())
 					if (declares(statement.Get()))
 						return statement.Get();
 				return nullptr;
-			case Scripting::NodeType::ForLoop: {
-				const auto& loop = static_cast<const Scripting::ForLoopNode&>(node);
+			case C4Compiler::NodeType::ForLoop: {
+				const auto& loop = static_cast<const C4Compiler::ForLoopNode&>(node);
 				if (loop.IsRangeBased())
 					return loop.GetRangeVarNameToken().GetText() == name ? &node : nullptr;
 				return declares(loop.GetInitClause().Get()) ? loop.GetInitClause().Get() : nullptr;
 			}
-			case Scripting::NodeType::LambdaExpression: {
-				const auto& lambda = static_cast<const Scripting::LambdaNode&>(node);
-				for (const Scripting::LambdaCapture& capture : lambda.GetCaptures())
+			case C4Compiler::NodeType::LambdaExpression: {
+				const auto& lambda = static_cast<const C4Compiler::LambdaNode&>(node);
+				for (const C4Compiler::LambdaCapture& capture : lambda.GetCaptures())
 					if (capture.declaration && capture.name.GetText() == name)
 						return capture.declaration.Get();
 				return named(lambda.GetParameters());
 			}
-			case Scripting::NodeType::FunctionDefinition:
-				return named(static_cast<const Scripting::FunctionDefinitionNode&>(node).GetParameters());
+			case C4Compiler::NodeType::FunctionDefinition:
+				return named(static_cast<const C4Compiler::FunctionDefinitionNode&>(node).GetParameters());
 			default:
 				return nullptr;
 			}
 		}
 
-		std::string JoinSegments(const Scripting::NamespaceQualifiedNameNode& nqn)
+		std::string JoinSegments(const C4Compiler::NamespaceQualifiedNameNode& nqn)
 		{
 			std::string out;
 			for (uint32 i = 0; i < nqn.SegmentCount(); ++i)
@@ -219,25 +219,25 @@ namespace C4LSP::Server
 		}
 
 		/// The qualified path of a StaticAccess chain (`A::B::C`) outermost-first, or "" if unjoinable.
-		std::string StaticAccessPath(const Scripting::AstNode* node)
+		std::string StaticAccessPath(const C4Compiler::AstNode* node)
 		{
 			std::vector<std::string> segments; // innermost first
-			const Scripting::AstNode* cur = node;
-			while (cur && cur->Type() == Scripting::NodeType::StaticAccess)
+			const C4Compiler::AstNode* cur = node;
+			while (cur && cur->Type() == C4Compiler::NodeType::StaticAccess)
 			{
-				const auto& inner = static_cast<const Scripting::StaticAccessNode&>(*cur);
+				const auto& inner = static_cast<const C4Compiler::StaticAccessNode&>(*cur);
 				segments.push_back(inner.GetMemberNameToken().GetText());
 				cur = inner.GetBaseType().Get();
 			}
 			std::string prefix;
-			if (cur && cur->Type() == Scripting::NodeType::IdentifierExpression)
+			if (cur && cur->Type() == C4Compiler::NodeType::IdentifierExpression)
 			{
-				segments.push_back(static_cast<const Scripting::IdentifierExpressionNode&>(*cur).GetName());
+				segments.push_back(static_cast<const C4Compiler::IdentifierExpressionNode&>(*cur).GetName());
 				std::reverse(segments.begin(), segments.end()); // outermost first
 				for (size_t i = 0; i < segments.size(); ++i)
 					prefix += (i ? "::" : "") + segments[i];
 			}
-			else if (const auto* nqn = dynamic_cast<const Scripting::NamespaceQualifiedNameNode*>(cur))
+			else if (const auto* nqn = dynamic_cast<const C4Compiler::NamespaceQualifiedNameNode*>(cur))
 			{
 				for (uint32 i = 0; i < nqn->SegmentCount(); ++i)
 					prefix += (prefix.empty() ? "" : "::") + std::string(nqn->GetSegments()[i].nameToken.GetText());
@@ -248,11 +248,11 @@ namespace C4LSP::Server
 		}
 	}
 
-	const Scripting::ObjectType* SemanticResolver::EnclosingObject(const Core::Vector<const Scripting::AstNode*>& path) const
+	const C4Compiler::ObjectType* SemanticResolver::EnclosingObject(const Core::Vector<const C4Compiler::AstNode*>& path) const
 	{
 		int oi = -1;
 		for (int i = static_cast<int>(path.Count()) - 1; i >= 0; --i)
-			if (path[i]->Type() == Scripting::NodeType::ObjectDefinition)
+			if (path[i]->Type() == C4Compiler::NodeType::ObjectDefinition)
 			{
 				oi = i;
 				break;
@@ -260,27 +260,27 @@ namespace C4LSP::Server
 		if (oi < 0)
 			return nullptr;
 
-		const auto& objNode = static_cast<const Scripting::ObjectDefinitionNode&>(*path[oi]);
+		const auto& objNode = static_cast<const C4Compiler::ObjectDefinitionNode&>(*path[oi]);
 		std::string qualified = objNode.GetNameToken().GetText();
 		std::vector<std::string> namespaces; // innermost first, for the prefix join below
 		for (int i = oi - 1; i >= 0; --i)
-			if (path[i]->Type() == Scripting::NodeType::Namespace)
-				namespaces.push_back(static_cast<const Scripting::NamespaceNode&>(*path[i]).Name());
+			if (path[i]->Type() == C4Compiler::NodeType::Namespace)
+				namespaces.push_back(static_cast<const C4Compiler::NamespaceNode&>(*path[i]).Name());
 
 		for (size_t depth = 0; depth <= namespaces.size(); ++depth)
 		{
 			std::string candidate = qualified;
 			for (size_t k = 0; k < depth; ++k) // innermost-first, then reverse to outermost-first
 				candidate = namespaces[k] + "::" + candidate;
-			if (const Scripting::SymbolInfo* info = FindVisibleQualified(m_Model, candidate, UnitIdOf(objNode)))
-				if (info->kind == Scripting::SymbolKind::Type && info->type)
+			if (const C4Compiler::SymbolInfo* info = FindVisibleQualified(m_Model, candidate, UnitIdOf(objNode)))
+				if (info->kind == C4Compiler::SymbolKind::Type && info->type)
 					return UnwrapObject(info->type);
 		}
 		return nullptr;
 	}
 
 	// Outside any function (a field, a base type, a namespace's variable): its declarations' scope.
-	SemanticResolver::Ctx SemanticResolver::ContextFor(const Core::Vector<const Scripting::AstNode*>& path) const
+	SemanticResolver::Ctx SemanticResolver::ContextFor(const Core::Vector<const C4Compiler::AstNode*>& path) const
 	{
 		Ctx ctx;
 		int fi = FindFunctionIndex(path);
@@ -291,12 +291,12 @@ namespace C4LSP::Server
 			ctx.scope = DeclarationScope(path);
 			return ctx;
 		}
-		const auto& fn = static_cast<const Scripting::FunctionDefinitionNode&>(*path[fi]);
+		const auto& fn = static_cast<const C4Compiler::FunctionDefinitionNode&>(*path[fi]);
 		ctx.unitId = UnitIdOf(fn);
 		if (!fn.GetName())
 			return ctx;
 
-		if (const Scripting::FunctionRecord* rec = RecordOf(path, fi, ctx.unitId))
+		if (const C4Compiler::FunctionRecord* rec = RecordOf(path, fi, ctx.unitId))
 		{
 			ctx.enclosingType = rec->containingType ? rec->containingType : EnclosingObject(path);
 			ctx.scope = rec->scope; // the function's enclosing namespace/class - unqualified lookup context
@@ -307,18 +307,18 @@ namespace C4LSP::Server
 	// Where a declaration outside any function is: its innermost type's scope, else its innermost namespace's; null at
 	// file level. A field's type in `namespace Ied { class Server { LspPool* lsp; } }` is looked up from there, as the
 	// compiler looks it up, not from the file's top.
-	const Scripting::Scope* SemanticResolver::DeclarationScope(const Core::Vector<const Scripting::AstNode*>& path) const
+	const C4Compiler::Scope* SemanticResolver::DeclarationScope(const Core::Vector<const C4Compiler::AstNode*>& path) const
 	{
-		if (const Scripting::ObjectType* object = EnclosingObject(path))
+		if (const C4Compiler::ObjectType* object = EnclosingObject(path))
 			return m_Model.TypeScope(object);
 		std::string qualified;
-		for (const Scripting::AstNode* node : path)
-			if (node->Type() == Scripting::NodeType::Namespace && !static_cast<const Scripting::NamespaceNode&>(*node).IsRoot())
-				qualified += (qualified.empty() ? "" : "::") + std::string(static_cast<const Scripting::NamespaceNode&>(*node).Name());
+		for (const C4Compiler::AstNode* node : path)
+			if (node->Type() == C4Compiler::NodeType::Namespace && !static_cast<const C4Compiler::NamespaceNode&>(*node).IsRoot())
+				qualified += (qualified.empty() ? "" : "::") + std::string(static_cast<const C4Compiler::NamespaceNode&>(*node).Name());
 		if (qualified.empty())
 			return nullptr;
-		const Scripting::SymbolInfo* info = FindVisibleQualified(m_Model, qualified, path.Count() ? UnitIdOf(*path.Back()) : 0);
-		return info && info->kind == Scripting::SymbolKind::Namespace ? info->scope : nullptr;
+		const C4Compiler::SymbolInfo* info = FindVisibleQualified(m_Model, qualified, path.Count() ? UnitIdOf(*path.Back()) : 0);
+		return info && info->kind == C4Compiler::SymbolKind::Namespace ? info->scope : nullptr;
 	}
 
 	// The record HIR lowers for the function `path[fi]` declares or defines, so containingType and scope match the
@@ -326,49 +326,49 @@ namespace C4LSP::Server
 	// namespace (`N::Find` for a `Find` in `namespace N`, tried with all of them first, then fewer); of the overloads a
 	// name finds, the one whose declarations hold this node. An argument-free query is the last resort only: it misses
 	// every function that takes parameters.
-	const Scripting::FunctionRecord* SemanticResolver::RecordOf(const Core::Vector<const Scripting::AstNode*>& path, int fi, uint32 unitId) const
+	const C4Compiler::FunctionRecord* SemanticResolver::RecordOf(const Core::Vector<const C4Compiler::AstNode*>& path, int fi, uint32 unitId) const
 	{
-		const auto& fn = static_cast<const Scripting::FunctionDefinitionNode&>(*path[fi]);
+		const auto& fn = static_cast<const C4Compiler::FunctionDefinitionNode&>(*path[fi]);
 		const std::string name = JoinSegments(*fn.GetName());
-		const Scripting::ObjectType* receiver = EnclosingObject(path);
+		const C4Compiler::ObjectType* receiver = EnclosingObject(path);
 		if (receiver)
-			if (const Scripting::FunctionRecord* rec = RecordAmong(FindVisibleQualified(m_Model, name, 0, m_Model.TypeScope(receiver)), fn))
+			if (const C4Compiler::FunctionRecord* rec = RecordAmong(FindVisibleQualified(m_Model, name, 0, m_Model.TypeScope(receiver)), fn))
 				return rec;
 
 		std::vector<std::string> namespaces; // innermost first
 		for (int i = fi - 1; i >= 0; --i)
-			if (path[i]->Type() == Scripting::NodeType::Namespace)
-				namespaces.push_back(static_cast<const Scripting::NamespaceNode&>(*path[i]).Name());
+			if (path[i]->Type() == C4Compiler::NodeType::Namespace)
+				namespaces.push_back(static_cast<const C4Compiler::NamespaceNode&>(*path[i]).Name());
 		for (size_t depth = namespaces.size() + 1; depth-- > 0;)
 		{
 			std::string qualified = name;
 			for (size_t k = 0; k < depth; ++k)
 				qualified = namespaces[k] + "::" + qualified;
-			if (const Scripting::FunctionRecord* rec = RecordAmong(FindVisibleQualified(m_Model, qualified, unitId), fn))
+			if (const C4Compiler::FunctionRecord* rec = RecordAmong(FindVisibleQualified(m_Model, qualified, unitId), fn))
 				return rec;
 		}
 
 		// A class template's method: one record per instance, which no scope names by the method alone (BUG-408).
-		if (const Scripting::FunctionRecord* rec = RecordDeclaring(fn))
+		if (const C4Compiler::FunctionRecord* rec = RecordDeclaring(fn))
 			return rec;
 
-		Scripting::LookupContext lookup;
+		C4Compiler::LookupContext lookup;
 		lookup.unitId = unitId;
 		lookup.enclosingType = receiver;
-		const Scripting::FunctionRecord* rec = nullptr;
+		const C4Compiler::FunctionRecord* rec = nullptr;
 		if (m_Model.QueryFunction(name, nullptr, nullptr, {}, lookup, &rec).Ok() || (receiver && m_Model.QueryFunction(name, receiver, nullptr, {}, lookup, &rec).Ok()))
 			return rec;
 		return nullptr;
 	}
 
-	const Scripting::FunctionRecord* SemanticResolver::RecordDeclaring(const Scripting::AstNode& fn) const
+	const C4Compiler::FunctionRecord* SemanticResolver::RecordDeclaring(const C4Compiler::AstNode& fn) const
 	{
 		if (!m_RecordsIndexed)
 		{
-			Core::Vector<const Scripting::FunctionRecord*> records;
+			Core::Vector<const C4Compiler::FunctionRecord*> records;
 			m_Model.AllFunctionRecords(records);
-			for (const Scripting::FunctionRecord* record : records)
-				for (const Scripting::AstNode* declaration : record->declarations)
+			for (const C4Compiler::FunctionRecord* record : records)
+				for (const C4Compiler::AstNode* declaration : record->declarations)
 					m_RecordByDeclaration.emplace(declaration, record); // the first record a declaration has
 			m_RecordsIndexed = true;
 		}
@@ -376,8 +376,8 @@ namespace C4LSP::Server
 		return found == m_RecordByDeclaration.end() ? nullptr : found->second;
 	}
 
-	const Scripting::SymbolInfo* SemanticResolver::Lookup(const std::string& name, uint32 unitId,
-		const Core::Vector<const Scripting::AstNode*>* path) const
+	const C4Compiler::SymbolInfo* SemanticResolver::Lookup(const std::string& name, uint32 unitId,
+		const Core::Vector<const C4Compiler::AstNode*>* path) const
 	{
 		if (!m_Model.IsValid())
 			return nullptr;
@@ -387,14 +387,14 @@ namespace C4LSP::Server
 	// Innermost scope first, out to the function: a block's locals, a for statement's variable, a lambda's parameters,
 	// then the function's parameters. Stopping at the function keeps a same-named local of an outer (sibling) function
 	// out - the rule HIR's scope chain enforces.
-	bool SemanticResolver::ResolveLocal(const std::string& name, const Core::Vector<const Scripting::AstNode*>& path,
-		const Scripting::AstNode*& declOut, const Scripting::Type*& typeOut) const
+	bool SemanticResolver::ResolveLocal(const std::string& name, const Core::Vector<const C4Compiler::AstNode*>& path,
+		const C4Compiler::AstNode*& declOut, const C4Compiler::Type*& typeOut) const
 	{
 		declOut = nullptr;
 		typeOut = nullptr;
 		const int fi = FindFunctionIndex(path);
 		for (int i = static_cast<int>(path.Count()) - 1; i >= 0 && i >= fi; --i)
-			if (const Scripting::AstNode* declaration = DeclaredIn(*path[i], name))
+			if (const C4Compiler::AstNode* declaration = DeclaredIn(*path[i], name))
 			{
 				declOut = declaration;
 				typeOut = DeclaredType(*declaration, path);
@@ -405,35 +405,35 @@ namespace C4LSP::Server
 
 	// The type a parameter, a local or a range-for variable is declared with; a variable declared without one (an init
 	// capture, `n` of `[n = count]`) has its initializer's.
-	const Scripting::Type* SemanticResolver::DeclaredType(const Scripting::AstNode& declaration, const Core::Vector<const Scripting::AstNode*>& path) const
+	const C4Compiler::Type* SemanticResolver::DeclaredType(const C4Compiler::AstNode& declaration, const Core::Vector<const C4Compiler::AstNode*>& path) const
 	{
-		const Scripting::AstNode* written = nullptr;
+		const C4Compiler::AstNode* written = nullptr;
 		switch (declaration.Type())
 		{
-		case Scripting::NodeType::Parameter: written = static_cast<const Scripting::ParameterNode&>(declaration).GetType().Get(); break;
-		case Scripting::NodeType::VariableDefinition: {
-			const auto& variable = static_cast<const Scripting::VariableDefinitionNode&>(declaration);
+		case C4Compiler::NodeType::Parameter: written = static_cast<const C4Compiler::ParameterNode&>(declaration).GetType().Get(); break;
+		case C4Compiler::NodeType::VariableDefinition: {
+			const auto& variable = static_cast<const C4Compiler::VariableDefinitionNode&>(declaration);
 			if (!variable.GetType() && variable.GetInitializer())
 				return ResolveReference(*variable.GetInitializer(), path).type;
 			written = variable.GetType().Get();
 			break;
 		}
-		case Scripting::NodeType::ForLoop: written = static_cast<const Scripting::ForLoopNode&>(declaration).GetInitClause().Get(); break;
+		case C4Compiler::NodeType::ForLoop: written = static_cast<const C4Compiler::ForLoopNode&>(declaration).GetInitClause().Get(); break;
 		default: break;
 		}
-		if (!written || written->Type() != Scripting::NodeType::QualType)
+		if (!written || written->Type() != C4Compiler::NodeType::QualType)
 			return nullptr;
-		return ResolveQualType(static_cast<const Scripting::QualTypeNode&>(*written), path);
+		return ResolveQualType(static_cast<const C4Compiler::QualTypeNode&>(*written), path);
 	}
 
-	NodeResolution SemanticResolver::ResolveIdentifier(const std::string& name, const Core::Vector<const Scripting::AstNode*>& path) const
+	NodeResolution SemanticResolver::ResolveIdentifier(const std::string& name, const Core::Vector<const C4Compiler::AstNode*>& path) const
 	{
 		if (name.empty() || name == "this")
 			return {};
 
 		// 1) Lexical locals + parameters (HIR's FindLocal equivalent, derived from the AST path).
-		const Scripting::AstNode* localDecl = nullptr;
-		const Scripting::Type* localType = nullptr;
+		const C4Compiler::AstNode* localDecl = nullptr;
+		const C4Compiler::Type* localType = nullptr;
 		if (ResolveLocal(name, path, localDecl, localType))
 			return { localType, localDecl, false };
 
@@ -441,7 +441,7 @@ namespace C4LSP::Server
 		//    visibility (unitId 0) so a name defined in any file is found - the same rule the compiler uses
 		//    when it builds the program-wide model, and what an editor needs for completion/navigation.
 		Ctx ctx = ContextFor(path);
-		Scripting::LookupContext qctx;
+		C4Compiler::LookupContext qctx;
 		qctx.unitId = 0;
 		qctx.enclosingType = ctx.enclosingType;
 		qctx.scope = ctx.scope;
@@ -453,7 +453,7 @@ namespace C4LSP::Server
 			res.declaration = var.value.symbol ? var.value.symbol->declNode : nullptr;
 			if (!res.declaration && ctx.enclosingType) // a field: locate its declaring node on the type chain
 			{
-				for (const Scripting::ObjectType* t = ctx.enclosingType; t; )
+				for (const C4Compiler::ObjectType* t = ctx.enclosingType; t; )
 				{
 					if (const auto* f = t->GetFieldByName(name)) { res.declaration = f->m_DeclaringNode; break; }
 					t = t->GetBaseTypes().Count() ? t->GetBaseTypes()[0] : nullptr;
@@ -464,13 +464,13 @@ namespace C4LSP::Server
 
 		// 3) A function name in expression position (call callee, decay, or bare reference). The arguments are not
 		//    known here, so any overload names it: the one an argument-free call picks, else the first of the set.
-		const Scripting::FunctionRecord* picked = nullptr;
-		auto fn = m_Model.QueryFunction(name, nullptr, nullptr, Core::Vector<const Scripting::Type*>(), qctx, &picked);
-		const Scripting::SymbolInfo* info = FindVisibleQualified(m_Model, name, 0, ctx.scope);
-		const bool overloads = info && info->kind == Scripting::SymbolKind::Function && !info->functions.Empty();
+		const C4Compiler::FunctionRecord* picked = nullptr;
+		auto fn = m_Model.QueryFunction(name, nullptr, nullptr, Core::Vector<const C4Compiler::Type*>(), qctx, &picked);
+		const C4Compiler::SymbolInfo* info = FindVisibleQualified(m_Model, name, 0, ctx.scope);
+		const bool overloads = info && info->kind == C4Compiler::SymbolKind::Function && !info->functions.Empty();
 		if (fn.Ok() || overloads)
 		{
-			const Scripting::FunctionRecord* rec = fn.Ok() ? picked : info->functions[0];
+			const C4Compiler::FunctionRecord* rec = fn.Ok() ? picked : info->functions[0];
 			NodeResolution res;
 			res.isFunction = true;
 			res.type = fn.Ok() ? fn.value : rec->type;
@@ -481,34 +481,34 @@ namespace C4LSP::Server
 		}
 
 		// 4) A type named as a value: the callee of a constructor call (`StringView(text)`).
-		if (info && info->kind == Scripting::SymbolKind::Type && info->type)
-			return { Scripting::TypeHandle::UnwrapToValue(info->type), info->declNode, false };
+		if (info && info->kind == C4Compiler::SymbolKind::Type && info->type)
+			return { C4Compiler::TypeHandle::UnwrapToValue(info->type), info->declNode, false };
 
 		// 5) An implicit-this method a base class declares (the class scope holds only the type's own).
-		for (const Scripting::ObjectType* t = ctx.enclosingType; t; t = t->GetBaseTypes().Count() ? t->GetBaseTypes()[0] : nullptr)
-			if (const Scripting::ObjectType::MethodInfo* method = t->FindMethodByName(name))
+		for (const C4Compiler::ObjectType* t = ctx.enclosingType; t; t = t->GetBaseTypes().Count() ? t->GetBaseTypes()[0] : nullptr)
+			if (const C4Compiler::ObjectType::MethodInfo* method = t->FindMethodByName(name))
 				return { method->m_ReturnType, method->m_DeclaringNode, true };
 		return {};
 	}
 
 	// The type a member access's base names (`Counter` of `Counter.Make`), looked up from where it is written as the
 	// compiler does; null when the base is a value - a local or a parameter of that name comes first.
-	const Scripting::SymbolInfo* SemanticResolver::TypeNamedBy(const Scripting::AstNode& base, const Core::Vector<const Scripting::AstNode*>& path) const
+	const C4Compiler::SymbolInfo* SemanticResolver::TypeNamedBy(const C4Compiler::AstNode& base, const Core::Vector<const C4Compiler::AstNode*>& path) const
 	{
 		std::string written;
-		if (base.Type() == Scripting::NodeType::IdentifierExpression)
-			written = static_cast<const Scripting::IdentifierExpressionNode&>(base).GetName();
-		else if (base.Type() == Scripting::NodeType::StaticAccess || base.Type() == Scripting::NodeType::NamespaceQualifiedName)
+		if (base.Type() == C4Compiler::NodeType::IdentifierExpression)
+			written = static_cast<const C4Compiler::IdentifierExpressionNode&>(base).GetName();
+		else if (base.Type() == C4Compiler::NodeType::StaticAccess || base.Type() == C4Compiler::NodeType::NamespaceQualifiedName)
 			written = StaticAccessPath(&base);
-		const Scripting::AstNode* local = nullptr;
-		const Scripting::Type* localType = nullptr;
+		const C4Compiler::AstNode* local = nullptr;
+		const C4Compiler::Type* localType = nullptr;
 		if (written.empty() || ResolveLocal(written, path, local, localType))
 			return nullptr;
-		const Scripting::SymbolInfo* info = FindVisibleQualified(m_Model, written, UnitIdOf(base), ContextFor(path).scope);
-		return info && info->kind == Scripting::SymbolKind::Type && info->type ? info : nullptr;
+		const C4Compiler::SymbolInfo* info = FindVisibleQualified(m_Model, written, UnitIdOf(base), ContextFor(path).scope);
+		return info && info->kind == C4Compiler::SymbolKind::Type && info->type ? info : nullptr;
 	}
 
-	NodeResolution SemanticResolver::ResolveReference(const Scripting::AstNode& node, const Core::Vector<const Scripting::AstNode*>& path) const
+	NodeResolution SemanticResolver::ResolveReference(const C4Compiler::AstNode& node, const Core::Vector<const C4Compiler::AstNode*>& path) const
 	{
 		auto cached = m_RefCache.find(&node);
 		if (cached != m_RefCache.end())
@@ -519,37 +519,37 @@ namespace C4LSP::Server
 
 		switch (node.Type())
 		{
-		case Scripting::NodeType::IdentifierExpression: {
-			res = ResolveIdentifier(static_cast<const Scripting::IdentifierExpressionNode&>(node).GetName(), path);
+		case C4Compiler::NodeType::IdentifierExpression: {
+			res = ResolveIdentifier(static_cast<const C4Compiler::IdentifierExpressionNode&>(node).GetName(), path);
 			break;
 		}
-		case Scripting::NodeType::MemberAccess: {
-			const auto& ma = static_cast<const Scripting::MemberAccessNode&>(node);
+		case C4Compiler::NodeType::MemberAccess: {
+			const auto& ma = static_cast<const C4Compiler::MemberAccessNode&>(node);
 			if (!ma.GetBaseObject())
 				break;
 			const std::string member = ma.GetMemberNameToken().GetText();
-			const Scripting::AstNode* base = ma.GetBaseObject().Get();
+			const C4Compiler::AstNode* base = ma.GetBaseObject().Get();
 
 			// `Type.member` / `Ns::Type.member`: the base names a TYPE (static member), checked first - exactly HIR's
 			// ResolveMemberAccess ordering.
-			if (const Scripting::SymbolInfo* owner = TypeNamedBy(*base, path))
+			if (const C4Compiler::SymbolInfo* owner = TypeNamedBy(*base, path))
 			{
 				res = MemberOfNamedType(m_Model, *owner, member);
 				break;
 			}
 			// The base is an expression: resolve its value type, then the member on it.
 			const NodeResolution baseRes = ResolveReference(*base, path);
-			const Scripting::ObjectType* baseObj = baseRes.type ? UnwrapObject(ma.IsArrowAccess() ? Pointee(baseRes.type) : baseRes.type) : nullptr;
+			const C4Compiler::ObjectType* baseObj = baseRes.type ? UnwrapObject(ma.IsArrowAccess() ? Pointee(baseRes.type) : baseRes.type) : nullptr;
 			if (baseObj)
 				res = MemberOfValue(m_Model, baseObj, member);
 			break;
 		}
-		case Scripting::NodeType::StaticAccess: {
+		case C4Compiler::NodeType::StaticAccess: {
 			const std::string prefix = StaticAccessPath(&node);
 			if (prefix.empty())
 				break;
-			const Scripting::Scope* context = ContextFor(path).scope;
-			if (const Scripting::SymbolInfo* info = FindVisibleQualified(m_Model, prefix, unitId, context))
+			const C4Compiler::Scope* context = ContextFor(path).scope;
+			if (const C4Compiler::SymbolInfo* info = FindVisibleQualified(m_Model, prefix, unitId, context))
 			{
 				res = SymbolResolution(*info);
 				break;
@@ -557,14 +557,14 @@ namespace C4LSP::Server
 			// Owner type + member the qualified walk could not close: an enum's member, or one on the type chain.
 			const size_t colon = prefix.rfind("::");
 			if (colon != std::string::npos)
-				if (const Scripting::SymbolInfo* owner = FindVisibleQualified(m_Model, prefix.substr(0, colon), unitId, context))
+				if (const C4Compiler::SymbolInfo* owner = FindVisibleQualified(m_Model, prefix.substr(0, colon), unitId, context))
 					res = MemberOfNamedType(m_Model, *owner, prefix.substr(colon + 2));
 			break;
 		}
-		case Scripting::NodeType::FunctionCall: {
+		case C4Compiler::NodeType::FunctionCall: {
 			// A call's value - what `View()` gives `View().CodePointAt(i)`: what the callee returns, or the type a
 			// constructor call names.
-			const auto& call = static_cast<const Scripting::FunctionCallNode&>(node);
+			const auto& call = static_cast<const C4Compiler::FunctionCallNode&>(node);
 			if (!call.GetCallee())
 				break;
 			const NodeResolution callee = ResolveReference(*call.GetCallee(), path);
@@ -574,10 +574,10 @@ namespace C4LSP::Server
 				res.type = callee.type;
 			break;
 		}
-		case Scripting::NodeType::NamespaceQualifiedName: {
+		case C4Compiler::NodeType::NamespaceQualifiedName: {
 			// Written as a value, the name is a type's (`Box<int32>{1}`): resolved as a type node made of it would be.
-			Ref<Scripting::NamespaceQualifiedNameNode> name(const_cast<Scripting::NamespaceQualifiedNameNode*>(static_cast<const Scripting::NamespaceQualifiedNameNode*>(&node)));
-			const Ref<Scripting::QualTypeNode> written = Scripting::QualTypeNode::FromParts(name, nullptr, {}, false);
+			Ref<C4Compiler::NamespaceQualifiedNameNode> name(const_cast<C4Compiler::NamespaceQualifiedNameNode*>(static_cast<const C4Compiler::NamespaceQualifiedNameNode*>(&node)));
+			const Ref<C4Compiler::QualTypeNode> written = C4Compiler::QualTypeNode::FromParts(name, nullptr, {}, false);
 			auto type = m_Model.ResolveTypeInUnitContext(*written, unitId, ContextFor(path).scope);
 			if (type.Ok())
 			{
@@ -594,28 +594,28 @@ namespace C4LSP::Server
 		return res;
 	}
 
-	const Scripting::DeclaredAnnotations& SemanticResolver::Annotations() const { return m_Model.Annotations(); }
+	const C4Compiler::DeclaredAnnotations& SemanticResolver::Annotations() const { return m_Model.Annotations(); }
 
-	Scripting::AnnotationContext SemanticResolver::AnnotationContextAt(const Core::Vector<const Scripting::AstNode*>& path, uint32 sourceId) const
+	C4Compiler::AnnotationContext SemanticResolver::AnnotationContextAt(const Core::Vector<const C4Compiler::AstNode*>& path, uint32 sourceId) const
 	{
 		return { DeclarationScope(path), sourceId };
 	}
 
-	const Scripting::AstNode* SemanticResolver::AnnotationNamedAt(const Core::Vector<const Scripting::AstNode*>& path, uint32 line, uint32 column) const
+	const C4Compiler::AstNode* SemanticResolver::AnnotationNamedAt(const Core::Vector<const C4Compiler::AstNode*>& path, uint32 line, uint32 column) const
 	{
 		for (uint32 i = path.Count(); i-- > 0;)
 		{
-			if (path[i]->Type() != Scripting::NodeType::AnnotationItem) continue;
-			const auto& item = static_cast<const Scripting::AnnotationItem&>(*path[i]);
-			for (const Scripting::Token& token : item.GetNameTokens())
+			if (path[i]->Type() != C4Compiler::NodeType::AnnotationItem) continue;
+			const auto& item = static_cast<const C4Compiler::AnnotationItem&>(*path[i]);
+			for (const C4Compiler::Token& token : item.GetNameTokens())
 			{
-				const Scripting::SourceLocation& start = token.GetStartLocation();
-				const Scripting::SourceLocation& end = token.GetEndLocation();
+				const C4Compiler::SourceLocation& start = token.GetStartLocation();
+				const C4Compiler::SourceLocation& end = token.GetEndLocation();
 				const bool after = line > start.line || (line == start.line && column >= start.column);
 				const bool before = line < end.line || (line == end.line && column <= end.column);
 				if (!after || !before) continue;
-				const Scripting::DeclaredAnnotations::Overloads overloads = Annotations().Find(item.GetName().c_str(), AnnotationContextAt(path, token.GetStartLocation().sourceId));
-				const Scripting::AnnotationSignature* likely = overloads.Empty() ? nullptr : Scripting::LikelyOverload(overloads, item);
+				const C4Compiler::DeclaredAnnotations::Overloads overloads = Annotations().Find(item.GetName().c_str(), AnnotationContextAt(path, token.GetStartLocation().sourceId));
+				const C4Compiler::AnnotationSignature* likely = overloads.Empty() ? nullptr : C4Compiler::LikelyOverload(overloads, item);
 				return likely ? likely->declaration : nullptr;
 			}
 			return nullptr; // in its arguments: what they name, not the annotation
@@ -623,58 +623,58 @@ namespace C4LSP::Server
 		return nullptr;
 	}
 
-	bool SemanticResolver::IsReference(const Scripting::AstNode& node, const Scripting::AstNode* parent)
+	bool SemanticResolver::IsReference(const C4Compiler::AstNode& node, const C4Compiler::AstNode* parent)
 	{
 		switch (node.Type())
 		{
-		case Scripting::NodeType::IdentifierExpression: case Scripting::NodeType::MemberAccess: case Scripting::NodeType::StaticAccess:
+		case C4Compiler::NodeType::IdentifierExpression: case C4Compiler::NodeType::MemberAccess: case C4Compiler::NodeType::StaticAccess:
 			return true;
-		case Scripting::NodeType::NamespaceQualifiedName:
-			return !parent || (parent->Type() != Scripting::NodeType::QualType && parent->Type() != Scripting::NodeType::FunctionDefinition);
+		case C4Compiler::NodeType::NamespaceQualifiedName:
+			return !parent || (parent->Type() != C4Compiler::NodeType::QualType && parent->Type() != C4Compiler::NodeType::FunctionDefinition);
 		default:
 			return false;
 		}
 	}
 
-	const Scripting::Type* SemanticResolver::ResolveQualType(const Scripting::QualTypeNode& qt,
-		const Core::Vector<const Scripting::AstNode*>& path) const
+	const C4Compiler::Type* SemanticResolver::ResolveQualType(const C4Compiler::QualTypeNode& qt,
+		const Core::Vector<const C4Compiler::AstNode*>& path) const
 	{
 		auto cached = m_TypeCache.find(&qt);
 		if (cached != m_TypeCache.end())
 			return cached->second;
 
 		uint32 unitId = UnitIdOf(qt);
-		const Scripting::Scope* ctx = ContextFor(path).scope;
+		const C4Compiler::Scope* ctx = ContextFor(path).scope;
 		auto r = m_Model.ResolveTypeInUnitContext(qt, unitId, ctx);
-		const Scripting::Type* type = r.Ok() ? r.value : nullptr;
+		const C4Compiler::Type* type = r.Ok() ? r.value : nullptr;
 		m_TypeCache[&qt] = type;
 		return type;
 	}
 
-	const Scripting::AstNode* SemanticResolver::DeclarationOfWrittenType(const Scripting::QualTypeNode& qt,
-		const Core::Vector<const Scripting::AstNode*>& path) const
+	const C4Compiler::AstNode* SemanticResolver::DeclarationOfWrittenType(const C4Compiler::QualTypeNode& qt,
+		const Core::Vector<const C4Compiler::AstNode*>& path) const
 	{
-		if (const Scripting::AstNode* declaration = Features::DeclarationOfNamedType(ResolveQualType(qt, path)))
+		if (const C4Compiler::AstNode* declaration = Features::DeclarationOfNamedType(ResolveQualType(qt, path)))
 			return declaration;
 		if (!qt.HasTemplateArgs())
 			return nullptr;
 		std::string templateName;
-		for (const Scripting::NamespaceQualifiedNameNode::Segment& segment : qt.BaseName()->GetSegments())
+		for (const C4Compiler::NamespaceQualifiedNameNode::Segment& segment : qt.BaseName()->GetSegments())
 			templateName += (templateName.empty() ? "" : "::") + std::string(segment.nameToken.GetText());
-		const Scripting::SymbolInfo* info = Lookup(templateName, UnitIdOf(qt), &path);
-		return info && info->kind == Scripting::SymbolKind::Type ? info->declNode : nullptr;
+		const C4Compiler::SymbolInfo* info = Lookup(templateName, UnitIdOf(qt), &path);
+		return info && info->kind == C4Compiler::SymbolKind::Type ? info->declNode : nullptr;
 	}
 
 	void SemanticResolver::CollectNamespacePaths(std::unordered_set<std::string>& out) const
 	{
 		if (!m_Model.IsValid())
 			return;
-		std::function<void(const Scripting::Scope*, std::vector<std::string>&)> walk =
-			[&](const Scripting::Scope* scope, std::vector<std::string>& chain) {
+		std::function<void(const C4Compiler::Scope*, std::vector<std::string>&)> walk =
+			[&](const C4Compiler::Scope* scope, std::vector<std::string>& chain) {
 				for (const auto& child : scope->GetChildren())
 				{
-					const Scripting::Scope* s = child.get();
-					if (s->GetKind() == Scripting::Scope::Kind::Namespace && !s->GetName().empty())
+					const C4Compiler::Scope* s = child.get();
+					if (s->GetKind() == C4Compiler::Scope::Kind::Namespace && !s->GetName().empty())
 					{
 						chain.push_back(s->GetName());
 						for (size_t i = 1; i <= chain.size(); ++i) // every prefix is a namespace path
@@ -695,23 +695,23 @@ namespace C4LSP::Server
 		walk(m_Model.Symbols()->GetRoot(), chain);
 	}
 
-	void SemanticResolver::ForEachGlobalSymbol(const std::function<void(const Core::String&, const Scripting::SymbolInfo&)>& visit) const
+	void SemanticResolver::ForEachGlobalSymbol(const std::function<void(const Core::String&, const C4Compiler::SymbolInfo&)>& visit) const
 	{
 		if (!m_Model.IsValid())
 			return;
-		Core::Vector<std::pair<Core::String, Scripting::SymbolInfo*>> entries;
-		std::function<void(const Scripting::Scope*)> walk = [&](const Scripting::Scope* scope) {
+		Core::Vector<std::pair<Core::String, C4Compiler::SymbolInfo*>> entries;
+		std::function<void(const C4Compiler::Scope*)> walk = [&](const C4Compiler::Scope* scope) {
 			for (const auto& child : scope->GetChildren())
 				walk(child.get());
 			auto kind = scope->GetKind();
-			if (kind != Scripting::Scope::Kind::File && kind != Scripting::Scope::Kind::Namespace)
+			if (kind != C4Compiler::Scope::Kind::File && kind != C4Compiler::Scope::Kind::Namespace)
 				return; // Class scopes hold fields/methods - reachable only via member access, never as globals.
 						// Function/block layers hold locals, never project symbols. Emitting Class-scope symbols here
 						// leaked every class's members into EVERY completion list (the wrong-object bug).
 			entries.Clear();
 			scope->Enumerate(entries);
 			for (const auto& [name, info] : entries)
-				if (!Scripting::IsExtensionMethodKey(name)) // a member of the type it extends, not a global
+				if (!C4Compiler::IsExtensionMethodKey(name)) // a member of the type it extends, not a global
 					visit(name, *info);
 		};
 		walk(m_Model.Symbols()->GetRoot());
@@ -721,16 +721,16 @@ namespace C4LSP::Server
 	{
 		if (!m_Model.IsValid())
 			return;
-		std::function<void(const Scripting::Scope*)> walk = [&](const Scripting::Scope* scope) {
+		std::function<void(const C4Compiler::Scope*)> walk = [&](const C4Compiler::Scope* scope) {
 			for (const auto& child : scope->GetChildren())
 				walk(child.get());
-			Core::Vector<std::pair<Core::String, Scripting::SymbolInfo*>> entries;
+			Core::Vector<std::pair<Core::String, C4Compiler::SymbolInfo*>> entries;
 			scope->Enumerate(entries);
 			for (const auto& [name, info] : entries)
 			{
-				if (info->kind != Scripting::SymbolKind::Type || !info->type)
+				if (info->kind != C4Compiler::SymbolKind::Type || !info->type)
 					continue;
-				const auto* obj = dynamic_cast<const Scripting::ObjectType*>(Scripting::TypeHandle::UnwrapToValue(info->type));
+				const auto* obj = dynamic_cast<const C4Compiler::ObjectType*>(C4Compiler::TypeHandle::UnwrapToValue(info->type));
 				if (obj)
 					out.push_back({ obj, info->declNode });
 			}
@@ -738,40 +738,40 @@ namespace C4LSP::Server
 		walk(m_Model.Symbols()->GetRoot());
 	}
 
-	void SemanticResolver::CollectDeclarationsByName(const std::string& simpleName, std::vector<const Scripting::AstNode*>& out) const
+	void SemanticResolver::CollectDeclarationsByName(const std::string& simpleName, std::vector<const C4Compiler::AstNode*>& out) const
 	{
 		if (!m_Model.IsValid())
 			return;
-		std::function<void(const Scripting::Scope*)> walk = [&](const Scripting::Scope* scope) {
+		std::function<void(const C4Compiler::Scope*)> walk = [&](const C4Compiler::Scope* scope) {
 			for (const auto& child : scope->GetChildren())
 				walk(child.get());
-			Core::Vector<std::pair<Core::String, Scripting::SymbolInfo*>> entries;
+			Core::Vector<std::pair<Core::String, C4Compiler::SymbolInfo*>> entries;
 			scope->Enumerate(entries);
 			for (const auto& [name, info] : entries)
-				if ((name == simpleName || name == Scripting::ExtensionMethodKey(simpleName)) && info->declNode)
+				if ((name == simpleName || name == C4Compiler::ExtensionMethodKey(simpleName)) && info->declNode)
 					out.push_back(info->declNode);
 		};
 		walk(m_Model.Symbols()->GetRoot());
 	}
 
-	void SemanticResolver::CollectFunctionDeclarations(const Scripting::AstNode* declaration, std::vector<const Scripting::AstNode*>& out) const
+	void SemanticResolver::CollectFunctionDeclarations(const C4Compiler::AstNode* declaration, std::vector<const C4Compiler::AstNode*>& out) const
 	{
-		if (const Scripting::AnnotationSignature* declared = Annotations().Declared(declaration))
+		if (const C4Compiler::AnnotationSignature* declared = Annotations().Declared(declaration))
 		{
-			for (const Scripting::AnnotationSignature* overload : *Annotations().Named(declared->qualifiedName.c_str())) // a use names them all
+			for (const C4Compiler::AnnotationSignature* overload : *Annotations().Named(declared->qualifiedName.c_str())) // a use names them all
 				if (std::find(out.begin(), out.end(), overload->declaration) == out.end())
 					out.push_back(overload->declaration);
 			return;
 		}
-		if (m_Model.IsValid() && declaration && declaration->Type() == Scripting::NodeType::FunctionDefinition)
+		if (m_Model.IsValid() && declaration && declaration->Type() == C4Compiler::NodeType::FunctionDefinition)
 		{
-			Core::Vector<const Scripting::FunctionRecord*> records;
+			Core::Vector<const C4Compiler::FunctionRecord*> records;
 			m_Model.AllFunctionRecords(records);
-			for (const Scripting::FunctionRecord* record : records)
+			for (const C4Compiler::FunctionRecord* record : records)
 			{
 				if (std::find(record->declarations.begin(), record->declarations.end(), declaration) == record->declarations.end())
 					continue;
-				for (const Scripting::AstNode* node : record->declarations)
+				for (const C4Compiler::AstNode* node : record->declarations)
 					if (std::find(out.begin(), out.end(), node) == out.end())
 						out.push_back(node);
 			}

@@ -14,7 +14,7 @@ namespace fs = std::filesystem;
 
 namespace Testing
 {
-	using namespace Scripting;
+	using namespace C4Compiler;
 
 	// Locate assets/IsolatedTest by walking up from the current directory (the test runner is
 	// normally started at the repo root, but this keeps the test working from any CWD). Empty if

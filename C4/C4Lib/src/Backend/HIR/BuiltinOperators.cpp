@@ -2,7 +2,7 @@
 #include "Model/TypeHandle.h"
 #include "Model/Types/SwizzleType.h"
 
-namespace Scripting::BuiltinOperators
+namespace C4Compiler::BuiltinOperators
 {
 	namespace
 	{
@@ -84,4 +84,4 @@ namespace Scripting::BuiltinOperators
 				: "operator '" + tok + "' needs a number or a pointer, not '" + t->GetName() + "'";
 		return "";
 	}
-} // namespace Scripting::BuiltinOperators
+} // namespace C4Compiler::BuiltinOperators

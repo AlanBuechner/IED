@@ -11,7 +11,7 @@
 #include "Parser/Nodes/Expressions/ParenthesizedExpressionNode.h"
 #include "Parser/Nodes/Expressions/TypeOfExpressionNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

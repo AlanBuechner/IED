@@ -5,7 +5,7 @@
 #include "Core/StringFormat.h"
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 
 	// -----------------------------------------------------------------------
@@ -484,4 +484,4 @@ namespace Scripting
 		// would corrupt outer scope checkpoint offsets.
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

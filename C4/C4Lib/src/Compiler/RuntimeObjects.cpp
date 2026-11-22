@@ -12,7 +12,7 @@
 #include <system_error>
 #include <thread>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

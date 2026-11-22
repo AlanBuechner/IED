@@ -1,7 +1,7 @@
 #include "Model/Types/UnionLayout.h"
 #include <unordered_map>
 
-namespace Scripting::UnionLayout
+namespace C4Compiler::UnionLayout
 {
 	namespace
 	{

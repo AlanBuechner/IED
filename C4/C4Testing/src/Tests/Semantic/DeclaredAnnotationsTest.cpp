@@ -16,7 +16,7 @@ annotation Requires(const char* typeName, const char*... more) on type;
 annotation Component on type;
 )";
 
-		const Scripting::ProgramModel& MakeModel(Scripting::CompilerInstance& compiler, const std::string& source)
+		const C4Compiler::ProgramModel& MakeModel(C4Compiler::CompilerInstance& compiler, const std::string& source)
 		{
 			uint32 id = compiler.RegisterInMemory("t.cf", source.c_str());
 			compiler.CompileAll();
@@ -25,68 +25,68 @@ annotation Component on type;
 		}
 
 		// The diagnostics whose message holds `text`.
-		Core::Vector<Scripting::CompilationError> Saying(const Scripting::CompilerInstance& compiler, const char* text)
+		Core::Vector<C4Compiler::CompilationError> Saying(const C4Compiler::CompilerInstance& compiler, const char* text)
 		{
-			Core::Vector<Scripting::CompilationError> found;
-			for (const Scripting::CompilationError& error : compiler.GetAllDiagnostics())
+			Core::Vector<C4Compiler::CompilationError> found;
+			for (const C4Compiler::CompilationError& error : compiler.GetAllDiagnostics())
 				if (error.message.find(text) != Core::String::npos) found.Push(error);
 			return found;
 		}
 
-		int Count(const Scripting::CompilerInstance& compiler, Scripting::ErrorSeverity severity)
+		int Count(const C4Compiler::CompilerInstance& compiler, C4Compiler::ErrorSeverity severity)
 		{
 			int count = 0;
-			for (const Scripting::CompilationError& error : compiler.GetAllDiagnostics())
+			for (const C4Compiler::CompilationError& error : compiler.GetAllDiagnostics())
 				if (error.severity == severity) ++count;
 			return count;
 		}
 
-		int Errors(const Scripting::CompilerInstance& compiler) { return Count(compiler, Scripting::ErrorSeverity::Error); }
+		int Errors(const C4Compiler::CompilerInstance& compiler) { return Count(compiler, C4Compiler::ErrorSeverity::Error); }
 
-		bool At(const Scripting::CompilationError& error, uint32 line, uint32 column) { return error.location.line == line && error.location.column == column; }
+		bool At(const C4Compiler::CompilationError& error, uint32 line, uint32 column) { return error.location.line == line && error.location.column == column; }
 
-		Core::Vector<Scripting::ReflectedAnnotation> Registered(const Scripting::ProgramModel& model, const char* type, const char* field = nullptr)
+		Core::Vector<C4Compiler::ReflectedAnnotation> Registered(const C4Compiler::ProgramModel& model, const char* type, const char* field = nullptr)
 		{
-			for (const Scripting::ObjectType* object : model.ObjectTypes())
+			for (const C4Compiler::ObjectType* object : model.ObjectTypes())
 			{
 				if (!object || object->GetName() != type) continue;
-				Core::Vector<const Scripting::AstNode*> declarations;
-				Scripting::AnnotationPlace place = Scripting::AnnotationPlace::Type;
+				Core::Vector<const C4Compiler::AstNode*> declarations;
+				C4Compiler::AnnotationPlace place = C4Compiler::AnnotationPlace::Type;
 				if (!field) declarations.Push(object->GetDeclNode());
 				else
 				{
-					place = Scripting::AnnotationPlace::Field;
+					place = C4Compiler::AnnotationPlace::Field;
 					for (const auto& info : object->GetFields())
 						if (info.mName == field) declarations.Push(info.m_DeclaringNode);
 				}
-				auto folded = Scripting::ReflectedAnnotations(model, declarations, place, model.TypeScope(object));
-				return folded.Ok() ? folded.value : Core::Vector<Scripting::ReflectedAnnotation>();
+				auto folded = C4Compiler::ReflectedAnnotations(model, declarations, place, model.TypeScope(object));
+				return folded.Ok() ? folded.value : Core::Vector<C4Compiler::ReflectedAnnotation>();
 			}
 			return {};
 		}
 
-		size_t OverloadCount(const Scripting::DeclaredAnnotations& declared, const char* qualifiedName)
+		size_t OverloadCount(const C4Compiler::DeclaredAnnotations& declared, const char* qualifiedName)
 		{
 			const auto* overloads = declared.Named(qualifiedName);
 			return overloads ? overloads->Count() : 0;
 		}
 
 		// What the annotations a type carries register as: each one's name.
-		Core::String NamesOn(const Scripting::ProgramModel& model, const char* type)
+		Core::String NamesOn(const C4Compiler::ProgramModel& model, const char* type)
 		{
 			Core::String names;
-			for (const Scripting::ReflectedAnnotation& annotation : Registered(model, type)) names += (names.empty() ? "" : " ") + annotation.name;
+			for (const C4Compiler::ReflectedAnnotation& annotation : Registered(model, type)) names += (names.empty() ? "" : " ") + annotation.name;
 			return names;
 		}
 	}
 
 	void DeclaredAnnotationsTest::FoundByTheirQualifiedName()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, std::string(kLibrary) + "struct M { public int32 v; }\n[Requires(M), Component] struct C { public int32 v; }\n"
 			"namespace Lib { annotation Requires(int32 n) on type; }\n");
 		TEST_ASSERT(compiler.GetAllErrors().Empty());
-		const Scripting::DeclaredAnnotations& declared = model.Annotations();
+		const C4Compiler::DeclaredAnnotations& declared = model.Annotations();
 		TEST_ASSERT_EQ((int)OverloadCount(declared, "Requires"), 2);
 		TEST_ASSERT_EQ((int)OverloadCount(declared, "Lib::Requires"), 1); // another annotation, of its namespace
 		TEST_ASSERT_EQ((int)OverloadCount(declared, "Component"), 1);
@@ -101,7 +101,7 @@ annotation Component on type;
 
 	void DeclaredAnnotationsTest::AUseNamesOneAsAnyNameIsNamed()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, R"(annotation Tag on type;
 namespace A
 {
@@ -126,7 +126,7 @@ namespace A { struct Holder { [Tag(4)] struct Nested { public int32 v; } public 
 
 	void DeclaredAnnotationsTest::AnInnerOneHidesAnOuterOne()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		MakeModel(compiler, R"(annotation Tag on type;
 namespace A { annotation Tag(int32 n) on type; [Tag] struct NoArgument { public int32 v; } }
 )");
@@ -137,7 +137,7 @@ namespace A { annotation Tag(int32 n) on type; [Tag] struct NoArgument { public 
 
 	void DeclaredAnnotationsTest::ANamespacesOneIsNotSeenOutsideIt()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		MakeModel(compiler, R"(namespace Scene { annotation Range(double min, double max) on field; }
 struct S { [Range(0, 1)] public float a; [Scene::Range(0, 1)] public float b; }
 namespace Scene { struct T { [Range(0, 1)] public float c; } }
@@ -155,7 +155,7 @@ annotation Global on type;
 
 	void DeclaredAnnotationsTest::AMisspeltOneIsLookedUpWhereItIsWritten()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		MakeModel(compiler, R"(namespace Scene { annotation Range(double min, double max) on field; struct S { [Rang(0, 1)] public float a; } }
 struct T { [Scene::Rang(0, 1)] public float b; [Rang(0, 1)] public float c; }
 )");
@@ -163,21 +163,21 @@ struct T { [Scene::Rang(0, 1)] public float b; [Rang(0, 1)] public float c; }
 		TEST_ASSERT_EQ((int)Saying(compiler, "unknown annotation 'Scene::Rang': did you mean 'Range'?").Count(), 1);
 		auto unseen = Saying(compiler, "annotation [Rang] is not declared");
 		TEST_ASSERT_EQ((int)unseen.Count(), 1); // outside Scene, nothing it sees is near it
-		TEST_ASSERT(unseen[0].severity == Scripting::ErrorSeverity::Warning);
+		TEST_ASSERT(unseen[0].severity == C4Compiler::ErrorSeverity::Warning);
 		TEST_ASSERT_EQ(Errors(compiler), 2);
 		TEST_PASSED();
 	}
 
 	void DeclaredAnnotationsTest::AMisspeltOneIsAnError()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		MakeModel(compiler, std::string(kLibrary) + "struct M { public int32 v; }\n[Component, Requiers(M)] struct P { public int32 v; }\n");
 		auto errors = Saying(compiler, "unknown annotation 'Requiers': did you mean 'Requires'? (an annotation nothing declares is kept for reflection, "
 			"and nothing that reads [Requires] sees it)");
 		TEST_ASSERT_EQ((int)errors.Count(), 1);
 		TEST_ASSERT(At(errors[0], 5, 13));
-		TEST_ASSERT(errors[0].severity == Scripting::ErrorSeverity::Error);
-		Scripting::CompilerInstance cased;
+		TEST_ASSERT(errors[0].severity == C4Compiler::ErrorSeverity::Error);
+		C4Compiler::CompilerInstance cased;
 		MakeModel(cased, std::string(kLibrary) + "[requires] struct Q { public int32 v; }\n");
 		TEST_ASSERT_EQ((int)Saying(cased, "unknown annotation 'requires': did you mean 'Requires'").Count(), 1); // case counts
 		TEST_PASSED();
@@ -187,30 +187,30 @@ struct T { [Scene::Rang(0, 1)] public float b; [Rang(0, 1)] public float c; }
 	// annotation - nothing said in a script build, and the field had no range.
 	void DeclaredAnnotationsTest::TwoSwappedNeighborsAreOneEdit()
 	{
-		TEST_ASSERT_EQ((int)Scripting::EditDistance("Rnage", "Range"), 1);
-		TEST_ASSERT_EQ((int)Scripting::EditDistance("Range", "Rnaeg"), 2); // two swaps
-		TEST_ASSERT_EQ((int)Scripting::EditDistance("Rang", "Range"), 1);
-		TEST_ASSERT_EQ((int)Scripting::EditDistance("ab", "ba"), 1);
-		TEST_ASSERT_EQ((int)Scripting::EditDistance("", "Step"), 4);
-		Scripting::CompilerInstance compiler;
+		TEST_ASSERT_EQ((int)C4Compiler::EditDistance("Rnage", "Range"), 1);
+		TEST_ASSERT_EQ((int)C4Compiler::EditDistance("Range", "Rnaeg"), 2); // two swaps
+		TEST_ASSERT_EQ((int)C4Compiler::EditDistance("Rang", "Range"), 1);
+		TEST_ASSERT_EQ((int)C4Compiler::EditDistance("ab", "ba"), 1);
+		TEST_ASSERT_EQ((int)C4Compiler::EditDistance("", "Step"), 4);
+		C4Compiler::CompilerInstance compiler;
 		MakeModel(compiler, R"(annotation Range(double min, double max) on field;
 annotation Step(double by) on field;
 struct S { [Rnage(0, 1)] public float a; [Setp(0.1)] public float b; [Rnaeg(0, 1)] public float c; }
 )");
 		auto range = Saying(compiler, "unknown annotation 'Rnage': did you mean 'Range'?");
 		TEST_ASSERT_EQ((int)range.Count(), 1);
-		TEST_ASSERT(range[0].severity == Scripting::ErrorSeverity::Error);
+		TEST_ASSERT(range[0].severity == C4Compiler::ErrorSeverity::Error);
 		TEST_ASSERT_EQ((int)Saying(compiler, "unknown annotation 'Setp': did you mean 'Step'?").Count(), 1);
 		auto twice = Saying(compiler, "annotation [Rnaeg] is not declared");
 		TEST_ASSERT_EQ((int)twice.Count(), 1); // two swaps from a short name: no near miss
-		TEST_ASSERT(twice[0].severity == Scripting::ErrorSeverity::Warning);
+		TEST_ASSERT(twice[0].severity == C4Compiler::ErrorSeverity::Warning);
 		TEST_ASSERT_EQ(Errors(compiler), 2);
 		TEST_PASSED();
 	}
 
 	void DeclaredAnnotationsTest::EveryKindOfDeclarationIsChecked()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		MakeModel(compiler, std::string(kLibrary) + R"(struct F { [Componnt] public int32 field; [Requirs] public void Method([Componet] int32 p) { } }
 [Requres] int32 Free() { return 0; }
 [Compnent] int32 g_global = 1;
@@ -224,16 +224,16 @@ union U { [Componnent] int32 i; float f; }
 
 	void DeclaredAnnotationsTest::AnUndeclaredOneIsAWarning()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		MakeModel(compiler, std::string(kLibrary) + "[Serialize, Tint(1, 2)] struct U { [Lib::Hidden] public int32 v; }\n");
 		TEST_ASSERT_EQ(Errors(compiler), 0);
 		auto serialize = Saying(compiler, "annotation [Serialize] is not declared: declare it, what it takes and where it goes, with `annotation Serialize(...) on ...;`");
 		TEST_ASSERT_EQ((int)serialize.Count(), 1);
-		TEST_ASSERT(serialize[0].severity == Scripting::ErrorSeverity::Warning);
+		TEST_ASSERT(serialize[0].severity == C4Compiler::ErrorSeverity::Warning);
 		TEST_ASSERT(At(serialize[0], 4, 2));
 		TEST_ASSERT_EQ((int)Saying(compiler, "annotation [Tint] is not declared").Count(), 1);
 		TEST_ASSERT_EQ((int)Saying(compiler, "annotation [Lib::Hidden] is not declared: declare it, what it takes and where it goes, with `annotation Hidden(").Count(), 1);
-		Scripting::CompilerInstance typo;
+		C4Compiler::CompilerInstance typo;
 		MakeModel(typo, "[Test] void F() { }\nint32 main() { return 0; }\n");
 		TEST_ASSERT_EQ((int)typo.GetAllDiagnostics().Count(), 1); // the parser's "did you mean 'test'", not a second warning
 		TEST_ASSERT_EQ((int)Saying(typo, "did you mean 'test'").Count(), 1);
@@ -242,9 +242,9 @@ union U { [Componnent] int32 i; float f; }
 
 	void DeclaredAnnotationsTest::TheClosestIsNamed()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, "annotation Hidden; annotation Hinted; annotation Bidden;\n");
-		const Scripting::DeclaredAnnotations& declared = model.Annotations();
+		const C4Compiler::DeclaredAnnotations& declared = model.Annotations();
 		TEST_ASSERT(declared.MisspeltBy("Hiddem", {})[0]->name == "Hidden"); // one edit beats two
 		TEST_ASSERT(declared.MisspeltBy("Xidden", {})[0]->name == "Bidden"); // a tie: the name first in order, whatever the map's
 		TEST_ASSERT(declared.MisspeltBy("Hxxxxx", {}).Empty());
@@ -253,7 +253,7 @@ union U { [Componnent] int32 i; float f; }
 
 	void DeclaredAnnotationsTest::TheArgumentCountIsChecked()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		MakeModel(compiler, R"(annotation None;
 annotation Two(int32 a, int32 b);
 annotation Optional(int32 a, int32 b = 2, int32 c = 3);
@@ -274,7 +274,7 @@ annotation AtLeast(int32 first, int32... more);
 
 	void DeclaredAnnotationsTest::EachArgumentsKindIsChecked()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		MakeModel(compiler, R"(struct Mesh { public int32 v; }
 annotation Range(double min, double max);
 annotation Label(const char* text);
@@ -300,7 +300,7 @@ annotation Count(int32 n);
 
 	void DeclaredAnnotationsTest::AnIntegerMustFitItsParameter()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		MakeModel(compiler, R"(annotation Byte(uint8 b);
 annotation Small(int8 s);
 annotation Unsigned(uint64 u);
@@ -318,7 +318,7 @@ annotation Unsigned(uint64 u);
 
 	void DeclaredAnnotationsTest::AnEnumParameterTakesItsEnumerators()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, R"(namespace Render { enum class Pass { Opaque, Glass } enum class Other { Glass } enum Plain { First, Second } }
 annotation Drawn(Render::Pass pass);
 annotation Kind(Render::Plain kind);
@@ -334,13 +334,13 @@ namespace Render { [Drawn(Pass::Opaque), Kind(Second)] struct B { public int32 v
 		TEST_ASSERT_EQ(Errors(compiler), 3);
 		auto glass = Registered(model, "A");
 		TEST_ASSERT_EQ((int)glass.Count(), 1);
-		TEST_ASSERT(glass[0].arguments[0].value.kind == Scripting::ConstantValue::Kind::Int64 && glass[0].arguments[0].value.intValue == 1); // its value
+		TEST_ASSERT(glass[0].arguments[0].value.kind == C4Compiler::ConstantValue::Kind::Int64 && glass[0].arguments[0].value.intValue == 1); // its value
 		TEST_PASSED();
 	}
 
 	void DeclaredAnnotationsTest::OverloadsAreChosenByTheirArguments()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, R"(struct Mesh { public int32 v; }
 annotation Range(int64 min, int64 max);
 annotation Range(double min, double max);
@@ -360,7 +360,7 @@ annotation Pick(int32 a);
 		TEST_ASSERT_EQ(Errors(compiler), 2);
 		auto ints = Registered(model, "Ints");
 		TEST_ASSERT(ints[0].declaration && ints[0].declaration->ToString() == "Range(int64 min, int64 max)"); // exact beats converted
-		TEST_ASSERT(ints[0].arguments[1].value.kind == Scripting::ConstantValue::Kind::Int64);
+		TEST_ASSERT(ints[0].arguments[1].value.kind == C4Compiler::ConstantValue::Kind::Int64);
 		TEST_ASSERT(ints[1].declaration->ToString() == "Of(typename type)");
 		auto mixed = Registered(model, "Mixed");
 		TEST_ASSERT(mixed[0].declaration->ToString() == "Range(double min, double max)");
@@ -370,7 +370,7 @@ annotation Pick(int32 a);
 
 	void DeclaredAnnotationsTest::ReflectionRegistersWhatTheDeclarationTakes()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, R"(annotation Range(double min, double max) on field;
 annotation Step(double by = 0.25, bool snap = true) on field;
 annotation Note(const char* text = "none") on field;
@@ -379,22 +379,22 @@ struct S { [Range(0, 2), Step, Note] public float a; [Step(1)] public float b; [
 		TEST_ASSERT_EQ(Errors(compiler), 0);
 		auto a = Registered(model, "S", "a");
 		TEST_ASSERT_EQ((int)a.Count(), 3);
-		TEST_ASSERT(a[0].arguments[0].value.kind == Scripting::ConstantValue::Kind::Float64 && a[0].arguments[0].value.floatValue == 0.0); // an integer for a double
-		TEST_ASSERT(a[0].arguments[1].value.kind == Scripting::ConstantValue::Kind::Float64 && a[0].arguments[1].value.floatValue == 2.0);
+		TEST_ASSERT(a[0].arguments[0].value.kind == C4Compiler::ConstantValue::Kind::Float64 && a[0].arguments[0].value.floatValue == 0.0); // an integer for a double
+		TEST_ASSERT(a[0].arguments[1].value.kind == C4Compiler::ConstantValue::Kind::Float64 && a[0].arguments[1].value.floatValue == 2.0);
 		TEST_ASSERT_EQ((int)a[1].arguments.Count(), 2); // its defaults
 		TEST_ASSERT(a[1].arguments[0].value.floatValue == 0.25 && a[1].arguments[1].value.booleanValue);
 		TEST_ASSERT(a[2].arguments[0].value.stringValue == "none");
 		auto b = Registered(model, "S", "b");
-		TEST_ASSERT(b[0].arguments[0].value.kind == Scripting::ConstantValue::Kind::Float64 && b[0].arguments[0].value.floatValue == 1.0);
+		TEST_ASSERT(b[0].arguments[0].value.kind == C4Compiler::ConstantValue::Kind::Float64 && b[0].arguments[0].value.floatValue == 1.0);
 		TEST_ASSERT(b[0].arguments[1].value.booleanValue); // the default after what is written
 		auto c = Registered(model, "S", "c");
-		TEST_ASSERT(!c[0].declaration && c[0].arguments[0].value.kind == Scripting::ConstantValue::Kind::Int64); // undeclared: as written
+		TEST_ASSERT(!c[0].declaration && c[0].arguments[0].value.kind == C4Compiler::ConstantValue::Kind::Int64); // undeclared: as written
 		TEST_PASSED();
 	}
 
 	void DeclaredAnnotationsTest::APackTakesAnyNumber()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, std::string(kLibrary) + R"(annotation Groups(const char*... names) on type;
 struct A { public int32 v; } struct B { public int32 v; }
 [Groups, Requires(A)] struct One { public int32 v; }
@@ -417,7 +417,7 @@ struct A { public int32 v; } struct B { public int32 v; }
 
 	void DeclaredAnnotationsTest::PlacesAreChecked()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		MakeModel(compiler, R"(annotation OnType on type;
 annotation Range(double min, double max) on field, parameter;
 annotation Handler on method;
@@ -452,7 +452,7 @@ annotation Anywhere;
 
 	void DeclaredAnnotationsTest::ADeclarationThatDeclaresNothingIsAnError()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		MakeModel(compiler, R"(struct Mesh { public int32 v; }
 annotation BadPlace on thing;
 annotation BadType(Mesh m);
@@ -489,7 +489,7 @@ annotation Fine(int32 a, int32 b = 2, int32... rest);
 
 	void DeclaredAnnotationsTest::ItsSyntaxErrorsAreSaidOnce()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		MakeModel(compiler, R"(annotation Open(int32 a;
 annotation NoPlace on 3;
 annotation Missing field;
@@ -517,7 +517,7 @@ struct T { [Fine(2)] public int32 v; }
 
 	void DeclaredAnnotationsTest::AnnotationIsStillAName()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		MakeModel(compiler, R"(struct Annotation { public int32 v; }
 Annotation annotation;
 int32 g_annotation = 1;
@@ -539,12 +539,12 @@ int32 main()
 	void DeclaredAnnotationsTest::ADeclarationIsNoFunction()
 	{
 		// A call to one is the error NegativeTest AnnotationCalled says.
-		Scripting::CompilerInstance unused;
+		C4Compiler::CompilerInstance unused;
 		const auto& model = MakeModel(unused, "annotation Marked;\n[Marked] int32 main() { return 0; }\n");
 		TEST_ASSERT(unused.GetAllDiagnostics().Empty());
-		Core::Vector<const Scripting::FunctionRecord*> records;
+		Core::Vector<const C4Compiler::FunctionRecord*> records;
 		model.AllFunctionRecords(records);
-		for (const Scripting::FunctionRecord* record : records) TEST_ASSERT(record->name != "Marked"); // never a function of the program
+		for (const C4Compiler::FunctionRecord* record : records) TEST_ASSERT(record->name != "Marked"); // never a function of the program
 		TEST_PASSED();
 	}
 }

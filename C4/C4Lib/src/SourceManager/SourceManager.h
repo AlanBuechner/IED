@@ -6,7 +6,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 
 	// How much of a folder RegisterFolder takes: everything under it; everything but its own tests/ folder (a project's source

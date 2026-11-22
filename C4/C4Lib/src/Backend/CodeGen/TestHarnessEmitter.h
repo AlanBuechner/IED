@@ -6,7 +6,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// What a `-test` build's harness reports beyond the tests themselves.
 	struct TestHarnessOptions
@@ -44,4 +44,4 @@ namespace Scripting
 		llvm::Function* m_Main = nullptr;
 		std::unordered_map<std::string, llvm::Constant*> m_Texts;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

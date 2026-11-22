@@ -27,7 +27,7 @@
 #include "Nodes/Declarations/QualTypeNode.h"
 #include "Nodes/Declarations/NamespaceQualifiedNameNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	Ref<AstNode> PrattParser::TryMemberTemplateCall(ParserState& state, const Ref<AstNode>& member)
 	{
@@ -390,4 +390,4 @@ namespace Scripting
 			ErrorSeverity::Error);
 		return nullptr;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

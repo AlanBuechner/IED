@@ -1,7 +1,7 @@
 #pragma once
 #include "Model/Types/Type.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A type that is called with a signature: `funcptr<R(A)>` (FunPtrType) and `func<R(A)>` (FuncType). Code
 	/// that only needs the signature works on this; code for one of the two checks the kind.
@@ -26,4 +26,4 @@ namespace Scripting
 		const Type* m_ReturnType = nullptr;
 		Core::Vector<const Type*> m_ParameterTypes;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

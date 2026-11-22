@@ -7,7 +7,7 @@
 #include <thread>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// What a request made that the other lowerings may find only once the request has ended (a table's new entries).
 	class IShownWhenMade
@@ -101,4 +101,4 @@ namespace Scripting
 		mutable std::mutex m_ViolationsLock;
 		mutable std::vector<std::string> m_Violations;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

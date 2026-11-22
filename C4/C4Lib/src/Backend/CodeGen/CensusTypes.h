@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ModuleContext;
 	struct CensusFunction;
@@ -68,4 +68,4 @@ namespace Scripting
 		std::vector<const CensusFunction*> m_New;
 		std::vector<const Type*> m_Unplanned;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

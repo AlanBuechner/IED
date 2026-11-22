@@ -4,7 +4,7 @@
 #include "Model/Types/SwizzleType.h"
 // IntegerType / PointerType live in DerivedTypes.h on this vendored LLVM 22 (no individual headers).
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -92,4 +92,4 @@ namespace Scripting
 	{
 		return m_Layout.getTypeAllocSize(registers) > m_Layout.getTypeAllocSize(object) ? registers : object;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

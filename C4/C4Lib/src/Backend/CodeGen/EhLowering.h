@@ -5,7 +5,7 @@
 #include <llvm/IR/Instructions.h>
 #include <memory>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class MirEmitter;
 
@@ -38,4 +38,4 @@ namespace Scripting
 		/// A noexcept function's handler: the exception stops the program.
 		virtual void Terminate() = 0;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

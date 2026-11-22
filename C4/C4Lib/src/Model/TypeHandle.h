@@ -2,7 +2,7 @@
 #include "Types.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 
 	/// The abstract type object: wraps a const Type* and hides its shape behind capability
@@ -97,4 +97,4 @@ namespace Scripting
 		const Type* m_Type = nullptr;
 	};
 
-} // namespace Scripting
+} // namespace C4Compiler

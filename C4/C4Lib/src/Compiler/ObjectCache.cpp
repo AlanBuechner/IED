@@ -21,7 +21,7 @@
 #include <signal.h>
 #endif
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

@@ -2,7 +2,7 @@
 #include "../Declarations/QualTypeNode.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	void SafeCastNode::SetOperand(Ref<AstNode> operand)
 	{

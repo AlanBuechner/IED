@@ -2,7 +2,7 @@
 #include "Model/Types/ObjectType.h"
 #include <vector>
 
-namespace Scripting::AggregateSlots
+namespace C4Compiler::AggregateSlots
 {
 	/// One position braces fill (`{a, b, c}`): a field, or one lane of a packed region.
 	struct Slot

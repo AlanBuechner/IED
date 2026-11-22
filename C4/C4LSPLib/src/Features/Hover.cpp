@@ -18,11 +18,11 @@
 
 namespace C4LSP::Features
 {
-	using Scripting::NodeType;
+	using C4Compiler::NodeType;
 
 	static std::string CodeBlock(const std::string& code) { return "```c4\n" + code + "\n```"; }
 
-	static bool Declares(const Scripting::AstNode& node)
+	static bool Declares(const C4Compiler::AstNode& node)
 	{
 		switch (node.Type())
 		{
@@ -43,7 +43,7 @@ namespace C4LSP::Features
 	}
 
 	// What a parameter or a local is, said before its block: neither has an owner to qualify it with.
-	static std::string KindLine(Server::CompilationSession& session, const Scripting::AstNode& decl)
+	static std::string KindLine(Server::CompilationSession& session, const C4Compiler::AstNode& decl)
 	{
 		if (decl.Type() == NodeType::Parameter)
 			return "parameter `" + DeclarationText::NameOf(decl) + "`\n\n";
@@ -51,7 +51,7 @@ namespace C4LSP::Features
 			return "local `" + DeclarationText::NameOf(decl) + "`\n\n";
 		if (decl.Type() != NodeType::VariableDefinition)
 			return "";
-		const Core::Vector<const Scripting::AstNode*> path = DeclarationText::PathTo(session, decl);
+		const Core::Vector<const C4Compiler::AstNode*> path = DeclarationText::PathTo(session, decl);
 		for (uint32 i = 0; i + 1 < path.Count(); ++i)
 			if (path[i]->Type() == NodeType::FunctionDefinition)
 				return "local `" + DeclarationText::NameOf(decl) + "`\n\n";
@@ -77,7 +77,7 @@ namespace C4LSP::Features
 		auto unit = session.GetCompiler().GetCompilationUnit(sourceId);
 		if (!unit || !unit->GetRootAST())
 			return result;
-		const Scripting::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
+		const C4Compiler::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
 		Server::LocatedNode located = Server::NodeLocator::Locate(source, sourceId, unit->GetRootAST(), position);
 		if (!located.Found())
 			return result;
@@ -102,18 +102,18 @@ namespace C4LSP::Features
 	{
 		// What go-to-definition finds without a reference: an annotation's declaration, a variable a lambda captures, a
 		// declaration's own name (a range-for variable's, the type `Ring` of `Ring::Push`).
-		if (const Scripting::AstNode* annotation = Definition::AnnotationNamedAt(session, located, position))
+		if (const C4Compiler::AstNode* annotation = Definition::AnnotationNamedAt(session, located, position))
 			return AnnotationMarkdown(session, *annotation);
-		if (const Scripting::AstNode* captured = Definition::CapturedAt(session, located, position))
+		if (const C4Compiler::AstNode* captured = Definition::CapturedAt(session, located, position))
 			return DeclarationMarkdown(session, *captured);
-		if (const Scripting::AstNode* named = Definition::DeclarationNamedAt(session, sourceId, located, position))
+		if (const C4Compiler::AstNode* named = Definition::DeclarationNamedAt(session, sourceId, located, position))
 			return named->Type() == NodeType::AnnotationDeclaration ? AnnotationMarkdown(session, *named) : DeclarationMarkdown(session, *named);
 
 		const Server::SemanticResolver& resolver = session.GetResolver();
 		// Prefer a reference node (identifier / member access / call callee) with a resolved type.
 		for (int i = static_cast<int>(located.path.Count()) - 1; i >= 0; --i)
 		{
-			const Scripting::AstNode* node = located.path[i];
+			const C4Compiler::AstNode* node = located.path[i];
 			if (node->Type() == NodeType::LambdaExpression)
 				break; // a lambda is a function of its own: the declaration around it is not what its code names
 
@@ -128,7 +128,7 @@ namespace C4LSP::Features
 			// declaration around it.
 			if (node->Type() == NodeType::QualType)
 			{
-				std::string typeText = BuildTypeHover(session, static_cast<const Scripting::QualTypeNode&>(*node), located.path);
+				std::string typeText = BuildTypeHover(session, static_cast<const C4Compiler::QualTypeNode&>(*node), located.path);
 				if (!typeText.empty())
 					return typeText;
 			}
@@ -143,7 +143,7 @@ namespace C4LSP::Features
 		return "";
 	}
 
-	std::string Hover::BuildReferenceHover(Server::CompilationSession& session, const Scripting::Type* type, const Scripting::AstNode* declaration)
+	std::string Hover::BuildReferenceHover(Server::CompilationSession& session, const C4Compiler::Type* type, const C4Compiler::AstNode* declaration)
 	{
 		if (declaration)
 		{
@@ -155,19 +155,19 @@ namespace C4LSP::Features
 		return typeText.empty() ? "" : CodeBlock(typeText);
 	}
 
-	std::string Hover::BuildTypeHover(Server::CompilationSession& session, const Scripting::QualTypeNode& type, const Core::Vector<const Scripting::AstNode*>& path)
+	std::string Hover::BuildTypeHover(Server::CompilationSession& session, const C4Compiler::QualTypeNode& type, const Core::Vector<const C4Compiler::AstNode*>& path)
 	{
-		const Scripting::AstNode* declaration = session.GetResolver().DeclarationOfWrittenType(type, path);
+		const C4Compiler::AstNode* declaration = session.GetResolver().DeclarationOfWrittenType(type, path);
 		const std::string declText = declaration ? DeclarationMarkdown(session, *declaration) : "";
 		if (!declText.empty())
 			return declText;
-		const Scripting::Type* resolved = session.GetResolver().ResolveQualType(type, path);
+		const C4Compiler::Type* resolved = session.GetResolver().ResolveQualType(type, path);
 		return resolved ? CodeBlock(TypeText(resolved)) : "";
 	}
 
-	std::string Hover::DeclarationMarkdown(Server::CompilationSession& session, const Scripting::AstNode& declaration)
+	std::string Hover::DeclarationMarkdown(Server::CompilationSession& session, const C4Compiler::AstNode& declaration)
 	{
-		const Scripting::AstNode& shown = DeclarationText::InItsType(session, declaration);
+		const C4Compiler::AstNode& shown = DeclarationText::InItsType(session, declaration);
 		const std::string code = DeclarationText::Qualified(session, shown);
 		if (code.empty())
 			return "";
@@ -178,15 +178,15 @@ namespace C4LSP::Features
 		return doc.empty() ? text : text + "\n\n" + doc;
 	}
 
-	std::string Hover::AnnotationMarkdown(Server::CompilationSession& session, const Scripting::AstNode& declaration)
+	std::string Hover::AnnotationMarkdown(Server::CompilationSession& session, const C4Compiler::AstNode& declaration)
 	{
-		const Scripting::DeclaredAnnotations& annotations = session.GetResolver().Annotations();
-		const Scripting::AnnotationSignature* declared = annotations.Declared(&declaration);
+		const C4Compiler::DeclaredAnnotations& annotations = session.GetResolver().Annotations();
+		const C4Compiler::AnnotationSignature* declared = annotations.Declared(&declaration);
 		if (!declared) return DeclarationMarkdown(session, declaration);
 		std::string uses;
 		std::string doc = DocComment::Of(session, declaration);
-		Scripting::AnnotationPlaces places = Scripting::AnnotationPlaces::None();
-		for (const Scripting::AnnotationSignature* overload : *annotations.Named(declared->qualifiedName.c_str()))
+		C4Compiler::AnnotationPlaces places = C4Compiler::AnnotationPlaces::None();
+		for (const C4Compiler::AnnotationSignature* overload : *annotations.Named(declared->qualifiedName.c_str()))
 		{
 			uses += (uses.empty() ? "[" : "\n[") + std::string(overload->ToString().c_str()) + "]";
 			places.Add(overload->places);

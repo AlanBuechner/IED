@@ -10,7 +10,7 @@
 #include "Parser/UnexpectedToken.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	static bool IsModifierKeyword(TokenType type, const Core::String& text)
 	{
@@ -411,4 +411,4 @@ namespace Scripting
 			m_Children.Push(m_Initializer);
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

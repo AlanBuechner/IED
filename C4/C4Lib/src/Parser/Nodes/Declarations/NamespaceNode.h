@@ -5,7 +5,7 @@
 #include "Lexer/Token.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Represents a namespace declaration in C4 source.
 	///

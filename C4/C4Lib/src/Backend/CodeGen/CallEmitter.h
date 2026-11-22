@@ -1,7 +1,7 @@
 #pragma once
 #include "Backend/CodeGen/IRContext.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ExprEmitter;
 
@@ -63,4 +63,4 @@ namespace Scripting
 		ExprEmitter& m_Expr;
 		std::vector<std::pair<unsigned, const Type*>> m_StackArguments; // argument index, type (PassOnStack)
 	};
-} // namespace Scripting
+} // namespace C4Compiler

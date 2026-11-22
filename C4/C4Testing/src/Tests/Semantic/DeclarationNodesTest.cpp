@@ -9,7 +9,7 @@ namespace Testing
 {
 	namespace
 	{
-		const Scripting::ProgramModel& MakeModel(Scripting::CompilerInstance& compiler, const char* source)
+		const C4Compiler::ProgramModel& MakeModel(C4Compiler::CompilerInstance& compiler, const char* source)
 		{
 			uint32 id = compiler.RegisterInMemory("t.cf", source);
 			compiler.CompileAll();
@@ -17,18 +17,18 @@ namespace Testing
 			return compiler.GetCompilationUnit(id)->GetProgramModel();
 		}
 
-		const Scripting::ObjectType* ObjectNamed(const Scripting::ProgramModel& model, const char* name)
+		const C4Compiler::ObjectType* ObjectNamed(const C4Compiler::ProgramModel& model, const char* name)
 		{
-			for (const Scripting::ObjectType* object : model.ObjectTypes())
+			for (const C4Compiler::ObjectType* object : model.ObjectTypes())
 				if (object && object->GetName() == name) return object;
 			return nullptr;
 		}
 
-		const Scripting::FunctionRecord* RecordNamed(const Scripting::ProgramModel& model, const char* name)
+		const C4Compiler::FunctionRecord* RecordNamed(const C4Compiler::ProgramModel& model, const char* name)
 		{
-			Core::Vector<const Scripting::FunctionRecord*> records;
+			Core::Vector<const C4Compiler::FunctionRecord*> records;
 			model.AllFunctionRecords(records);
-			for (const Scripting::FunctionRecord* record : records)
+			for (const C4Compiler::FunctionRecord* record : records)
 				if (record->name == name) return record;
 			return nullptr;
 		}
@@ -36,11 +36,11 @@ namespace Testing
 
 	void DeclarationNodesTest::ObjectTypeKeepsItsDeclaration()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, "namespace Geo { struct Point { public int32 x; } }\n");
-		const Scripting::ObjectType* point = ObjectNamed(model, "Point");
+		const C4Compiler::ObjectType* point = ObjectNamed(model, "Point");
 		TEST_ASSERT(point != nullptr);
-		const auto* decl = dynamic_cast<const Scripting::ObjectDefinitionNode*>(point->GetDeclNode());
+		const auto* decl = dynamic_cast<const C4Compiler::ObjectDefinitionNode*>(point->GetDeclNode());
 		TEST_ASSERT(decl != nullptr);
 		TEST_ASSERT(decl->GetNameToken().GetText() == "Point");
 		TEST_PASSED();
@@ -48,13 +48,13 @@ namespace Testing
 
 	void DeclarationNodesTest::EnumKeepsItsDeclarationAndScope()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, "namespace Ui { enum class Mode { A, B } }\n");
-		const Scripting::EnumType* mode = nullptr;
-		for (const Scripting::EnumType* en : model.EnumTypes())
+		const C4Compiler::EnumType* mode = nullptr;
+		for (const C4Compiler::EnumType* en : model.EnumTypes())
 			if (en && en->GetName() == "Mode") mode = en;
 		TEST_ASSERT(mode != nullptr);
-		TEST_ASSERT(dynamic_cast<const Scripting::EnumDefinitionNode*>(mode->GetDeclNode()) != nullptr);
+		TEST_ASSERT(dynamic_cast<const C4Compiler::EnumDefinitionNode*>(mode->GetDeclNode()) != nullptr);
 		TEST_ASSERT(mode->GetDeclScope() != nullptr);
 		TEST_ASSERT(mode->GetDeclScope()->GetName() == "Ui");
 		TEST_PASSED();
@@ -62,13 +62,13 @@ namespace Testing
 
 	void DeclarationNodesTest::TemplateInstanceKeepsTheTemplatesDeclaration()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, "template<T> struct Box { public T v; }\nBox<int32> g_box;\n");
-		const Scripting::ObjectType* instance = nullptr;
-		for (const Scripting::ObjectType* object : model.ObjectTypes())
+		const C4Compiler::ObjectType* instance = nullptr;
+		for (const C4Compiler::ObjectType* object : model.ObjectTypes())
 			if (object && object->GetName() == "Box" && !object->GetTemplateArguments().Empty()) instance = object;
 		TEST_ASSERT(instance != nullptr);
-		const auto* decl = dynamic_cast<const Scripting::ObjectDefinitionNode*>(instance->GetDeclNode());
+		const auto* decl = dynamic_cast<const C4Compiler::ObjectDefinitionNode*>(instance->GetDeclNode());
 		TEST_ASSERT(decl != nullptr);
 		TEST_ASSERT(decl->GetNameToken().GetText() == "Box");
 		TEST_PASSED();
@@ -76,12 +76,12 @@ namespace Testing
 
 	void DeclarationNodesTest::FunctionKeepsEveryDeclaration()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, "int32 Twice(int32 a);\nint32 Twice(int32 a) { return a * 2; }\n");
-		const Scripting::FunctionRecord* twice = RecordNamed(model, "Twice");
+		const C4Compiler::FunctionRecord* twice = RecordNamed(model, "Twice");
 		TEST_ASSERT(twice != nullptr);
 		TEST_ASSERT_EQ((int)twice->declarations.Count(), 2);
-		TEST_ASSERT(dynamic_cast<const Scripting::FunctionDefinitionNode*>(twice->declarations[0]) != nullptr);
+		TEST_ASSERT(dynamic_cast<const C4Compiler::FunctionDefinitionNode*>(twice->declarations[0]) != nullptr);
 		TEST_ASSERT(twice->declarations[0]->startLocation.line == 1);
 		TEST_ASSERT(twice->declarations[1]->startLocation.line == 2);
 		TEST_PASSED();
@@ -89,9 +89,9 @@ namespace Testing
 
 	void DeclarationNodesTest::MethodKeepsInClassAndOutOfLineDeclarations()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, "struct Counter { public int32 n; public int32 Get(); }\nint32 Counter::Get() { return n; }\n");
-		const Scripting::FunctionRecord* get = RecordNamed(model, "Get");
+		const C4Compiler::FunctionRecord* get = RecordNamed(model, "Get");
 		TEST_ASSERT(get != nullptr);
 		TEST_ASSERT_EQ((int)get->declarations.Count(), 2);
 		TEST_PASSED();

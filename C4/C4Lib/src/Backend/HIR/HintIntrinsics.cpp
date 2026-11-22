@@ -2,7 +2,7 @@
 #include "Backend/HIR/ImplicitConversion.h"
 #include "Model/TypeHandle.h"
 
-namespace Scripting::HintIntrinsics
+namespace C4Compiler::HintIntrinsics
 {
 	namespace
 	{
@@ -40,4 +40,4 @@ namespace Scripting::HintIntrinsics
 		if (name == "mem_prefetch") return Prefetch(ctx, args);
 		return Expect(ctx, name, args, name == "likely" ? IntrinsicOp::Likely : IntrinsicOp::Unlikely);
 	}
-} // namespace Scripting::HintIntrinsics
+} // namespace C4Compiler::HintIntrinsics

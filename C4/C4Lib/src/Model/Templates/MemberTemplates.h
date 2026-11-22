@@ -1,7 +1,7 @@
 #pragma once
 #include "Model/ProgramModel.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Function templates declared in a class (BUG-117: `struct P { template<U> static int32 F(U u); }`). Each is a
 	/// template of its owner type, found through a receiver (`p.F(1)`), a qualifying type (`P::F(1)`,
@@ -33,4 +33,4 @@ namespace Scripting
 	private:
 		static Core::String NameOf(const FunctionDefinitionNode& fn);
 	};
-} // namespace Scripting
+} // namespace C4Compiler

@@ -10,7 +10,7 @@
 #include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
 #include "Parser/Nodes/Declarations/ParameterNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	void AnnotationCheck::CheckNew()
 	{
@@ -166,4 +166,4 @@ namespace Scripting
 	{
 		if (m_Reported.insert({ at.sourceId, at.line, at.column }).second) m_Errors.AddError(at, message, severity);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

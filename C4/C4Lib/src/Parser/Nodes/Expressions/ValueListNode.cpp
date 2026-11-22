@@ -2,7 +2,7 @@
 #include "Parser/PrattParser.h"
 #include "Compiler/ErrorTracker.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	Ref<ValueListNode> ValueListNode::Parse(ParserState& state)
 	{
@@ -34,4 +34,4 @@ namespace Scripting
 		for (uint32 i = 0; i < m_Elements.Count(); ++i) result += (i ? ", " : "") + m_Elements[i]->ToString();
 		return result + "]";
 	}
-} // namespace Scripting
+} // namespace C4Compiler

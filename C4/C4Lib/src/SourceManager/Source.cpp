@@ -2,7 +2,7 @@
 #include "Compiler/FileIo.h"
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	// ---------------------------------------------------------------------------
 	// Source - synchronous source text with direct pointer access and line table

@@ -3,7 +3,7 @@
 #include "Parser/Nodes/Statements/SimpleStatementNodes.h" // goto / label statement nodes
 #include <functional>
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct CodeBlockNode; struct ExpressionStatementNode;
 	struct ReturnStatementNode; struct IfStatementNode;
@@ -84,4 +84,4 @@ namespace Scripting
 
 		LoweringContext& m_Ctx;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

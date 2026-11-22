@@ -34,7 +34,7 @@
 #include <thread>
 #include <unordered_set>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

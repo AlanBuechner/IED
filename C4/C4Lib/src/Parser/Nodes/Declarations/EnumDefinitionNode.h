@@ -6,7 +6,7 @@
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 
 	/// One enum member: `Name` or `Name = expr`.

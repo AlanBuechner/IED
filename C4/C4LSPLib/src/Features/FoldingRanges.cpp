@@ -19,12 +19,12 @@ namespace C4LSP::Features
 		return endLine > startLine;
 	}
 
-	void FoldingRanges::CollectNode(const Scripting::AstNode& node, uint32 sourceId, Core::Vector<FoldingRange>& out)
+	void FoldingRanges::CollectNode(const C4Compiler::AstNode& node, uint32 sourceId, Core::Vector<FoldingRange>& out)
 	{
 		switch (node.Type())
 		{
-		case Scripting::NodeType::Namespace: {
-			const auto& ns = static_cast<const Scripting::NamespaceNode&>(node);
+		case C4Compiler::NodeType::Namespace: {
+			const auto& ns = static_cast<const C4Compiler::NamespaceNode&>(node);
 			if (!ns.IsRoot() && UseFoldingRange(node.startLocation.line, node.endLocation.line))
 			{
 				FoldingRange range;
@@ -34,8 +34,8 @@ namespace C4LSP::Features
 			}
 			break;
 		}
-		case Scripting::NodeType::ObjectDefinition: {
-			const auto& obj = static_cast<const Scripting::ObjectDefinitionNode&>(node);
+		case C4Compiler::NodeType::ObjectDefinition: {
+			const auto& obj = static_cast<const C4Compiler::ObjectDefinitionNode&>(node);
 			if (obj.HasBody() && UseFoldingRange(node.startLocation.line, node.endLocation.line))
 			{
 				FoldingRange range;
@@ -45,8 +45,8 @@ namespace C4LSP::Features
 			}
 			break;
 		}
-		case Scripting::NodeType::FunctionDefinition: {
-			const auto& func = static_cast<const Scripting::FunctionDefinitionNode&>(node);
+		case C4Compiler::NodeType::FunctionDefinition: {
+			const auto& func = static_cast<const C4Compiler::FunctionDefinitionNode&>(node);
 			if (func.IsDeclaration())
 				break; // prototypes have no body to fold
 			auto body = func.GetBody();
@@ -54,7 +54,7 @@ namespace C4LSP::Features
 				break;
 			// The function's FIRST line carries the signature (`void Main() {`), which VS2022 keeps
 			// visible while collapsing - so start from the open brace, not the node start.
-			const Scripting::SourceLocation& open = body->GetOpenBraceToken().GetStartLocation();
+			const C4Compiler::SourceLocation& open = body->GetOpenBraceToken().GetStartLocation();
 			if (open.line < 1 || !UseFoldingRange(open.line, func.endLocation.line))
 				break;
 			FoldingRange range;
@@ -63,8 +63,8 @@ namespace C4LSP::Features
 			out.Push(range);
 			break;
 		}
-		case Scripting::NodeType::EnumDefinition: {
-			const auto& en = static_cast<const Scripting::EnumDefinitionNode&>(node);
+		case C4Compiler::NodeType::EnumDefinition: {
+			const auto& en = static_cast<const C4Compiler::EnumDefinitionNode&>(node);
 			if (UseFoldingRange(node.startLocation.line, node.endLocation.line))
 			{
 				FoldingRange range;
@@ -74,8 +74,8 @@ namespace C4LSP::Features
 			}
 			break;
 		}
-		case Scripting::NodeType::UnionDefinition: {
-			const auto& un = static_cast<const Scripting::UnionDefinitionNode&>(node);
+		case C4Compiler::NodeType::UnionDefinition: {
+			const auto& un = static_cast<const C4Compiler::UnionDefinitionNode&>(node);
 			if (un.HasBody() && UseFoldingRange(node.startLocation.line, node.endLocation.line))
 			{
 				FoldingRange range;
@@ -85,12 +85,12 @@ namespace C4LSP::Features
 			}
 			break;
 		}
-		case Scripting::NodeType::CodeBlock: {
-			const auto& block = static_cast<const Scripting::CodeBlockNode&>(node);
+		case C4Compiler::NodeType::CodeBlock: {
+			const auto& block = static_cast<const C4Compiler::CodeBlockNode&>(node);
 			if (!block.HasBraces())
 				break; // single-statement bodies have nothing to fold
-			const Scripting::SourceLocation& open = block.GetOpenBraceToken().GetStartLocation();
-			const Scripting::SourceLocation& close = block.GetCloseBraceToken().GetStartLocation();
+			const C4Compiler::SourceLocation& open = block.GetOpenBraceToken().GetStartLocation();
+			const C4Compiler::SourceLocation& close = block.GetCloseBraceToken().GetStartLocation();
 			if (open.line < 1 || !UseFoldingRange(open.line, close.line))
 				break; // `{ }` on one line folds to nothing
 			FoldingRange range;
@@ -103,7 +103,7 @@ namespace C4LSP::Features
 			break;
 		}
 
-		Server::ForEachWrittenChild(node, [&](const Scripting::AstNode& child) {
+		Server::ForEachWrittenChild(node, [&](const C4Compiler::AstNode& child) {
 			if (child.startLocation.sourceId == sourceId) // skip inlined include trees and foreign nodes
 				CollectNode(child, sourceId, out);
 		});
@@ -115,18 +115,18 @@ namespace C4LSP::Features
 		if (text.empty())
 			return;
 
-		auto source = Scripting::Source::FromMemory(text);
-		Scripting::Lexer lexer(*source.Get(), 1); // positions are mapped by line, so the id is irrelevant here
+		auto source = C4Compiler::Source::FromMemory(text);
+		C4Compiler::Lexer lexer(*source.Get(), 1); // positions are mapped by line, so the id is irrelevant here
 		for (;;)
 		{
-			const Scripting::Token& tok = lexer.NextToken();
-			if (tok.GetType() == Scripting::TokenType::EndOfFile)
+			const C4Compiler::Token& tok = lexer.NextToken();
+			if (tok.GetType() == C4Compiler::TokenType::EndOfFile)
 				break;
-			bool multi = tok.GetType() == Scripting::TokenType::MultiComment;
+			bool multi = tok.GetType() == C4Compiler::TokenType::MultiComment;
 			if (!multi)
 				continue; // single-line `//` comments never fold (VS2022 parity); the lexer also swallows their trailing newline, so they are not even candidates
-			const Scripting::SourceLocation& start = tok.GetStartLocation();
-			const Scripting::SourceLocation& end = tok.GetEndLocation();
+			const C4Compiler::SourceLocation& start = tok.GetStartLocation();
+			const C4Compiler::SourceLocation& end = tok.GetEndLocation();
 			if (start.line < 1 || !UseFoldingRange(start.line, end.line))
 				continue; // single-line comments never fold
 			FoldingRange range;

@@ -1,7 +1,7 @@
 #pragma once
 #include "Backend/HIR/LoweringContext.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ExprLowerer;
 	struct BracedInitializerNode;
@@ -36,4 +36,4 @@ namespace Scripting
 	/// What a field a braced list or aggregate `T(...)` leaves out starts as: its initializer, evaluated
 	/// without an object (it cannot use other fields or `this`), else its default construction, else zero.
 	QueryResult<const HIRNode*> OmittedFieldValue(LoweringContext& ctx, const ObjectType* type, const ObjectType::FieldInfo& field);
-} // namespace Scripting
+} // namespace C4Compiler

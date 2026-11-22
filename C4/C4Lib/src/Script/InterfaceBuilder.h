@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class CompilerInstance;
 	class ProgramModel;
@@ -44,4 +44,4 @@ namespace Scripting
 	/// calls them, so a script reaches every Bedrock API its host has the headers of (the collector's hooks a VM in a script uses,
 	/// GC::RegisterMarkEnd, while the host calls none).
 	std::vector<std::string> LibraryRuntimeSymbols(const ProgramModel& model, const SourceManager& sources);
-} // namespace Scripting
+} // namespace C4Compiler

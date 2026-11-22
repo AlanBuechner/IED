@@ -2,7 +2,7 @@
 #include "Model/Types.h"
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// MSVC decorated type names, the identity the frame handler and `dynamic_cast` compare. C4 and C++
 	/// spell the same type the same way, so exceptions and RTTI cross the interop boundary:
@@ -17,4 +17,4 @@ namespace Scripting
 		/// The TypeDescriptor name of a pointer to `pointee` (`.PEAVFoo@@`; `.PEAX` for void).
 		std::string PointerTo(const Type* pointee);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -2,7 +2,7 @@
 #include "../Declarations/QualTypeNode.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	void CastExpressionNode::SetOperand(Ref<AstNode> operand)
 	{

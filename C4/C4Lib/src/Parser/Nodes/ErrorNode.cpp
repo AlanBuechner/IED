@@ -1,6 +1,6 @@
 #include "ErrorNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	ErrorNode::ErrorNode(const SourceLocation& start, const SourceLocation& end, Core::String why) : m_Why(std::move(why))
 	{

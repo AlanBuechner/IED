@@ -3,7 +3,7 @@
 #include "Model/TypeHandle.h"
 #include "Model/Types/ReferenceType.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -102,4 +102,4 @@ namespace Scripting
 	{
 		return ctx.queries().TypeStore()->Pointer(location->type, IsReadOnly(ctx, location));
 	}
-} // namespace Scripting
+} // namespace C4Compiler

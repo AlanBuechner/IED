@@ -3,7 +3,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Pass 2 of the model build (docs/compiler/02-program-model.md, Build passes): every declaration pass 1 left pending
 	/// is a query, asked at most once and answered from its inputs alone (the declaration's node, its unit and its
@@ -103,4 +103,4 @@ namespace Scripting
 		std::unordered_map<const SymbolInfo*, uint32> m_StaticMembers; // a static data member's symbol -> its field
 		std::unordered_map<const ObjectType*, ObjectWork> m_Objects;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

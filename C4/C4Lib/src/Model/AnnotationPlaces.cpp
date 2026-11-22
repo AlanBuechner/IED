@@ -1,7 +1,7 @@
 #include "Model/AnnotationPlaces.h"
 #include "Model/SymbolTable.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -72,4 +72,4 @@ namespace Scripting
 		const bool inType = function.scope && function.scope->GetKind() == Scope::Kind::Class;
 		return function.containingType || function.isExtensionMethod || inType ? AnnotationPlace::Method : AnnotationPlace::Function;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

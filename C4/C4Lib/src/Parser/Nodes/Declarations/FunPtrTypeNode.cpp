@@ -1,7 +1,7 @@
 #include "FunPtrTypeNode.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	Core::String FunPtrTypeNode::ToString() const
 	{
@@ -190,4 +190,4 @@ namespace Scripting
 	}
 
 
-} // namespace Scripting
+} // namespace C4Compiler

@@ -1,6 +1,6 @@
 #include "Backend/HIR/AsmTemplate.h"
 
-namespace Scripting::AsmTemplate
+namespace C4Compiler::AsmTemplate
 {
 	namespace
 	{

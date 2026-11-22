@@ -2,7 +2,7 @@
 #include "Model/Templates/TemplateArguments.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct PackExpansionNode;
 
@@ -37,4 +37,4 @@ namespace Scripting
 		QueryResult<TemplateArgs> ExpandArguments(const ProgramModel& model, const PackExpansionNode& expansion, bool takesType,
 			uint32 unitId, Scope* lookup, const Scope* context);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

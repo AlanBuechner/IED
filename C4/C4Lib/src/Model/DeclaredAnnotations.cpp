@@ -10,7 +10,7 @@
 #include "Parser/Nodes/Declarations/ParameterNode.h"
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -363,4 +363,4 @@ namespace Scripting
 		default: return "no constant";
 		}
 	}
-} // namespace Scripting
+} // namespace C4Compiler

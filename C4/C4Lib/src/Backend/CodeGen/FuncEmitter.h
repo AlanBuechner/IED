@@ -1,7 +1,7 @@
 #pragma once
 #include "Backend/CodeGen/IRContext.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ExprEmitter;
 	class SignatureType;

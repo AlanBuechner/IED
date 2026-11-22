@@ -4,7 +4,7 @@
 #include <llvm/IR/Module.h>
 #include <optional>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -37,4 +37,4 @@ namespace Scripting
 						CapAlignment(*store, GuaranteedAlignment(layout, store->getValueOperand()->getType()));
 				}
 	}
-} // namespace Scripting
+} // namespace C4Compiler

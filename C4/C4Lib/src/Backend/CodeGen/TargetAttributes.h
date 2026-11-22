@@ -3,7 +3,7 @@
 
 namespace llvm { class Module; }
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ModuleContext;
 	class ProgramModel;
@@ -19,4 +19,4 @@ namespace Scripting
 	/// ApplyTarget; the model checked the names. A function is found by its record, whatever its symbol (a split
 	/// program's file-static one has a suffix).
 	void ApplyFunctionTargets(ModuleContext& mctx, const ProgramModel& model);
-} // namespace Scripting
+} // namespace C4Compiler

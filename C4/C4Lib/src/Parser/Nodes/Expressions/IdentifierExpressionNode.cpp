@@ -1,6 +1,6 @@
 #include "IdentifierExpressionNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 
 	Ref<IdentifierExpressionNode> IdentifierExpressionNode::TryParse(ParserState& state)
@@ -33,4 +33,4 @@ namespace Scripting
 		return m_NameToken.GetText();
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

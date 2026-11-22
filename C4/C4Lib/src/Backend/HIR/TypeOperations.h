@@ -3,7 +3,7 @@
 #include "Compiler/ErrorTracker.h"
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 	struct FunctionRecord;
@@ -43,4 +43,4 @@ namespace Scripting
 	/// then its start), `destroy((T*)object)`, or `new ((T*)to) T(*(const T*)from)`. Incomplete (with the reason in
 	/// `errors`) when the operation does not lower.
 	HIRFunction LowerTypeOperationThunk(ProgramModel& model, ErrorTracker& errors, const ObjectType& type, TypeOperation op, const FunctionRecord& thunk);
-} // namespace Scripting
+} // namespace C4Compiler

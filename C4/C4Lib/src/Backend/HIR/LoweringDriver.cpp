@@ -12,7 +12,7 @@
 #include "Model/TypeHandle.h"           // UnwrapToValue (alias/reference -> concrete type)
 #include "Model/Abstractness.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -152,4 +152,4 @@ namespace Scripting
 		fn.complete = true;
 		return fn;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

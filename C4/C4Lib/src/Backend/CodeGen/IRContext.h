@@ -7,7 +7,7 @@
 #include <vector>
 #include <unordered_map>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// What a call and an expression need of the MIR block being emitted (MirEmitter): where a call that may throw
 	/// unwinds to, the funclet it runs in, and the region an expression runs in place (a loop over an array's elements).
@@ -141,4 +141,4 @@ namespace Scripting
 		llvm::BasicBlock* m_Prev;
 		llvm::DebugLoc m_Line;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

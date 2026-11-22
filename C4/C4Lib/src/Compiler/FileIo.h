@@ -5,7 +5,7 @@
 #include <string>
 #include <system_error>
 
-namespace Scripting
+namespace C4Compiler
 {
 	// Files by path through LLVM's calls, which take paths longer than MAX_PATH (a deep build or project folder);
 	// std::filesystem's and the standard streams' do not. Paths are UTF-8.

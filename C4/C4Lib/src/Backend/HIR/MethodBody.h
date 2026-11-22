@@ -1,7 +1,7 @@
 #pragma once
 #include "Backend/HIR/LoweringContext.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct CodeBlockNode;
 
@@ -11,4 +11,4 @@ namespace Scripting
 	/// each unless the body's first statement calls the base's create / copy itself. A compiler-written
 	/// lifecycle function has only those parts.
 	QueryResult<void> LowerFunctionBody(LoweringContext& ctx, const FunctionRecord* record, const CodeBlockNode* body, BlockNode* root);
-} // namespace Scripting
+} // namespace C4Compiler

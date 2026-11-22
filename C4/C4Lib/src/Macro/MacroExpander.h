@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Where macro uses are expanded: `__FILE__` is the file's name and `__LINE__` the line.
 	struct ExpansionSite

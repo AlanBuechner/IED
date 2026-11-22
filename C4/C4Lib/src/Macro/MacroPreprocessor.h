@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// What the macro pass made of a file: where its lines are left out and its uses expanded, and the errors and warnings
 	/// of its directives and uses.

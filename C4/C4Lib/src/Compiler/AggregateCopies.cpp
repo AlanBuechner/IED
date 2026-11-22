@@ -4,7 +4,7 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

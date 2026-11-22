@@ -7,7 +7,7 @@ namespace Testing
 {
 	// Build the program model for one in-memory unit (mirrors ProgramModelTest's harness). The model
 	// is move-only and shared, so the caller keeps the compiler alive for as long as it uses the ref.
-	static const Scripting::ProgramModel& MakeModel(Scripting::CompilerInstance& compiler, const char* source)
+	static const C4Compiler::ProgramModel& MakeModel(C4Compiler::CompilerInstance& compiler, const char* source)
 	{
 		uint32 id = compiler.RegisterInMemory("t.cf", source);
 		compiler.CompileAll();
@@ -19,12 +19,12 @@ namespace Testing
 	// First AST node matching the predicate (depth-first). Used to pull a concrete type/call node out
 	// of a parsed body so a test can query it by its source-level spelling.
 	template <typename Pred>
-	static const Scripting::AstNode* FindNode(Scripting::CompilerInstance& compiler, uint32 unitId, Pred pred)
+	static const C4Compiler::AstNode* FindNode(C4Compiler::CompilerInstance& compiler, uint32 unitId, Pred pred)
 	{
 		auto unit = compiler.GetCompilationUnit(unitId);
 		if (!unit || !unit->GetRootAST()) return nullptr;
-		const Scripting::AstNode* found = nullptr;
-		std::function<void(const Scripting::AstNode&)> walk = [&](const Scripting::AstNode& n) {
+		const C4Compiler::AstNode* found = nullptr;
+		std::function<void(const C4Compiler::AstNode&)> walk = [&](const C4Compiler::AstNode& n) {
 			if (found) return;
 			if (pred(n)) { found = &n; return; }
 			for (const auto& child : n.Children())
@@ -38,23 +38,23 @@ namespace Testing
 
 	void ProgramModelEdgeCasesTest::NestedTemplateInstantiationIsConcrete()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"template<T> struct Box { public T v; }\n"
 			"template<T> struct Vec { public T x; public Box<T> b; }\n"
 			"Vec<int32> g;\n");
 
 		// The `Vec<int32>` type node from the global variable.
-		const auto* var = FindNode(compiler, 1, [](const Scripting::AstNode& n) {
-			const auto* v = dynamic_cast<const Scripting::VariableDefinitionNode*>(&n);
+		const auto* var = FindNode(compiler, 1, [](const C4Compiler::AstNode& n) {
+			const auto* v = dynamic_cast<const C4Compiler::VariableDefinitionNode*>(&n);
 			return v && v->GetType() && v->GetNameToken().GetText() == "g";
 		});
 		TEST_ASSERT(var != nullptr);
 
-		auto r = model.QueryInstantiation(*dynamic_cast<const Scripting::VariableDefinitionNode*>(var)->GetType().Get());
+		auto r = model.QueryInstantiation(*dynamic_cast<const C4Compiler::VariableDefinitionNode*>(var)->GetType().Get());
 		TEST_ASSERT(r.Ok());
 		TEST_ASSERT(r.value != nullptr);
-		TEST_ASSERT(r.value->GetKind() == Scripting::TypeKind::Object);
+		TEST_ASSERT(r.value->GetKind() == C4Compiler::TypeKind::Object);
 		// Vec<int32> = { int32 x; Box<int32> b; } = 4 + 4 = 8 bytes, align 4.
 		TEST_ASSERT_EQ((int)model.SizeOf(r.value).value, 8);
 		TEST_ASSERT_EQ((int)model.AlignOf(r.value).value, 4);
@@ -66,7 +66,7 @@ namespace Testing
 		TEST_ASSERT_EQ((int)model.SizeOf(b.value.field->m_Type).value, 4);
 
 		// The same spelling yields the SAME cached instance (templates are indistinguishable + cached).
-		auto again = model.QueryInstantiation(*dynamic_cast<const Scripting::VariableDefinitionNode*>(var)->GetType().Get());
+		auto again = model.QueryInstantiation(*dynamic_cast<const C4Compiler::VariableDefinitionNode*>(var)->GetType().Get());
 		TEST_ASSERT(again.Ok());
 		TEST_ASSERT(again.value == r.value);
 		TEST_PASSED();
@@ -74,7 +74,7 @@ namespace Testing
 
 	void ProgramModelEdgeCasesTest::AliasTemplateYieldsSameInstantiation()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"template<T> struct TBox { public T v; }\n"
 			"alias ABox = TBox<float>;\n"
@@ -94,18 +94,18 @@ namespace Testing
 
 	void ProgramModelEdgeCasesTest::NonTypeParameterDrivesArrayLayout()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"template<int N> struct Arr { int32[N] d; }\n"
 			"Arr<4> g;\n");
 
-		const auto* var = FindNode(compiler, 1, [](const Scripting::AstNode& n) {
-			const auto* v = dynamic_cast<const Scripting::VariableDefinitionNode*>(&n);
+		const auto* var = FindNode(compiler, 1, [](const C4Compiler::AstNode& n) {
+			const auto* v = dynamic_cast<const C4Compiler::VariableDefinitionNode*>(&n);
 			return v && v->GetType() && v->GetNameToken().GetText() == "g";
 		});
 		TEST_ASSERT(var != nullptr);
 
-		auto r = model.QueryInstantiation(*dynamic_cast<const Scripting::VariableDefinitionNode*>(var)->GetType().Get());
+		auto r = model.QueryInstantiation(*dynamic_cast<const C4Compiler::VariableDefinitionNode*>(var)->GetType().Get());
 		TEST_ASSERT(r.Ok());
 		// Arr<4> holds int32 d[4] = 16 bytes, align 4. The non-type param N folded into the array size.
 		TEST_ASSERT_EQ((int)model.SizeOf(r.value).value, 16);
@@ -115,7 +115,7 @@ namespace Testing
 
 	void ProgramModelEdgeCasesTest::OperatorOnInstantiatedTypeResolves()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"template<T> struct Num {\n"
 			"    public T v;\n"
@@ -123,15 +123,15 @@ namespace Testing
 			"}\n"
 			"Num<int32> g;\n");
 
-		const auto* var = FindNode(compiler, 1, [](const Scripting::AstNode& n) {
-			const auto* v = dynamic_cast<const Scripting::VariableDefinitionNode*>(&n);
+		const auto* var = FindNode(compiler, 1, [](const C4Compiler::AstNode& n) {
+			const auto* v = dynamic_cast<const C4Compiler::VariableDefinitionNode*>(&n);
 			return v && v->GetType() && v->GetNameToken().GetText() == "g";
 		});
 		TEST_ASSERT(var != nullptr);
 
-		auto r = model.QueryInstantiation(*dynamic_cast<const Scripting::VariableDefinitionNode*>(var)->GetType().Get());
+		auto r = model.QueryInstantiation(*dynamic_cast<const C4Compiler::VariableDefinitionNode*>(var)->GetType().Get());
 		TEST_ASSERT(r.Ok());
-		const Scripting::Type* numInt = r.value;
+		const C4Compiler::Type* numInt = r.value;
 
 		// `a + b` on the instantiation: the [operator("add")] method registered on the template body
 		// must be discoverable on the concrete Num<int32>. Left-receiver preference.
@@ -144,15 +144,15 @@ namespace Testing
 
 	void ProgramModelEdgeCasesTest::FunctionTemplateExplicitArgsInstantiateAndCache()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"template<T> int32 Id(T x) { return 1; }\n"
 			"int32 r = Id<int32>(5);\n");
 
 		// Pull the explicit `Id<int32>` template-argument list from the call site.
-		const Scripting::TemplateArgumentListNode* tmplArgs = nullptr;
-		FindNode(compiler, 1, [&](const Scripting::AstNode& n) {
-			const auto* call = dynamic_cast<const Scripting::FunctionCallNode*>(&n);
+		const C4Compiler::TemplateArgumentListNode* tmplArgs = nullptr;
+		FindNode(compiler, 1, [&](const C4Compiler::AstNode& n) {
+			const auto* call = dynamic_cast<const C4Compiler::FunctionCallNode*>(&n);
 			if (call && call->GetTemplateArgs()) tmplArgs = call->GetTemplateArgs().Get();
 			return call != nullptr;
 		});
@@ -160,7 +160,7 @@ namespace Testing
 
 		auto intType = model.QueryType("int32");
 		TEST_ASSERT(intType.Ok());
-		Core::Vector<const Scripting::Type*> args;
+		Core::Vector<const C4Compiler::Type*> args;
 		args.Push(intType.value);
 
 		// Explicit template args instantiate the function template transparently: one resolved signature.
@@ -170,7 +170,7 @@ namespace Testing
 		TEST_ASSERT_EQ((int)f.value->GetParameterCount(), 1);
 
 		// Every registered signature has exactly one lowering record (body + mangled symbol).
-		const Scripting::FunctionRecord* rec = model.RecordFor(f.value);
+		const C4Compiler::FunctionRecord* rec = model.RecordFor(f.value);
 		TEST_ASSERT(rec != nullptr);
 		TEST_PASSED();
 	}
@@ -181,7 +181,7 @@ namespace Testing
 	{
 		// A name shadowed by nesting: the SAME identifier at two depths of one namespace tree. The
 		// qualified paths must each resolve to its own constant (no cross-depth bleed).
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"namespace Outer { const int32 K = 5; }\n"
 			"namespace Outer { namespace Inner { const int32 K = 9; } }\n");
@@ -200,7 +200,7 @@ namespace Testing
 	{
 		// Two `namespace N { ... }` blocks in one file merge into one scope: a constant from the first
 		// block, a type and a function from the second all coexist and resolve by qualified name.
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"namespace N { const int32 A = 1; }\n"
 			"namespace N { struct S { int32 v; } void F() {} }\n");
@@ -211,7 +211,7 @@ namespace Testing
 
 		auto s = model.QueryType("N::S");
 		TEST_ASSERT(s.Ok());
-		TEST_ASSERT(s.value->GetKind() == Scripting::TypeKind::Object);
+		TEST_ASSERT(s.value->GetKind() == C4Compiler::TypeKind::Object);
 
 		auto f = model.QueryFunction("N::F");
 		TEST_ASSERT(f.Ok());
@@ -227,14 +227,14 @@ namespace Testing
 		// it - is covered by the on-disk IsolatedTest NamespaceClassOutOfLine case; in-memory units
 		// cannot include each other, and a unit that has NOT seen the type must not be able to define
 		// its methods, which is exactly what visibility enforces.)
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"namespace N { struct C { int32 Get(); } }\n"
 			"int32 N::C::Get() { return 42; }\n");
 
 		auto c = model.QueryType("N::C");
 		TEST_ASSERT(c.Ok());
-		const Scripting::Type* ct = c.value;
+		const C4Compiler::Type* ct = c.value;
 
 		// ONE function query, receiver = the type: finds the method.
 		auto f = model.QueryFunction("Get", ct);
@@ -242,7 +242,7 @@ namespace Testing
 		TEST_ASSERT(f.value != nullptr);
 
 		// The out-of-line body is attached to this signature's lowering record (not a shell).
-		const Scripting::FunctionRecord* rec = model.RecordFor(f.value);
+		const C4Compiler::FunctionRecord* rec = model.RecordFor(f.value);
 		TEST_ASSERT(rec != nullptr);
 		TEST_ASSERT(rec->bodyNode != nullptr);
 		TEST_PASSED();
@@ -252,7 +252,7 @@ namespace Testing
 
 	void ProgramModelEdgeCasesTest::AliasChainResolvesToSameObject()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"struct Point { int32 x; }\n"
 			"alias A1 = Point;\n"
@@ -272,29 +272,29 @@ namespace Testing
 
 	void ProgramModelEdgeCasesTest::PointerToAliasUnwrapsForMemberAccess()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"struct Point { int32 x; }\n"
 			"alias Pt = Point;\n"
 			"Pt* p;\n");
 
 		// The `Pt*` type node from the pointer variable (find it by the variable's name).
-		const auto* var = FindNode(compiler, 1, [](const Scripting::AstNode& n) {
-			const auto* v = dynamic_cast<const Scripting::VariableDefinitionNode*>(&n);
+		const auto* var = FindNode(compiler, 1, [](const C4Compiler::AstNode& n) {
+			const auto* v = dynamic_cast<const C4Compiler::VariableDefinitionNode*>(&n);
 			return v && v->GetType() && v->GetNameToken().GetText() == "p";
 		});
 		TEST_ASSERT(var != nullptr);
-		auto ptrType = model.ResolveType(*dynamic_cast<const Scripting::VariableDefinitionNode*>(var)->GetType().Get());
+		auto ptrType = model.ResolveType(*dynamic_cast<const C4Compiler::VariableDefinitionNode*>(var)->GetType().Get());
 		TEST_ASSERT(ptrType.Ok());
 
 		// The pointee of Pt* is the alias Pt; a pointer is a first-class value (NOT unwrapped by
 		// UnwrapToValue), so member access goes through GetPointedType to the pointee, then resolves the
 		// alias to the concrete Point. This is how lowering does p->x: deref the pointer, then field.
-		const Scripting::Type* pointee = Scripting::TypeHandle::GetPointedType(ptrType.value);
+		const C4Compiler::Type* pointee = C4Compiler::TypeHandle::GetPointedType(ptrType.value);
 		TEST_ASSERT(pointee != nullptr);
-		const Scripting::Type* base = Scripting::TypeHandle::UnwrapToValue(pointee); // alias -> Point
+		const C4Compiler::Type* base = C4Compiler::TypeHandle::UnwrapToValue(pointee); // alias -> Point
 		TEST_ASSERT(base != nullptr);
-		TEST_ASSERT(base->GetKind() == Scripting::TypeKind::Object);
+		TEST_ASSERT(base->GetKind() == C4Compiler::TypeKind::Object);
 
 		auto x = model.QueryMember(base, "x");
 		TEST_ASSERT(x.Ok());
@@ -306,13 +306,13 @@ namespace Testing
 
 	void ProgramModelEdgeCasesTest::DefaultArgumentsFillAtResolution()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"int32 F(int32 a, int32 b = 7) { return a + b; }\n");
 
 		auto intType = model.QueryType("int32");
 		TEST_ASSERT(intType.Ok());
-		Core::Vector<const Scripting::Type*> one;
+		Core::Vector<const C4Compiler::Type*> one;
 		one.Push(intType.value);
 
 		// One explicit arg: the default fills `b` at resolution. The caller gets ONE signature.
@@ -321,7 +321,7 @@ namespace Testing
 		TEST_ASSERT_EQ((int)f.value->GetParameterCount(), 2);   // both params present in the signature
 
 		// minArity = params minus trailing defaults = 1 (only `a` is required).
-		const Scripting::FunctionRecord* rec = model.RecordFor(f.value);
+		const C4Compiler::FunctionRecord* rec = model.RecordFor(f.value);
 		TEST_ASSERT(rec != nullptr);
 		TEST_ASSERT_EQ((int)rec->minArity, 1);
 
@@ -330,7 +330,7 @@ namespace Testing
 		// `a` is required. Overload resolution with real args is the separate, strict path.
 		auto none = model.QueryFunction("F", nullptr, nullptr, {});
 		TEST_ASSERT(none.Ok());
-		const Scripting::FunctionRecord* recNone = model.RecordFor(none.value);
+		const C4Compiler::FunctionRecord* recNone = model.RecordFor(none.value);
 		TEST_ASSERT(recNone != nullptr);
 		TEST_ASSERT_EQ((int)recNone->minArity, 1);
 		TEST_PASSED();
@@ -340,7 +340,7 @@ namespace Testing
 
 	void ProgramModelEdgeCasesTest::VirtualMethodIsInheritedAndOverridden()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"struct Shape { virtual float GetArea(); }\n"
 			"struct Circle : public Shape { float GetArea() override; }\n");
@@ -350,8 +350,8 @@ namespace Testing
 		TEST_ASSERT(shape.Ok());
 		TEST_ASSERT(circle.Ok());
 
-		const auto* st = static_cast<const Scripting::ObjectType*>(shape.value);
-		const auto* ct = static_cast<const Scripting::ObjectType*>(circle.value);
+		const auto* st = static_cast<const C4Compiler::ObjectType*>(shape.value);
+		const auto* ct = static_cast<const C4Compiler::ObjectType*>(circle.value);
 
 		// The base declares a virtual; the derived hierarchy carries it.
 		auto baseM = model.QueryMember(shape.value, "GetArea");
@@ -370,7 +370,7 @@ namespace Testing
 
 	void ProgramModelEdgeCasesTest::PolymorphicHierarchyHasSingleVptr()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"struct Base { virtual int32 F(); int32 a; }\n"
 			"struct Derived : public Base { int32 b; }\n");
@@ -379,8 +379,8 @@ namespace Testing
 		auto derived = model.QueryType("Derived");
 		TEST_ASSERT(base.Ok());
 		TEST_ASSERT(derived.Ok());
-		const auto* bt = static_cast<const Scripting::ObjectType*>(base.value);
-		const auto* dt = static_cast<const Scripting::ObjectType*>(derived.value);
+		const auto* bt = static_cast<const C4Compiler::ObjectType*>(base.value);
+		const auto* dt = static_cast<const C4Compiler::ObjectType*>(derived.value);
 
 		// Base: one vptr (8) + int32 a (4), padded to align 8 => size 16.
 		TEST_ASSERT_EQ((int)model.SizeOf(base.value).value, 16);
@@ -403,7 +403,7 @@ namespace Testing
 
 	void ProgramModelEdgeCasesTest::TestRegistryCollectsGroupsAndSymbols()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"[test(\"math.mul\")] void TestMul() {}\n"
 			"[test(\"math.div\")] void TestDiv() {}\n"
@@ -425,7 +425,7 @@ namespace Testing
 
 	void ProgramModelEdgeCasesTest::ClassFixturesFromStaticSetupTeardown()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"struct Counter {\n"
 			"    [test_setup] public static void Setup() {}\n"
@@ -449,7 +449,7 @@ namespace Testing
 
 	void ProgramModelEdgeCasesTest::ClassTestGroupPrefixesItsMethods()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"[test(\"math.vector\")] struct VectorTests {\n"
 			"    [test(\"addition\")] public static void TestAddition() {}\n"
@@ -472,7 +472,7 @@ namespace Testing
 
 	void ProgramModelEdgeCasesTest::ExtensionMethodOnNamespacedClassIsFound()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"namespace NS { struct Box { int32 v; } }\n"
 			"void SetBox(int32 x) extends NS::Box { this->v = x; }\n");
@@ -491,19 +491,19 @@ namespace Testing
 
 	void ProgramModelEdgeCasesTest::ExtensionMethodOnInstantiatedTypeIsFound()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"template<T> struct Stack { public T top; }\n"
 			"void Push(int32 v) extends Stack<int32> {}\n"
 			"Stack<int32> s;\n");
 
 		// The concrete Stack<int32> type (from the global variable's spelling).
-		const auto* var = FindNode(compiler, 1, [](const Scripting::AstNode& n) {
-			const auto* v = dynamic_cast<const Scripting::VariableDefinitionNode*>(&n);
+		const auto* var = FindNode(compiler, 1, [](const C4Compiler::AstNode& n) {
+			const auto* v = dynamic_cast<const C4Compiler::VariableDefinitionNode*>(&n);
 			return v && v->GetType() && v->GetNameToken().GetText() == "s";
 		});
 		TEST_ASSERT(var != nullptr);
-		auto r = model.QueryInstantiation(*dynamic_cast<const Scripting::VariableDefinitionNode*>(var)->GetType().Get());
+		auto r = model.QueryInstantiation(*dynamic_cast<const C4Compiler::VariableDefinitionNode*>(var)->GetType().Get());
 		TEST_ASSERT(r.Ok());
 
 		// An extension method whose target is a TEMPLATE INSTANTIATION binds to the concrete type.
@@ -518,7 +518,7 @@ namespace Testing
 
 	void ProgramModelEdgeCasesTest::CombinedNamespaceTemplateInheritOperatorExtension()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"namespace Geometry {\n"
 			"    template<T> struct Shape {\n"
@@ -532,7 +532,7 @@ namespace Testing
 
 		auto circle = model.QueryType("Geometry::Circle");
 		TEST_ASSERT(circle.Ok());
-		const auto* ct = static_cast<const Scripting::ObjectType*>(circle.value);
+		const auto* ct = static_cast<const C4Compiler::ObjectType*>(circle.value);
 
 		// Inheritance from a template instantiation: Circle carries the base's virtual.
 		TEST_ASSERT(ct->IsPolymorphic());
@@ -556,20 +556,20 @@ namespace Testing
 
 	void ProgramModelEdgeCasesTest::InitListTypeExposesDataAndSizeMembers()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"__init_list<int32> g;\n");
 
 		// The `__init_list<int32>` type node from the global variable.
-		const auto* var = FindNode(compiler, 1, [](const Scripting::AstNode& n) {
-			const auto* v = dynamic_cast<const Scripting::VariableDefinitionNode*>(&n);
+		const auto* var = FindNode(compiler, 1, [](const C4Compiler::AstNode& n) {
+			const auto* v = dynamic_cast<const C4Compiler::VariableDefinitionNode*>(&n);
 			return v && v->GetType() && v->GetNameToken().GetText() == "g";
 		});
 		TEST_ASSERT(var != nullptr);
 
-		auto t = model.ResolveType(*dynamic_cast<const Scripting::VariableDefinitionNode*>(var)->GetType().Get());
+		auto t = model.ResolveType(*dynamic_cast<const C4Compiler::VariableDefinitionNode*>(var)->GetType().Get());
 		TEST_ASSERT(t.Ok());
-		TEST_ASSERT(t.value->GetKind() == Scripting::TypeKind::InitList);
+		TEST_ASSERT(t.value->GetKind() == C4Compiler::TypeKind::InitList);
 		// The ABI is the 16-byte { T* data, uint64 size } aggregate.
 		TEST_ASSERT_EQ((int)model.SizeOf(t.value).value, (int)(sizeof(void*) * 2));
 
@@ -577,13 +577,13 @@ namespace Testing
 		auto data = model.QueryMember(t.value, "data");
 		TEST_ASSERT(data.Ok());
 		TEST_ASSERT(data.value.IsField);
-		TEST_ASSERT_EQ((int)data.value.field->m_Type->GetKind(), (int)Scripting::TypeKind::Pointer);
+		TEST_ASSERT_EQ((int)data.value.field->m_Type->GetKind(), (int)C4Compiler::TypeKind::Pointer);
 		TEST_ASSERT_EQ((int)data.value.field->m_Offset, 0);
 
 		auto size = model.QueryMember(t.value, "size");
 		TEST_ASSERT(size.Ok());
 		TEST_ASSERT(size.value.IsField);
-		TEST_ASSERT_EQ((int)size.value.field->m_Type->GetKind(), (int)Scripting::TypeKind::UInt64);
+		TEST_ASSERT_EQ((int)size.value.field->m_Type->GetKind(), (int)C4Compiler::TypeKind::UInt64);
 		TEST_ASSERT_EQ((int)size.value.field->m_Offset, (int)sizeof(void*));
 
 		// An unknown name is still a clean miss.
@@ -598,7 +598,7 @@ namespace Testing
 		// PARENT so `v.x` / `v.r` resolve to the parent, and all views share ONE byte range. This used to
 		// be dropped entirely: the parent had only `tag`, size was 4 (not 16), and x/y/z/r/g/b were
 		// unresolvable - a core C4 SIMD feature.
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"struct Vec3 {\n"
 			"\tunion {\n"
@@ -610,8 +610,8 @@ namespace Testing
 
 		auto t = model.QueryType("Vec3");
 		TEST_ASSERT(t.Ok());
-		const Scripting::Type* base = Scripting::TypeHandle::UnwrapToValue(t.value);
-		TEST_ASSERT(dynamic_cast<const Scripting::ObjectType*>(base) != nullptr);
+		const C4Compiler::Type* base = C4Compiler::TypeHandle::UnwrapToValue(t.value);
+		TEST_ASSERT(dynamic_cast<const C4Compiler::ObjectType*>(base) != nullptr);
 
 		// 3 floats (12 bytes, shared by both views) + int32 tag = 16. NOT 4 (the old broken size).
 		TEST_ASSERT_EQ((int)model.SizeOf(base).value, 16);
@@ -645,7 +645,7 @@ namespace Testing
 		// every spelling of one operator unifies to its canonical name ([operator("[]")] == "index").
 		// Before this the catalog used different names (sub/bitand/shl) and had no [] entry, so these
 		// queries returned NotFound even though the method was declared.
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"struct V { int32 v; }\n"
 			"[operator(\"subtract\")] V Sub(const V& o) extends V { return o; }\n"
@@ -655,7 +655,7 @@ namespace Testing
 
 		auto vt = model.QueryType("V");
 		TEST_ASSERT(vt.Ok());
-		const Scripting::Type* v = vt.value;
+		const C4Compiler::Type* v = vt.value;
 
 		// Token as written -> the spec-named method (catalog maps token to canonical name).
 		auto sub = model.QueryOperator("-", v, v);

@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -36,4 +36,4 @@ namespace Scripting
 		if (written == name) return false;
 		return EditDistance(written, name) <= (name.size() < kShortName ? kShortEdits : kLongEdits);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

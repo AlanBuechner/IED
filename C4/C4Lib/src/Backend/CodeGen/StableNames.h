@@ -10,7 +10,7 @@ namespace llvm
 	class Type;
 }
 
-namespace Scripting::StableNames
+namespace C4Compiler::StableNames
 {
 	/// Names for the module's private data that depend on what the data is, never on the order the program created
 	/// it in: an edit then renames nothing it did not change, and the partitions it did not touch keep their code and

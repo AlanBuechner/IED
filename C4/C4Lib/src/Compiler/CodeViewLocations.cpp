@@ -8,7 +8,7 @@
 #include <llvm/IR/Module.h>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

@@ -2,7 +2,7 @@
 #include "Lexer/Lexer.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// What to say about a token no parser accepts: a keyword written where a declaration names something
 	/// (`int32 asm = 1;`) says so; anything else is an unexpected token.

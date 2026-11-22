@@ -1,6 +1,6 @@
 #include "Model/IntegerRanges.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -30,4 +30,4 @@ namespace Scripting
 		if (Bits(integer) >= kWidestInteger && integer->GetKind() != TypeKind::Bool) return true;
 		return value < 0 ? FitsNegative(value, integer) : static_cast<uint64>(value) <= MaxOf(integer);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

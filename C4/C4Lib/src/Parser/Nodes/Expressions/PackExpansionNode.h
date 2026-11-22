@@ -3,7 +3,7 @@
 #include "Lexer/Token.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// `pattern...` (D-19): the pattern once per element of the packs it names, in the arguments of a call, the
 	/// elements of a braced list, or a template argument list - `G(args...)`, `G(Wrap(args)...)`, `Tuple<Ts...>`.
@@ -51,4 +51,4 @@ namespace Scripting
 		Ref<AstNode> m_Last;
 		Core::Vector<Ref<AstNode>> m_Children;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

@@ -6,7 +6,7 @@
 #include "../Declarations/ParameterNode.h"
 #include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// What a lambda captures when the body uses an enclosing local the list does not name.
 	enum class CaptureDefault

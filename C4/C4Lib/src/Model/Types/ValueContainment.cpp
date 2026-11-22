@@ -5,7 +5,7 @@
 #include <functional>
 #include <unordered_set>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -70,4 +70,4 @@ namespace Scripting
 		return QueryResult<void>::Fail(QueryError::CyclicDependency,
 			"'" + type->GetName() + "' holds itself by value (" + steps + "), so it has no size: hold one of them by pointer");
 	}
-} // namespace Scripting
+} // namespace C4Compiler

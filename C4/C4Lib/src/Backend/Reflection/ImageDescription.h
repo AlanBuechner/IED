@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The rows of the reflection wire format (C4Runtime/ReflectABI.h), a type's GC record (GCRuntimeC.h c4_gc_type) and its
 	/// pointer map's words, and a table of pointers.
@@ -67,4 +67,4 @@ namespace Scripting
 		std::vector<ImageTable> m_Tables;
 		ImageRow m_Image; // c4_reflect_image; empty when there is nothing to register
 	};
-} // namespace Scripting
+} // namespace C4Compiler

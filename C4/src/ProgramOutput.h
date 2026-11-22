@@ -31,11 +31,11 @@ public:
 	/// What the earlier stages produced that the output needs.
 	struct Inputs
 	{
-		const Scripting::CompileOptions& options;
-		Scripting::CompilationResult& result;
-		Scripting::CompilerInstance& compiler;
-		const Scripting::InteropPass::Result& interop;
-		const std::unordered_map<std::string, Scripting::MacroTable>& exportedMacros;
+		const C4Compiler::CompileOptions& options;
+		C4Compiler::CompilationResult& result;
+		C4Compiler::CompilerInstance& compiler;
+		const C4Compiler::InteropPass::Result& interop;
+		const std::unordered_map<std::string, C4Compiler::MacroTable>& exportedMacros;
 	};
 
 	explicit ProgramOutput(const Inputs& inputs) : m_In(inputs) {}
@@ -43,11 +43,11 @@ public:
 	/// The program's output from its partitions (D-81; the first holds the program's own code and data, the only one
 	/// unless the build links) and its reflection image (D-82): a module of its own, built only when no object of its
 	/// key is kept (no key: the image is in the first partition).
-	bool Write(const std::vector<llvm::Module*>& partitions, const Scripting::KeyedModule& image = {});
+	bool Write(const std::vector<llvm::Module*>& partitions, const C4Compiler::KeyedModule& image = {});
 
 	/// Whether the build links a program (not `-S`, `-bc` or `-c`, which write the one module): then it is emitted in
 	/// partitions, and each is verified as the output reads it (so lowering leaves it unverified: ProgramBackend::VerifyLater).
-	static bool Links(const Scripting::CompileOptions& options);
+	static bool Links(const C4Compiler::CompileOptions& options);
 
 private:
 	// The .pdb a link writes, and the name it is written under until the program is in place.
@@ -60,21 +60,21 @@ private:
 	bool MakeOutputFolder();
 	std::string IntermediateBase();
 	bool WriteModule(llvm::Module& module, const std::string& base);
-	bool WriteWholeProgram(const std::vector<llvm::Module*>& partitions, const Scripting::KeyedModule& image, const std::string& base);
-	std::unique_ptr<llvm::Module> Merged(const std::vector<llvm::Module*>& partitions, const Scripting::KeyedModule& image,
-		const std::string& base, const Scripting::ObjectSettings& settings);
+	bool WriteWholeProgram(const std::vector<llvm::Module*>& partitions, const C4Compiler::KeyedModule& image, const std::string& base);
+	std::unique_ptr<llvm::Module> Merged(const std::vector<llvm::Module*>& partitions, const C4Compiler::KeyedModule& image,
+		const std::string& base, const C4Compiler::ObjectSettings& settings);
 	bool Verified(const llvm::Module& module);
-	bool WritePartitions(const std::vector<llvm::Module*>& partitions, const Scripting::KeyedModule& image, const std::string& base);
+	bool WritePartitions(const std::vector<llvm::Module*>& partitions, const C4Compiler::KeyedModule& image, const std::string& base);
 	bool WriteIR(const llvm::Module& module, const std::string& path);
 	bool WriteBitcode(const llvm::Module& module, const std::string& path);
-	bool Optimize(llvm::Module& module, const Scripting::ObjectSettings& settings);
-	unsigned PartitionsFor(const llvm::Module& module, const Scripting::ObjectSettings& settings) const;
-	static std::string CacheSalt(const Scripting::ObjectSettings& settings);
-	bool WriteCompiledObject(llvm::Module& module, const Scripting::ObjectSettings& settings, const std::string& objPath);
-	std::vector<std::string> Assemble(llvm::Module& module, const Scripting::ObjectSettings& settings, const Scripting::ObjectCache& cache);
-	void ReportPartitions(const Scripting::CachedObjects& objects, unsigned partitions, unsigned threads) const;
-	void ReportObjects(uint64_t instructions, unsigned objects, size_t reused, unsigned threads, const Scripting::ObjectCache& cache) const;
-	void Report(const std::vector<Scripting::ObjectDiagnostic>& diagnostics);
+	bool Optimize(llvm::Module& module, const C4Compiler::ObjectSettings& settings);
+	unsigned PartitionsFor(const llvm::Module& module, const C4Compiler::ObjectSettings& settings) const;
+	static std::string CacheSalt(const C4Compiler::ObjectSettings& settings);
+	bool WriteCompiledObject(llvm::Module& module, const C4Compiler::ObjectSettings& settings, const std::string& objPath);
+	std::vector<std::string> Assemble(llvm::Module& module, const C4Compiler::ObjectSettings& settings, const C4Compiler::ObjectCache& cache);
+	void ReportPartitions(const C4Compiler::CachedObjects& objects, unsigned partitions, unsigned threads) const;
+	void ReportObjects(uint64_t instructions, unsigned objects, size_t reused, unsigned threads, const C4Compiler::ObjectCache& cache) const;
+	void Report(const std::vector<C4Compiler::ObjectDiagnostic>& diagnostics);
 	bool Link(const std::vector<std::string>& programObjects, const std::string& base);
 	LinkStamp StampFor(const std::string& base, const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& libraries,
 		const DebugInfoPaths& debugInfo) const;
@@ -82,12 +82,12 @@ private:
 	bool PlaceDebugInfo(const DebugInfoPaths& paths);
 	bool PrepareScriptHost(const std::vector<llvm::Module*>& partitions);
 	bool CollectInlineBodies(const std::vector<llvm::Module*>& partitions, const std::vector<std::string>& bitcode, const std::string& base,
-		const Scripting::ObjectSettings& settings);
-	Scripting::KeyedModule HostTable(const llvm::Module& program) const;
+		const C4Compiler::ObjectSettings& settings);
+	C4Compiler::KeyedModule HostTable(const llvm::Module& program) const;
 	bool FinishInterface(llvm::Module& module);
-	bool FinishScriptHost(const llvm::Module& program, const Scripting::ObjectSettings& settings, const std::string& base,
+	bool FinishScriptHost(const llvm::Module& program, const C4Compiler::ObjectSettings& settings, const std::string& base,
 		std::vector<std::string>& objects);
-	bool WriteBuildId(llvm::Module& buildId, const Scripting::ObjectSettings& settings, const Scripting::ObjectCache& kept,
+	bool WriteBuildId(llvm::Module& buildId, const C4Compiler::ObjectSettings& settings, const C4Compiler::ObjectCache& kept,
 		const std::string& path);
 	bool WriteScriptInterface();
 	bool ShipScriptHost(const std::filesystem::path& scriptHost);
@@ -97,9 +97,9 @@ private:
 	static constexpr unsigned kInlineBodyChunksPerPartition = 4;
 
 	Inputs m_In;
-	std::optional<Scripting::HostBuild> m_HostBuild;       // a script host's, until its inline bodies are in
-	std::vector<Scripting::HostEntry> m_HostEntries;       // a program in partitions: what its table lists
+	std::optional<C4Compiler::HostBuild> m_HostBuild;       // a script host's, until its inline bodies are in
+	std::vector<C4Compiler::HostEntry> m_HostEntries;       // a program in partitions: what its table lists
 	std::vector<std::string> m_AlwaysListed;               // and the names every table lists beside the runtime's
-	std::optional<Scripting::HostInterface> m_Interface;   // what goes beside the program
+	std::optional<C4Compiler::HostInterface> m_Interface;   // what goes beside the program
 	std::string m_InterfaceBytes;                          // its bytes, made once with its build id
 };

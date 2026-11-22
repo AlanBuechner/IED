@@ -29,7 +29,7 @@
 #include <iterator>
 #include <optional>
 
-namespace Scripting
+namespace C4Compiler
 {
 	QueryResult<Value> ExprLowerer::ResolveBinary(const BinaryExpressionNode* n)
 	{
@@ -443,4 +443,4 @@ namespace Scripting
 		const ConstantValue one = t->IsFloatingPoint() ? ConstantValue::Float(1.0) : ConstantValue::Int(1);
 		return m_Ctx.out->NewNode<IntrinsicOpNode>(t, up ? IntrinsicOp::Add : IntrinsicOp::Sub, value, m_Ctx.out->NewNode<ConstantNode>(t, one));
 	}
-} // namespace Scripting
+} // namespace C4Compiler

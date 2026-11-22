@@ -4,7 +4,7 @@
 #include "Parser/PrattParser.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 
 	Ref<TemplateParameterNode> TemplateParameterNode::TryParse(ParserState& state)
@@ -233,4 +233,4 @@ namespace Scripting
 		return result;
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

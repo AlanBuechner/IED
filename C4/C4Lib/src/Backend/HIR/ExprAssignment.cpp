@@ -17,7 +17,7 @@
 #include "Model/TypeHandle.h"
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -322,4 +322,4 @@ namespace Scripting
 		seq->steps.push_back(loadTmp);
 		return Value::R(seq, tv->type);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

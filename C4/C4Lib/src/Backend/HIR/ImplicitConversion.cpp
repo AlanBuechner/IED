@@ -13,7 +13,7 @@
 #include <cmath>
 #include <limits>
 
-namespace Scripting::ImplicitConversion
+namespace C4Compiler::ImplicitConversion
 {
 	bool IsZeroConstant(const HIRNode* value)
 	{
@@ -271,4 +271,4 @@ namespace Scripting::ImplicitConversion
 		if (ctx.queries().FindCastMethod(t, ctx.queries().TypeStore()->Builtin(TypeKind::Bool))) why += "; convert it with (bool)x";
 		return why;
 	}
-} // namespace Scripting::ImplicitConversion
+} // namespace C4Compiler::ImplicitConversion

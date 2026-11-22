@@ -1,7 +1,7 @@
 #include "Backend/HIR/AsmRegisters.h"
 #include <unordered_set>
 
-namespace Scripting::AsmRegisters
+namespace C4Compiler::AsmRegisters
 {
 	namespace
 	{

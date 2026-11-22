@@ -1,7 +1,7 @@
 #pragma once
 #include "Backend/HIR/LoweringContext.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The implicit conversions (docs/language/04 4.9, D-32) for every place a value becomes a typed location:
 	/// an initialization, an argument, an assignment, a return.
@@ -29,4 +29,4 @@ namespace Scripting
 		/// beside a pointer in `==` / `!=`. A bool's `false` is not one.
 		bool IsZeroConstant(const HIRNode* value);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

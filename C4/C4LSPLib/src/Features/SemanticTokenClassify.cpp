@@ -22,34 +22,34 @@
 
 namespace C4LSP::Features::TokenWalk
 {
-	uint32 ObjectKindToToken(Scripting::ObjectKind kind)
+	uint32 ObjectKindToToken(C4Compiler::ObjectKind kind)
 	{
 		switch (kind)
 		{
-		case Scripting::ObjectKind::Struct:    return K(SemanticTokenKind::Struct);
-		case Scripting::ObjectKind::Interface: return K(SemanticTokenKind::Interface);
+		case C4Compiler::ObjectKind::Struct:    return K(SemanticTokenKind::Struct);
+		case C4Compiler::ObjectKind::Interface: return K(SemanticTokenKind::Interface);
 		default:                               return K(SemanticTokenKind::Class);
 		}
 	}
 
 	/// The object type a resolved symbol denotes (null when it is not an object type).
-	const Scripting::ObjectType* AsObject(const Scripting::SymbolInfo* info)
+	const C4Compiler::ObjectType* AsObject(const C4Compiler::SymbolInfo* info)
 	{
-		if (!info || info->kind != Scripting::SymbolKind::Type || !info->type)
+		if (!info || info->kind != C4Compiler::SymbolKind::Type || !info->type)
 			return nullptr;
-		return dynamic_cast<const Scripting::ObjectType*>(Scripting::TypeHandle::UnwrapToValue(info->type));
+		return dynamic_cast<const C4Compiler::ObjectType*>(C4Compiler::TypeHandle::UnwrapToValue(info->type));
 	}
 
-	uint32 TypeDeclKind(const Scripting::AstNode* decl)
+	uint32 TypeDeclKind(const C4Compiler::AstNode* decl)
 	{
-		if (decl && decl->Type() == Scripting::NodeType::ObjectDefinition)
-			return ObjectKindToToken(static_cast<const Scripting::ObjectDefinitionNode*>(decl)->Kind());
-		if (decl && decl->Type() == Scripting::NodeType::EnumDefinition)
+		if (decl && decl->Type() == C4Compiler::NodeType::ObjectDefinition)
+			return ObjectKindToToken(static_cast<const C4Compiler::ObjectDefinitionNode*>(decl)->Kind());
+		if (decl && decl->Type() == C4Compiler::NodeType::EnumDefinition)
 			return K(SemanticTokenKind::Enum);
 		return K(SemanticTokenKind::Type);
 	}
 
-	bool HasMethod(const Scripting::ObjectType* object, const std::string& name)
+	bool HasMethod(const C4Compiler::ObjectType* object, const std::string& name)
 	{
 		if (!object)
 			return false;
@@ -62,7 +62,7 @@ namespace C4LSP::Features::TokenWalk
 		return false;
 	}
 
-	bool HasField(const Scripting::ObjectType* object, const std::string& name)
+	bool HasField(const C4Compiler::ObjectType* object, const std::string& name)
 	{
 		if (!object)
 			return false;
@@ -73,11 +73,11 @@ namespace C4LSP::Features::TokenWalk
 		return false;
 	}
 
-	bool OwnerMemberKind(const Scripting::SymbolInfo* owner, const std::string& name, uint32& kind)
+	bool OwnerMemberKind(const C4Compiler::SymbolInfo* owner, const std::string& name, uint32& kind)
 	{
 		if (!owner)
 			return false;
-		if (const Scripting::ObjectType* object = AsObject(owner))
+		if (const C4Compiler::ObjectType* object = AsObject(owner))
 		{
 			if (HasMethod(object, name))
 			{
@@ -87,14 +87,14 @@ namespace C4LSP::Features::TokenWalk
 			kind = K(SemanticTokenKind::Field);
 			return HasField(object, name);
 		}
-		const Scripting::Type* value = Scripting::TypeHandle::UnwrapToValue(owner->type);
-		if (const auto* enumType = dynamic_cast<const Scripting::EnumType*>(value))
+		const C4Compiler::Type* value = C4Compiler::TypeHandle::UnwrapToValue(owner->type);
+		if (const auto* enumType = dynamic_cast<const C4Compiler::EnumType*>(value))
 		{
 			kind = K(SemanticTokenKind::Variable); // a scoped constant
 			for (const auto& m : enumType->GetMembers())
 				if (m.mName == name) return true;
 		}
-		if (const auto* unionType = dynamic_cast<const Scripting::UnionType*>(value))
+		if (const auto* unionType = dynamic_cast<const C4Compiler::UnionType*>(value))
 		{
 			kind = K(SemanticTokenKind::Field);
 			for (const auto& f : unionType->GetFields())
@@ -104,59 +104,59 @@ namespace C4LSP::Features::TokenWalk
 	}
 
 	/// A bare name inside a member function that names a method of its object: an implicit-this call.
-	bool IsImplicitThisMethod(const Ctx& ctx, const Scripting::AstNode& refNode, const Core::Vector<const Scripting::AstNode*>& path)
+	bool IsImplicitThisMethod(const Ctx& ctx, const C4Compiler::AstNode& refNode, const Core::Vector<const C4Compiler::AstNode*>& path)
 	{
-		if (!ctx.resolver || refNode.Type() != Scripting::NodeType::IdentifierExpression)
+		if (!ctx.resolver || refNode.Type() != C4Compiler::NodeType::IdentifierExpression)
 			return false;
-		const auto& id = static_cast<const Scripting::IdentifierExpressionNode&>(refNode);
+		const auto& id = static_cast<const C4Compiler::IdentifierExpressionNode&>(refNode);
 		return HasMethod(ctx.resolver->EnclosingObject(path), std::string(id.GetNameToken().GetText()));
 	}
 
 	/// Classify a reference based on the declaration node it resolved to. A variable that is an
 	/// object member (tracked in `fields`) counts as a field whether reached via `p.x` or a bare
 	/// implicit-this identifier.
-	uint32 DeclKind(const Scripting::AstNode* decl, bool isMemberAccess, const Ctx& ctx)
+	uint32 DeclKind(const C4Compiler::AstNode* decl, bool isMemberAccess, const Ctx& ctx)
 	{
 		if (!decl)
 			return isMemberAccess ? K(SemanticTokenKind::Field) : K(SemanticTokenKind::Variable);
 		switch (decl->Type())
 		{
-		case Scripting::NodeType::FunctionDefinition:
+		case C4Compiler::NodeType::FunctionDefinition:
 			return isMemberAccess ? K(SemanticTokenKind::Method) : K(SemanticTokenKind::Function);
-		case Scripting::NodeType::Parameter:
+		case C4Compiler::NodeType::Parameter:
 			return K(SemanticTokenKind::Variable); // house style: parameters are not a distinct color from variables
-		case Scripting::NodeType::VariableDefinition:
+		case C4Compiler::NodeType::VariableDefinition:
 			if (isMemberAccess || ctx.fields.count(decl))
 				return K(SemanticTokenKind::Field);
 			return K(SemanticTokenKind::Variable);
-		case Scripting::NodeType::ObjectDefinition:
-		case Scripting::NodeType::EnumDefinition:
-		case Scripting::NodeType::UnionDefinition:
-		case Scripting::NodeType::AliasDefinition:
+		case C4Compiler::NodeType::ObjectDefinition:
+		case C4Compiler::NodeType::EnumDefinition:
+		case C4Compiler::NodeType::UnionDefinition:
+		case C4Compiler::NodeType::AliasDefinition:
 			return TypeDeclKind(decl);
-		case Scripting::NodeType::Namespace:
+		case C4Compiler::NodeType::Namespace:
 			return K(SemanticTokenKind::Namespace);
 		default:
 			return isMemberAccess ? K(SemanticTokenKind::Field) : K(SemanticTokenKind::Variable);
 		}
 	}
 
-	bool IsFunctionType(const Scripting::Type* type)
+	bool IsFunctionType(const C4Compiler::Type* type)
 	{
 		if (!type)
 			return false;
 		auto kind = type->GetKind();
-		return kind == Scripting::TypeKind::Function || kind == Scripting::TypeKind::FunPtr;
+		return kind == C4Compiler::TypeKind::Function || kind == C4Compiler::TypeKind::FunPtr;
 	}
 
 	/// Classify a reference (identifier / member access / static access) using the semantic
 	/// result. `isMemberAccess` marks tokens reached through '.' or '::' on an object/type.
-	uint32 ClassifyReference(const Ctx& ctx, const Scripting::AstNode& refNode, const Core::Vector<const Scripting::AstNode*>& path, bool isMemberAccess)
+	uint32 ClassifyReference(const Ctx& ctx, const C4Compiler::AstNode& refNode, const Core::Vector<const C4Compiler::AstNode*>& path, bool isMemberAccess)
 	{
 		if (ctx.resolver)
 		{
 			const Server::NodeResolution res = ctx.resolver->ResolveReference(refNode, path);
-			const bool function = res.isFunction || (res.declaration && res.declaration->Type() == Scripting::NodeType::FunctionDefinition);
+			const bool function = res.isFunction || (res.declaration && res.declaration->Type() == C4Compiler::NodeType::FunctionDefinition);
 			if (!isMemberAccess && function && IsImplicitThisMethod(ctx, refNode, path))
 				return K(SemanticTokenKind::Method);
 			if (res.declaration)
@@ -173,7 +173,7 @@ namespace C4LSP::Features::TokenWalk
 		return isMemberAccess ? K(SemanticTokenKind::Field) : K(SemanticTokenKind::Variable);
 	}
 
-	void RecordOffset(Ctx& ctx, const Scripting::SourceLocation& loc, TokInfo info)
+	void RecordOffset(Ctx& ctx, const C4Compiler::SourceLocation& loc, TokInfo info)
 	{
 		if (loc.sourceId != ctx.sourceId || loc.line == 0 || loc.column == 0)
 			return; // only this file's own tokens map to re-lexed editor positions
@@ -188,7 +188,7 @@ namespace C4LSP::Features::TokenWalk
 		ctx.byOffset[{ loc.line, loc.column }] = info;
 	}
 
-	void RecordName(Ctx& ctx, const Scripting::SourceLocation& loc, const std::string& name, TokInfo info)
+	void RecordName(Ctx& ctx, const C4Compiler::SourceLocation& loc, const std::string& name, TokInfo info)
 	{
 		if (loc.sourceId != ctx.sourceId || name.empty())
 			return;
@@ -239,7 +239,7 @@ namespace C4LSP::Features::TokenWalk
 		// Resolve the prefix against the model ONCE: a resolved TYPE beats namespace-prefix
 		// matching for non-final segments, because C4 has no nested namespaces - `Win::Test` inside
 		// `namespace Win { class Test ... }` is the type path to Test, not a namespace named "Win::Test".
-		const Scripting::SymbolInfo* entry = nullptr;
+		const C4Compiler::SymbolInfo* entry = nullptr;
 		if (ctx.resolver)
 			entry = ctx.resolver->Lookup(prefix, 0);
 
@@ -260,7 +260,7 @@ namespace C4LSP::Features::TokenWalk
 					return tnIt->second;
 			}
 
-			if (entry && entry->kind == Scripting::SymbolKind::Type)
+			if (entry && entry->kind == C4Compiler::SymbolKind::Type)
 				return TypeDeclKind(entry->declNode); // a resolved owner type: `SomeClass::` of a member chain
 
 			// A namespace the chain continues through. Checked AFTER resolved-type matching (above) so a
@@ -272,7 +272,7 @@ namespace C4LSP::Features::TokenWalk
 
 		// The FINAL segment is a type name: its own declaration kind; an alias reached through a namespace is
 		// generic gold.
-		if (entry && entry->kind == Scripting::SymbolKind::Type)
+		if (entry && entry->kind == C4Compiler::SymbolKind::Type)
 		{
 			const uint32 kind = TypeDeclKind(entry->declNode);
 			if (kind != K(SemanticTokenKind::Type) || prefix.find("::") != std::string::npos || ctx.namespacePaths.count(prefix))
@@ -294,9 +294,9 @@ namespace C4LSP::Features::TokenWalk
 			{
 				switch (entry->kind)
 				{
-				case Scripting::SymbolKind::Function:
+				case C4Compiler::SymbolKind::Function:
 					return K(SemanticTokenKind::Method); // static/extension or free member function
-				case Scripting::SymbolKind::Variable:
+				case C4Compiler::SymbolKind::Variable:
 					return K(SemanticTokenKind::Field);  // a (static) member variable
 				default:
 					break;
@@ -305,7 +305,7 @@ namespace C4LSP::Features::TokenWalk
 
 			// (b) Direct member route: owner type's fields/methods incl. inheritance + extensions,
 			// and scoped-enum/union members the symbol table doesn't register as qualified names.
-			const Scripting::SymbolInfo* owner = nullptr;
+			const C4Compiler::SymbolInfo* owner = nullptr;
 			if (!ownerPrefix.empty() && ctx.resolver)
 				owner = ctx.resolver->Lookup(ownerPrefix, 0);
 			uint32 memberKind = 0;
@@ -323,10 +323,10 @@ namespace C4LSP::Features::TokenWalk
 	/// last of a type that resolves to a primitive; it is builtin only when it names the primitive itself (`int32`),
 	/// not an alias of one.
 	static TokInfo ClassifyTypeSegment(const Ctx& ctx, const std::string& prefix, const std::string& name, bool endsPrimitive,
-		const Core::Vector<const Scripting::AstNode*>& path)
+		const Core::Vector<const C4Compiler::AstNode*>& path)
 	{
-		const Scripting::SymbolInfo* entry = ctx.resolver ? ctx.resolver->Lookup(prefix, 0, &path) : nullptr;
-		const bool declaresType = entry && entry->kind == Scripting::SymbolKind::Type;
+		const C4Compiler::SymbolInfo* entry = ctx.resolver ? ctx.resolver->Lookup(prefix, 0, &path) : nullptr;
+		const bool declaresType = entry && entry->kind == C4Compiler::SymbolKind::Type;
 		if (endsPrimitive && !declaresType)
 			return { K(SemanticTokenKind::Type), SemanticTokenModifiers::Builtin };
 		if (ctx.templateParamNames.count(name))
@@ -345,7 +345,7 @@ namespace C4LSP::Features::TokenWalk
 	/// resolved type comes from the model's own type verb (the compiler is the source of truth); a single-segment
 	/// name that resolves to NOTHING is not a primitive. First-wins in RecordOffset keeps this from clobbering a
 	/// classification another node already recorded for the same offset.
-	void ClassifyTypeSegments(const Scripting::QualTypeNode& qt, Ctx& ctx, const Core::Vector<const Scripting::AstNode*>& path)
+	void ClassifyTypeSegments(const C4Compiler::QualTypeNode& qt, Ctx& ctx, const Core::Vector<const C4Compiler::AstNode*>& path)
 	{
 		if (!qt.BaseName())
 			return;
@@ -353,7 +353,7 @@ namespace C4LSP::Features::TokenWalk
 		bool isPrimitive = false; // resolved through the model's own type verb; `char` of `const char*` too
 		if (ctx.resolver)
 		{
-			const Scripting::Type* named = NamedType(ctx.resolver->ResolveQualType(qt, path));
+			const C4Compiler::Type* named = NamedType(ctx.resolver->ResolveQualType(qt, path));
 			isPrimitive = named && named->IsPrimitive();
 		}
 
@@ -362,7 +362,7 @@ namespace C4LSP::Features::TokenWalk
 		for (uint32 i = 0; i < segments.Count(); ++i)
 		{
 			const auto& seg = segments[i];
-			if (seg.nameToken.GetType() != Scripting::TokenType::Identifier)
+			if (seg.nameToken.GetType() != C4Compiler::TokenType::Identifier)
 				continue;
 			const std::string name(seg.nameToken.GetText());
 			prefix += (prefix.empty() ? "" : "::") + name;

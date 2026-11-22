@@ -8,7 +8,7 @@
 #include "Parser/Nodes/Declarations/UnionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -142,4 +142,4 @@ namespace Scripting
 		u.raw->SetPendingFields(false);
 		return QueryResult<void>::Success();
 	}
-} // namespace Scripting
+} // namespace C4Compiler

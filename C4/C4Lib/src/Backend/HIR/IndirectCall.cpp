@@ -4,7 +4,7 @@
 #include "Model/Types/SignatureType.h"
 #include "Model/Types/QualifiedName.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -45,4 +45,4 @@ namespace Scripting
 		}
 		return CallResult(ctx, call, fp->GetReturnType());
 	}
-} // namespace Scripting
+} // namespace C4Compiler

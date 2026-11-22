@@ -1,7 +1,7 @@
 #pragma once
 #include "Model/Types/Type.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A type alias (C++ `using`): a pure synonym for another type, transparent for value identity.
 	class AliasType : public Type
@@ -22,4 +22,4 @@ namespace Scripting
 		Core::String m_FullName;
 		const Type* m_AliasedType = nullptr;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

@@ -4,7 +4,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The goto rules (docs/language/09-statements-and-control-flow.md section 5), C++'s: a goto may target any
 	/// label of its function, but not jump past a declaration or a defer, of the block both are in or of a block it
@@ -32,4 +32,4 @@ namespace Scripting
 		std::unordered_map<uint32, Point> m_Labels;
 		std::vector<Point> m_Gotos;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

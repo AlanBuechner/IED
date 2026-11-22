@@ -1,7 +1,7 @@
 #pragma once
 #include "Model/ProgramModel.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	// =====================================================================
 	// SYMBOL QUERIES (doc 04/08) - the subsystem behind every NAME query in the model. One verb per
@@ -77,4 +77,4 @@ namespace Scripting
 		static void CollectInheritedStatics(const ProgramModel& model, const Core::String& name, uint32 unitId, const Scope* scope,
 			Core::Vector<OverloadCandidate>& candidates);
 	};
-} // namespace Scripting
+} // namespace C4Compiler

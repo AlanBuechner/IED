@@ -1,7 +1,7 @@
 #pragma once
 #include "Model/Types/Type.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The type of a braced argument (`Take({ 5, 6 })`) while a call is resolved: it has no type of its own, only
 	/// a number of entries, which decides the parameters it can bind (D-57): an `__init_list<T>`, an object those
@@ -18,4 +18,4 @@ namespace Scripting
 	private:
 		uint32 m_Entries = 0;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

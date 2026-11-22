@@ -3,7 +3,7 @@
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/TemplateDefinitionNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	Core::String MemberTemplates::NameOf(const FunctionDefinitionNode& fn)
 	{
@@ -80,4 +80,4 @@ namespace Scripting
 		});
 		return out;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

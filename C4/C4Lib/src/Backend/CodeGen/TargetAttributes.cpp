@@ -4,7 +4,7 @@
 #include "Model/TargetAnnotation.h"
 #include <llvm/IR/Module.h>
 
-namespace Scripting
+namespace C4Compiler
 {
 	void ApplyTarget(llvm::Module& module, const CpuTarget& target)
 	{
@@ -31,4 +31,4 @@ namespace Scripting
 			if (target) function->addFnAttr("target-features", target->LlvmFeatures());
 		}
 	}
-} // namespace Scripting
+} // namespace C4Compiler

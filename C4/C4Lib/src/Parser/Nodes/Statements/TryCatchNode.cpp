@@ -4,7 +4,7 @@
 #include "../Declarations/QualTypeNode.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 
 Core::String CatchClauseNode::ToString() const
@@ -194,4 +194,4 @@ void TryCatchNode::ParseBody(ParserState& state)
 		m_Children.Push(m_FinallyBody);
 }
 
-} // namespace Scripting
+} // namespace C4Compiler

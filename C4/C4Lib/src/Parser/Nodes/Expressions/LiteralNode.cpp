@@ -1,6 +1,6 @@
 #include "LiteralNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 
 	Ref<LiteralNode> LiteralNode::TryParse(ParserState& state)
@@ -69,4 +69,4 @@ namespace Scripting
 		return m_ValueToken.GetText();
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

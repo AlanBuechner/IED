@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 	struct FunctionRecord;
@@ -70,4 +70,4 @@ namespace Scripting
 		LoweringStats m_Stats;
 		std::vector<std::string> m_Violations;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

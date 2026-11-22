@@ -1,7 +1,7 @@
 #pragma once
 #include "Target/TargetAbi.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// x86_64-pc-windows-msvc: PE/COFF, the Windows x64 convention, MSVC's object model and funclet exceptions,
 	/// CodeView in a .pdb, lld-link against the MSVC runtime.
@@ -19,4 +19,4 @@ namespace Scripting
 	/// printing why.
 	bool WriteLinkInputs(const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& libraries,
 		std::vector<std::string> (*library)(const std::string& argument), const std::string& path);
-} // namespace Scripting
+} // namespace C4Compiler

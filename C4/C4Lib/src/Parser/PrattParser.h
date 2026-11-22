@@ -3,7 +3,7 @@
 #include "Parser/ParserState.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Binding powers of the expression grammar (D-27): C++'s levels, plus `**` above the prefix operators, whose
 	/// operand binds at `**`'s power (Python's rule: `-x ** 2` is `-(x ** 2)`, `2 ** -1` works).

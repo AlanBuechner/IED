@@ -4,7 +4,7 @@
 #include "Model/Types.h"
 #include "Model/Types/UnionLayout.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -123,4 +123,4 @@ namespace Scripting
 		if (!field->field->m_InUnionRegion || owner->GetKind() != TypeKind::Object) return AliasClass::None;
 		return OfMembers(UnionLayout::RegionMembers(static_cast<const ObjectType*>(owner)->GetFields(), field->field->m_UnionRegionId));
 	}
-} // namespace Scripting
+} // namespace C4Compiler

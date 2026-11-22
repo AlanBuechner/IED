@@ -2,7 +2,7 @@
 #include "Model/Types/AliasType.h"
 #include "Model/Types/ArrayType.h"
 
-namespace Scripting::NativeMemory
+namespace C4Compiler::NativeMemory
 {
 	namespace
 	{
@@ -45,4 +45,4 @@ namespace Scripting::NativeMemory
 	}
 
 	bool Counted(const ObjectType::FieldInfo& field) { return !field.m_IsStatic && !field.m_InUnionRegion && Holds(field.m_Type); }
-} // namespace Scripting::NativeMemory
+} // namespace C4Compiler::NativeMemory

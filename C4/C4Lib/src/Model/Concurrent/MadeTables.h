@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// An answer table lowering's requests fill, keyed by what the answer is made from (a template and its arguments):
 	/// every lowering finds an answer without a lock once the request that made it has ended, and the thread making it
@@ -117,4 +117,4 @@ namespace Scripting
 		GrowOnlyMap<K, std::unique_ptr<GrowOnlyList<const T*>>, Hash> m_Shown;
 		std::vector<std::pair<K, const T*>> m_Pending; // the making thread's alone
 	};
-} // namespace Scripting
+} // namespace C4Compiler

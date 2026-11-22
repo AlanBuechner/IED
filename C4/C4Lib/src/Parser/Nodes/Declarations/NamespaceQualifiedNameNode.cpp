@@ -3,7 +3,7 @@
 #include "QualTypeNode.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	// --- TemplateArgumentListNode ---
 
@@ -344,4 +344,4 @@ Ref<TemplateArgumentListNode> TemplateArgumentListNode::FromArguments(const Toke
 		return result;
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

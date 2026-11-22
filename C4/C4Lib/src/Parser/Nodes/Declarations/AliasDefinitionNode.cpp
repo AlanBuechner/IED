@@ -4,7 +4,7 @@
 #include "TemplateDefinitionNode.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	Core::String AliasDefinitionNode::ToString() const
 	{
@@ -190,4 +190,4 @@ namespace Scripting
 			m_Children.Push(m_AliasedType);
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

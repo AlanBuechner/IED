@@ -5,7 +5,7 @@
 #include "Model/ProgramModel.h"
 #include "Model/Types/QualifiedName.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	void PartitionSet::SplitInto(unsigned count)
 	{
@@ -104,4 +104,4 @@ namespace Scripting
 		for (const ObjectType* type : model.ObjectTypes()) type->GetSize();
 		for (const UnionType* type : model.UnionTypes()) type->GetSize();
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -17,7 +17,7 @@
 #include "Parser/Nodes/Expressions/TypeCheckNode.h"
 
 // The casts that need more than a conversion: to a reference, and the checked ones (`is`, `as`, dynamic_cast).
-namespace Scripting
+namespace C4Compiler
 {
 	// `(T&)x`, `static_cast<T&>(x)`: the location `x` names, seen as a `T` - a related object's sub-object, or the
 	// same bytes for reinterpret_cast. The result is a location, as in C++; the cast rules apply to the pointers.

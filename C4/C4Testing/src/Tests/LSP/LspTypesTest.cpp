@@ -6,7 +6,7 @@ namespace Testing
 {
 	void LspTypesTest::TestPositionConvertsOneBasedToZeroBased()
 	{
-		Scripting::SourceLocation loc;
+		C4Compiler::SourceLocation loc;
 		loc.line = 5;     // 1-based
 		loc.column = 12;  // 1-based
 		loc.byteOffset = 78;
@@ -19,10 +19,10 @@ namespace Testing
 
 	void LspTypesTest::TestRangeFromSourceRange()
 	{
-		Scripting::SourceLocation start;
+		C4Compiler::SourceLocation start;
 		start.line = 1;
 		start.column = 1;
-		Scripting::SourceLocation end;
+		C4Compiler::SourceLocation end;
 		end.line = 3;
 		end.column = 9;
 
@@ -57,10 +57,10 @@ namespace Testing
 
 	void LspTypesTest::TestLocationMakeUsesConvertedRange()
 	{
-		Scripting::SourceLocation start;
+		C4Compiler::SourceLocation start;
 		start.line = 2;
 		start.column = 4;
-		Scripting::SourceLocation end;
+		C4Compiler::SourceLocation end;
 		end.line = 2;
 		end.column = 7;
 

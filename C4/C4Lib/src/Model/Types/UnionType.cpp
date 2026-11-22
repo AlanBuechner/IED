@@ -1,7 +1,7 @@
 #include "Model/Types/UnionType.h"
 #include "Model/Types/UnionLayout.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	UnionType::UnionType(const Core::String& name)
 		: Type(TypeKind::Union), m_FullName(name)
@@ -32,4 +32,4 @@ namespace Scripting
 		}
 		return -1;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

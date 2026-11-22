@@ -1,7 +1,7 @@
 #include "AssignmentExpressionNode.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	std::span<const Ref<AstNode>> AssignmentExpressionNode::Children() const
 	{

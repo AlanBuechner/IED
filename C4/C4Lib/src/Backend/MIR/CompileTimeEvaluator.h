@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 
@@ -49,4 +49,4 @@ namespace Scripting
 		std::unordered_map<const FunctionRecord*, std::unique_ptr<HIRFunction>> m_Bodies;
 		std::unordered_map<std::thread::id, std::vector<const FunctionRecord*>> m_Lowering;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

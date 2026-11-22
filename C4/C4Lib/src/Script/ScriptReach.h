@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The projects a script's project depends on (docs/runtime/04 section 4.5): those its allow-list names when every
 	/// entry names one - of the host, or a layer below it - as a module depends on what its manifest names; none when the
@@ -24,4 +24,4 @@ namespace Scripting
 	/// declaration uses resolve only within its project's reach (docs/language/15 rule 4), so the files left out change
 	/// nothing the script's code means.
 	std::vector<uint32> ReachedUnits(const HostInterface& host, const std::vector<const ScriptChain*>& layers, const std::vector<std::string>& depends);
-} // namespace Scripting
+} // namespace C4Compiler

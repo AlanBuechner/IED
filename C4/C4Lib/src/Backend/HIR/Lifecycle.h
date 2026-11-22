@@ -3,7 +3,7 @@
 #include "Backend/HIR/LifecycleFacts.h"
 #include <functional>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// How objects come into existence, are copied and go away (docs/language/06, D-03, D-05..D-07), as
 	/// HIR. Construction runs the base, then the fields, then the chosen create; destruction runs the
@@ -149,4 +149,4 @@ namespace Scripting
 
 		LoweringContext& m_Ctx;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

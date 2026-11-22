@@ -8,7 +8,7 @@
 #include "Model/OperatorAnnotations.h" // [group("name")] collection for reflection (plan 14)
 #include <functional>
 
-namespace Scripting
+namespace C4Compiler
 {
 	void ModelBuilder::RegisterUnion(Context& ctx, const UnionDefinitionNode& un)
 	{
@@ -107,4 +107,4 @@ namespace Scripting
 	}
 
 	// =====================================================================
-} // namespace Scripting
+} // namespace C4Compiler

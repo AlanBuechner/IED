@@ -9,7 +9,7 @@
 #include <array>
 #include "Parser/Nodes/Expressions/TypeOfExpressionNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	// Compile-time queries (docs/language/10 4): sizeof, alignof, offsetof (int64 constants), holds_native_bytes and
 	// holds_pointers (bools; a program function of the name wins), gc_type_of (the address of the type's GC record),

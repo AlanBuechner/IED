@@ -11,64 +11,64 @@ namespace Testing
 {
 	void ObjectDefinitionTest::TestSimpleClass()
 	{
-		auto stream = Scripting::Source::FromMemory("class MyClass { }");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("class MyClass { }");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ObjectDefinitionNode::TryParse(state);
+		auto node = C4Compiler::ObjectDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
-		TEST_ASSERT(node->Kind() == Scripting::ObjectKind::Class);
+		TEST_ASSERT(node->Kind() == C4Compiler::ObjectKind::Class);
 		TEST_PASSED();
 	}
 
 	void ObjectDefinitionTest::TestStruct()
 	{
-		auto stream = Scripting::Source::FromMemory("struct MyStruct { }");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("struct MyStruct { }");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ObjectDefinitionNode::TryParse(state);
+		auto node = C4Compiler::ObjectDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
-		TEST_ASSERT(node->Kind() == Scripting::ObjectKind::Struct);
+		TEST_ASSERT(node->Kind() == C4Compiler::ObjectKind::Struct);
 		TEST_PASSED();
 	}
 
 	void ObjectDefinitionTest::TestInterface()
 	{
-		auto stream = Scripting::Source::FromMemory("interface IMyInterface { }");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("interface IMyInterface { }");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ObjectDefinitionNode::TryParse(state);
+		auto node = C4Compiler::ObjectDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
-		TEST_ASSERT(node->Kind() == Scripting::ObjectKind::Interface);
+		TEST_ASSERT(node->Kind() == C4Compiler::ObjectKind::Interface);
 		TEST_PASSED();
 	}
 
 	void ObjectDefinitionTest::TestWithAccessModifier()
 	{
-		auto stream = Scripting::Source::FromMemory("public class MyClass { }");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("public class MyClass { }");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ObjectDefinitionNode::TryParse(state);
+		auto node = C4Compiler::ObjectDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
-		TEST_ASSERT(node->GetAccessModifier() == Scripting::AccessModifier::Public);
+		TEST_ASSERT(node->GetAccessModifier() == C4Compiler::AccessModifier::Public);
 		TEST_PASSED();
 	}
 
 	void ObjectDefinitionTest::TestWithInheritance()
 	{
-		auto stream = Scripting::Source::FromMemory("class MyClass : BaseClass { }");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("class MyClass : BaseClass { }");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ObjectDefinitionNode::TryParse(state);
+		auto node = C4Compiler::ObjectDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->GetBaseClasses().Count() == 1);
 		TEST_PASSED();
@@ -76,12 +76,12 @@ namespace Testing
 
 	void ObjectDefinitionTest::TestMultipleInheritance()
 	{
-		auto stream = Scripting::Source::FromMemory("class MyClass : BaseClass1, BaseClass2 { }");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("class MyClass : BaseClass1, BaseClass2 { }");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ObjectDefinitionNode::TryParse(state);
+		auto node = C4Compiler::ObjectDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->GetBaseClasses().Count() == 2);
 		TEST_PASSED();
@@ -89,12 +89,12 @@ namespace Testing
 
 	void ObjectDefinitionTest::TestWithTemplate()
 	{
-		auto stream = Scripting::Source::FromMemory("template<T> class MyClass { }");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("template<T> class MyClass { }");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ObjectDefinitionNode::TryParse(state);
+		auto node = C4Compiler::ObjectDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->IsTemplated());
 		TEST_PASSED();
@@ -102,12 +102,12 @@ namespace Testing
 
 	void ObjectDefinitionTest::TestWithAnnotation()
 	{
-		auto stream = Scripting::Source::FromMemory("[Serialize] class MyClass { }");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("[Serialize] class MyClass { }");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ObjectDefinitionNode::TryParse(state);
+		auto node = C4Compiler::ObjectDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->GetAnnotations().Count() == 1);
 		TEST_PASSED();
@@ -115,12 +115,12 @@ namespace Testing
 
 	void ObjectDefinitionTest::TestAbstractClass()
 	{
-		auto stream = Scripting::Source::FromMemory("abstract class MyClass { }");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("abstract class MyClass { }");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ObjectDefinitionNode::TryParse(state);
+		auto node = C4Compiler::ObjectDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->IsAbstract());
 		TEST_PASSED();
@@ -128,12 +128,12 @@ namespace Testing
 
 	void ObjectDefinitionTest::TestFinalClass()
 	{
-		auto stream = Scripting::Source::FromMemory("final class Leaf : public Base { }");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("final class Leaf : public Base { }");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ObjectDefinitionNode::TryParse(state);
+		auto node = C4Compiler::ObjectDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->IsFinal());
 		TEST_ASSERT(!node->IsAbstract());
@@ -148,12 +148,12 @@ namespace Testing
 			"final final class Leaf { }" };
 		for (const char* source : sources)
 		{
-			auto stream = Scripting::Source::FromMemory(source);
-			Scripting::Lexer lexer(*stream, 0);
-			Scripting::ErrorTracker errorTracker;
-			Scripting::ParserState state(lexer, errorTracker);
+			auto stream = C4Compiler::Source::FromMemory(source);
+			C4Compiler::Lexer lexer(*stream, 0);
+			C4Compiler::ErrorTracker errorTracker;
+			C4Compiler::ParserState state(lexer, errorTracker);
 
-			auto node = Scripting::ObjectDefinitionNode::TryParse(state);
+			auto node = C4Compiler::ObjectDefinitionNode::TryParse(state);
 			TEST_ASSERT(node != nullptr);
 			TEST_ASSERT(errorTracker.GetErrors().Count() == 1);
 		}
@@ -162,27 +162,27 @@ namespace Testing
 
 	void ObjectDefinitionTest::TestNoMatch()
 	{
-		auto stream = Scripting::Source::FromMemory("while (x > 0) { }");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("while (x > 0) { }");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ObjectDefinitionNode::TryParse(state);
+		auto node = C4Compiler::ObjectDefinitionNode::TryParse(state);
 		TEST_ASSERT(node == nullptr);
 		TEST_PASSED();
 	}
 
 	namespace
 	{
-		const Scripting::VariableDefinitionNode* FieldNamed(const Scripting::ObjectDefinitionNode& node, const char* name)
+		const C4Compiler::VariableDefinitionNode* FieldNamed(const C4Compiler::ObjectDefinitionNode& node, const char* name)
 		{
 			for (const auto& member : node.GetBodyMembers())
-				if (const auto* field = dynamic_cast<const Scripting::VariableDefinitionNode*>(member.Get()); field && field->GetNameToken().GetText() == name)
+				if (const auto* field = dynamic_cast<const C4Compiler::VariableDefinitionNode*>(member.Get()); field && field->GetNameToken().GetText() == name)
 					return field;
 			return nullptr;
 		}
 
-		Core::String FirstAnnotationName(const Core::Vector<Ref<Scripting::AnnotationNode>>& annotations)
+		Core::String FirstAnnotationName(const Core::Vector<Ref<C4Compiler::AnnotationNode>>& annotations)
 		{
 			return annotations.Empty() ? Core::String() : annotations[0]->GetBracketGroups()[0].annotations[0]->GetName();
 		}
@@ -191,7 +191,7 @@ namespace Testing
 	// `[Property] private:` - each label keeps its annotations, and the fields and methods under it take them.
 	void ObjectDefinitionTest::TestSectionAnnotations()
 	{
-		auto stream = Scripting::Source::FromMemory(
+		auto stream = C4Compiler::Source::FromMemory(
 			"class Panel {\n"
 			"	private int32 before;\n"
 			"[Property] [Saved, Shown]\n"
@@ -203,16 +203,16 @@ namespace Testing
 			"[Serialize(1)] protected:\n"
 			"	protected int32 kept;\n"
 			"}");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ObjectDefinitionNode::TryParse(state);
+		auto node = C4Compiler::ObjectDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT_EQ((int)errorTracker.GetErrors().Count(), 0);
 		TEST_ASSERT_EQ((int)node->GetSections().Count(), 3);
-		const Scripting::AccessSection& hidden = node->GetSections()[0];
-		TEST_ASSERT(hidden.m_Access == Scripting::AccessModifier::Private);
+		const C4Compiler::AccessSection& hidden = node->GetSections()[0];
+		TEST_ASSERT(hidden.m_Access == C4Compiler::AccessModifier::Private);
 		TEST_ASSERT_EQ((int)hidden.m_Annotations.Count(), 2); // one node per bracket run: [Property] and [Saved, Shown]
 		TEST_ASSERT_EQ((int)hidden.m_Members.Count(), 2);
 		TEST_ASSERT(FieldNamed(*node, "before")->GetSectionAnnotations().Empty()); // before any label
@@ -220,9 +220,9 @@ namespace Testing
 		TEST_ASSERT(FieldNamed(*node, "a")->GetAnnotations().Empty());           // its own stay its own
 		TEST_ASSERT(FieldNamed(*node, "plain")->GetSectionAnnotations().Empty()); // a label without annotations
 		TEST_ASSERT(FirstAnnotationName(FieldNamed(*node, "kept")->GetSectionAnnotations()) == "Serialize");
-		TEST_ASSERT(FieldNamed(*node, "kept")->GetAccessModifier() == Scripting::AccessModifier::Protected);
+		TEST_ASSERT(FieldNamed(*node, "kept")->GetAccessModifier() == C4Compiler::AccessModifier::Protected);
 		for (const auto& member : node->GetBodyMembers())
-			if (const auto* method = dynamic_cast<const Scripting::FunctionDefinitionNode*>(member.Get()))
+			if (const auto* method = dynamic_cast<const C4Compiler::FunctionDefinitionNode*>(member.Get()))
 				TEST_ASSERT(FirstAnnotationName(method->GetSectionAnnotations()) == "Property" && FirstAnnotationName(method->GetAnnotations()) == "Own");
 		TEST_PASSED();
 	}
@@ -230,18 +230,18 @@ namespace Testing
 	// Nested types, enums and aliases are no section's members: they take none of its annotations.
 	void ObjectDefinitionTest::TestSectionAnnotationsOnlyOnFieldsAndMethods()
 	{
-		auto stream = Scripting::Source::FromMemory(
+		auto stream = C4Compiler::Source::FromMemory(
 			"class Holder {\n"
 			"[Saved] public:\n"
 			"	public enum Mode { A, B }\n"
 			"	struct Inner { public int32 x; }\n"
 			"	public int32 value;\n"
 			"}");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ObjectDefinitionNode::TryParse(state);
+		auto node = C4Compiler::ObjectDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT_EQ((int)errorTracker.GetErrors().Count(), 0);
 		TEST_ASSERT_EQ((int)node->GetSections()[0].m_Members.Count(), 1);
@@ -252,12 +252,12 @@ namespace Testing
 	// The compiler's annotations act on one declaration: a label passes on only reflected ones.
 	void ObjectDefinitionTest::TestCompilerAnnotationOnSection()
 	{
-		auto stream = Scripting::Source::FromMemory("class Grouped {\n[group(\"ui\")]\npublic:\n	public int32 value;\n}");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("class Grouped {\n[group(\"ui\")]\npublic:\n	public int32 value;\n}");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ObjectDefinitionNode::TryParse(state);
+		auto node = C4Compiler::ObjectDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT_EQ((int)errorTracker.GetErrors().Count(), 1);
 		TEST_ASSERT(errorTracker.GetErrors()[0].message.find("[group] is the compiler's") != Core::String::npos);
@@ -267,12 +267,12 @@ namespace Testing
 	// An annotated member is no label: `[Range(0, 1)] public float x;` stays the field's own.
 	void ObjectDefinitionTest::TestAnnotatedMemberIsNoLabel()
 	{
-		auto stream = Scripting::Source::FromMemory("class Plain {\npublic:\n	[Range(0, 1)] public float x;\n	[Command(\"go\")] public void Go() { }\n}");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("class Plain {\npublic:\n	[Range(0, 1)] public float x;\n	[Command(\"go\")] public void Go() { }\n}");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ObjectDefinitionNode::TryParse(state);
+		auto node = C4Compiler::ObjectDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT_EQ((int)errorTracker.GetErrors().Count(), 0);
 		TEST_ASSERT_EQ((int)node->GetSections().Count(), 1);

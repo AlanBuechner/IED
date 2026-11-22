@@ -3,7 +3,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 	struct FunctionRecord;
@@ -35,4 +35,4 @@ namespace Scripting
 		std::unordered_map<uint32, uint64> m_FileHashes; // by source id: its path's
 		std::unordered_map<uint32, uint64> m_Shares;     // by source id: how many partitions its functions spread over
 	};
-} // namespace Scripting
+} // namespace C4Compiler

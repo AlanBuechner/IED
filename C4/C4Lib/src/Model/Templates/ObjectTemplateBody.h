@@ -3,7 +3,7 @@
 #include "Model/Templates/TemplateArguments.h"
 #include "Model/TemplateInstantiator.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct AliasDefinitionNode;
 	struct VariableDefinitionNode;
@@ -89,4 +89,4 @@ namespace Scripting
 		uint32 m_UnitId;
 		const InstantiationBindings* m_Owner;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

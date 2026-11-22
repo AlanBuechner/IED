@@ -3,7 +3,7 @@
 #include "Model/QueryResult.h"
 #include <functional>
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct FunctionRecord;
 	class SignatureType;
@@ -28,4 +28,4 @@ namespace Scripting
 		Core::String m_Name;
 		InstanceFor m_InstanceFor;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

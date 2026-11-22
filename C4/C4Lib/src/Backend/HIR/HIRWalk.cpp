@@ -1,6 +1,6 @@
 #include "Backend/HIR/HIRWalk.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -170,4 +170,4 @@ namespace Scripting
 	{
 		EmittedWalk(visit).Node(function.root);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

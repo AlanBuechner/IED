@@ -2,7 +2,7 @@
 
 #include "Lexer.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class LexerRecovery
 	{
@@ -27,4 +27,4 @@ namespace Scripting
 		}
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

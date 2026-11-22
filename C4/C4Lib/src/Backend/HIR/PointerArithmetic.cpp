@@ -1,7 +1,7 @@
 #include "Backend/HIR/PointerArithmetic.h"
 #include "Model/TypeHandle.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -67,4 +67,4 @@ namespace Scripting
 		if (op == "-" && leftPointer && rightPointer) return Difference(ctx, lhs, rhs);
 		return leftPointer ? Offset(ctx, op, lhs, rhs) : Offset(ctx, op, rhs, lhs);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

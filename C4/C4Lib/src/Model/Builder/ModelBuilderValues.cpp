@@ -9,7 +9,7 @@
 #include "Model/OperatorAnnotations.h" // [group("name")] collection for reflection (plan 14)
 #include <functional>
 
-namespace Scripting
+namespace C4Compiler
 {
 	void ModelBuilder::RegisterVariable(Context& ctx, const VariableDefinitionNode& var)
 	{
@@ -170,4 +170,4 @@ namespace Scripting
 
 			m_PendingFuncs.Push({ ctx.scope, firstName, &fn, ctx.unitId });
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -5,7 +5,7 @@ namespace llvm
 	class Module;
 }
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// LLVM writes a CodeView variable with any constant location as one S_CONSTANT for its whole function, dropping
 	/// its other ranges: a variable with another location, or constants that disagree, loses its constant ones.

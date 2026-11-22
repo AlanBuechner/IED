@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct FunctionDefinitionNode;
 	struct FunctionRecord;
@@ -59,4 +59,4 @@ namespace Scripting
 		std::unordered_map<const ObjectType*, Fixtures> m_ClassFixtures;
 		std::unordered_map<const ObjectType*, Core::String> m_ClassGroups;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

@@ -28,7 +28,7 @@
 #include <algorithm>
 #include <tuple>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -468,4 +468,4 @@ namespace Scripting
 	{
 		return SymbolQueries().QueryConstant(*this, name, unitId, context);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

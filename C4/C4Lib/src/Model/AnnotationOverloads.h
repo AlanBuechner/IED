@@ -2,7 +2,7 @@
 #include "Model/DeclaredAnnotations.h"
 #include "Model/QueryResult.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct AnnotationItem;
 
@@ -26,4 +26,4 @@ namespace Scripting
 	/// takes its argument count and whose parameters each written literal fits (a string literal a string, a number a
 	/// number, `true` a bool), else the first that takes that many.
 	const AnnotationSignature* LikelyOverload(const DeclaredAnnotations::Overloads& overloads, const AnnotationItem& item);
-} // namespace Scripting
+} // namespace C4Compiler

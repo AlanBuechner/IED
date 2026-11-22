@@ -1,7 +1,7 @@
 #include "MacroTable.h"
 #include <sstream>
 
-namespace Scripting
+namespace C4Compiler
 {
 	void MacroTable::Define(const std::string& name, const std::string& body)
 	{

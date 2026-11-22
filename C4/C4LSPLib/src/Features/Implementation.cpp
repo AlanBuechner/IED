@@ -23,17 +23,17 @@ namespace C4LSP::Features
 		if (!unit || !unit->GetRootAST())
 			return {};
 
-		const Scripting::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
+		const C4Compiler::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
 		Server::LocatedNode located = Server::NodeLocator::Locate(source, sourceId, unit->GetRootAST(), position);
 		if (!located.Found())
 			return {};
 
 		// A method (named or called here): what overrides it. Otherwise the type here: what derives from it.
-		const Scripting::AstNode* named = Definition::TargetAt(session, sourceId, located, position);
-		if (named && named->Type() == Scripting::NodeType::FunctionDefinition)
+		const C4Compiler::AstNode* named = Definition::TargetAt(session, sourceId, located, position);
+		if (named && named->Type() == C4Compiler::NodeType::FunctionDefinition)
 			return Overrides(session, *named);
 
-		const Scripting::ObjectType* target = TypeUnderCursor(session, located);
+		const C4Compiler::ObjectType* target = TypeUnderCursor(session, located);
 		if (!target)
 			return {};
 
@@ -43,12 +43,12 @@ namespace C4LSP::Features
 		session.GetResolver().CollectObjectTypes(types);
 
 		Core::Vector<Protocol::Location> out;
-		std::set<const Scripting::ObjectType*> seen;
+		std::set<const C4Compiler::ObjectType*> seen;
 		for (const auto& t : types)
 		{
 			if (!t.object || !t.decl || seen.count(t.object))
 				continue;
-			std::set<const Scripting::ObjectType*> visited;
+			std::set<const C4Compiler::ObjectType*> visited;
 			if (DerivesFrom(t.object, target, visited))
 			{
 				seen.insert(t.object);
@@ -58,22 +58,22 @@ namespace C4LSP::Features
 		return out;
 	}
 
-	const Scripting::ObjectType* Implementation::TypeUnderCursor(Server::CompilationSession& session, const Server::LocatedNode& located)
+	const C4Compiler::ObjectType* Implementation::TypeUnderCursor(Server::CompilationSession& session, const Server::LocatedNode& located)
 	{
 		const Server::SemanticResolver& resolver = session.GetResolver();
 
 		// A type name in a declaration / cast / new: resolve the QualType through the model's own type verb.
 		for (int i = static_cast<int>(located.path.Count()) - 1; i >= 0; --i)
 		{
-			const Scripting::AstNode* node = located.path[i];
-			if (node->Type() != Scripting::NodeType::QualType)
+			const C4Compiler::AstNode* node = located.path[i];
+			if (node->Type() != C4Compiler::NodeType::QualType)
 				continue;
 
-			const auto& qt = static_cast<const Scripting::QualTypeNode&>(*node);
+			const auto& qt = static_cast<const C4Compiler::QualTypeNode&>(*node);
 			if (!qt.BaseName())
 				return nullptr;
-			if (const Scripting::Type* type = resolver.ResolveQualType(qt, located.path))
-				if (const Scripting::ObjectType* obj = dynamic_cast<const Scripting::ObjectType*>(Scripting::TypeHandle::UnwrapToValue(type)))
+			if (const C4Compiler::Type* type = resolver.ResolveQualType(qt, located.path))
+				if (const C4Compiler::ObjectType* obj = dynamic_cast<const C4Compiler::ObjectType*>(C4Compiler::TypeHandle::UnwrapToValue(type)))
 					return obj;
 			return nullptr;
 		}
@@ -81,9 +81,9 @@ namespace C4LSP::Features
 		// The cursor is on a type definition itself: match the object whose declaring node is exactly this one.
 		for (int i = static_cast<int>(located.path.Count()) - 1; i >= 0; --i)
 		{
-			const Scripting::AstNode* node = located.path[i];
-			if (node->Type() != Scripting::NodeType::ObjectDefinition &&
-				node->Type() != Scripting::NodeType::EnumDefinition)
+			const C4Compiler::AstNode* node = located.path[i];
+			if (node->Type() != C4Compiler::NodeType::ObjectDefinition &&
+				node->Type() != C4Compiler::NodeType::EnumDefinition)
 				continue;
 
 			std::vector<Server::SemanticResolver::ObjectDecl> types;
@@ -96,15 +96,15 @@ namespace C4LSP::Features
 		return nullptr;
 	}
 
-	Core::Vector<Protocol::Location> Implementation::Overrides(Server::CompilationSession& session, const Scripting::AstNode& method)
+	Core::Vector<Protocol::Location> Implementation::Overrides(Server::CompilationSession& session, const C4Compiler::AstNode& method)
 	{
-		const Scripting::AstNode& declared = DeclarationText::InItsType(session, method);
-		const Core::Vector<const Scripting::AstNode*> path = DeclarationText::PathTo(session, declared);
-		if (path.Count() < 2 || path[path.Count() - 2]->Type() != Scripting::NodeType::ObjectDefinition)
+		const C4Compiler::AstNode& declared = DeclarationText::InItsType(session, method);
+		const Core::Vector<const C4Compiler::AstNode*> path = DeclarationText::PathTo(session, declared);
+		if (path.Count() < 2 || path[path.Count() - 2]->Type() != C4Compiler::NodeType::ObjectDefinition)
 			return {};
 		std::vector<Server::SemanticResolver::ObjectDecl> types;
 		session.GetResolver().CollectObjectTypes(types);
-		const Scripting::ObjectType* owner = nullptr;
+		const C4Compiler::ObjectType* owner = nullptr;
 		for (const auto& t : types)
 			if (t.decl == path[path.Count() - 2])
 				owner = t.object;
@@ -112,23 +112,23 @@ namespace C4LSP::Features
 			return {};
 
 		const std::string name = DeclarationText::NameOf(declared);
-		const uint32 parameters = static_cast<const Scripting::FunctionDefinitionNode&>(declared).GetParameters().Count();
+		const uint32 parameters = static_cast<const C4Compiler::FunctionDefinitionNode&>(declared).GetParameters().Count();
 		Core::Vector<Protocol::Location> out;
-		std::set<const Scripting::AstNode*> seen;
+		std::set<const C4Compiler::AstNode*> seen;
 		for (const auto& t : types)
 		{
-			std::set<const Scripting::ObjectType*> visited;
-			if (!t.object || !t.decl || t.decl->Type() != Scripting::NodeType::ObjectDefinition || !DerivesFrom(t.object, owner, visited))
+			std::set<const C4Compiler::ObjectType*> visited;
+			if (!t.object || !t.decl || t.decl->Type() != C4Compiler::NodeType::ObjectDefinition || !DerivesFrom(t.object, owner, visited))
 				continue;
-			for (const auto& member : static_cast<const Scripting::ObjectDefinitionNode&>(*t.decl).GetBodyMembers())
-				if (member && member->Type() == Scripting::NodeType::FunctionDefinition && DeclarationText::NameOf(*member) == name &&
-					static_cast<const Scripting::FunctionDefinitionNode&>(*member).GetParameters().Count() == parameters && seen.insert(member.Get()).second)
+			for (const auto& member : static_cast<const C4Compiler::ObjectDefinitionNode&>(*t.decl).GetBodyMembers())
+				if (member && member->Type() == C4Compiler::NodeType::FunctionDefinition && DeclarationText::NameOf(*member) == name &&
+					static_cast<const C4Compiler::FunctionDefinitionNode&>(*member).GetParameters().Count() == parameters && seen.insert(member.Get()).second)
 					out.Push(Definition::LocationForDeclaration(session, *Definition::WithBody(session, member.Get())));
 		}
 		return out;
 	}
 
-	bool Implementation::DerivesFrom(const Scripting::ObjectType* type, const Scripting::ObjectType* target, std::set<const Scripting::ObjectType*>& visited)
+	bool Implementation::DerivesFrom(const C4Compiler::ObjectType* type, const C4Compiler::ObjectType* target, std::set<const C4Compiler::ObjectType*>& visited)
 	{
 		if (!type || !target || type == target || visited.count(type))
 			return false;

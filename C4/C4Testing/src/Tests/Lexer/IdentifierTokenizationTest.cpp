@@ -5,49 +5,49 @@ namespace Testing
 	// Consolidated: structural, control flow, built-in type, and visibility keywords in one pass
 	void IdentifierTokenizationTest::TestAllKeywords()
 	{
-		auto stream = Scripting::Source::FromMemory(
+		auto stream = C4Compiler::Source::FromMemory(
 			"namespace class struct enum "
 			"if else for while return break continue "
 			"true false null this "
 			"public private protected");
-		Scripting::Lexer lexer(*stream, 0);
+		C4Compiler::Lexer lexer(*stream, 0);
 
 		// Structural keywords
-		TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::Namespace);
-		TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::Class);
-		TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::Struct);
-		TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::Enum);
+		TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::Namespace);
+		TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::Class);
+		TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::Struct);
+		TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::Enum);
 
 		// Control flow keywords
-		TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::If);
-		TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::Else);
-		TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::For);
-		TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::While);
-		TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::Return);
-		TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::Break);
-		TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::Continue);
+		TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::If);
+		TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::Else);
+		TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::For);
+		TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::While);
+		TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::Return);
+		TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::Break);
+		TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::Continue);
 
 		// Built-in type and literal keywords
-		TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::True);
-		TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::False);
-		TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::Null);
-		TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::This);
+		TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::True);
+		TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::False);
+		TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::Null);
+		TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::This);
 
 		// Visibility modifiers
-		TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::Public);
-		TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::Private);
-		TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::Protected);
+		TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::Public);
+		TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::Private);
+		TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::Protected);
 
 		TEST_PASSED();
 	}
 
 	void IdentifierTokenizationTest::TestNonKeywordRemainsIdentifier()
 	{
-		auto stream = Scripting::Source::FromMemory("myVar");
-		Scripting::Lexer lexer(*stream, 0);
+		auto stream = C4Compiler::Source::FromMemory("myVar");
+		C4Compiler::Lexer lexer(*stream, 0);
 
 		auto& t = lexer.NextCompoundToken();
-		TEST_ASSERT(t.GetType() == Scripting::TokenType::Identifier);
+		TEST_ASSERT(t.GetType() == C4Compiler::TokenType::Identifier);
 		TEST_ASSERT(t.GetText() == "myVar");
 		TEST_PASSED();
 	}
@@ -55,17 +55,17 @@ namespace Testing
 	void IdentifierTokenizationTest::TestCaseSensitivity()
 	{
 		// "If" (capital I) should not promote to If keyword
-		auto stream = Scripting::Source::FromMemory("If TRUE");
-		Scripting::Lexer lexer(*stream, 0);
+		auto stream = C4Compiler::Source::FromMemory("If TRUE");
+		C4Compiler::Lexer lexer(*stream, 0);
 
-		TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::Identifier);
-		TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::Identifier);
+		TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::Identifier);
+		TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::Identifier);
 		TEST_PASSED();
 	}
 
 	void IdentifierTokenizationTest::TestEveryKeywordPromotes()
 	{
-		using T = Scripting::TokenType;
+		using T = C4Compiler::TokenType;
 		const struct { const char* text; T type; } keywords[] = {
 			{ "namespace", T::Namespace }, { "class", T::Class }, { "struct", T::Struct }, { "interface", T::Interface },
 			{ "enum", T::Enum }, { "union", T::Union }, { "public", T::Public }, { "private", T::Private },
@@ -81,9 +81,9 @@ namespace Testing
 		};
 		for (const auto& keyword : keywords)
 		{
-			auto stream = Scripting::Source::FromMemory(keyword.text);
-			Scripting::Lexer lexer(*stream, 0);
-			const Scripting::Token& token = lexer.NextCompoundToken();
+			auto stream = C4Compiler::Source::FromMemory(keyword.text);
+			C4Compiler::Lexer lexer(*stream, 0);
+			const C4Compiler::Token& token = lexer.NextCompoundToken();
 			TEST_ASSERT(token.GetType() == keyword.type);
 			TEST_ASSERT(token.GetText() == keyword.text);
 		}
@@ -93,11 +93,11 @@ namespace Testing
 	void IdentifierTokenizationTest::TestTypeNamesAndLoopStayIdentifiers()
 	{
 		// D-04: `loop` is an ordinary name; type names (built-in aliases included) are never keywords.
-		auto stream = Scripting::Source::FromMemory("loop int uint char char8 int32 float double bool void Loop loops");
-		Scripting::Lexer lexer(*stream, 0);
+		auto stream = C4Compiler::Source::FromMemory("loop int uint char char8 int32 float double bool void Loop loops");
+		C4Compiler::Lexer lexer(*stream, 0);
 		for (int i = 0; i < 12; ++i)
-			TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::Identifier);
-		TEST_ASSERT(lexer.NextCompoundToken().GetType() == Scripting::TokenType::EndOfFile);
+			TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::Identifier);
+		TEST_ASSERT(lexer.NextCompoundToken().GetType() == C4Compiler::TokenType::EndOfFile);
 		TEST_PASSED();
 	}
 }

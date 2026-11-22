@@ -41,7 +41,7 @@ namespace C4LSP::Server
 		const std::vector<std::string>& GetIncludePaths() const { return m_IncludePaths; }
 		void SetDefines(std::map<std::string, std::string> defines) { m_Defines = std::move(defines); }
 		// The processor the build compiles for (D-62): its SIMD_* macros and which intrinsics are allowed.
-		void SetTarget(const Scripting::CpuTarget& target) { m_Target = target; }
+		void SetTarget(const C4Compiler::CpuTarget& target) { m_Target = target; }
 		const std::map<std::string, std::string>& GetDefines() const { return m_Defines; }
 
 		// The default library the program's includes resolve against, as in C4.exe's install: the client's
@@ -67,17 +67,17 @@ namespace C4LSP::Server
 		void RemoveOpenDocument(const std::string& uri);
 
 		// The parses of the program's analysis before this one: each file whose text is the same takes its tree from there
-		// instead of being parsed again (Scripting::PriorParses). They outlive the next Recompile.
-		void UsePriorParses(std::shared_ptr<const Scripting::PriorParses> prior) { m_PriorParses = std::move(prior); }
+		// instead of being parsed again (C4Compiler::PriorParses). They outlive the next Recompile.
+		void UsePriorParses(std::shared_ptr<const C4Compiler::PriorParses> prior) { m_PriorParses = std::move(prior); }
 		// This analysis's parses, for the next analysis of the program; null for a script session.
-		std::shared_ptr<const Scripting::PriorParses> Parses() const;
+		std::shared_ptr<const C4Compiler::PriorParses> Parses() const;
 
 		bool Recompile();
 
-		Scripting::SourceManager& GetSourceManager() { return m_Compiler->GetSourceManager(); }
-		const Scripting::SourceManager& GetSourceManager() const { return m_Compiler->GetSourceManager(); }
-		Scripting::CompilerInstance& GetCompiler() { return *m_Compiler; }
-		const Scripting::CompilerInstance& GetCompiler() const { return *m_Compiler; }
+		C4Compiler::SourceManager& GetSourceManager() { return m_Compiler->GetSourceManager(); }
+		const C4Compiler::SourceManager& GetSourceManager() const { return m_Compiler->GetSourceManager(); }
+		C4Compiler::CompilerInstance& GetCompiler() { return *m_Compiler; }
+		const C4Compiler::CompilerInstance& GetCompiler() const { return *m_Compiler; }
 
 		// The shared on-demand resolver bound to the current program model. Rebuilt (and its caches
 		// dropped) on every Recompile(), so features always resolve against the freshest model and can
@@ -90,7 +90,7 @@ namespace C4LSP::Server
 		// program-model errors come from GetAllDiagnostics(), and these are the type errors the bodies the program
 		// needs produce. Together they are the compiler's complete error output for the project, so the LSP reports
 		// exactly what the build would - no separate or duplicated error logic in the LSP.
-		const Core::Vector<Scripting::CompilationError>& GetLoweringDiagnostics() const { return m_LoweringErrors; }
+		const Core::Vector<C4Compiler::CompilationError>& GetLoweringDiagnostics() const { return m_LoweringErrors; }
 		// Whether the last compile lowered the bodies: its front end found no error (C4.exe lowers only then).
 		bool LoweredBodies() const { return m_LoweredBodies; }
 		// When this compile stopped short of the bodies for an error in the front end: the body diagnostics `earlier` had for
@@ -105,10 +105,10 @@ namespace C4LSP::Server
 		// Whether a file the last compile read from disk is different there now, or gone: something besides the editor
 		// (git, a build, another tool) changed it. A file whose time changed but whose text did not is taken as it is now.
 		// `stampOf` gives a file's size and time now. The worker's alone: requests never call it.
-		using StampLookup = std::function<std::optional<Scripting::FileStamp>(const std::string& path)>;
+		using StampLookup = std::function<std::optional<C4Compiler::FileStamp>(const std::string& path)>;
 		bool ChangedOnDisk(const StampLookup& stampOf);
 		// The files the last compile read from disk, each with its size and time then.
-		std::vector<std::pair<std::string, Scripting::FileStamp>> DiskStamps() const;
+		std::vector<std::pair<std::string, C4Compiler::FileStamp>> DiskStamps() const;
 
 		// How long the steps of the last compile took, in milliseconds, for the server's log.
 		struct Timings
@@ -127,7 +127,7 @@ namespace C4LSP::Server
 		std::string GetEditorText(const std::string& uri) const;
 
 		// The macros a source has at its end, as the last compile's macro pass left them; null when it had none.
-		const Scripting::MacroTable* MacroTableOf(uint32 sourceId) const;
+		const C4Compiler::MacroTable* MacroTableOf(uint32 sourceId) const;
 		// A source's text as the last compile read it, before its macros were expanded (its `#define` lines are there);
 		// empty for one it has not read.
 		std::string_view RawTextOf(uint32 sourceId) const;
@@ -136,10 +136,10 @@ namespace C4LSP::Server
 		std::optional<size_t> CompiledTextHash(const std::string& uri) const;
 
 		// An editor range: a location is always its file's own (R8; a binding's is its unit's, the `.c4bind`).
-		Protocol::Range ToEditorRange(uint32 sourceId, const Scripting::SourceLocation& start, const Scripting::SourceLocation& end) const;
-		Protocol::Location ToEditorLocation(const Scripting::SourceLocation& start, const Scripting::SourceLocation& end) const;
+		Protocol::Range ToEditorRange(uint32 sourceId, const C4Compiler::SourceLocation& start, const C4Compiler::SourceLocation& end) const;
+		Protocol::Location ToEditorLocation(const C4Compiler::SourceLocation& start, const C4Compiler::SourceLocation& end) const;
 		// Whether a location is in a unit of CBind's bindings (R8).
-		bool InBindings(const Scripting::SourceLocation& location) const;
+		bool InBindings(const C4Compiler::SourceLocation& location) const;
 
 	private:
 		// Display name a document URI maps to (root-relative, or just the file name).
@@ -164,10 +164,10 @@ namespace C4LSP::Server
 		// Lower what the program needs through the compiler's own ProgramLowering - the bodies, the thunks, the globals'
 		// starts and storage, for a script against its host - to collect the body-level diagnostics. No LLVM is emitted.
 		// Gated on a clean front end, as C4.exe lowers only after one.
-		void RunLoweringPass(const std::optional<Scripting::ScriptLowering>& script = std::nullopt);
+		void RunLoweringPass(const std::optional<C4Compiler::ScriptLowering>& script = std::nullopt);
 		bool RecompileScript();
 		// The scope's files, each open one with the editor's text, as a script compile takes them.
-		Scripting::ScriptCompileOptions ScriptOptions() const;
+		C4Compiler::ScriptCompileOptions ScriptOptions() const;
 		// Each registered file on disk with its size and time now, right after the compile read it (ChangedOnDisk).
 		void RecordDiskFiles();
 		// Whether the file of `sourceId` now holds other text than the compile read.
@@ -177,22 +177,22 @@ namespace C4LSP::Server
 		{
 			std::string path;
 			uint32 sourceId = 0;
-			Scripting::FileStamp stamp;
+			C4Compiler::FileStamp stamp;
 		};
 
-		std::shared_ptr<const Scripting::PriorParses> m_PriorParses; // UsePriorParses; dropped once the compile took them
-		std::unique_ptr<Scripting::CompilerInstance> m_Compiler;
+		std::shared_ptr<const C4Compiler::PriorParses> m_PriorParses; // UsePriorParses; dropped once the compile took them
+		std::unique_ptr<C4Compiler::CompilerInstance> m_Compiler;
 		std::unique_ptr<SemanticResolver> m_Resolver; // rebuilt on Recompile() to track the current model
-		Core::Vector<Scripting::CompilationError> m_LoweringErrors; // body-level (HIR) diagnostics, see GetLoweringDiagnostics
+		Core::Vector<C4Compiler::CompilationError> m_LoweringErrors; // body-level (HIR) diagnostics, see GetLoweringDiagnostics
 		std::string m_RootFolder;
 		std::vector<std::string> m_IncludePaths; // -I dirs from the client's build config (see SetIncludePaths)
 		std::string m_LibraryFolder;             // the default library (see SetLibraryFolder)
 		std::string m_ProjectsFile;              // the build description (see SetProjectsFile)
 		std::map<std::string, std::string> m_Defines;  // predefined macros for every preprocessed file
-		Scripting::CpuTarget m_Target;                  // the build's processor (see SetTarget)
+		C4Compiler::CpuTarget m_Target;                  // the build's processor (see SetTarget)
 		std::map<std::string, std::string> m_InMemorySources; // display name -> text
 		std::map<std::string, std::string> m_OpenDocuments;   // uri -> editor text
-		std::map<uint32, Scripting::MacroTable> m_MacroTables; // sourceId -> its macros at its end (RunPreprocessPhase)
+		std::map<uint32, C4Compiler::MacroTable> m_MacroTables; // sourceId -> its macros at its end (RunPreprocessPhase)
 		std::map<uint32, std::string> m_RawTexts;              // sourceId -> its text before macro expansion (RunPreprocessPhase)
 		std::vector<DiskFile> m_DiskFiles;                     // the files the last compile read from disk (RecordDiskFiles)
 		Timings m_Timings;
@@ -201,7 +201,7 @@ namespace C4LSP::Server
 		bool m_ScriptHostBuild = false;                        // see SetScriptHostBuild
 		ScriptScope m_Script;
 		std::shared_ptr<const LoadedInterface> m_ScriptHost; // set in script mode
-		std::unique_ptr<Scripting::HostQuestions> m_HostQuestions; // what the script's model asks of its host's table, per compile
+		std::unique_ptr<C4Compiler::HostQuestions> m_HostQuestions; // what the script's model asks of its host's table, per compile
 		std::string m_SetupProblem;
 	};
 } // namespace C4LSP::Server

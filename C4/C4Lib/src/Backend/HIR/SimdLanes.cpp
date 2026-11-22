@@ -1,6 +1,6 @@
 #include "Backend/HIR/SimdLanes.h"
 
-namespace Scripting::SimdLanes
+namespace C4Compiler::SimdLanes
 {
 	using namespace SimdOperands;
 
@@ -99,4 +99,4 @@ namespace Scripting::SimdLanes
 		if (!shape.Ok()) return Fail(shape.message);
 		return Node(MakeSimd(call, shape.value, Op::Splat, { value.node }));
 	}
-} // namespace Scripting::SimdLanes
+} // namespace C4Compiler::SimdLanes

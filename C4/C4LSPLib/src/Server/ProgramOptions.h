@@ -22,7 +22,7 @@ namespace C4LSP::Server
 		bool library = false;                       // the default library's own program (docs/tools/03 "The default library's own program")
 
 		// The processor the flags select; the default target when they select none.
-		Scripting::CpuTarget Target() const;
+		C4Compiler::CpuTarget Target() const;
 		bool operator==(const ProgramOptions& other) const;
 		bool operator!=(const ProgramOptions& other) const { return !(*this == other); }
 	};

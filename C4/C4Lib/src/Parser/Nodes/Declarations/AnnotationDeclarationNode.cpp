@@ -2,7 +2,7 @@
 #include "Parser/UnexpectedToken.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -141,4 +141,4 @@ namespace Scripting
 			Core::StringFormat::Format("Expected {0} after the declaration of [{1}], got '{2}'", expected, GetName(), end.GetText()), ErrorSeverity::Error);
 		return false;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

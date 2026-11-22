@@ -5,7 +5,7 @@
 #include "Core/Core.h"
 #include <optional>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class Type;
 	class ProgramModel;

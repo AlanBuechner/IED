@@ -6,7 +6,7 @@
 #include <string_view>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// One source of the host as a script compiles against it (docs/runtime/04 section 3.2).
 	struct InterfaceFile
@@ -86,4 +86,4 @@ namespace Scripting
 	/// hash of all of them): a build that changed nothing a script sees leaves the interface as it was.
 	bool WriteSealedInterface(const std::string& bytes, const std::string& path, std::string* error);
 	bool ReadInterface(const std::string& path, HostInterface& host, std::string* error);
-} // namespace Scripting
+} // namespace C4Compiler

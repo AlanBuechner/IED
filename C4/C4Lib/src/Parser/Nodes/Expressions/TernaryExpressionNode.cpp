@@ -1,7 +1,7 @@
 #include "TernaryExpressionNode.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	std::span<const Ref<AstNode>> TernaryExpressionNode::Children() const
 	{

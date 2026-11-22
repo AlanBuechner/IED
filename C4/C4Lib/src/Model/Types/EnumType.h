@@ -2,7 +2,7 @@
 #include "Model/Types/Type.h"
 #include "Parser/AstNode.h" // AstNode (declaration node for LSP/DAP)
 
-namespace Scripting
+namespace C4Compiler
 {
 	class Scope;
 
@@ -63,4 +63,4 @@ namespace Scripting
 		Core::Vector<Core::String> m_EnclosingNames;
 		bool m_IsScoped = false;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

@@ -12,7 +12,7 @@ namespace llvm
 	class TargetMachine;
 }
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// How a debug script reaches one name it takes from outside (docs/runtime/04 section 6.4).
 	enum class ImportKind
@@ -45,4 +45,4 @@ namespace Scripting
 	/// its loader wrote that names a thunk or a stand-in into the host's own, at the same offset. False, with the reason,
 	/// when the module lacks its import tables.
 	bool BindScriptImports(void* module, const std::vector<ScriptImport>& imports, std::string* error);
-} // namespace Scripting
+} // namespace C4Compiler

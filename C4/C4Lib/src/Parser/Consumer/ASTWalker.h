@@ -3,7 +3,7 @@
 #include <stack>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Frame on the traversal stack - tracks whether we are entering (pre-visit)
 	/// or leaving (post-visit) a node during DFS.

@@ -14,7 +14,7 @@
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

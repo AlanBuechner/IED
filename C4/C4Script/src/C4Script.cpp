@@ -13,19 +13,19 @@
 
 struct c4s_host
 {
-	std::unique_ptr<Scripting::ScriptHost> host;
+	std::unique_ptr<C4Compiler::ScriptHost> host;
 };
 
 struct c4s_script
 {
-	std::unique_ptr<Scripting::Script> script;
+	std::unique_ptr<C4Compiler::Script> script;
 	std::string tag;
 };
 
 namespace
 {
 	// The guard ScriptHost runs a script's starts, exits and calls in.
-	bool Guard(void (*fn)(void*), void* context, Scripting::ScriptFault* fault)
+	bool Guard(void (*fn)(void*), void* context, C4Compiler::ScriptFault* fault)
 	{
 		c4s_fault seen = {};
 		if (c4s_guarded_call(fn, context, &seen)) return true;
@@ -56,13 +56,13 @@ namespace
 		error[length] = 0;
 	}
 
-	Scripting::ScriptCompileOptions OptionsOf(const c4s_options& from)
+	C4Compiler::ScriptCompileOptions OptionsOf(const c4s_options& from)
 	{
-		Scripting::ScriptCompileOptions options;
+		C4Compiler::ScriptCompileOptions options;
 		options.name = from.name ? from.name : "script";
 		for (uint32_t i = 0; i < from.fileCount; ++i)
 		{
-			Scripting::ScriptFile file;
+			C4Compiler::ScriptFile file;
 			file.path = from.paths && from.paths[i] ? from.paths[i] : "";
 			if (from.texts && from.texts[i]) file.text = from.texts[i];
 			options.files.push_back(std::move(file));
@@ -95,7 +95,7 @@ extern "C"
 	{
 		const std::string path = interfacePath && *interfacePath ? interfacePath : ExecutableInterface();
 		std::string why;
-		std::unique_ptr<Scripting::ScriptHost> host = Scripting::ScriptHost::Open(path, table, Guard, &why);
+		std::unique_ptr<C4Compiler::ScriptHost> host = C4Compiler::ScriptHost::Open(path, table, Guard, &why);
 		if (!host)
 		{
 			CopyError(why, error, errorSize);
@@ -122,7 +122,7 @@ extern "C"
 	int32_t c4s_host_has_project(const c4s_host* host, const char* project)
 	{
 		if (!host || !project) return 0;
-		for (const Scripting::InterfaceProject& known : host->host->Interface().projects)
+		for (const C4Compiler::InterfaceProject& known : host->host->Interface().projects)
 			if (known.name == project) return 1;
 		return 0;
 	}

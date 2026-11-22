@@ -12,7 +12,7 @@
 #include <algorithm>
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -160,4 +160,4 @@ namespace Scripting
 	{
 		return Run(callee, arguments, at);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -8,7 +8,7 @@
 #include <map>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct LexicalDiagnostic
 	{

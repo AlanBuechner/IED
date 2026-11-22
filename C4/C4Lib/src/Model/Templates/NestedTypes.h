@@ -2,7 +2,7 @@
 #include "Model/ProgramModel.h"
 #include "Model/Templates/TemplateArguments.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct ObjectDefinitionNode;
 	struct EnumDefinitionNode;
@@ -33,4 +33,4 @@ namespace Scripting
 		/// The names a member type is declared in: its owner instance, written as a type (`Ns::Outer<float>`).
 		static Core::Vector<Core::String> EnclosingNames(const Owner& owner);
 	};
-} // namespace Scripting
+} // namespace C4Compiler

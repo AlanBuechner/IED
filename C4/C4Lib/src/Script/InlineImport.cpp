@@ -14,7 +14,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -306,4 +306,4 @@ namespace Scripting
 		UseScriptRuntime(script); // a host body that throws or registers an exit goes through the script's runtime too
 		return true;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

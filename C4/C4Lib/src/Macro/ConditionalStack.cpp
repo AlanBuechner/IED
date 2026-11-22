@@ -1,6 +1,6 @@
 #include "Macro/ConditionalStack.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	void ConditionalStack::Open(bool condition, unsigned line)
 	{

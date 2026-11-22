@@ -3,7 +3,7 @@
 #include "Model/SymbolTable.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class AnnotationNode;
 
@@ -27,4 +27,4 @@ namespace Scripting
 	/// several: [group("components")] [group("SubSystem")]. Shared by every registration path so an
 	/// instantiated/template type carries the same groups its hand-written twin would.
 	void CollectGroupAnnotations(const AnnotationNode* ann, Core::Vector<Core::String>& out);
-} // namespace Scripting
+} // namespace C4Compiler

@@ -139,9 +139,9 @@ namespace C4LSP::Features
 		}
 
 		// What the declaration after the annotation groups is, read from `at` (past the group the caret is in).
-		std::optional<Scripting::AnnotationPlace> DeclarationAt(const std::string& text, size_t at, bool inType)
+		std::optional<C4Compiler::AnnotationPlace> DeclarationAt(const std::string& text, size_t at, bool inType)
 		{
-			using Scripting::AnnotationPlace;
+			using C4Compiler::AnnotationPlace;
 			at = SkipSpace(text, at);
 			while (at < text.size() && text[at] == '[')
 			{
@@ -185,19 +185,19 @@ namespace C4LSP::Features
 			return colon < text.size() && text[colon] == ':' && (colon + 1 >= text.size() || text[colon + 1] != ':');
 		}
 
-		std::string Detail(const Scripting::DeclaredAnnotations::Overloads& overloads)
+		std::string Detail(const C4Compiler::DeclaredAnnotations::Overloads& overloads)
 		{
 			std::string detail;
-			for (const Scripting::AnnotationSignature* overload : overloads)
+			for (const C4Compiler::AnnotationSignature* overload : overloads)
 				detail += (detail.empty() ? "[" : " [") + std::string(overload->ToString().c_str()) + "]";
 			return detail;
 		}
 
-		bool GoesThere(const Scripting::DeclaredAnnotations::Overloads& overloads, const AnnotationCompletion::Site& site)
+		bool GoesThere(const C4Compiler::DeclaredAnnotations::Overloads& overloads, const AnnotationCompletion::Site& site)
 		{
-			using Scripting::AnnotationPlace;
+			using C4Compiler::AnnotationPlace;
 			if (!site.onLabel && !site.place) return true;
-			for (const Scripting::AnnotationSignature* overload : overloads)
+			for (const C4Compiler::AnnotationSignature* overload : overloads)
 			{
 				if (site.onLabel && (overload->places.Has(AnnotationPlace::Field) || overload->places.Has(AnnotationPlace::Method))) return true;
 				if (!site.onLabel && overload->places.Has(*site.place)) return true;
@@ -219,7 +219,7 @@ namespace C4LSP::Features
 		Site site;
 		const size_t nameStart = NameStart(text, caret);
 		site.qualifier = text.substr(nameStart, WordStart(text, caret) - nameStart);
-		if (InParameters(text, bracket)) site.place = Scripting::AnnotationPlace::Parameter;
+		if (InParameters(text, bracket)) site.place = C4Compiler::AnnotationPlace::Parameter;
 		else
 		{
 			const size_t past = PastGroup(text, bracket);
@@ -239,7 +239,7 @@ namespace C4LSP::Features
 			if (WordStart(text, place) == place) return false;
 			at = SkipSpaceBack(text, WordStart(text, place));
 		}
-		const std::string on = Scripting::kAnnotationPlacesKeyword;
+		const std::string on = C4Compiler::kAnnotationPlacesKeyword;
 		if (!WordEndsAt(text, at, on)) return false;
 		at = SkipSpaceBack(text, at - on.size());
 		if (at > 0 && text[at - 1] == ')')
@@ -250,17 +250,17 @@ namespace C4LSP::Features
 		}
 		const size_t name = WordStart(text, at);
 		if (name == at) return false;
-		return WordEndsAt(text, SkipSpaceBack(text, name), Scripting::kAnnotationKeyword);
+		return WordEndsAt(text, SkipSpaceBack(text, name), C4Compiler::kAnnotationKeyword);
 	}
 
 	void AnnotationCompletion::AddPlaces(Core::Vector<CompletionItem>& out)
 	{
-		for (const Scripting::AnnotationPlace place : Scripting::AllAnnotationPlaces())
+		for (const C4Compiler::AnnotationPlace place : C4Compiler::AllAnnotationPlaces())
 		{
 			CompletionItem item;
-			item.label = Scripting::AnnotationPlaceName(place);
+			item.label = C4Compiler::AnnotationPlaceName(place);
 			item.kind = Kind::Keyword;
-			item.detail = std::string("the annotation goes on ") + Scripting::AnnotationPlaceNoun(place);
+			item.detail = std::string("the annotation goes on ") + C4Compiler::AnnotationPlaceNoun(place);
 			item.sortText = std::to_string(static_cast<int>(place));
 			out.Push(item);
 		}
@@ -268,14 +268,14 @@ namespace C4LSP::Features
 
 	// An annotation is offered by its own name where, written after the site's qualifier, that name leads to it: the
 	// annotations of the namespaces around the caret and the global one, in files this one includes.
-	void AnnotationCompletion::Add(const Server::SemanticResolver& resolver, const Site& site, const Scripting::AnnotationContext& at,
+	void AnnotationCompletion::Add(const Server::SemanticResolver& resolver, const Site& site, const C4Compiler::AnnotationContext& at,
 		Core::Vector<CompletionItem>& out)
 	{
-		const Scripting::DeclaredAnnotations& declared = resolver.Annotations();
+		const C4Compiler::DeclaredAnnotations& declared = resolver.Annotations();
 		for (const auto& [qualified, overloads] : declared.All())
 		{
 			const std::string name = overloads[0]->name.c_str();
-			const Scripting::DeclaredAnnotations::Overloads named = declared.Find(site.qualifier + name, at);
+			const C4Compiler::DeclaredAnnotations::Overloads named = declared.Find(site.qualifier + name, at);
 			if (named.Empty() || named[0]->qualifiedName != overloads[0]->qualifiedName || !GoesThere(named, site)) continue;
 			CompletionItem item;
 			item.label = name;
@@ -285,7 +285,7 @@ namespace C4LSP::Features
 			out.Push(item);
 		}
 		if (!site.qualifier.empty() || site.onLabel) return; // the compiler's own are named alone, and go on one declaration
-		for (const char* name : Scripting::CompilerAnnotationNames())
+		for (const char* name : C4Compiler::CompilerAnnotationNames())
 		{
 			CompletionItem item;
 			item.label = name;

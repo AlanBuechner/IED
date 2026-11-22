@@ -3,7 +3,7 @@
 #include "Lexer/Token.h"  // SourceLocation
 #include <utility>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Errors a semantic query can report. A query never "partially succeeds": the caller sees
 	/// exactly one of these (or None) and decides whether to surface it as a diagnostic.
@@ -83,4 +83,4 @@ namespace Scripting
 		}
 	};
 
-} // namespace Scripting
+} // namespace C4Compiler

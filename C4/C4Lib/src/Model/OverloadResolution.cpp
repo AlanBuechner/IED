@@ -17,7 +17,7 @@
 #include "Model/Types/ReferenceType.h"
 #include "Model/Types/EnumType.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	// Pointer-kind / universal-handle predicates shared by ParamCost. A "universal" handle is void*
 	// (and recursively any pointer whose pointee is itself universal): in C4's one-opaque-ptr model
@@ -356,4 +356,4 @@ namespace Scripting
 		return total;
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

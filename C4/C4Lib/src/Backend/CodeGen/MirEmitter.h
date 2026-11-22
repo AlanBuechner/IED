@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Emits one function's MIR into its llvm::Function (docs/compiler/06-mir.md "Emission"): every block control can
 	/// reach from the entry, each block's statements through the ExprEmitter, its terminator as a branch, a switch or a
@@ -94,4 +94,4 @@ namespace Scripting
 		llvm::Type* m_StagedType = nullptr;      // what the returns stage in the return slot; null when nothing is
 		std::vector<std::pair<const OnceNode*, llvm::Value*>> m_OnceGuards;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

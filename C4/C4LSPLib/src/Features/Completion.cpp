@@ -27,7 +27,7 @@ namespace C4LSP::Features
 
 	/// Member access sees through pointers / references / aliases (the analyzer's own rule), so
 	/// completion unwraps the base type identically.
-	static const Scripting::Type* Deref(const Scripting::Type* type) { return Scripting::TypeHandle::UnwrapToValue(type); }
+	static const C4Compiler::Type* Deref(const C4Compiler::Type* type) { return C4Compiler::TypeHandle::UnwrapToValue(type); }
 
 	Core::Vector<CompletionItem> Completion::At(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position)
 	{
@@ -47,7 +47,7 @@ namespace C4LSP::Features
 		if (!unit || !unit->GetRootAST())
 			return {};
 
-		const Scripting::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
+		const C4Compiler::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
 		const Server::PlaceInAnalysis place = Server::PlaceInAnalyzedText(session.RawTextOf(sourceId), text, position);
 		const Server::LocatedNode located = Server::NodeLocator::Locate(source, sourceId, unit->GetRootAST(), place.position);
 		const size_t offset = OffsetAt(text, position);
@@ -56,7 +56,7 @@ namespace C4LSP::Features
 
 		const Server::SemanticResolver& resolver = session.GetResolver();
 		const std::optional<AnnotationCompletion::Site> annotation = AnnotationCompletion::Find(text, offset, InTypeBody(located.path));
-		const Scripting::AnnotationContext annotationAt = resolver.AnnotationContextAt(located.path, sourceId);
+		const C4Compiler::AnnotationContext annotationAt = resolver.AnnotationContextAt(located.path, sourceId);
 		if (annotation && !annotation->qualifier.empty()) // `[Scene::Ra`: only an annotation is named there
 		{
 			Core::Vector<CompletionItem> named;
@@ -101,13 +101,13 @@ namespace C4LSP::Features
 		return named;
 	}
 
-	bool Completion::InTypeBody(const Core::Vector<const Scripting::AstNode*>& path)
+	bool Completion::InTypeBody(const Core::Vector<const C4Compiler::AstNode*>& path)
 	{
 		for (uint32 i = path.Count(); i-- > 0;)
 		{
-			const Scripting::NodeType type = path[i]->Type();
-			if (type == Scripting::NodeType::FunctionDefinition || type == Scripting::NodeType::LambdaExpression) return false;
-			if (type == Scripting::NodeType::ObjectDefinition || type == Scripting::NodeType::UnionDefinition) return true;
+			const C4Compiler::NodeType type = path[i]->Type();
+			if (type == C4Compiler::NodeType::FunctionDefinition || type == C4Compiler::NodeType::LambdaExpression) return false;
+			if (type == C4Compiler::NodeType::ObjectDefinition || type == C4Compiler::NodeType::UnionDefinition) return true;
 		}
 		return false;
 	}
@@ -133,53 +133,53 @@ namespace C4LSP::Features
 		return std::min(offset + position.character, text.size());
 	}
 
-	void Completion::CollectMembersOf(const Scripting::Type* type, CompletionCandidates& out)
+	void Completion::CollectMembersOf(const C4Compiler::Type* type, CompletionCandidates& out)
 	{
 		type = Deref(type);
 		if (!type)
 			return;
 		switch (type->GetKind())
 		{
-		case Scripting::TypeKind::Object: {
+		case C4Compiler::TypeKind::Object: {
 			// Derived first, so a member it declares wins over a base's of the same name.
-			std::set<const Scripting::ObjectType*> seen;
-			Core::Vector<const Scripting::ObjectType*> pending;
-			pending.Push(static_cast<const Scripting::ObjectType*>(type));
+			std::set<const C4Compiler::ObjectType*> seen;
+			Core::Vector<const C4Compiler::ObjectType*> pending;
+			pending.Push(static_cast<const C4Compiler::ObjectType*>(type));
 			for (uint32 i = 0; i < pending.Count(); ++i)
 			{
 				if (!seen.insert(pending[i]).second)
 					continue;
 				AddMembersOf(pending[i], out);
-				for (const Scripting::ObjectType* base : pending[i]->GetBaseTypes())
+				for (const C4Compiler::ObjectType* base : pending[i]->GetBaseTypes())
 					if (base)
 						pending.Push(base);
 			}
 			break;
 		}
-		case Scripting::TypeKind::Union: {
-			for (const auto& field : static_cast<const Scripting::UnionType*>(type)->GetFields())
+		case C4Compiler::TypeKind::Union: {
+			for (const auto& field : static_cast<const C4Compiler::UnionType*>(type)->GetFields())
 				out.Add(field.mName, Kind::Field, [&] { return TypeText(field.m_Type); });
 			break;
 		}
-		case Scripting::TypeKind::Enum: {
-			for (const auto& member : static_cast<const Scripting::EnumType*>(type)->GetMembers())
+		case C4Compiler::TypeKind::Enum: {
+			for (const auto& member : static_cast<const C4Compiler::EnumType*>(type)->GetMembers())
 				out.Add(member.mName, Kind::Enum, [&] { return type->ToString(); });
 			break;
 		}
-		case Scripting::TypeKind::Pointer:
+		case C4Compiler::TypeKind::Pointer:
 			// `p->`: the pointee's members.
-			CollectMembersOf(static_cast<const Scripting::PointerType*>(type)->GetPointeeType(), out);
+			CollectMembersOf(static_cast<const C4Compiler::PointerType*>(type)->GetPointeeType(), out);
 			break;
 		default:
 			break; // scalars have no members
 		}
 	}
 
-	void Completion::AddMembersOf(const Scripting::ObjectType* obj, CompletionCandidates& out)
+	void Completion::AddMembersOf(const C4Compiler::ObjectType* obj, CompletionCandidates& out)
 	{
 		for (const auto& field : obj->GetFields())
 			out.Add(field.mName, Kind::Field, [&] { return TypeText(field.m_Type); });
-		auto addMethods = [&out](const Core::Vector<Scripting::ObjectType::MethodInfo>& methods) {
+		auto addMethods = [&out](const Core::Vector<C4Compiler::ObjectType::MethodInfo>& methods) {
 			for (const auto& method : methods)
 				out.Add(method.mName, Kind::Method, [&] { return MethodSignature(method); });
 		};
@@ -187,7 +187,7 @@ namespace C4LSP::Features
 		addMethods(obj->GetExtensionMethods()); // operators + CBind foreign members are extensions
 	}
 
-	std::string Completion::MethodSignature(const Scripting::ObjectType::MethodInfo& method)
+	std::string Completion::MethodSignature(const C4Compiler::ObjectType::MethodInfo& method)
 	{
 		std::string text = TypeText(method.m_ReturnType);
 		if (method.m_ParameterTypes.Count() == 0)
@@ -207,26 +207,26 @@ namespace C4LSP::Features
 		return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_';
 	}
 
-	void Completion::CollectEnclosingContext(const Core::Vector<const Scripting::AstNode*>& path, CompletionCandidates& out)
+	void Completion::CollectEnclosingContext(const Core::Vector<const C4Compiler::AstNode*>& path, CompletionCandidates& out)
 	{
 		for (int i = static_cast<int>(path.Count()) - 1; i >= 0; --i)
 		{
-			const Scripting::AstNode* node = path[i];
+			const C4Compiler::AstNode* node = path[i];
 			switch (node->Type())
 			{
-			case Scripting::NodeType::FunctionDefinition: {
-				const auto& func = static_cast<const Scripting::FunctionDefinitionNode&>(*node);
+			case C4Compiler::NodeType::FunctionDefinition: {
+				const auto& func = static_cast<const C4Compiler::FunctionDefinitionNode&>(*node);
 				for (const auto& param : func.GetParameters())
 					out.Add(param->GetNameToken().GetText(), Kind::Variable,
 						[&] { return param->GetType() ? param->GetType()->ToString() : std::string(); });
 				break;
 			}
-			case Scripting::NodeType::CodeBlock: {
-				const auto& block = static_cast<const Scripting::CodeBlockNode&>(*node);
+			case C4Compiler::NodeType::CodeBlock: {
+				const auto& block = static_cast<const C4Compiler::CodeBlockNode&>(*node);
 				for (const auto& stmt : block.GetStatements())
-					if (stmt && stmt->Type() == Scripting::NodeType::VariableDefinition)
+					if (stmt && stmt->Type() == C4Compiler::NodeType::VariableDefinition)
 					{
-						const auto& var = static_cast<const Scripting::VariableDefinitionNode&>(*stmt.Get());
+						const auto& var = static_cast<const C4Compiler::VariableDefinitionNode&>(*stmt.Get());
 						out.Add(var.GetNameToken().GetText(), Kind::Variable,
 							[&] { return var.GetType() ? var.GetType()->ToString() : std::string(); });
 					}
@@ -238,29 +238,29 @@ namespace C4LSP::Features
 		}
 	}
 
-	void Completion::CollectClassMembers(const Core::Vector<const Scripting::AstNode*>& path, CompletionCandidates& out)
+	void Completion::CollectClassMembers(const Core::Vector<const C4Compiler::AstNode*>& path, CompletionCandidates& out)
 	{
 		for (int i = static_cast<int>(path.Count()) - 1; i >= 0; --i)
 		{
-			const Scripting::AstNode* node = path[i];
-			if (node->Type() != Scripting::NodeType::ObjectDefinition)
+			const C4Compiler::AstNode* node = path[i];
+			if (node->Type() != C4Compiler::NodeType::ObjectDefinition)
 				continue;
 
-			const auto& obj = static_cast<const Scripting::ObjectDefinitionNode&>(*node);
+			const auto& obj = static_cast<const C4Compiler::ObjectDefinitionNode&>(*node);
 			for (const auto& member : obj.GetBodyMembers())
 			{
 				if (!member)
 					continue;
 				switch (member->Type())
 				{
-				case Scripting::NodeType::VariableDefinition: {
-					const auto& field = static_cast<const Scripting::VariableDefinitionNode&>(*member.Get());
+				case C4Compiler::NodeType::VariableDefinition: {
+					const auto& field = static_cast<const C4Compiler::VariableDefinitionNode&>(*member.Get());
 					out.Add(field.GetNameToken().GetText(), Kind::Field,
 						[&] { return field.GetType() ? field.GetType()->ToString() : std::string(); });
 					break;
 				}
-				case Scripting::NodeType::FunctionDefinition: {
-					const auto& method = static_cast<const Scripting::FunctionDefinitionNode&>(*member.Get());
+				case C4Compiler::NodeType::FunctionDefinition: {
+					const auto& method = static_cast<const C4Compiler::FunctionDefinitionNode&>(*member.Get());
 					if (method.GetName())
 						out.Add(method.GetName()->GetFirstIdentifierToken().GetText(), Kind::Method,
 							[&] { return method.GetReturnType().Get() ? method.GetReturnType()->ToString() + "()" : std::string("()"); });
@@ -276,7 +276,7 @@ namespace C4LSP::Features
 
 	void Completion::CollectGlobalSymbols(const Server::SemanticResolver& resolver, CompletionCandidates& out)
 	{
-		resolver.ForEachGlobalSymbol([&out](const Core::String& name, const Scripting::SymbolInfo& info) {
+		resolver.ForEachGlobalSymbol([&out](const Core::String& name, const C4Compiler::SymbolInfo& info) {
 			if (!out.Wants(name))
 				return;
 			out.Add(name, SymbolKindToLsp(info.kind), [&] {
@@ -305,18 +305,18 @@ namespace C4LSP::Features
 		return qualifier;
 	}
 
-	bool Completion::CollectQualified(const Server::SemanticResolver& resolver, uint32 unitId, const Core::Vector<const Scripting::AstNode*>& path,
+	bool Completion::CollectQualified(const Server::SemanticResolver& resolver, uint32 unitId, const Core::Vector<const C4Compiler::AstNode*>& path,
 		const std::string& qualifier, CompletionCandidates& out)
 	{
-		const Scripting::SymbolInfo* named = resolver.Lookup(qualifier, unitId, &path);
+		const C4Compiler::SymbolInfo* named = resolver.Lookup(qualifier, unitId, &path);
 		if (!named)
 			return false;
-		if (named->kind == Scripting::SymbolKind::Namespace && named->scope)
+		if (named->kind == C4Compiler::SymbolKind::Namespace && named->scope)
 		{
 			AddScopeSymbols(*named->scope, out);
 			return true;
 		}
-		if (named->kind == Scripting::SymbolKind::Type && named->type)
+		if (named->kind == C4Compiler::SymbolKind::Type && named->type)
 		{
 			CollectMembersOf(named->type, out);
 			return true;
@@ -324,13 +324,13 @@ namespace C4LSP::Features
 		return false;
 	}
 
-	void Completion::AddScopeSymbols(const Scripting::Scope& scope, CompletionCandidates& out)
+	void Completion::AddScopeSymbols(const C4Compiler::Scope& scope, CompletionCandidates& out)
 	{
-		Core::Vector<std::pair<Core::String, Scripting::SymbolInfo*>> entries;
+		Core::Vector<std::pair<Core::String, C4Compiler::SymbolInfo*>> entries;
 		scope.Enumerate(entries);
 		for (const auto& [name, info] : entries)
 		{
-			if (Scripting::IsExtensionMethodKey(name)) continue; // a member of the type it extends
+			if (C4Compiler::IsExtensionMethodKey(name)) continue; // a member of the type it extends
 			out.Add(name, SymbolKindToLsp(info->kind), [&] {
 				if (!info->functions.Empty()) return FunctionSignature(info->functions[0]->type);
 				return info->type ? info->type->ToString() : std::string();
@@ -338,14 +338,14 @@ namespace C4LSP::Features
 		}
 	}
 
-	int Completion::SymbolKindToLsp(Scripting::SymbolKind kind)
+	int Completion::SymbolKindToLsp(C4Compiler::SymbolKind kind)
 	{
 		switch (kind)
 		{
-		case Scripting::SymbolKind::Function:  return Kind::Function;
-		case Scripting::SymbolKind::Type:      return Kind::Class;
-		case Scripting::SymbolKind::Namespace: return Kind::Module;
-		case Scripting::SymbolKind::Variable:  return Kind::Variable;
+		case C4Compiler::SymbolKind::Function:  return Kind::Function;
+		case C4Compiler::SymbolKind::Type:      return Kind::Class;
+		case C4Compiler::SymbolKind::Namespace: return Kind::Module;
+		case C4Compiler::SymbolKind::Variable:  return Kind::Variable;
 		default:                               return Kind::Variable;
 		}
 	}

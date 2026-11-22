@@ -7,7 +7,7 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
 
-namespace Scripting
+namespace C4Compiler
 {
 	std::unique_ptr<EhLowering> EhLowering::For(ExceptionScheme scheme, MirEmitter& emitter)
 	{
@@ -427,4 +427,4 @@ namespace Scripting
 		B.CreateStore(B.getInt32(StaticStorage::kOnceRunning), guard);
 		B.CreateBr(TargetOf(end.target));
 	}
-} // namespace Scripting
+} // namespace C4Compiler

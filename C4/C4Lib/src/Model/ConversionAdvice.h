@@ -1,7 +1,7 @@
 #pragma once
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class Type;
 

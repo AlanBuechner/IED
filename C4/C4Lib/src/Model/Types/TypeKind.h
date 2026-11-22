@@ -1,6 +1,6 @@
 #pragma once
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Canonical type representation for semantic analysis.
 	enum class TypeKind
@@ -31,4 +31,4 @@ namespace Scripting
 		BracedList,   // a braced argument `{a, b}` while a call is resolved: only its entry count (D-57)
 		Invalid
 	};
-} // namespace Scripting
+} // namespace C4Compiler

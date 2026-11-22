@@ -4,7 +4,7 @@
 #include "Core/Core.h"
 #include <string_view>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A numeric literal's type and value (docs/language/03 3.6-3.7): an integer's bits (an unsigned value
 	/// above INT64_MAX keeps its bit pattern) or a floating-point value.

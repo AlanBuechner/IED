@@ -3,7 +3,7 @@
 #include "SourceManager/SourceManager.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The registered files the interop pass reads: each whose text, as its parse reads it, may hold an `extern "c"` or
 	/// `extern "c++"` directive. `projectFolders`: a file's headers are found in its project's folders and its

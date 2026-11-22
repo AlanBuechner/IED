@@ -5,7 +5,7 @@
 #include <optional>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct SymbolInfo;
 
@@ -22,4 +22,4 @@ namespace Scripting
 	/// as data in the image, not as code that runs before main. Nothing when any step of `start` does more: a call, a
 	/// loop, a value that is not such a constant.
 	std::optional<ConstantData> ConstantImage(const BlockNode& start, const SymbolInfo& global, uint64 size);
-} // namespace Scripting
+} // namespace C4Compiler

@@ -7,7 +7,7 @@ namespace llvm
 	class Module;
 }
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The definitions of each of `count` partitions of `module`, in the module's order. Data no source file names
 	/// (the reflection image and its rows, the GC roots table) is the first partition's alone, so an edit that changes

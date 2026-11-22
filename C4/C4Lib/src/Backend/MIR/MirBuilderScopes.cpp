@@ -2,7 +2,7 @@
 // and catch, once regions. docs/compiler/06-mir.md "Scopes and exits".
 #include "Backend/MIR/MirBuilder.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	// --- scopes and exits -------------------------------------------------------------------------------------
 
@@ -392,4 +392,4 @@ namespace Scripting
 		}
 		Enter(done);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

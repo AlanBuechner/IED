@@ -7,7 +7,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// MSVC x64 RTTI (D-10, docs/compiler/04): a TypeDescriptor per decorated name, and for each polymorphic
 	/// type its ClassHierarchyDescriptor (the base class array) and the CompleteObjectLocator that sits at
@@ -33,4 +33,4 @@ namespace Scripting
 		std::unordered_map<const ObjectType*, llvm::GlobalVariable*> m_Hierarchies;
 		std::map<std::pair<const ObjectType*, int64>, llvm::GlobalVariable*> m_Locators;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

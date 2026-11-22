@@ -8,7 +8,7 @@
 #include <llvm/Transforms/Utils/Local.h>
 #include <unordered_map>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -159,4 +159,4 @@ namespace Scripting
 		const std::vector<bool> unwinds = graph.Unwinding();
 		pool.Run(modules.size(), [&](size_t i) { Apply(*modules[i], graph, unwinds); });
 	}
-} // namespace Scripting
+} // namespace C4Compiler

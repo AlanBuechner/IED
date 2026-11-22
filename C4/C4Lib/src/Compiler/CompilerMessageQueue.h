@@ -7,7 +7,7 @@
 #include <utility>
 #include <unordered_map>
 
-namespace Scripting
+namespace C4Compiler
 {
 
 	// --- Message types sent TO the compiler instance ---

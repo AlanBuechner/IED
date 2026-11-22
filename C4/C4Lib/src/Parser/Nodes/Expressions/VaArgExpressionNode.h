@@ -3,7 +3,7 @@
 #include "Parser/ParserState.h"
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// `va_arg(list, T)` (D-35): the next variadic argument, read as a `T`. The second operand is a type, so
 	/// it parses like `sizeof`'s.

@@ -3,7 +3,7 @@
 #include "Protocol/LspTypes.h"
 #include "Server/NodeLocator.h"
 
-namespace Scripting { class AstNode; class ProgramModel; struct SourceLocation; }
+namespace C4Compiler { class AstNode; class ProgramModel; struct SourceLocation; }
 namespace C4LSP::Server { class CompilationSession; class SemanticResolver; }
 
 namespace C4LSP::Features
@@ -44,9 +44,9 @@ namespace C4LSP::Features
 
 	private:
 		// The name-token span of a declaration or reference node (not the whole statement).
-		struct NameSpan { bool valid = false; Scripting::SourceLocation start, end; };
+		struct NameSpan { bool valid = false; C4Compiler::SourceLocation start, end; };
 
-		static NameSpan DeclarationNameSpan(const Scripting::AstNode& decl);
-		static RenameOccurrence MakeOccurrence(Server::CompilationSession& session, uint32 sourceId, const Scripting::SourceLocation& start, const Scripting::SourceLocation& end);
+		static NameSpan DeclarationNameSpan(const C4Compiler::AstNode& decl);
+		static RenameOccurrence MakeOccurrence(Server::CompilationSession& session, uint32 sourceId, const C4Compiler::SourceLocation& start, const C4Compiler::SourceLocation& end);
 	};
 } // namespace C4LSP::Features

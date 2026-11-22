@@ -8,7 +8,7 @@
 #include "Parser/Nodes/Declarations/NamespaceNode.h"
 #include "Parser/Nodes/Expressions/LiteralNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

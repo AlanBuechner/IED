@@ -25,7 +25,7 @@ namespace C4LSP::Features
 		if (!unit || !unit->GetRootAST())
 			return {};
 
-		const Scripting::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
+		const C4Compiler::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
 		Server::LocatedNode located = Server::NodeLocator::Locate(source, sourceId, unit->GetRootAST(), position);
 		if (!located.Found())
 			return {};
@@ -39,11 +39,11 @@ namespace C4LSP::Features
 
 		for (int i = static_cast<int>(located.path.Count()) - 1; i >= 0; --i)
 		{
-			const Scripting::AstNode* node = located.path[i];
+			const C4Compiler::AstNode* node = located.path[i];
 
 			// A value reference whose resolved type is a user-defined object/enum: jump to that type.
-			if (node->Type() == Scripting::NodeType::IdentifierExpression ||
-				node->Type() == Scripting::NodeType::MemberAccess)
+			if (node->Type() == C4Compiler::NodeType::IdentifierExpression ||
+				node->Type() == C4Compiler::NodeType::MemberAccess)
 			{
 				auto locations = ResolveReference(session, resolver, *node, located.path);
 				if (!locations.Empty())
@@ -51,7 +51,7 @@ namespace C4LSP::Features
 			}
 
 			// A type name (in a declaration, cast, `new`, or qualified path): jump to the type definition.
-			if (node->Type() == Scripting::NodeType::QualType)
+			if (node->Type() == C4Compiler::NodeType::QualType)
 			{
 				auto locations = ResolveTypeName(session, *node, located.path);
 				if (!locations.Empty())
@@ -61,15 +61,15 @@ namespace C4LSP::Features
 		return {};
 	}
 
-	Core::Vector<Protocol::Location> TypeDefinition::ResolveReference(Server::CompilationSession& session, const Server::SemanticResolver& resolver, const Scripting::AstNode& node, const Core::Vector<const Scripting::AstNode*>& path)
+	Core::Vector<Protocol::Location> TypeDefinition::ResolveReference(Server::CompilationSession& session, const Server::SemanticResolver& resolver, const C4Compiler::AstNode& node, const Core::Vector<const C4Compiler::AstNode*>& path)
 	{
 		return LocationOfType(session, resolver.ResolveReference(node, path).type);
 	}
 
-	Core::Vector<Protocol::Location> TypeDefinition::LocationOfType(Server::CompilationSession& session, const Scripting::Type* type)
+	Core::Vector<Protocol::Location> TypeDefinition::LocationOfType(Server::CompilationSession& session, const C4Compiler::Type* type)
 	{
 		// Only user-defined named types have a definition to jump to: a `Point*` or a `Point&` still lands on Point.
-		const Scripting::AstNode* typeDecl = DeclarationOfNamedType(type);
+		const C4Compiler::AstNode* typeDecl = DeclarationOfNamedType(type);
 		if (!typeDecl)
 			return {};
 		return { Definition::LocationForDeclaration(session, *typeDecl) };
@@ -77,25 +77,25 @@ namespace C4LSP::Features
 
 	Core::Vector<Protocol::Location> TypeDefinition::DeclaredType(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position)
 	{
-		const Scripting::AstNode* declaration = Definition::DeclarationNamedAt(session, sourceId, located, position);
-		const Scripting::QualTypeNode* type = nullptr;
-		if (declaration && declaration->Type() == Scripting::NodeType::VariableDefinition)
-			type = static_cast<const Scripting::VariableDefinitionNode&>(*declaration).GetType().Get();
-		else if (declaration && declaration->Type() == Scripting::NodeType::Parameter)
-			type = static_cast<const Scripting::ParameterNode&>(*declaration).GetType().Get();
+		const C4Compiler::AstNode* declaration = Definition::DeclarationNamedAt(session, sourceId, located, position);
+		const C4Compiler::QualTypeNode* type = nullptr;
+		if (declaration && declaration->Type() == C4Compiler::NodeType::VariableDefinition)
+			type = static_cast<const C4Compiler::VariableDefinitionNode&>(*declaration).GetType().Get();
+		else if (declaration && declaration->Type() == C4Compiler::NodeType::Parameter)
+			type = static_cast<const C4Compiler::ParameterNode&>(*declaration).GetType().Get();
 		return type ? LocationOfType(session, session.GetResolver().ResolveQualType(*type, located.path)) : Core::Vector<Protocol::Location>();
 	}
 
-	Core::Vector<Protocol::Location> TypeDefinition::ResolveTypeName(Server::CompilationSession& session, const Scripting::AstNode& typeNode, const Core::Vector<const Scripting::AstNode*>& path)
+	Core::Vector<Protocol::Location> TypeDefinition::ResolveTypeName(Server::CompilationSession& session, const C4Compiler::AstNode& typeNode, const Core::Vector<const C4Compiler::AstNode*>& path)
 	{
-		const auto& qt = static_cast<const Scripting::QualTypeNode&>(typeNode);
+		const auto& qt = static_cast<const C4Compiler::QualTypeNode&>(typeNode);
 		if (!qt.BaseName())
 			return {};
 
 		std::string full; // outermost..innermost, for a qualified lookup
 		std::string simple; // the last identifier segment (a type definition is keyed by it)
 		for (const auto& seg : qt.BaseName()->GetSegments())
-			if (seg.nameToken.GetType() == Scripting::TokenType::Identifier)
+			if (seg.nameToken.GetType() == C4Compiler::TokenType::Identifier)
 			{
 				full += (full.empty() ? "" : "::") + std::string(seg.nameToken.GetText());
 				simple = seg.nameToken.GetText();
@@ -107,19 +107,19 @@ namespace C4LSP::Features
 		// with its declaring node. A nested type (`Vec2` inside `Test`) doesn't resolve through the global
 		// qualified walk, so fall back to a by-name scan of every declaration when that finds nothing.
 		const Server::SemanticResolver& resolver = session.GetResolver();
-		if (const Scripting::SymbolInfo* info = resolver.Lookup(full, 0))
-			if (info->kind == Scripting::SymbolKind::Type && info->declNode)
+		if (const C4Compiler::SymbolInfo* info = resolver.Lookup(full, 0))
+			if (info->kind == C4Compiler::SymbolKind::Type && info->declNode)
 				return { Definition::LocationForDeclaration(session, *info->declNode) };
 
-		std::vector<const Scripting::AstNode*> decls;
+		std::vector<const C4Compiler::AstNode*> decls;
 		resolver.CollectDeclarationsByName(simple, decls);
 		Core::Vector<Protocol::Location> result;
-		for (const Scripting::AstNode* decl : decls)
+		for (const C4Compiler::AstNode* decl : decls)
 		{
-			if (decl->Type() != Scripting::NodeType::ObjectDefinition &&
-				decl->Type() != Scripting::NodeType::EnumDefinition &&
-				decl->Type() != Scripting::NodeType::UnionDefinition &&
-				decl->Type() != Scripting::NodeType::AliasDefinition)
+			if (decl->Type() != C4Compiler::NodeType::ObjectDefinition &&
+				decl->Type() != C4Compiler::NodeType::EnumDefinition &&
+				decl->Type() != C4Compiler::NodeType::UnionDefinition &&
+				decl->Type() != C4Compiler::NodeType::AliasDefinition)
 				continue; // a type reference wants a type definition, not a same-named function/variable
 			result.Push(Definition::LocationForDeclaration(session, *decl));
 		}

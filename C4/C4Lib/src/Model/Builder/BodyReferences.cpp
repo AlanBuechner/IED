@@ -3,7 +3,7 @@
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
 #include <set>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -33,4 +33,4 @@ namespace Scripting
 				InstantiateNamedTypes(model, body, unit);
 		}
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -8,7 +8,7 @@
 #include <llvm/TargetParser/Triple.h>
 #include <iostream>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -138,4 +138,4 @@ namespace Scripting
 		static const LinuxX64 target;
 		return target;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

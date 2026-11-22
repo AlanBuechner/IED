@@ -2,7 +2,7 @@
 #include "Backend/HIR/ReadOnly.h"
 #include "Model/TypeHandle.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	const LValue* BuildIndexLValue(LoweringContext& ctx, const Value& base, const HIRNode* indexNode,
 		const Type* elemType, size_t elemSize)
@@ -37,4 +37,4 @@ namespace Scripting
 		const HIRNode* base = static_cast<const AddressArithmeticNode*>(element->addr)->base;
 		return base && base->kind == HIRNode::Kind::AddressOf ? static_cast<const AddressOfNode*>(base)->loc : nullptr;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

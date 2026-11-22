@@ -1,7 +1,7 @@
 #include "Backend/HIR/PackedViews.h"
 #include "Model/Types/SwizzleType.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -83,4 +83,4 @@ namespace Scripting
 		const LValue* storage = RegionStorage(ctx, obj, *region, base);
 		return name.size() == 1 ? OneLane(ctx, region->m_Swizzle, storage, name) : LaneRun(ctx, region->m_Swizzle, storage, name);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

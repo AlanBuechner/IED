@@ -5,7 +5,7 @@
 #include <windows.h>
 #endif
 
-namespace Scripting
+namespace C4Compiler
 {
 	PrettyPrintConsumer::PrettyPrintConsumer()
 	{

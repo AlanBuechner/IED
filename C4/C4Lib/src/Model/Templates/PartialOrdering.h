@@ -1,7 +1,7 @@
 #pragma once
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct AstNode;
 	struct TemplateDefinitionNode;
@@ -31,4 +31,4 @@ namespace Scripting
 		/// +1 when `a` is more specialized than `b`, -1 when `b` is more specialized than `a`, 0 when neither is.
 		int Compare(const TemplatePatterns& a, const TemplatePatterns& b);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

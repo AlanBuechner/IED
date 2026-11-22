@@ -3,7 +3,7 @@
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/raw_ostream.h>
 
-namespace Scripting
+namespace C4Compiler
 {
 	// The module is verified once (which checks every function too); only a failure goes through the functions one by
 	// one, so the diagnostic names the culprit (a bare verifyModule reports the first error without saying where).

@@ -2,7 +2,7 @@
 #include "Compiler/CompilationResult.h"
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class CompilerInstance;
 	class SourceManager;

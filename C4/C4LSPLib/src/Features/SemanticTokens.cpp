@@ -42,33 +42,33 @@ namespace C4LSP::Features
 	namespace
 	{
 		// --- Keyword classification for the lexical pass ------------------------
-		bool IsKeywordToken(Scripting::TokenType t)
+		bool IsKeywordToken(C4Compiler::TokenType t)
 		{
-			return Scripting::Token::IsKeyword(t);
+			return C4Compiler::Token::IsKeyword(t);
 		}
 
-		uint32 KeywordKind(Scripting::TokenType t)
+		uint32 KeywordKind(C4Compiler::TokenType t)
 		{
 			switch (t)
 			{
-			case Scripting::TokenType::If:
-			case Scripting::TokenType::Else:
-			case Scripting::TokenType::Switch:
-			case Scripting::TokenType::Case:
-			case Scripting::TokenType::Default:
-			case Scripting::TokenType::Fallthrough:
-			case Scripting::TokenType::For:
-			case Scripting::TokenType::While:
-			case Scripting::TokenType::Do:
-			case Scripting::TokenType::Break:
-			case Scripting::TokenType::Continue:
-			case Scripting::TokenType::Return:
-			case Scripting::TokenType::Defer:
-			case Scripting::TokenType::Goto:
-			case Scripting::TokenType::Try:
-			case Scripting::TokenType::Catch:
-			case Scripting::TokenType::Finally:
-			case Scripting::TokenType::Throw:
+			case C4Compiler::TokenType::If:
+			case C4Compiler::TokenType::Else:
+			case C4Compiler::TokenType::Switch:
+			case C4Compiler::TokenType::Case:
+			case C4Compiler::TokenType::Default:
+			case C4Compiler::TokenType::Fallthrough:
+			case C4Compiler::TokenType::For:
+			case C4Compiler::TokenType::While:
+			case C4Compiler::TokenType::Do:
+			case C4Compiler::TokenType::Break:
+			case C4Compiler::TokenType::Continue:
+			case C4Compiler::TokenType::Return:
+			case C4Compiler::TokenType::Defer:
+			case C4Compiler::TokenType::Goto:
+			case C4Compiler::TokenType::Try:
+			case C4Compiler::TokenType::Catch:
+			case C4Compiler::TokenType::Finally:
+			case C4Compiler::TokenType::Throw:
 				return K(SemanticTokenKind::ControlFlow); // control flow reads lighter purple, distinct from plain keywords
 
 			// Access modifiers and qualifiers (public / private / protected / virtual / override / const / static)
@@ -79,7 +79,7 @@ namespace C4LSP::Features
 		}
 
 		/// True when (line, column-1) matches a directive line start from `starts`.
-		bool IsDirectiveLineStart(const std::vector<std::pair<uint32, uint32>>& starts, const Scripting::SourceLocation& loc)
+		bool IsDirectiveLineStart(const std::vector<std::pair<uint32, uint32>>& starts, const C4Compiler::SourceLocation& loc)
 		{
 			for (const auto& s : starts)
 				if (s.first == loc.line && s.second == (loc.column > 0 ? loc.column - 1 : 0))
@@ -89,10 +89,10 @@ namespace C4LSP::Features
 
 		/// True when `tok` (an identifier spelled "include") starts a real include directive, using the same
 		/// commit rule as IncludeDeclarationNode::TryParse/ParseBody: next token is a string literal ending in ".ch".
-		bool IsIncludeDirective(const Scripting::Lexer& lexer)
+		bool IsIncludeDirective(const C4Compiler::Lexer& lexer)
 		{
-			const Scripting::Token& path = lexer.PeekCompound();
-			if (path.GetType() != Scripting::TokenType::Text)
+			const C4Compiler::Token& path = lexer.PeekCompound();
+			if (path.GetType() != C4Compiler::TokenType::Text)
 				return false;
 			const std::string& text = path.GetText(); // Core::String is std::string; .ch check matches the parser's substr test
 			return text.size() >= 3 && text.substr(text.size() - 3) == ".ch";
@@ -138,7 +138,7 @@ namespace C4LSP::Features
 		}
 
 		// A line's length (1-based line) without its line break.
-		uint32 LineLength(const Scripting::Source* source, uint32 line)
+		uint32 LineLength(const C4Compiler::Source* source, uint32 line)
 		{
 			Core::String text = source->GetLineText(line);
 			size_t size = text.size();
@@ -150,8 +150,8 @@ namespace C4LSP::Features
 		// Lengths are byte spans (C4 sources are treated as bytes). A token over several lines - a block comment, or
 		// a line comment the lexer ends at the next line's start - becomes one token per line: an LSP token never
 		// crosses a line unless the client says it takes multiline tokens, and IED does not.
-		void Emit(C4LSP::Features::SemanticTokensResult& out, const Scripting::Token& tok, uint32 kind, uint32 modifiers,
-		           const Scripting::Source* source)
+		void Emit(C4LSP::Features::SemanticTokensResult& out, const C4Compiler::Token& tok, uint32 kind, uint32 modifiers,
+		           const C4Compiler::Source* source)
 		{
 			const auto& s = tok.GetStartLocation();
 			const auto& e = tok.GetEndLocation();
@@ -202,13 +202,13 @@ namespace C4LSP::Features
 		if (unit && unit->GetRootAST())
 		{
 			CollectIncludedDeclarations(session.GetCompiler(), ctx);
-			Core::Vector<const Scripting::AstNode*> path;
+			Core::Vector<const C4Compiler::AstNode*> path;
 			Walk(*unit->GetRootAST().Get(), ctx, path, /*objectDepth=*/0, /*directMember=*/false);
 		}
 
 		// 2) Re-lex the text and emit one token per semantic lexeme.
-		auto source = Scripting::Source::FromMemory(text);
-		Scripting::Lexer lexer(*source.Get(), sourceId);
+		auto source = C4Compiler::Source::FromMemory(text);
+		C4Compiler::Lexer lexer(*source.Get(), sourceId);
 
 		// Preprocessor directive lines (their '#' is swallowed into an identifier by the lexer, so the
 		// first token of each such line must be colored a macro): positions + the defined-macro names.
@@ -224,7 +224,7 @@ namespace C4LSP::Features
 		// are blank (BUG-343).
 		auto& sourceManager = session.GetSourceManager();
 		for (uint32 sid = 1; sid <= sourceManager.Count(); ++sid)
-			if (const Scripting::MacroTable* table = session.MacroTableOf(sid))
+			if (const C4Compiler::MacroTable* table = session.MacroTableOf(sid))
 				for (const auto& [name, macro] : table->All())
 					definedMacros.insert(name);
 
@@ -264,13 +264,13 @@ namespace C4LSP::Features
 
 		while (true)
 		{
-			const Scripting::Token& tok = lexer.NextToken();
-			if (tok.GetType() == Scripting::TokenType::EndOfFile)
+			const C4Compiler::Token& tok = lexer.NextToken();
+			if (tok.GetType() == C4Compiler::TokenType::EndOfFile)
 				break;
 
 			switch (tok.GetType())
 			{
-			case Scripting::TokenType::Identifier: {
+			case C4Compiler::TokenType::Identifier: {
 				const auto& startLoc = tok.GetStartLocation();
 				auto it = ctx.byOffset.find({ startLoc.line, startLoc.column });
 				uint32 kind;
@@ -307,15 +307,15 @@ namespace C4LSP::Features
 				Emit(result, tok, kind, modifiers, source.Get());
 				break;
 			}
-			case Scripting::TokenType::Number:
-			case Scripting::TokenType::Char:
+			case C4Compiler::TokenType::Number:
+			case C4Compiler::TokenType::Char:
 				Emit(result, tok, K(SemanticTokenKind::Number), None, source.Get());
 				break;
-			case Scripting::TokenType::Comment:
-			case Scripting::TokenType::MultiComment:
+			case C4Compiler::TokenType::Comment:
+			case C4Compiler::TokenType::MultiComment:
 				Emit(result, tok, K(SemanticTokenKind::Comment), None, source.Get());
 				break;
-			case Scripting::TokenType::Text:
+			case C4Compiler::TokenType::Text:
 				Emit(result, tok, K(SemanticTokenKind::String), None, source.Get());
 				break;
 			default:

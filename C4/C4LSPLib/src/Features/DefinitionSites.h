@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting { struct FunctionDefinitionNode; }
+namespace C4Compiler { struct FunctionDefinitionNode; }
 
 namespace C4LSP::Server { class CompilationSession; }
 
@@ -33,9 +33,9 @@ namespace C4LSP::Features
 	class DefinitionSites
 	{
 	public:
-		static std::optional<DefinitionSite> InSourceFile(Server::CompilationSession& session, const Scripting::FunctionDefinitionNode& declaration);
+		static std::optional<DefinitionSite> InSourceFile(Server::CompilationSession& session, const C4Compiler::FunctionDefinitionNode& declaration);
 		/// How a body written in place of the declaration's `;` looks: as the bodies beside it are written.
-		static DefinitionStyle InPlaceStyle(Server::CompilationSession& session, const Scripting::FunctionDefinitionNode& declaration);
+		static DefinitionStyle InPlaceStyle(Server::CompilationSession& session, const C4Compiler::FunctionDefinitionNode& declaration);
 		/// What goes in at the site for these definitions, in order: in the namespaces it opens, apart from the code around
 		/// it. `caret` is where the first one's cursor lands in it.
 		static std::string Joined(const DefinitionSite& site, const std::vector<WrittenDefinition>& definitions, size_t& caret);

@@ -7,7 +7,7 @@
 
 namespace Testing
 {
-	using namespace Scripting;
+	using namespace C4Compiler;
 	namespace fs = std::filesystem;
 
 	namespace

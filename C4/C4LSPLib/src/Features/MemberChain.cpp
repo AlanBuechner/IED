@@ -101,85 +101,85 @@ namespace C4LSP::Features
 			return link;
 		}
 
-		const Scripting::Type* Value(const Scripting::Type* type) { return Scripting::TypeHandle::UnwrapToValue(type); }
+		const C4Compiler::Type* Value(const C4Compiler::Type* type) { return C4Compiler::TypeHandle::UnwrapToValue(type); }
 
-		const Scripting::ObjectType* ObjectOf(const Scripting::Type* type)
+		const C4Compiler::ObjectType* ObjectOf(const C4Compiler::Type* type)
 		{
 			type = Value(type);
-			return type && type->GetKind() == Scripting::TypeKind::Object ? static_cast<const Scripting::ObjectType*>(type) : nullptr;
+			return type && type->GetKind() == C4Compiler::TypeKind::Object ? static_cast<const C4Compiler::ObjectType*>(type) : nullptr;
 		}
 
 		// What a function or a callable value returns; a type that is neither is a method's, already its return type.
-		const Scripting::Type* Returned(const Scripting::Type* type)
+		const C4Compiler::Type* Returned(const C4Compiler::Type* type)
 		{
-			const Scripting::Type* value = Value(type);
+			const C4Compiler::Type* value = Value(type);
 			if (!value) return nullptr;
 			switch (value->GetKind())
 			{
-			case Scripting::TypeKind::Function: return static_cast<const Scripting::FunctionType*>(value)->GetReturnType();
-			case Scripting::TypeKind::FunPtr:
-			case Scripting::TypeKind::Func: return static_cast<const Scripting::SignatureType*>(value)->GetReturnType();
+			case C4Compiler::TypeKind::Function: return static_cast<const C4Compiler::FunctionType*>(value)->GetReturnType();
+			case C4Compiler::TypeKind::FunPtr:
+			case C4Compiler::TypeKind::Func: return static_cast<const C4Compiler::SignatureType*>(value)->GetReturnType();
 			default: return type;
 			}
 		}
 
 		// The return type of the operator `annotation` (`index`, `call`, `arrow`) of `type`'s object; null without one.
-		const Scripting::Type* OperatorReturn(const Scripting::Type* type, const char* annotation)
+		const C4Compiler::Type* OperatorReturn(const C4Compiler::Type* type, const char* annotation)
 		{
-			for (const Scripting::ObjectType* object = ObjectOf(type); object; object = object->GetBaseTypes().Empty() ? nullptr : object->GetBaseTypes()[0])
+			for (const C4Compiler::ObjectType* object = ObjectOf(type); object; object = object->GetBaseTypes().Empty() ? nullptr : object->GetBaseTypes()[0])
 				if (const Core::Vector<uint32>* methods = object->MethodsWithOperator(Core::String(annotation)))
 					return object->GetMethods()[(*methods)[0]].m_ReturnType;
 			return nullptr;
 		}
 
 		// What calling a value of `value`'s type returns: a callable's return type, an object's `()` operator's.
-		const Scripting::Type* CallResult(const Scripting::Type* value)
+		const C4Compiler::Type* CallResult(const C4Compiler::Type* value)
 		{
 			switch (value->GetKind())
 			{
-			case Scripting::TypeKind::Function:
-			case Scripting::TypeKind::FunPtr:
-			case Scripting::TypeKind::Func: return Returned(value);
-			case Scripting::TypeKind::Object: return OperatorReturn(value, "call");
+			case C4Compiler::TypeKind::Function:
+			case C4Compiler::TypeKind::FunPtr:
+			case C4Compiler::TypeKind::Func: return Returned(value);
+			case C4Compiler::TypeKind::Object: return OperatorReturn(value, "call");
 			default: return nullptr;
 			}
 		}
 
-		const Scripting::Type* Applied(const Scripting::Type* type, Suffix suffix)
+		const C4Compiler::Type* Applied(const C4Compiler::Type* type, Suffix suffix)
 		{
-			const Scripting::Type* value = Value(type);
+			const C4Compiler::Type* value = Value(type);
 			if (!value) return nullptr;
 			if (suffix == Suffix::Call) return CallResult(value);
 			switch (value->GetKind())
 			{
-			case Scripting::TypeKind::Pointer: return static_cast<const Scripting::PointerType*>(value)->GetPointeeType();
-			case Scripting::TypeKind::Array: return static_cast<const Scripting::ArrayType*>(value)->GetElementType();
+			case C4Compiler::TypeKind::Pointer: return static_cast<const C4Compiler::PointerType*>(value)->GetPointeeType();
+			case C4Compiler::TypeKind::Array: return static_cast<const C4Compiler::ArrayType*>(value)->GetElementType();
 			default: return OperatorReturn(value, "index");
 			}
 		}
 
 		// What `->` reaches from `type`: a pointer's pointee, or what the object's `->` operator returns, dereferenced.
-		const Scripting::Type* Arrowed(const Scripting::Type* type)
+		const C4Compiler::Type* Arrowed(const C4Compiler::Type* type)
 		{
-			const Scripting::Type* value = Value(type);
-			if (value && value->GetKind() == Scripting::TypeKind::Object)
+			const C4Compiler::Type* value = Value(type);
+			if (value && value->GetKind() == C4Compiler::TypeKind::Object)
 				value = Value(OperatorReturn(value, "arrow"));
-			return value && value->GetKind() == Scripting::TypeKind::Pointer ? static_cast<const Scripting::PointerType*>(value)->GetPointeeType() : value;
+			return value && value->GetKind() == C4Compiler::TypeKind::Pointer ? static_cast<const C4Compiler::PointerType*>(value)->GetPointeeType() : value;
 		}
 
 		// A member of `type` by name: a field's type, or a method's return type (`method` set).
-		const Scripting::Type* MemberType(const Scripting::Type* type, const std::string& name, bool& method)
+		const C4Compiler::Type* MemberType(const C4Compiler::Type* type, const std::string& name, bool& method)
 		{
 			method = false;
-			const Scripting::Type* value = Value(type);
+			const C4Compiler::Type* value = Value(type);
 			if (!value) return nullptr;
-			if (value->GetKind() == Scripting::TypeKind::Union)
+			if (value->GetKind() == C4Compiler::TypeKind::Union)
 			{
-				for (const auto& field : static_cast<const Scripting::UnionType*>(value)->GetFields())
+				for (const auto& field : static_cast<const C4Compiler::UnionType*>(value)->GetFields())
 					if (field.mName == name) return field.m_Type;
 				return nullptr;
 			}
-			const Scripting::ObjectType* object = ObjectOf(value);
+			const C4Compiler::ObjectType* object = ObjectOf(value);
 			if (!object) return nullptr;
 			if (const auto* field = object->GetFieldByName(Core::String(name))) return field->m_Type;
 			if (const auto* found = object->FindMethodByName(Core::String(name)))
@@ -190,30 +190,30 @@ namespace C4LSP::Features
 			return nullptr;
 		}
 
-		bool DeclaresType(const Scripting::AstNode* declaration)
+		bool DeclaresType(const C4Compiler::AstNode* declaration)
 		{
 			if (!declaration) return false;
 			switch (declaration->Type())
 			{
-			case Scripting::NodeType::ObjectDefinition:
-			case Scripting::NodeType::UnionDefinition:
-			case Scripting::NodeType::EnumDefinition:
-			case Scripting::NodeType::AliasDefinition: return true;
+			case C4Compiler::NodeType::ObjectDefinition:
+			case C4Compiler::NodeType::UnionDefinition:
+			case C4Compiler::NodeType::EnumDefinition:
+			case C4Compiler::NodeType::AliasDefinition: return true;
 			default: return false;
 			}
 		}
 
 		// The value a name has where the chain starts: its type, and whether its first call is spent on it (a function's
 		// call, a type's construction).
-		struct Start { const Scripting::Type* type = nullptr; bool called = false; };
+		struct Start { const C4Compiler::Type* type = nullptr; bool called = false; };
 
-		Start StartOfSymbol(const Scripting::SymbolInfo* info)
+		Start StartOfSymbol(const C4Compiler::SymbolInfo* info)
 		{
 			if (!info) return {};
 			switch (info->kind)
 			{
-			case Scripting::SymbolKind::Function: return { info->functions.Empty() ? nullptr : Returned(info->functions[0]->type), true };
-			case Scripting::SymbolKind::Type: return { info->type, true };
+			case C4Compiler::SymbolKind::Function: return { info->functions.Empty() ? nullptr : Returned(info->functions[0]->type), true };
+			case C4Compiler::SymbolKind::Type: return { info->type, true };
 			default: return { info->type, false };
 			}
 		}
@@ -238,7 +238,7 @@ namespace C4LSP::Features
 		return MemberChain(std::move(links));
 	}
 
-	const Scripting::Type* MemberChain::TypeIn(const Server::SemanticResolver& resolver, uint32 unitId, const Core::Vector<const Scripting::AstNode*>& path) const
+	const C4Compiler::Type* MemberChain::TypeIn(const Server::SemanticResolver& resolver, uint32 unitId, const Core::Vector<const C4Compiler::AstNode*>& path) const
 	{
 		// The leading links joined by `::` are one name (`Math::FVector3::Up`).
 		size_t at = 0;
@@ -255,7 +255,7 @@ namespace C4LSP::Features
 			start = { named.isFunction ? Returned(named.type) : named.type, named.isFunction || DeclaresType(named.declaration) };
 		}
 
-		const Scripting::Type* type = start.type;
+		const C4Compiler::Type* type = start.type;
 		bool called = start.called;
 		for (;;)
 		{

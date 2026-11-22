@@ -16,7 +16,7 @@ namespace Testing
 {
 	namespace
 	{
-		using namespace Scripting;
+		using namespace C4Compiler;
 
 		struct Parsed
 		{

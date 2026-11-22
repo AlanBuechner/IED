@@ -1,7 +1,7 @@
 #pragma once
 #include "Model/DeclaredAnnotations.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// How a folded argument fits an annotation parameter (docs/language/12 section 4.1).
 	struct ArgumentFit
@@ -18,4 +18,4 @@ namespace Scripting
 	/// The identifiers an expression or type names, in order: `Render::Pass::Glass` of a static access or a type name, `Glass`
 	/// of an identifier; empty for anything else.
 	Core::Vector<Core::String> WrittenNameSegments(const AstNode* written);
-} // namespace Scripting
+} // namespace C4Compiler

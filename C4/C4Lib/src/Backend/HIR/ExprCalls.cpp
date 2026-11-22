@@ -36,7 +36,7 @@
 #include "Model/Types/ReferenceType.h" // T& return -> Deref lvalue
 #include "Model/TypeHandle.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	QueryResult<Value> ExprLowerer::ResolveCall(const FunctionCallNode* n)
 	{
@@ -360,4 +360,4 @@ namespace Scripting
 		const Type* pointer = m_Ctx.queries().TypeStore()->FunPtr(instance.value->type->GetReturnType(), params);
 		return Value::R(m_Ctx.out->NewNode<FunctionAddressNode>(pointer, instance.value), pointer);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

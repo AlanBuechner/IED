@@ -5,7 +5,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace Scripting { struct AstNode; }
+namespace C4Compiler { struct AstNode; }
 
 namespace C4LSP::Server { class CompilationSession; }
 
@@ -51,9 +51,9 @@ namespace C4LSP::Features
 		static Core::Vector<WorkspaceSymbol> Collect(Server::CompilationSession& session, const std::string& query, size_t limit);
 		// Processes one declaration node: emits it when its name matches and recurses into any
 		// nested scopes (namespace/object bodies) so a query finds members of non-matching parents.
-		static void AddDeclaration(Walk& walk, const Scripting::AstNode& node, uint32 sourceId, const std::string& container, bool member);
-		static void AddEach(Walk& walk, const Core::Vector<Ref<Scripting::AstNode>>& nodes, uint32 sourceId, const std::string& container, bool member);
-		static void Push(Walk& walk, const Scripting::AstNode& node, const std::string& container, bool member);
+		static void AddDeclaration(Walk& walk, const C4Compiler::AstNode& node, uint32 sourceId, const std::string& container, bool member);
+		static void AddEach(Walk& walk, const Core::Vector<Ref<C4Compiler::AstNode>>& nodes, uint32 sourceId, const std::string& container, bool member);
+		static void Push(Walk& walk, const C4Compiler::AstNode& node, const std::string& container, bool member);
 		/// Every source's `#define`s whose name matches, as Function symbols where they are defined.
 		static void AddMacros(Walk& walk);
 	};

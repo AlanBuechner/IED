@@ -15,7 +15,7 @@
 #include "Parser/Nodes/Declarations/FunPtrTypeNode.h"
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	// ---------------------------------------------------------------------------
 	// TYPE RESOLUTION (doc 04): one entry point for every type position in the AST.
@@ -432,4 +432,4 @@ namespace Scripting
 			return nullptr; // cannot descend further
 		}
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -7,7 +7,7 @@
 #include "Parser/Nodes/Expressions/StaticAccessNode.h"
 #include "Parser/Nodes/Declarations/NamespaceQualifiedNameNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	// A qualified call target `Ns::Fn` (or nested `A::B::C`) parses as a StaticAccessNode whose base is
 	// either another StaticAccessNode or a plain identifier. Join the path into "A::B::C" for QueryFunction.
@@ -197,4 +197,4 @@ namespace Scripting
 		if (IsCallableField(owner.value, target.name)) return ValueCallTarget(sa); // `T::handler(x)`: a static field's value
 		return target;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

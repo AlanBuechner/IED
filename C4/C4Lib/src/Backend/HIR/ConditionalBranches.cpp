@@ -9,7 +9,7 @@
 #include "Model/Types/PointerType.h"
 #include "Model/Types/QualifiedName.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -85,4 +85,4 @@ namespace Scripting
 		chosen.addr = ctx.out->NewNode<TernaryNode>(pointer, condition, ctx.AddressAs(pointer, a.lvalue, true), ctx.AddressAs(pointer, b.lvalue, true));
 		return ctx.NewLValue(chosen);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

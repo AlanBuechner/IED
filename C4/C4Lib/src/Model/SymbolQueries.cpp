@@ -16,7 +16,7 @@
 #include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
 #include "Compiler/ErrorTracker.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -690,6 +690,6 @@ namespace Scripting
 	}
 
 
-} // namespace Scripting
+} // namespace C4Compiler
 
 

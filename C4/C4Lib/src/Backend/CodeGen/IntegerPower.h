@@ -2,7 +2,7 @@
 
 namespace llvm { class Function; class Module; class IntegerType; }
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// `a ** b` on integers (D-26): one internal function per integer type, by square-and-multiply with
 	/// wrapping multiplication. A negative exponent gives 0, except for a base of 1 (gives 1) and -1 (gives -1

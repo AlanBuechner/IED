@@ -1,7 +1,7 @@
 #pragma once
 #include "Target/TargetAbi.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Windows x64: an aggregate of exactly 1, 2, 4 or 8 bytes crosses a call as one integer of its width; any other
 	/// size in memory (null).
@@ -11,4 +11,4 @@ namespace Scripting
 	/// only floats is SSE (`float`, `<2 x float>` or `double`), any other INTEGER (an integer of the bytes it holds); the
 	/// one type, or a struct of the two. Null (memory) past 16 bytes, for an unaligned field, an x87 or 128-bit float.
 	llvm::Type* SystemVAggregateRegisters(const AggregateShape& aggregate);
-} // namespace Scripting
+} // namespace C4Compiler

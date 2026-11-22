@@ -2,7 +2,7 @@
 #include "Model/ProgramModel.h"
 #include "Model/TypeHandle.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -41,4 +41,4 @@ namespace Scripting
 		}
 		return own;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

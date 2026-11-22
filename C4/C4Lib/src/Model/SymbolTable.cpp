@@ -4,7 +4,7 @@
 #include <optional>
 #include <tuple>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -431,4 +431,4 @@ namespace Scripting
 		walk(m_Root.get());
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

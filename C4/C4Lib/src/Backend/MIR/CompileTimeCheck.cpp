@@ -3,7 +3,7 @@
 #include "Model/SymbolTable.h"
 #include "Parser/Nodes/Declarations/AnnotationNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -174,4 +174,4 @@ namespace Scripting
 			return QueryResult<void>::Fail(QueryError::NotAValue, "[compile_time] takes no arguments", mark->startLocation);
 		return CompileTimeCheck(fn).Run();
 	}
-} // namespace Scripting
+} // namespace C4Compiler

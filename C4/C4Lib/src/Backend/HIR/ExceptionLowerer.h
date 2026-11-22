@@ -1,7 +1,7 @@
 #pragma once
 #include "Backend/HIR/LoweringContext.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class StmtLowerer;
 	struct TryCatchNode; struct CatchClauseNode; struct ThrowStatementNode; struct DeferStatementNode;
@@ -27,4 +27,4 @@ namespace Scripting
 		LoweringContext& m_Ctx;
 		StmtLowerer& m_Stmts;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

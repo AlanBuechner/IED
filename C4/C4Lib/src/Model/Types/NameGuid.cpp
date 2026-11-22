@@ -1,7 +1,7 @@
 #include "Model/Types/NameGuid.h"
 #include <vector>
 
-namespace Scripting::NameGuid
+namespace C4Compiler::NameGuid
 {
 	namespace
 	{

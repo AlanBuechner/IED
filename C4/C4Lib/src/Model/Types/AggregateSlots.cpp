@@ -3,7 +3,7 @@
 #include "Model/Types/UnionLayout.h"
 #include <set>
 
-namespace Scripting::AggregateSlots
+namespace C4Compiler::AggregateSlots
 {
 	namespace
 	{

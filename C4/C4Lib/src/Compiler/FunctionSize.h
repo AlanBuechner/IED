@@ -2,7 +2,7 @@
 
 namespace llvm { class Function; }
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Whether `function` has at most `limit` instructions, counting no further than one past it: a block's size is a
 	/// walk of its instructions, so a large function's whole count is not paid for at each question.

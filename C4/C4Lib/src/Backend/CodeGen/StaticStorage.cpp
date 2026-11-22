@@ -5,7 +5,7 @@
 #include <llvm/IR/Instructions.h>
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -128,4 +128,4 @@ namespace Scripting
 		B.CreateRetVoid();
 		return fn;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

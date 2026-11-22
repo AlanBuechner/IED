@@ -3,7 +3,7 @@
 #include "Model/LifecycleMethods.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// What a type needs to come into existence, be copied and go away (docs/language/06): read from its own
 	/// lifecycle methods, its base and its fields. A type that needs none of it is trivial - zeroed storage
@@ -33,4 +33,4 @@ namespace Scripting
 		/// region is that member's offset less its m_UnionIntraOffset, m_UnionRegionSize bytes long.
 		void ForEachUnionRegion(const ObjectType* type, const std::function<void(const ObjectType::FieldInfo&)>& visit);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

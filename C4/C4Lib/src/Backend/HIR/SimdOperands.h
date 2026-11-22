@@ -3,7 +3,7 @@
 #include "Model/Types/SwizzleType.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// What the SIMD intrinsic families share (D-62): reading arguments as lanes, the lane checks and the messages.
 	namespace SimdOperands
@@ -50,4 +50,4 @@ namespace Scripting
 		SimdNode* MakeSimd(const Call& call, const Type* type, SimdNode::Op op, std::vector<const HIRNode*> operands);
 		Value Node(SimdNode* node);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

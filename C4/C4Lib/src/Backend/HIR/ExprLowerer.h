@@ -3,7 +3,7 @@
 #include "Backend/HIR/LoweringContext.h"
 #include "Backend/HIR/Construction.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	// Forward-declared AST node types used in the per-node method signatures; ExprLowerer.cpp
 	// includes their full definitions. (The lowerer only stores pointers to them.)
@@ -275,4 +275,4 @@ namespace Scripting
 
 		LoweringContext& m_Ctx; // the per-function state (slots, arena, queries)
 	};
-} // namespace Scripting
+} // namespace C4Compiler

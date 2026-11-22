@@ -1,7 +1,7 @@
 #include "Model/NotIncluded.h"
 #include "Model/ProgramModel.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -87,4 +87,4 @@ namespace Scripting
 		if (file.empty()) return "";
 		return " (another '" + name + "' is declared in " + file + c_ThisFile + ")";
 	}
-} // namespace Scripting
+} // namespace C4Compiler

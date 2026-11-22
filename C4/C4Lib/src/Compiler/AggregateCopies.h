@@ -2,7 +2,7 @@
 
 namespace llvm { class Module; }
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Rewrites each copy of a struct or array that the emitter wrote as a load and a store of the whole aggregate into a
 	/// memcpy. Unoptimized code generation (FastISel) cannot select an aggregate store and hands the rest of its block to

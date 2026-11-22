@@ -2,7 +2,7 @@
 #include "Model/Types/Type.h"
 #include "Model/Types/ObjectType.h" // FieldInfo (the list exposes its two aggregate fields)
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// C++-style initializer list: __init_list<T>. Mirrors std::initializer_list<T>'s ABI -
 	/// a 16-byte aggregate { const T* data, size_type size } passed by value. The element type
@@ -28,4 +28,4 @@ namespace Scripting
 		ObjectType::FieldInfo m_Size_;   // uint64 @8
 		bool m_HasMembers = false;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

@@ -7,7 +7,7 @@ namespace
 {
 	std::string StateOf(const std::string& path)
 	{
-		const std::optional<Scripting::FileStamp> stamp = Scripting::StampOf(path);
+		const std::optional<C4Compiler::FileStamp> stamp = C4Compiler::StampOf(path);
 		if (!stamp) return path + " missing\n";
 		return path + " " + std::to_string(stamp->size) + " " + std::to_string(stamp->modified) + "\n";
 	}
@@ -29,11 +29,11 @@ LinkStamp::LinkStamp(std::string path, const std::vector<std::string>& inputs, c
 	m_Inputs = Hash(read);
 }
 
-bool LinkStamp::Current() const { return Scripting::ReadFileBytes(m_Path) == Contents(); }
+bool LinkStamp::Current() const { return C4Compiler::ReadFileBytes(m_Path) == Contents(); }
 
-void LinkStamp::Record() const { Scripting::WriteFileBytes(m_Path, Contents()); }
+void LinkStamp::Record() const { C4Compiler::WriteFileBytes(m_Path, Contents()); }
 
-void LinkStamp::Forget() const { Scripting::RemoveFile(m_Path); }
+void LinkStamp::Forget() const { C4Compiler::RemoveFile(m_Path); }
 
 std::string LinkStamp::Contents() const
 {

@@ -1,7 +1,7 @@
 #pragma once
 #include "Model/Types/Type.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	// The values an integer type (bool, char or integer of any width) holds.
 	namespace IntegerRanges
@@ -14,4 +14,4 @@ namespace Scripting
 		/// uint64).
 		bool Fits(int64 value, const Type* integer);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

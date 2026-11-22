@@ -5,7 +5,7 @@
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/IRBuilder.h>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

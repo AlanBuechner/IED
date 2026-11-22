@@ -8,7 +8,7 @@
 #include <cstring>
 #include <unordered_map>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -112,4 +112,4 @@ namespace Scripting
 		for (const std::string& name : names) joined.append(name).push_back('\0');
 		return Hex(llvm::xxh3_64bits(llvm::StringRef(joined)));
 	}
-} // namespace Scripting
+} // namespace C4Compiler

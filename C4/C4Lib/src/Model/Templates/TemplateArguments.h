@@ -3,7 +3,7 @@
 #include "Model/QueryResult.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 	class Type;
@@ -93,4 +93,4 @@ namespace Scripting
 		static QueryResult<TemplateArg> ResolveValue(const ProgramModel& model, const AstNode* written, uint32 unitId, Scope* lookup,
 			const Scope* context);
 	};
-} // namespace Scripting
+} // namespace C4Compiler

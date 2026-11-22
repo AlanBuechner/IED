@@ -15,7 +15,7 @@
 #include <cstdlib>
 #include <unordered_map>
 
-namespace Scripting
+namespace C4Compiler
 {
 
 	namespace
@@ -308,4 +308,4 @@ namespace Scripting
 
 	void RemoveIfExists(const std::string& path) { RemoveFile(path); }
 
-} // namespace Scripting
+} // namespace C4Compiler

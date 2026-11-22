@@ -3,7 +3,7 @@
 #include "Core/Core.h"
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// C++-style and C-style cast expressions.
 	struct CastExpressionNode : public AstNode

@@ -14,7 +14,7 @@ namespace C4LSP::Features
 {
 	namespace
 	{
-		using Scripting::TokenType;
+		using C4Compiler::TokenType;
 
 		struct Tok
 		{
@@ -26,7 +26,7 @@ namespace C4LSP::Features
 		bool IsWordLike(TokenType t)
 		{
 			return t == TokenType::Identifier || t == TokenType::Number || t == TokenType::Char || t == TokenType::Text ||
-				Scripting::Token::IsKeyword(t);
+				C4Compiler::Token::IsKeyword(t);
 		}
 
 		bool IsControlKeyword(TokenType t)
@@ -141,8 +141,8 @@ namespace C4LSP::Features
 
 		void LexAll()
 		{
-			auto source = Scripting::Source::FromMemory(text);
-			Scripting::Lexer lexer(*source.Get(), /*sourceId=*/0); // formatter never resolves against a SourceManager
+			auto source = C4Compiler::Source::FromMemory(text);
+			C4Compiler::Lexer lexer(*source.Get(), /*sourceId=*/0); // formatter never resolves against a SourceManager
 
 			// The real compiler lexes compound operators (->, ==, <=, <<...): NextCompoundToken greedily
 			// combines adjacent atomic operator tokens into the longest match. The formatter must see the
@@ -155,7 +155,7 @@ namespace C4LSP::Features
 			// parse concern: spacing around < > can never change meaning, so it does not matter here.
 			while (true)
 			{
-				const Scripting::Token& tok = lexer.NextToken();
+				const C4Compiler::Token& tok = lexer.NextToken();
 				if (tok.GetType() == TokenType::EndOfFile)
 					break;
 
@@ -164,15 +164,15 @@ namespace C4LSP::Features
 				t.start = tok.GetByteOffset();
 				t.end = tok.GetEndLocation().byteOffset; // the exact source extent (a literal's text is its decoded value)
 
-				Scripting::Token combined = tok; // running copy of what has been consumed so far (atomic ops are one char each)
-				if (Scripting::IsAtomicOperator(t.type))
+				C4Compiler::Token combined = tok; // running copy of what has been consumed so far (atomic ops are one char each)
+				if (C4Compiler::IsAtomicOperator(t.type))
 					while (true)
 					{
-						const Scripting::Token& next = lexer.Peek(0);
-						if (!Scripting::IsAtomicOperator(next.GetType()) || next.GetByteOffset() != t.end)
+						const C4Compiler::Token& next = lexer.Peek(0);
+						if (!C4Compiler::IsAtomicOperator(next.GetType()) || next.GetByteOffset() != t.end)
 							break; // a compound operator is adjacent characters, as the compiler lexes it
-						Scripting::Token attempt;
-						if (combined.CombineWith(next.GetText()[0], attempt) != Scripting::Token::TokenAppendMethod::Combine)
+						C4Compiler::Token attempt;
+						if (combined.CombineWith(next.GetText()[0], attempt) != C4Compiler::Token::TokenAppendMethod::Combine)
 							break;
 						combined = attempt; // extend the result, not the original atomic token
 						t.type = combined.GetType();

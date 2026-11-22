@@ -6,7 +6,7 @@
 #include "../Expressions/BracedInitializerNode.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 
 // ====================================================================
@@ -583,4 +583,4 @@ void ThrowStatementNode::ParseBody(ParserState& state)
 
 
 
-} // namespace Scripting
+} // namespace C4Compiler

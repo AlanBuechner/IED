@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// What parsing a file gave: its tree, the errors its text has and the includes it asked for. A language server
 	/// compiles a program again on each edit, every file but the edited one as it was, and a compile given the parses of
@@ -38,4 +38,4 @@ namespace Scripting
 	private:
 		std::unordered_map<uint32, PriorParse> m_Parses;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

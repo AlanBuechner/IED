@@ -4,7 +4,7 @@
 #include <cctype>
 #include <set>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

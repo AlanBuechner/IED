@@ -4,7 +4,7 @@
 #include "Lexer/Token.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// One operand of an `asm` block (docs/language/16): `in(reg) x;`, `out("eax") low;`, `inout(xmm) v;`,
 	/// `in(reg) name = expr;` or `const name = expr;`.

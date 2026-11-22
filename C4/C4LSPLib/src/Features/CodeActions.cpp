@@ -98,17 +98,17 @@ namespace C4LSP::Features
 	/// Collect every non-arrow MemberAccessNode in `sourceId` whose member name == `member`, into out.
 	/// A node is only considered when its own start location belongs to the target source: a merged unit
 	/// inlines included files, so subtrees from other sources are descended but never matched.
-	static void CollectDotMemberAccesses(const Scripting::AstNode& node, uint32 sourceId,
-		const std::string& member, Core::Vector<const Scripting::MemberAccessNode*>& out)
+	static void CollectDotMemberAccesses(const C4Compiler::AstNode& node, uint32 sourceId,
+		const std::string& member, Core::Vector<const C4Compiler::MemberAccessNode*>& out)
 	{
-		if (node.startLocation.sourceId == sourceId && node.Type() == Scripting::NodeType::MemberAccess)
+		if (node.startLocation.sourceId == sourceId && node.Type() == C4Compiler::NodeType::MemberAccess)
 		{
-			const auto* ma = static_cast<const Scripting::MemberAccessNode*>(&node);
+			const auto* ma = static_cast<const C4Compiler::MemberAccessNode*>(&node);
 			if (!ma->IsArrowAccess() && ma->GetMemberNameToken().GetText() == member)
 				out.Push(ma);
 		}
 
-		Server::ForEachWrittenChild(node, [&](const Scripting::AstNode& child) { CollectDotMemberAccesses(child, sourceId, member, out); });
+		Server::ForEachWrittenChild(node, [&](const C4Compiler::AstNode& child) { CollectDotMemberAccesses(child, sourceId, member, out); });
 	}
 
 	// ------------------------------------------------------------- quickfix --
@@ -130,17 +130,17 @@ namespace C4LSP::Features
 
 		uint32 targetLine1Based = diag.range.start.line + 1; // LSP 0-based -> SourceLocation 1-based
 
-		Core::Vector<const Scripting::MemberAccessNode*> matches;
+		Core::Vector<const C4Compiler::MemberAccessNode*> matches;
 		CollectDotMemberAccesses(*unit->GetRootAST(), sourceId, member, matches);
 		if (matches.Count() == 0)
 			return; // cannot locate the exact access - no safe edit
 
 		// Prefer a match whose dot token sits on the diagnostic's line; otherwise take the first.
-		const Scripting::MemberAccessNode* chosen = matches[0];
+		const C4Compiler::MemberAccessNode* chosen = matches[0];
 		for (const auto* ma : matches)
 			if (ma->GetAccessOperatorToken().GetStartLocation().line == targetLine1Based) { chosen = ma; break; }
 
-		const Scripting::Token& dot = chosen->GetAccessOperatorToken();
+		const C4Compiler::Token& dot = chosen->GetAccessOperatorToken();
 		CodeAction action;
 		action.title = "Use '->' (pointer dereference)";
 		action.kind = "quickfix";
@@ -188,10 +188,10 @@ namespace C4LSP::Features
 	///                                       not link nested definitions and requires declarations before use.
 	/// Returns false when no safe file-scope point exists (the caller then emits no action for this name).
 	static bool InsertionPointFor(Server::CompilationSession& session, uint32 sourceId,
-		const Ref<Scripting::AstNode>& rootAst, const Protocol::Position& anchor /*0-based LSP*/,
+		const Ref<C4Compiler::AstNode>& rootAst, const Protocol::Position& anchor /*0-based LSP*/,
 		Protocol::Range& insertAtOut) // zero-width insertion range
 	{
-		const Scripting::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
+		const C4Compiler::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
 		Server::LocatedNode located = Server::NodeLocator::Locate(source, sourceId, rootAst,
 			anchor);
 
@@ -205,11 +205,11 @@ namespace C4LSP::Features
 		}
 
 		// Walk the ancestor path (innermost last) for the OUTERMOST enclosing top-level definition.
-		const Scripting::AstNode* enclosingDef = nullptr; // FunctionDefinition or ObjectDefinition
+		const C4Compiler::AstNode* enclosingDef = nullptr; // FunctionDefinition or ObjectDefinition
 		for (int i = static_cast<int>(located.path.Count()) - 1; i >= 0; --i)
 		{
 			auto t = located.path[i]->Type();
-			if (t == Scripting::NodeType::FunctionDefinition || t == Scripting::NodeType::ObjectDefinition)
+			if (t == C4Compiler::NodeType::FunctionDefinition || t == C4Compiler::NodeType::ObjectDefinition)
 				enclosingDef = located.path[i]; // keep walking: a class inside a function wins
 		}
 
@@ -226,13 +226,13 @@ namespace C4LSP::Features
 			return false; // definition lives in another (included) file - cannot edit it from here
 
 		insertAtOut = session.ToEditorRange(sourceId, enclosingDef->startLocation,
-			Scripting::SourceLocation{ enclosingDef->startLocation.line, 1, 0, sourceId });
+			C4Compiler::SourceLocation{ enclosingDef->startLocation.line, 1, 0, sourceId });
 		insertAtOut.end = insertAtOut.start; // zero-width point at the definition's first column
 		return true;
 	}
 
 	static void AddCreateDefinitionActions(Server::CompilationSession& session, uint32 sourceId, const std::string& uri,
-		const Ref<Scripting::AstNode>& rootAst, const std::string& editorText,
+		const Ref<C4Compiler::AstNode>& rootAst, const std::string& editorText,
 		const Core::Vector<Protocol::Diagnostic>& diagnostics, Core::Vector<CodeAction>& out)
 	{
 		// One action per undefined-call diagnostic occurrence: each error line's lightbulb offers the fix for ITS OWN marker
@@ -293,7 +293,7 @@ namespace C4LSP::Features
 
 	static CodeActionEdit InPlaceEdit(Server::CompilationSession& session, uint32 sourceId, const std::string& uri, const MissingDefinition& missing)
 	{
-		const Scripting::Token& semicolon = missing.declaration->GetSemicolonToken();
+		const C4Compiler::Token& semicolon = missing.declaration->GetSemicolonToken();
 		const WrittenDefinition body = DefinitionWriter::InPlaceBody(session, missing, DefinitionSites::InPlaceStyle(session, *missing.declaration));
 		CodeActionEdit edit;
 		edit.uri = uri;

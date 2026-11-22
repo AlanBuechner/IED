@@ -3,7 +3,7 @@
 #include "Compiler/FileIo.h"
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	static std::string Norm(const std::string& p)
 	{

@@ -1,7 +1,7 @@
 #pragma once
 #include "Parser/ParserState.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Lookaheads that tell the shapes of `T name(...)` apart; each leaves the lexer where it was, at the '('.
 
@@ -12,4 +12,4 @@ namespace Scripting
 	/// When it cannot, `T name(args);` is a variable started with those arguments (docs/language/04 section 4.10).
 	/// A group of bare names (`T v(a, b)`) can be both and reads as parameters.
 	bool ParenGroupIsParameterList(ParserState& state);
-} // namespace Scripting
+} // namespace C4Compiler

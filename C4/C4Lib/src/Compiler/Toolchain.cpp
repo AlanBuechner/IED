@@ -9,7 +9,7 @@
 #include <llvm/Support/Program.h>
 #endif
 
-namespace Scripting::Toolchain
+namespace C4Compiler::Toolchain
 {
 	namespace
 	{
@@ -19,8 +19,8 @@ namespace Scripting::Toolchain
 		const fs::path kSourceTree = "C4";
 
 		// Through FileIo, so a C4 installed in a deep folder finds its parts (BUG-356).
-		bool IsFile(const fs::path& p) { return Scripting::IsFile(PathText(p)); }
-		bool IsFolder(const fs::path& p) { return Scripting::IsFolder(PathText(p)); }
+		bool IsFile(const fs::path& p) { return C4Compiler::IsFile(PathText(p)); }
+		bool IsFolder(const fs::path& p) { return C4Compiler::IsFolder(PathText(p)); }
 		bool Exists(const fs::path& p) { return FileExists(PathText(p)); }
 
 		fs::path ExecutableFolder()

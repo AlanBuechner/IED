@@ -4,7 +4,7 @@
 #include "Macro/MacroText.h"
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	using namespace MacroText;
 

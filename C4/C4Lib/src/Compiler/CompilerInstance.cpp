@@ -24,7 +24,7 @@
 
 namespace fs = std::filesystem;
 
-namespace Scripting
+namespace C4Compiler
 {
 
 	CompilerInstance::CompilerInstance()

@@ -12,8 +12,8 @@ namespace Testing
 	/// interface and its index. Empty interface (no files) when the host did not compile.
 	struct TestHost
 	{
-		Scripting::HostInterface interface;
-		std::unique_ptr<Scripting::HostIndex> index;
+		C4Compiler::HostInterface interface;
+		std::unique_ptr<C4Compiler::HostIndex> index;
 		std::string diagnostics;
 	};
 
@@ -34,6 +34,6 @@ namespace Testing
 	TestHost MakeProjectTestHost(const std::vector<TestProject>& projects);
 
 	/// `script` (one file, `script.cf`) compiled against `host`, optimized or not.
-	Scripting::CompiledScript CompileTestScript(const TestHost& host, const std::string& script, bool optimize = false,
+	C4Compiler::CompiledScript CompileTestScript(const TestHost& host, const std::string& script, bool optimize = false,
 		const std::vector<std::string>& allow = {}, bool onlyAllowed = false);
 } // namespace Testing

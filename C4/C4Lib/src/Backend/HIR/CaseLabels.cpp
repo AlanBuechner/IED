@@ -6,7 +6,7 @@
 #include "Model/Types/EnumType.h"
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -70,4 +70,4 @@ namespace Scripting
 		const Core::String text = negative ? std::to_string(v) : std::to_string(static_cast<uint64>(v));
 		return "case value " + text + " does not fit in the switch's '" + m_Selector->GetName() + "'";
 	}
-} // namespace Scripting
+} // namespace C4Compiler

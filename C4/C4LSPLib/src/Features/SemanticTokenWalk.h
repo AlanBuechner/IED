@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class QualTypeNode;
 	class CompilerInstance;
@@ -45,7 +45,7 @@ namespace C4LSP::Features::TokenWalk
 		// neighboring token's kind (the old byte-keyed collision).
 		std::map<std::pair<uint32, uint32>, TokInfo> byOffset; // (line, column) -> info (exact)
 		std::unordered_map<std::string, TokInfo> byName; // declaration name -> info (fallback)
-		std::unordered_set<const Scripting::AstNode*> fields; // variable decls that are object members
+		std::unordered_set<const C4Compiler::AstNode*> fields; // variable decls that are object members
 
 		/// Simple declared TYPE names ("Test", "Point") mapped to their own token kind. Populated as the walk
 		/// meets each ObjectDefinition/EnumDefinition, so a chain segment or bare reference whose qualified path
@@ -66,31 +66,31 @@ namespace C4LSP::Features::TokenWalk
 		std::unordered_set<std::string> templateParamNames;
 	};
 
-	uint32 ObjectKindToToken(Scripting::ObjectKind kind);
-	const Scripting::ObjectType* AsObject(const Scripting::SymbolInfo* info);
+	uint32 ObjectKindToToken(C4Compiler::ObjectKind kind);
+	const C4Compiler::ObjectType* AsObject(const C4Compiler::SymbolInfo* info);
 	/// A type declaration's own kind: struct / class / interface / enum, else the generic `type` (an alias).
-	uint32 TypeDeclKind(const Scripting::AstNode* decl);
+	uint32 TypeDeclKind(const C4Compiler::AstNode* decl);
 	/// Whether `object`, a base it inherits or one of its extensions declares a method / a field named `name`.
-	bool HasMethod(const Scripting::ObjectType* object, const std::string& name);
-	bool HasField(const Scripting::ObjectType* object, const std::string& name);
+	bool HasMethod(const C4Compiler::ObjectType* object, const std::string& name);
+	bool HasField(const C4Compiler::ObjectType* object, const std::string& name);
 	/// The kind of `name` as a member of the type `owner` names (a method or field of an object, a scoped enum constant,
 	/// a union field); false when it has no such member.
-	bool OwnerMemberKind(const Scripting::SymbolInfo* owner, const std::string& name, uint32& kind);
-	bool IsImplicitThisMethod(const Ctx& ctx, const Scripting::AstNode& refNode, const Core::Vector<const Scripting::AstNode*>& path);
-	uint32 DeclKind(const Scripting::AstNode* decl, bool isMemberAccess, const Ctx& ctx);
-	bool IsFunctionType(const Scripting::Type* type);
-	uint32 ClassifyReference(const Ctx& ctx, const Scripting::AstNode& refNode, const Core::Vector<const Scripting::AstNode*>& path, bool isMemberAccess);
-	void RecordOffset(Ctx& ctx, const Scripting::SourceLocation& loc, TokInfo info);
-	void RecordName(Ctx& ctx, const Scripting::SourceLocation& loc, const std::string& name, TokInfo info);
+	bool OwnerMemberKind(const C4Compiler::SymbolInfo* owner, const std::string& name, uint32& kind);
+	bool IsImplicitThisMethod(const Ctx& ctx, const C4Compiler::AstNode& refNode, const Core::Vector<const C4Compiler::AstNode*>& path);
+	uint32 DeclKind(const C4Compiler::AstNode* decl, bool isMemberAccess, const Ctx& ctx);
+	bool IsFunctionType(const C4Compiler::Type* type);
+	uint32 ClassifyReference(const Ctx& ctx, const C4Compiler::AstNode& refNode, const Core::Vector<const C4Compiler::AstNode*>& path, bool isMemberAccess);
+	void RecordOffset(Ctx& ctx, const C4Compiler::SourceLocation& loc, TokInfo info);
+	void RecordName(Ctx& ctx, const C4Compiler::SourceLocation& loc, const std::string& name, TokInfo info);
 	void BuildNamespacePaths(Ctx& ctx);
 	bool IsNamespacePrefix(const Ctx& ctx, const std::string& name);
 	uint32 ClassifyChainSegment(const Ctx& ctx, const std::vector<std::string>& segments, size_t i);
-	void ClassifyTypeSegments(const Scripting::QualTypeNode& qt, Ctx& ctx, const Core::Vector<const Scripting::AstNode*>& path);
+	void ClassifyTypeSegments(const C4Compiler::QualTypeNode& qt, Ctx& ctx, const Core::Vector<const C4Compiler::AstNode*>& path);
 
 	/// True when `node` (the last entry of `path`) is what its parent call calls: `x.Get` in `x.Get()`.
-	bool IsCallee(const Scripting::AstNode& node, const Core::Vector<const Scripting::AstNode*>& path);
-	void Walk(const Scripting::AstNode& node, Ctx& ctx, const Core::Vector<const Scripting::AstNode*>& pathIn, int objectDepth, bool directMember);
+	bool IsCallee(const C4Compiler::AstNode& node, const Core::Vector<const C4Compiler::AstNode*>& path);
+	void Walk(const C4Compiler::AstNode& node, Ctx& ctx, const Core::Vector<const C4Compiler::AstNode*>& pathIn, int objectDepth, bool directMember);
 	/// The type names and member fields the headers `ctx.sourceId` includes (all of them, through their own includes)
 	/// declare, for references to them: `m_Count` in a method defined in the .cf reads as the field its header declares.
-	void CollectIncludedDeclarations(Scripting::CompilerInstance& compiler, Ctx& ctx);
+	void CollectIncludedDeclarations(C4Compiler::CompilerInstance& compiler, Ctx& ctx);
 } // namespace C4LSP::Features::TokenWalk

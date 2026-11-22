@@ -2,7 +2,7 @@
 #include <cctype>
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

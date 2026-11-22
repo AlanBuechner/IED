@@ -1,7 +1,7 @@
 #include "Macro/MacroToken.h"
 #include "Macro/MacroText.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	using namespace MacroText;
 

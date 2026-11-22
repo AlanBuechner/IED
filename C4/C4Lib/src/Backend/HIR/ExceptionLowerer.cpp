@@ -10,7 +10,7 @@
 #include "Backend/HIR/CallArguments.h"
 #include "Backend/HIR/Lifecycle.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -184,4 +184,4 @@ namespace Scripting
 		target->stmts.push_back(m_Ctx.out->NewNode<ExprStmtNode>(m_Ctx.LoadIfNeeded(e.value)));
 		return QueryResult<void>::Success();
 	}
-} // namespace Scripting
+} // namespace C4Compiler

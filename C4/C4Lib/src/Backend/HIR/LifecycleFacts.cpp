@@ -3,7 +3,7 @@
 #include "Model/TypeHandle.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace LifecycleFacts
 	{
@@ -120,4 +120,4 @@ namespace Scripting
 		}
 
 	}
-} // namespace Scripting
+} // namespace C4Compiler

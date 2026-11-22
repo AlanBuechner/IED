@@ -5,7 +5,7 @@
 #include "Model/TypeHandle.h"
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -279,4 +279,4 @@ namespace Scripting
 		B.CreateLifetimeEnd(temporary);
 		return result;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

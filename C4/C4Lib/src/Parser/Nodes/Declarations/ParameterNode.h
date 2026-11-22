@@ -5,7 +5,7 @@
 #include "Parser/Nodes/Declarations/AnnotationNode.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct QualTypeNode;
 

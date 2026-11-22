@@ -10,7 +10,7 @@
 #include <llvm/BinaryFormat/Dwarf.h>
 #include <filesystem>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

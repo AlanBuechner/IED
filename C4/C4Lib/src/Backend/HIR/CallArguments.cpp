@@ -13,7 +13,7 @@
 #include "Model/Types/AliasType.h"
 #include "Model/Types/QualifiedName.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -148,4 +148,4 @@ namespace Scripting
 		// (a lambda to a func), a scalar converted to the parameter type.
 		return InitialValue(ctx, arg.isLValue ? arg : Value::R(loaded, loaded->type), declared);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

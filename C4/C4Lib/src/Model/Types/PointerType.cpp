@@ -1,7 +1,7 @@
 #include "Model/Types/PointerType.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	PointerType::PointerType(const Type* pointeeType, bool constReferent)
 		: Type(TypeKind::Pointer), m_PointeeType(pointeeType), m_ConstReferent(constReferent)
@@ -26,4 +26,4 @@ namespace Scripting
 	{
 		return ToString();
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -5,7 +5,7 @@
 #include "Core/Core.h"
 #include "QualTypeNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// One packed/unpacked lane view inside a class/struct (or its anonymous union):
 	///   packed T x, y;      -> SIMD <2 x T> region with named lanes x(0), y(1)
@@ -36,4 +36,4 @@ namespace Scripting
 		Ref<QualTypeNode> m_ElementType;
 		Core::Vector<Token> m_Lanes;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

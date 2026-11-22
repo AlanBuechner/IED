@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Assembled partitions kept between builds by what produced them (roadmap 5.3): an object is named after the
 	/// hash of its partition's bitcode and of `salt` (the compiler and the target settings), so a partition whose

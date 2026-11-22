@@ -7,7 +7,7 @@
 #include "Model/Types.h"
 #include "Parser/Nodes/Expressions/LiteralNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	// Literals: numbers typed by Model/Literals (C's rules), characters and strings by their code-unit width,
 	// `true` / `false`, and `null` (a void* zero that converts to any pointer at its use).

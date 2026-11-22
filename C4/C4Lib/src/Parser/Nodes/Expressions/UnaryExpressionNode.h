@@ -2,7 +2,7 @@
 #include "Parser/AstNode.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Unary operator expression: OP operand (prefix) or operand OP (postfix).
 	struct UnaryExpressionNode : public AstNode

@@ -11,7 +11,7 @@
 #include "Model/Types/QualifiedName.h"
 #include "Model/Types/VirtualTables.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -187,4 +187,4 @@ namespace Scripting
 		fn.complete = ThunkBuilder(ctx, target, shared).Build().Ok() && errors.GetErrors().Empty();
 		return fn;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

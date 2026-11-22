@@ -1,7 +1,7 @@
 #pragma once
 #include "Backend/HIR/ConstantImage.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 	struct AstNode;
@@ -13,4 +13,4 @@ namespace Scripting
 	/// call cannot run; the global then starts by running its initializer before main, as any other.
 	std::optional<ConstantData> CompileTimeImage(ProgramModel& model, const SymbolInfo& global, const AstNode* initializer, const Scope* scope,
 		uint64 size);
-} // namespace Scripting
+} // namespace C4Compiler

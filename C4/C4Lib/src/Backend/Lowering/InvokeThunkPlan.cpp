@@ -6,7 +6,7 @@
 #include "Model/ReflectedEntities.h"
 #include "Model/Types/VirtualTables.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	// Records are only added, and what makes one reflected and callable never changes: those are kept, in order, until
 	// they have code to call.
@@ -80,4 +80,4 @@ namespace Scripting
 		const ObjectType::MethodInfo* method = model.MethodForRecord(record);
 		return method && VirtualTables::IsVirtual(record.containingType, *method);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

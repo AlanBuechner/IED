@@ -22,7 +22,7 @@
 #include "Model/Types/SwizzleType.h"
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	QueryResult<const HIRNode*> DeclLowerer::BracedValue(const BracedInitializerNode* br, const Type* type, const AstNode* site)
 	{
@@ -301,4 +301,4 @@ namespace Scripting
 		});
 		return status;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

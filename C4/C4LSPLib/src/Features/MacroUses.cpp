@@ -134,7 +134,7 @@ namespace C4LSP::Features
 		return out;
 	}
 
-	std::string MacroUses::Rendered(const Scripting::MacroDefinition& macro)
+	std::string MacroUses::Rendered(const C4Compiler::MacroDefinition& macro)
 	{
 		std::string text = "#define " + macro.name;
 		if (macro.isFunctionLike)
@@ -175,7 +175,7 @@ namespace C4LSP::Features
 	{
 		Use use;
 		const uint32 sourceId = session.FindSourceIdByUri(uri);
-		const Scripting::MacroTable* table = session.MacroTableOf(sourceId);
+		const C4Compiler::MacroTable* table = session.MacroTableOf(sourceId);
 		const std::string text = session.GetEditorText(uri);
 		const size_t at = OffsetOf(text, position);
 		if (!table || at == std::string_view::npos)
@@ -188,7 +188,7 @@ namespace C4LSP::Features
 		while (end < text.size() && IsNameChar(text[end]))
 			++end;
 		const size_t lineStart = start == 0 ? 0 : text.rfind('\n', start - 1) + 1;
-		const Scripting::MacroDefinition* macro = end > start ? table->Get(text.substr(start, end - start)) : nullptr;
+		const C4Compiler::MacroDefinition* macro = end > start ? table->Get(text.substr(start, end - start)) : nullptr;
 		if (!macro || DirectiveAt(text, lineStart) != std::string_view::npos)
 			return use;
 
@@ -200,13 +200,13 @@ namespace C4LSP::Features
 				return use; // a function-like macro's name without a call is not expanded
 			useEnd = callEnd;
 		}
-		Scripting::ExpansionSite site;
+		C4Compiler::ExpansionSite site;
 		site.file = session.GetSourceManager().HasInfo(sourceId) ? session.GetSourceManager().GetInfo(sourceId).displayName : uri;
 		site.line = position.line + 1;
 		use.found = true;
 		use.name = macro->name;
 		use.definition = Rendered(*macro);
-		use.expansion = Scripting::MacroExpander::Expand(text.substr(start, useEnd - start), *table, site).text;
+		use.expansion = C4Compiler::MacroExpander::Expand(text.substr(start, useEnd - start), *table, site).text;
 		use.range = { PositionOf(text, start), PositionOf(text, useEnd) };
 		for (const Definition& definition : DefinitionsIn(text))
 			if (definition.name == macro->name)

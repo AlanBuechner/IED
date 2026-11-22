@@ -1,7 +1,7 @@
 #include "Model/Builder/ObjectIdentity.h"
 #include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -37,4 +37,4 @@ namespace Scripting
 		type.SetDeclNode(&decl);
 		type.SetEnclosingNames(LocalEnclosingNames(declScope, decl.GetNameToken().GetStartLocation()));
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -1,7 +1,7 @@
 #pragma once
 #include "Backend/HIR/LoweringContext.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct NewExpressionNode;
 	class ExprLowerer;
@@ -39,4 +39,4 @@ namespace Scripting
 		LoweringContext& m_Ctx;
 		ExprLowerer& m_Expr;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

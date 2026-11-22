@@ -2,7 +2,7 @@
 #include "Model/Types/QualifiedName.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	FunctionType::FunctionType(const Type* returnType, const Core::Vector<ParameterInfo>& params, bool variadic)
 		: Type(TypeKind::Function), m_ReturnType(returnType), m_Parameters(params), m_IsVariadic(variadic)
@@ -55,4 +55,4 @@ namespace Scripting
 		if (m_IsVariadic) s += "v";
 		return s;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -1,7 +1,7 @@
 #include "Model/Types/ArrayType.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	ArrayType::ArrayType(const Type* elementType, uint64 elementCount)
 		: Type(TypeKind::Array), m_ElementType(elementType), m_ElementCount(elementCount)
@@ -22,4 +22,4 @@ namespace Scripting
 	{
 		return ToString();
 	}
-} // namespace Scripting
+} // namespace C4Compiler

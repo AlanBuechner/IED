@@ -2,7 +2,7 @@
 #include "Backend/HIR/LoweringContext.h"
 #include "Parser/Nodes/Statements/DestructuringNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// `[float a, b, _] = value;` (D-34): the value - a return list - is evaluated once into a statement
 	/// temporary (a copy when it names an existing list), then each element in order takes its value out of it:
@@ -36,4 +36,4 @@ namespace Scripting
 
 		LoweringContext& m_Ctx;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

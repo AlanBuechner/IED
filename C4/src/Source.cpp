@@ -61,7 +61,7 @@ namespace
 	class CompilerDriver
 	{
 	public:
-		explicit CompilerDriver(const Scripting::CompileOptions& options) : m_Options(options) {}
+		explicit CompilerDriver(const C4Compiler::CompileOptions& options) : m_Options(options) {}
 
 		int Run()
 		{
@@ -95,7 +95,7 @@ namespace
 
 			if (!modelOk || m_Result.HasErrors())
 			{
-				Scripting::DiagnosticReporter::Report(m_Result, &m_Compiler);
+				C4Compiler::DiagnosticReporter::Report(m_Result, &m_Compiler);
 				CORE_WARN("Front end reported {0} error(s)", m_Result.errors.Count());
 				return 1;
 			}
@@ -111,12 +111,12 @@ namespace
 		CORE_INFO("Phase 3: Codegen");
 		if (!RunBackend())
 		{
-			Scripting::DiagnosticReporter::Report(m_Result, &m_Compiler);
+			C4Compiler::DiagnosticReporter::Report(m_Result, &m_Compiler);
 			return 1;
 		}
 
 		// The warnings, and the phase times when they were asked for.
-		if (!m_Result.errors.Empty() || m_Options.timePhases) Scripting::DiagnosticReporter::Report(m_Result, &m_Compiler);
+		if (!m_Result.errors.Empty() || m_Options.timePhases) C4Compiler::DiagnosticReporter::Report(m_Result, &m_Compiler);
 		return 0;
 		}
 
@@ -132,26 +132,26 @@ namespace
 		{
 			if (!ProgramOutput::Links(m_Options)) return 1;
 			if (m_Options.partitions) return m_Options.partitions;
-			const unsigned worth = Scripting::ProgramPlacement::CountFor(m_Compiler.GetProgramModel());
+			const unsigned worth = C4Compiler::ProgramPlacement::CountFor(m_Compiler.GetProgramModel());
 			return m_Options.incremental ? worth : std::min(worth, c_MergedPartitions);
 		}
 
 		// What a partition copies from the others to inline: nothing when the partitions are merged before they are
 		// optimized (a whole-program build), only `inline` functions at -O0.
-		Scripting::PartitionCopies CopiesBetweenPartitions() const
+		C4Compiler::PartitionCopies CopiesBetweenPartitions() const
 		{
-			if (!m_Options.incremental) return Scripting::PartitionCopies::None;
-			return m_Options.optLevel == 0 ? Scripting::PartitionCopies::Inline : Scripting::PartitionCopies::Small;
+			if (!m_Options.incremental) return C4Compiler::PartitionCopies::None;
+			return m_Options.optLevel == 0 ? C4Compiler::PartitionCopies::Inline : C4Compiler::PartitionCopies::Small;
 		}
 
 		// -w drops the warnings; -Werror makes each one an error (B22).
 		void ApplyWarningOptions()
 		{
-			Core::Vector<Scripting::CompilationError> kept;
-			for (Scripting::CompilationError e : m_Result.errors)
+			Core::Vector<C4Compiler::CompilationError> kept;
+			for (C4Compiler::CompilationError e : m_Result.errors)
 			{
-				if (e.severity == Scripting::ErrorSeverity::Warning && m_Options.noWarnings) continue;
-				if (e.severity == Scripting::ErrorSeverity::Warning && m_Options.warningsAsErrors) e.severity = Scripting::ErrorSeverity::Error;
+				if (e.severity == C4Compiler::ErrorSeverity::Warning && m_Options.noWarnings) continue;
+				if (e.severity == C4Compiler::ErrorSeverity::Warning && m_Options.warningsAsErrors) e.severity = C4Compiler::ErrorSeverity::Error;
 				kept.Push(e);
 			}
 			m_Result.errors = kept;
@@ -161,13 +161,13 @@ namespace
 
 		// The located diagnostics, and the backend's own message when none of them is an error (a warning beside a
 		// missing entry point or an invalid module must not hide why the build failed).
-		void ReportBackendFailure(const Scripting::ProgramBackend& driver, const std::string& backendError)
+		void ReportBackendFailure(const C4Compiler::ProgramBackend& driver, const std::string& backendError)
 		{
 			bool located = false;
-			for (const Scripting::CompilationError& e : driver.LoweringErrors())
+			for (const C4Compiler::CompilationError& e : driver.LoweringErrors())
 			{
 				m_Result.errors.Push(e);
-				located = located || e.severity != Scripting::ErrorSeverity::Warning;
+				located = located || e.severity != C4Compiler::ErrorSeverity::Warning;
 			}
 			if (!located) m_Result.AddBackendError(Core::String(backendError.c_str()));
 		}
@@ -177,12 +177,12 @@ namespace
 		bool RunBackend()
 		{
 			llvm::LLVMContext& ctx = *new llvm::LLVMContext;
-			Scripting::ProgramBackend& driver = *new Scripting::ProgramBackend(ctx, m_Options.target.System());
+			C4Compiler::ProgramBackend& driver = *new C4Compiler::ProgramBackend(ctx, m_Options.target.System());
 
 			// The entry point the generated main calls: a -test run drives the test harness (the compiler
 			// emits a synthetic main that runs every [test] function), otherwise the user's main.
 			std::string backendError;
-			Scripting::TestHarnessOptions tests;
+			C4Compiler::TestHarnessOptions tests;
 			tests.jsonPath = m_Options.testJsonPath.c_str();
 			tests.fileOf = [this](uint32 sourceId) { return m_Compiler.GetSourceManager().GetInfo(sourceId).displayName; };
 			if (!m_Options.projectsFile.empty()) tests.ownUnit = [this](uint32 unit) { return InRootProject(unit); };
@@ -204,13 +204,13 @@ namespace
 				return false;
 			}
 			if (m_Options.gcStats) driver.InstallGcStatsPrinter();
-			for (const Scripting::CompilationError& e : driver.LoweringErrors())
+			for (const C4Compiler::CompilationError& e : driver.LoweringErrors())
 				m_Result.errors.Push(e); // a successful lowering reports warnings only
 			ApplyWarningOptions();
 			if (m_Result.HasErrors()) return false;
 			std::vector<llvm::Module*> partitions;
 			for (unsigned i = 0; i < driver.PartitionCount(); ++i) partitions.push_back(&driver.PartitionModule(i));
-			const Scripting::KeyedModule image{ driver.ReflectionImageKey(),
+			const C4Compiler::KeyedModule image{ driver.ReflectionImageKey(),
 				[&driver](llvm::LLVMContext& context) { return driver.BuildReflectionModule(context); } };
 			return ProgramOutput({ m_Options, m_Result, m_Compiler, m_Interop, m_ExportedMacros }).Write(partitions, image);
 		}
@@ -218,14 +218,14 @@ namespace
 		// A described build's harness runs the root project's tests; each dependency's own harness runs its (docs/language/15-projects.md rule 7).
 		bool InRootProject(uint32 unit)
 		{
-			const Scripting::SourceManager& sources = m_Compiler.GetSourceManager();
+			const C4Compiler::SourceManager& sources = m_Compiler.GetSourceManager();
 			if (!sources.HasInfo(unit)) return false;
-			const Scripting::SourceInfo& info = sources.GetInfo(unit);
+			const C4Compiler::SourceInfo& info = sources.GetInfo(unit);
 			return !info.library && info.project == sources.Projects().Root();
 		}
 
 		// -ftime: the bodies lowered on the threads in passes, and the changes they asked the model for (ParallelLowering).
-		static void ReportLowering(const Scripting::LoweringStats& stats, const std::vector<std::pair<const char*, double>>& steps)
+		static void ReportLowering(const C4Compiler::LoweringStats& stats, const std::vector<std::pair<const char*, double>>& steps)
 		{
 			const char* lead = "lower: ";
 			for (const auto& [step, seconds] : steps)
@@ -255,8 +255,8 @@ namespace
 			uint32 total = 0;
 			if (!m_Options.projectsFile.empty())
 			{
-				const Scripting::ProjectFileResult read = Scripting::ReadProjectFile(fs::path(m_Options.projectsFile.c_str()));
-				Scripting::ProjectSetResult checked = read.error.empty() ? Scripting::ProjectSet::Check(read.list) : Scripting::ProjectSetResult{};
+				const C4Compiler::ProjectFileResult read = C4Compiler::ReadProjectFile(fs::path(m_Options.projectsFile.c_str()));
+				C4Compiler::ProjectSetResult checked = read.error.empty() ? C4Compiler::ProjectSet::Check(read.list) : C4Compiler::ProjectSetResult{};
 				if (!read.error.empty() || !checked.set)
 				{
 					std::cerr << "error: " << (read.error.empty() ? m_Options.projectsFile.c_str() + std::string(": ") + checked.error : read.error) << "\n";
@@ -270,13 +270,13 @@ namespace
 			{
 				const fs::path& input = fs::path(m_Options.inputs[i].c_str());
 
-				if (!Scripting::FileExists(Scripting::PathText(input)))
+				if (!C4Compiler::FileExists(C4Compiler::PathText(input)))
 				{
 					std::cerr << "error: Input file/folder not found: " << input << std::endl;
 					return false;
 				}
 
-				if (Scripting::IsFolder(Scripting::PathText(input)))
+				if (C4Compiler::IsFolder(C4Compiler::PathText(input)))
 				{
 					total += m_Compiler.RegisterFolder(input);
 					CORE_INFO("Registered source file(s) from folder {0}", input.string());
@@ -286,7 +286,7 @@ namespace
 				// A single file is registered together with its folder so that the files it
 				// includes can be resolved.
 				fs::path parentDir = fs::absolute(input).parent_path();
-				if (!parentDir.empty() && Scripting::IsFolder(Scripting::PathText(parentDir)))
+				if (!parentDir.empty() && C4Compiler::IsFolder(C4Compiler::PathText(parentDir)))
 					total += m_Compiler.RegisterFolder(parentDir);
 				else
 					m_Compiler.RegisterFile(fs::absolute(input));
@@ -310,8 +310,8 @@ namespace
 			// compiler copy always finds its own copy. Only the library files the program includes (and what they
 			// include) are compiled, so a program that includes none of it compiles none of it and may use any of
 			// its names.
-			const fs::path bedrockDir = Scripting::Toolchain::Bedrock();
-			if (!Scripting::IsFolder(Scripting::PathText(bedrockDir)))
+			const fs::path bedrockDir = C4Compiler::Toolchain::Bedrock();
+			if (!C4Compiler::IsFolder(C4Compiler::PathText(bedrockDir)))
 			{
 				std::cerr << "error: the default library was not found at " << bedrockDir.string() << " (set C4_HOME to the "
 					"folder that holds C4.exe, Bedrock/, C4Runtime/ and toolchain/)\n";
@@ -329,12 +329,12 @@ namespace
 		uint32 RegisterProjectSources()
 		{
 			uint32 total = 0;
-			const Scripting::FolderScan scan = m_Options.runTests ? Scripting::FolderScan::Recursive : Scripting::FolderScan::WithoutTests;
-			const Scripting::ProjectSet& projects = m_Compiler.GetSourceManager().Projects();
+			const C4Compiler::FolderScan scan = m_Options.runTests ? C4Compiler::FolderScan::Recursive : C4Compiler::FolderScan::WithoutTests;
+			const C4Compiler::ProjectSet& projects = m_Compiler.GetSourceManager().Projects();
 			for (uint32 p = 0; p < projects.Count(); ++p)
 				for (const fs::path& source : projects.At(p).sources)
 				{
-					if (Scripting::IsFolder(Scripting::PathText(source))) total += m_Compiler.RegisterFolder(source, scan);
+					if (C4Compiler::IsFolder(C4Compiler::PathText(source))) total += m_Compiler.RegisterFolder(source, scan);
 					else if (m_Compiler.RegisterFile(source)) ++total;
 					else std::cerr << "warning: project '" << projects.At(p).name << "' names '" << source.generic_string() << "', which does not exist\n";
 				}
@@ -350,13 +350,13 @@ namespace
 			// macros (D-59), and lays what it does over the file's own text (R8): each source keeps its text, and its parse
 			// reads it through its MacroLayout.
 			auto& sources = m_Compiler.GetSourceManager();
-			auto macroResults = Scripting::ExpandSourceMacros(sources, Scripting::PredefinedMacros(m_Options.runTests, m_Options.target, m_Options.defines));
+			auto macroResults = C4Compiler::ExpandSourceMacros(sources, C4Compiler::PredefinedMacros(m_Options.runTests, m_Options.target, m_Options.defines));
 			m_Compiler.AddMacroDiagnostics(macroResults);
 			for (const auto& result : macroResults) m_ExportedMacros[result.absPath] = result.exported;
-			Scripting::ApplyMacroLayouts(sources, macroResults);
+			C4Compiler::ApplyMacroLayouts(sources, macroResults);
 
 			RunInteropPrepass(ResolveRootFolders());
-			Scripting::RegisterBindings(sources, m_Interop.files);
+			C4Compiler::RegisterBindings(sources, m_Interop.files);
 			ExportMacrosIfRequested(macroResults);
 		}
 
@@ -369,14 +369,14 @@ namespace
 			for (uint32 i = 0; i < m_Options.inputs.Count(); ++i)
 			{
 				const fs::path& input = fs::path(m_Options.inputs[i].c_str());
-				if (Scripting::IsFolder(Scripting::PathText(input)))
+				if (C4Compiler::IsFolder(C4Compiler::PathText(input)))
 				{
 					roots.push_back(input.string());
 					continue;
 				}
 
 				fs::path parentDir = fs::absolute(input).parent_path();
-				if (!parentDir.empty() && Scripting::IsFolder(Scripting::PathText(parentDir)))
+				if (!parentDir.empty() && C4Compiler::IsFolder(C4Compiler::PathText(parentDir)))
 					roots.push_back(parentDir.string());
 			}
 
@@ -394,8 +394,8 @@ namespace
 
 			// The build's own folder: two programs built at once never share a foreign object. Absolute, as CBind and clang
 			// run in other working folders (BUG-318).
-			const fs::path interopFolder = fs::absolute(Scripting::IntermediateFolder(m_Options) / (fs::path(m_Options.outputFile.c_str()).stem().string() + ".interop"));
-			const std::error_code ec = Scripting::CreateFolders(interopFolder.string());
+			const fs::path interopFolder = fs::absolute(C4Compiler::IntermediateFolder(m_Options) / (fs::path(m_Options.outputFile.c_str()).stem().string() + ".interop"));
+			const std::error_code ec = C4Compiler::CreateFolders(interopFolder.string());
 			if (ec)
 			{
 				m_Result.AddBackendError("cannot create the interop folder " + Core::String(interopFolder.string().c_str()) + ": " + Core::String(ec.message().c_str()));
@@ -407,8 +407,8 @@ namespace
 			std::vector<std::string> foreignFlags = { "-O" + std::to_string(m_Options.optLevel) };
 			if (m_Options.debugInfo) foreignFlags.push_back("-g");
 			// A file's headers are found in its project's folders and its dependencies' (D-59).
-			const auto inputs = Scripting::InteropInputsOf(m_Compiler.GetSourceManager(), !m_Options.projectsFile.empty());
-			m_Interop = Scripting::InteropPass::RunFolder(rootFolders, inputs, cliIncludes, objDir, m_Options.target, m_Options.verbose,
+			const auto inputs = C4Compiler::InteropInputsOf(m_Compiler.GetSourceManager(), !m_Options.projectsFile.empty());
+			m_Interop = C4Compiler::InteropPass::RunFolder(rootFolders, inputs, cliIncludes, objDir, m_Options.target, m_Options.verbose,
 				false, foreignFlags);
 
 			// A broken foreign C/C++ file (unresolvable path, CBind rejection, failed compile) must fail
@@ -418,7 +418,7 @@ namespace
 				m_Result.AddBackendError(e);
 		}
 
-		void ExportMacrosIfRequested(const std::vector<Scripting::MacroPass::FileResult>& macroResults)
+		void ExportMacrosIfRequested(const std::vector<C4Compiler::MacroPass::FileResult>& macroResults)
 		{
 			if (!m_Options.exportMacros)
 				return;
@@ -426,7 +426,7 @@ namespace
 			std::string outDir = m_Options.outputFile;
 			size_t slash = outDir.find_last_of("/\\");
 			outDir = (slash != std::string::npos) ? outDir.substr(0, slash) : ".";
-			Scripting::MacroPass::ExportTables(macroResults, outDir);
+			C4Compiler::MacroPass::ExportTables(macroResults, outDir);
 		}
 
 		// --- Phase 3: front end -----------------------------------------------------------
@@ -449,17 +449,17 @@ namespace
 				auto rootAST = unit->GetRootAST();
 				if (!rootAST) continue;
 
-				Scripting::PrettyPrintConsumer consumer;
-				Scripting::ASTWalker::Walk(rootAST, consumer);
+				C4Compiler::PrettyPrintConsumer consumer;
+				C4Compiler::ASTWalker::Walk(rootAST, consumer);
 			}
 		}
 
-		Scripting::CompileOptions m_Options;
-		Scripting::CompilerInstance m_Compiler;
-		Scripting::CompilationResult m_Result;
-		Scripting::InteropPass::Result m_Interop;
+		C4Compiler::CompileOptions m_Options;
+		C4Compiler::CompilerInstance m_Compiler;
+		C4Compiler::CompilationResult m_Result;
+		C4Compiler::InteropPass::Result m_Interop;
 		std::string m_LibraryFolder; // the default library (Bedrock) next to C4.exe, expanded with the inputs
-		std::unordered_map<std::string, Scripting::MacroTable> m_ExportedMacros; // by absolute path: what each file exports
+		std::unordered_map<std::string, C4Compiler::MacroTable> m_ExportedMacros; // by absolute path: what each file exports
 	};
 }
 
@@ -542,7 +542,7 @@ int main(int argc, char** argv)
 {
 	InstallCrashReport(argv[0]);
 
-	const Scripting::CompileOptions opts = Scripting::ParseArgs(argc, argv);
+	const C4Compiler::CompileOptions opts = C4Compiler::ParseArgs(argc, argv);
 	if (!opts.error.empty())
 	{
 		std::cerr << "error: " << opts.error << std::endl;
@@ -550,12 +550,12 @@ int main(int argc, char** argv)
 	}
 	if (opts.printHelp)
 	{
-		Scripting::PrintUsage();
+		C4Compiler::PrintUsage();
 		return 0;
 	}
 	if (opts.printVersion)
 	{
-		std::cout << "C4 " << Scripting::CompilerVersion::Major << "." << Scripting::CompilerVersion::Minor << "." << Scripting::CompilerVersion::Patch << std::endl;
+		std::cout << "C4 " << C4Compiler::CompilerVersion::Major << "." << C4Compiler::CompilerVersion::Minor << "." << C4Compiler::CompilerVersion::Patch << std::endl;
 		return 0;
 	}
 	if (opts.inputs.Count() != 0 && !opts.projectsFile.empty())

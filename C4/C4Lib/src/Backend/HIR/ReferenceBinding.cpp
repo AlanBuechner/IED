@@ -6,7 +6,7 @@
 #include "Model/Types/ReferenceType.h"
 #include <algorithm>
 
-namespace Scripting::ReferenceBinding
+namespace C4Compiler::ReferenceBinding
 {
 	namespace
 	{
@@ -129,4 +129,4 @@ namespace Scripting::ReferenceBinding
 		return "the reference field '" + field.mName + "' of '" + type->GetName() + "' is not bound: a reference names a location from "
 			"the start, so give it a braced entry, an initializer, or assign it in a create";
 	}
-} // namespace Scripting::ReferenceBinding
+} // namespace C4Compiler::ReferenceBinding

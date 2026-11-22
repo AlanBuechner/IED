@@ -10,7 +10,7 @@
 #include "Model/TypeHandle.h"
 #include "Model/Types/ClassHierarchy.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	const ObjectType* Lifecycle::AsObject(const Type* t)
 	{
@@ -523,4 +523,4 @@ namespace Scripting
 		IndexRange range{ [&] { return IndexConstant(begin); }, [&] { return IndexConstant(end); } };
 		AppendIndexLoop(m_Ctx, region, range, reverse, visit);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -2,7 +2,7 @@
 #include "Compiler/ErrorTracker.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A preprocessor error or warning at a 1-based line and column of the file as written.
 	struct MacroDiagnostic

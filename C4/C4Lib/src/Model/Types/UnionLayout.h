@@ -2,7 +2,7 @@
 #include "Model/Types/ObjectType.h"
 #include <vector>
 
-namespace Scripting::UnionLayout
+namespace C4Compiler::UnionLayout
 {
 	struct Geometry
 	{

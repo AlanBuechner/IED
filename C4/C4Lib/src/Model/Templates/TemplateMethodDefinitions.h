@@ -1,7 +1,7 @@
 #pragma once
 #include "Model/ProgramModel.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	// Out-of-line definitions of class template methods (`template<T> public void Box::Set(T x) { }`). Each must match
 	// a method its template declares. These are the mismatches no template argument can repair, found before any
@@ -26,4 +26,4 @@ namespace Scripting
 		static bool DeclaresMemberTemplate(const ProgramModel& model, const ProgramModel::TemplateMethodDef& def);
 		static Core::String Qualifier(const FunctionDefinitionNode& definition);
 	};
-} // namespace Scripting
+} // namespace C4Compiler

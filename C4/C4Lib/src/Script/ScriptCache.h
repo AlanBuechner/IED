@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct ScriptCompileOptions;
 
@@ -52,4 +52,4 @@ namespace Scripting
 
 	/// The build of the compiler running this code: the path, size and time of the file it was loaded from.
 	std::string ScriptCompilerIdentity();
-} // namespace Scripting
+} // namespace C4Compiler

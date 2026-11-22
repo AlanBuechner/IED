@@ -6,7 +6,7 @@
 #include "Model/TypeHandle.h"
 #include <unordered_map>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ExprLowerer; // lowers expressions (its own pair)
 	class StmtLowerer;  // lowers statements (its own pair)
@@ -307,4 +307,4 @@ namespace Scripting
 		mutable Core::String m_FailureNote;
 		ModelQueries m_Queries;  // the model-facing surface (built over m_Model)
 	};
-} // namespace Scripting
+} // namespace C4Compiler

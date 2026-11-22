@@ -9,7 +9,7 @@ namespace Testing
 	// Build the program model for one in-memory unit and hand back a reference to it (the model is
 	// move-only - it owns its data, doc 03 - so phases hold a reference to the one shared model). The
 	// caller keeps the compiler alive for as long as it uses the returned reference.
-	static const Scripting::ProgramModel& MakeModel(Scripting::CompilerInstance& compiler, const char* source)
+	static const C4Compiler::ProgramModel& MakeModel(C4Compiler::CompilerInstance& compiler, const char* source)
 	{
 		uint32 id = compiler.RegisterInMemory("t.cf", source);
 		compiler.CompileAll();
@@ -20,7 +20,7 @@ namespace Testing
 
 	void ModelParityTest::TypesAndLayoutMatchHandComputed()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"struct P { int32 x; float y; }\n"   // size 8, align 4
 			"struct Q { double d; int32 i; }\n"   // size 16 (padded to the double's 8-align), align 8
@@ -39,7 +39,7 @@ namespace Testing
 		auto a = model.QueryVariable("arr");
 		TEST_ASSERT(a.Ok());
 		TEST_ASSERT_EQ((int)model.SizeOf(a.value.type).value, 16); // 4 * sizeof(int32)
-		const Scripting::Type* elem = model.ElementOf(a.value.type);
+		const C4Compiler::Type* elem = model.ElementOf(a.value.type);
 		TEST_ASSERT(elem != nullptr);
 		TEST_ASSERT_EQ((int)elem->GetSize(), 4);
 		TEST_PASSED();
@@ -47,7 +47,7 @@ namespace Testing
 
 	void ModelParityTest::QualifiedNamesResolveToConcreteTypes()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"namespace Engine {\n"
 			"    struct Transform { float x; float y; }\n"   // size 8, align 4
@@ -64,13 +64,13 @@ namespace Testing
 
 		// A name not in the namespace is NotFound, not a wrong hit.
 		auto none = model.QueryType("Engine::Missing");
-		TEST_ASSERT(none.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(none.error == C4Compiler::QueryError::NotFound);
 		TEST_PASSED();
 	}
 
 	void ModelParityTest::InheritanceSizeIsBasePlusMembers()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"struct Base { int32 a; int32 b; }\n"   // size 8
 			"struct Derived : Base { float f; }\n"); // +4 => size 12, align 4
@@ -84,7 +84,7 @@ namespace Testing
 
 	void ModelParityTest::AliasIsTransparentToSameInstance()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler, "struct P { int32 x; }\nalias Pt = P;\n");
 
 		auto p = model.QueryType("P");
@@ -96,7 +96,7 @@ namespace Testing
 
 	void ModelParityTest::ConstantsAndEnumsFoldToKnownValues()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"namespace Math {\n"
 			"    const int32 K = 41;\n"
@@ -115,7 +115,7 @@ namespace Testing
 
 	void ModelParityTest::OperatorsDispatchToTheDeclaringSide()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"struct Plain { int32 v; }\n"
 			"struct HasAdd { int32 v; }\n"
@@ -132,25 +132,25 @@ namespace Testing
 
 		// Same operator, HasAdd as the RHS: the left operand is always the receiver (D-25), so nothing binds.
 		auto r = model.QueryOperator("add", plain.value, hasAdd.value);
-		TEST_ASSERT(r.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(r.error == C4Compiler::QueryError::NotFound);
 
 		// No operand declares "multiply": a clean NotFound, not a wrong pick.
 		auto none = model.QueryOperator("multiply", hasAdd.value, plain.value);
-		TEST_ASSERT(none.error == Scripting::QueryError::NotFound);
+		TEST_ASSERT(none.error == C4Compiler::QueryError::NotFound);
 		TEST_PASSED();
 	}
 
 	void ModelParityTest::TemplateInstantiationHasConcreteLayout()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"template<T> class TBox { public T v; }\n"
 			"TBox<int32> g;\n");
 
-		const Scripting::QualTypeNode* spec = nullptr;
-		std::function<void(const Scripting::AstNode&)> walk = [&](const Scripting::AstNode& n) {
+		const C4Compiler::QualTypeNode* spec = nullptr;
+		std::function<void(const C4Compiler::AstNode&)> walk = [&](const C4Compiler::AstNode& n) {
 			if (spec) return;
-			if (const auto* v = dynamic_cast<const Scripting::VariableDefinitionNode*>(&n)) {
+			if (const auto* v = dynamic_cast<const C4Compiler::VariableDefinitionNode*>(&n)) {
 				const auto& t = v->GetType();
 				if (t && t->HasTemplateArgs()) { spec = t.Get(); return; }
 			}
@@ -174,12 +174,12 @@ namespace Testing
 	}
 
 	// Find the parsed type node of the file-scope variable named `varName`.
-	static const Scripting::QualTypeNode* FindVarType(Scripting::CompilerInstance& compiler, const char* varName)
+	static const C4Compiler::QualTypeNode* FindVarType(C4Compiler::CompilerInstance& compiler, const char* varName)
 	{
-		const Scripting::QualTypeNode* found = nullptr;
-		std::function<void(const Scripting::AstNode&)> walk = [&](const Scripting::AstNode& n) {
+		const C4Compiler::QualTypeNode* found = nullptr;
+		std::function<void(const C4Compiler::AstNode&)> walk = [&](const C4Compiler::AstNode& n) {
 			if (found) return;
-			if (const auto* v = dynamic_cast<const Scripting::VariableDefinitionNode*>(&n)) {
+			if (const auto* v = dynamic_cast<const C4Compiler::VariableDefinitionNode*>(&n)) {
 				const auto& t = v->GetType();
 				if (t && v->GetNameToken().GetText() == varName) { found = t.Get(); return; }
 			}
@@ -193,7 +193,7 @@ namespace Testing
 
 	void ModelParityTest::ForwardDeclaredTypeIsIncompleteButUsable()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"struct Fwd;\n"
 			"struct H { Fwd* p; }\n");
@@ -207,7 +207,7 @@ namespace Testing
 		auto h = model.QueryType("H");
 		TEST_ASSERT(h.Ok());
 		TEST_ASSERT_EQ((int)model.SizeOf(h.value).value, 8);
-		const Scripting::ObjectType* obj = dynamic_cast<const Scripting::ObjectType*>(h.value);
+		const C4Compiler::ObjectType* obj = dynamic_cast<const C4Compiler::ObjectType*>(h.value);
 		TEST_ASSERT(obj != nullptr);
 		auto field = model.QueryMember(h.value, "p");
 		TEST_ASSERT(field.Ok());
@@ -217,7 +217,7 @@ namespace Testing
 
 	void ModelParityTest::OpenNamespaceBlocksMergeWithoutConflict()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"namespace Math { const int32 A = 10; }\n"
 			"namespace Math { const int32 B = 20; }\n");
@@ -234,12 +234,12 @@ namespace Testing
 
 	void ModelParityTest::ScopedAliasInTemplateSubstitutesToConcreteMember()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"template<T> class P { alias Type = T; Type val; }\n"
 			"P<float> g1;\n");
 
-		const Scripting::QualTypeNode* spec = FindVarType(compiler, "g1");
+		const C4Compiler::QualTypeNode* spec = FindVarType(compiler, "g1");
 		TEST_ASSERT(spec != nullptr);
 		auto inst = model.QueryInstantiation(*spec);
 		TEST_ASSERT(inst.Ok());
@@ -254,12 +254,12 @@ namespace Testing
 
 	void ModelParityTest::NonTypeParameterFoldsIntoArraySize()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"template<int N> struct Arr { int32[N] x; }\n"
 			"Arr<4> g2;\n");
 
-		const Scripting::QualTypeNode* spec = FindVarType(compiler, "g2");
+		const C4Compiler::QualTypeNode* spec = FindVarType(compiler, "g2");
 		TEST_ASSERT(spec != nullptr);
 		auto inst = model.QueryInstantiation(*spec);
 		TEST_ASSERT(inst.Ok());
@@ -269,7 +269,7 @@ namespace Testing
 		auto field = model.QueryMember(inst.value, "x");
 		TEST_ASSERT(field.Ok());
 		TEST_ASSERT(field.value.IsField);
-		const Scripting::Type* elem = model.ElementOf(field.value.field->m_Type);
+		const C4Compiler::Type* elem = model.ElementOf(field.value.field->m_Type);
 		TEST_ASSERT(elem != nullptr);
 		TEST_ASSERT_EQ((int)elem->GetSize(), 4); // int32 element
 		TEST_PASSED();
@@ -277,13 +277,13 @@ namespace Testing
 
 	void ModelParityTest::AbstractTypeIsMarkedAbstract()
 	{
-		Scripting::CompilerInstance compiler;
+		C4Compiler::CompilerInstance compiler;
 		const auto& model = MakeModel(compiler,
 			"abstract class Shape { virtual float Area() = 0; }\n");
 
 		auto s = model.QueryType("Shape");
 		TEST_ASSERT(s.Ok());
-		const Scripting::ObjectType* obj = dynamic_cast<const Scripting::ObjectType*>(s.value);
+		const C4Compiler::ObjectType* obj = dynamic_cast<const C4Compiler::ObjectType*>(s.value);
 		TEST_ASSERT(obj != nullptr);
 		TEST_ASSERT(obj->IsAbstract()); // the abstract flag is queryable - "cannot new" reads one flag (E4)
 		TEST_PASSED();
@@ -291,26 +291,26 @@ namespace Testing
 
 	// Shared interned primitive per kind, so "exact match" means pointer identity (mirrors the
 	// production TypeTable singletons). Distinct from OverloadResolutionTest's copy (file-static).
-	static const Scripting::Type* ParityPrim(Scripting::TypeKind kind)
+	static const C4Compiler::Type* ParityPrim(C4Compiler::TypeKind kind)
 	{
-		static Core::Vector<Scripting::PrimitiveType*> table(64, nullptr);
+		static Core::Vector<C4Compiler::PrimitiveType*> table(64, nullptr);
 		const int32 idx = (int32)kind;
 		if (!table[idx])
-			table[idx] = new Scripting::PrimitiveType(kind);
+			table[idx] = new C4Compiler::PrimitiveType(kind);
 		return table[idx];
 	}
 
-	static const Scripting::FunctionType* ParityFn(const Core::Vector<Scripting::TypeKind>& paramKinds)
+	static const C4Compiler::FunctionType* ParityFn(const Core::Vector<C4Compiler::TypeKind>& paramKinds)
 	{
-		const auto* ret = ParityPrim(Scripting::TypeKind::Int32);
-		Core::Vector<Scripting::FunctionType::ParameterInfo> params;
+		const auto* ret = ParityPrim(C4Compiler::TypeKind::Int32);
+		Core::Vector<C4Compiler::FunctionType::ParameterInfo> params;
 		for (uint32 i = 0; i < paramKinds.Count(); ++i) {
-			Scripting::FunctionType::ParameterInfo p;
+			C4Compiler::FunctionType::ParameterInfo p;
 			p.mName = "a";
 			p.m_Type = ParityPrim(paramKinds[i]);
 			params.Push(p);
 		}
-		return new Scripting::FunctionType(ret, params);
+		return new C4Compiler::FunctionType(ret, params);
 	}
 
 	void ModelParityTest::ResolveOverloadPicksBestAndReportsErrors()
@@ -319,45 +319,45 @@ namespace Testing
 		// on the model. The ranking mechanism itself is OverloadResolver::Resolve, which
 		// QueryFunction and QueryOperator call internally; this test locks its behavior directly.
 
-		const auto* exact = ParityFn({ Scripting::TypeKind::Int32 });   // int32 arg -> cost 0
-		const auto* conv  = ParityFn({ Scripting::TypeKind::Float32 });  // int32 arg -> cost 1 (numeric)
-		Core::Vector<Scripting::OverloadCandidate> cands;
+		const auto* exact = ParityFn({ C4Compiler::TypeKind::Int32 });   // int32 arg -> cost 0
+		const auto* conv  = ParityFn({ C4Compiler::TypeKind::Float32 });  // int32 arg -> cost 1 (numeric)
+		Core::Vector<C4Compiler::OverloadCandidate> cands;
 		cands.Push({ conv, nullptr, 1 });
 		cands.Push({ exact, nullptr, 1 });
-		Core::Vector<const Scripting::Type*> args;
-		args.Push(ParityPrim(Scripting::TypeKind::Int32));
+		Core::Vector<const C4Compiler::Type*> args;
+		args.Push(ParityPrim(C4Compiler::TypeKind::Int32));
 
 		// Resolved: the best signature wins (exact beats numeric conversion).
-		auto r = Scripting::OverloadResolver::Resolve(cands, args);
-		TEST_ASSERT(r.status == Scripting::OverloadResolution::Status::Resolved);
+		auto r = C4Compiler::OverloadResolver::Resolve(cands, args);
+		TEST_ASSERT(r.status == C4Compiler::OverloadResolution::Status::Resolved);
 		TEST_ASSERT(r.chosen == exact);
 
 		// Ambiguous: two distinct same-category NUMERIC param types both convert from an int32 arg (cost 1
 		// each) - a true tie, so it must be reported as a value error, never a silent wrong pick.
-		const auto* s1 = ParityFn({ Scripting::TypeKind::Int16 });    // int32 -> int16 : cost 1
-		const auto* s2 = ParityFn({ Scripting::TypeKind::Int64 });    // int32 -> int64 : cost 1
-		Core::Vector<Scripting::OverloadCandidate> tie;
+		const auto* s1 = ParityFn({ C4Compiler::TypeKind::Int16 });    // int32 -> int16 : cost 1
+		const auto* s2 = ParityFn({ C4Compiler::TypeKind::Int64 });    // int32 -> int64 : cost 1
+		Core::Vector<C4Compiler::OverloadCandidate> tie;
 		tie.Push({ s1, nullptr, 1 });
 		tie.Push({ s2, nullptr, 1 });
-		Core::Vector<const Scripting::Type*> tieArgs;
-		tieArgs.Push(ParityPrim(Scripting::TypeKind::Int32));
-		auto amb = Scripting::OverloadResolver::Resolve(tie, tieArgs);
-		TEST_ASSERT(amb.status == Scripting::OverloadResolution::Status::Ambiguous);
+		Core::Vector<const C4Compiler::Type*> tieArgs;
+		tieArgs.Push(ParityPrim(C4Compiler::TypeKind::Int32));
+		auto amb = C4Compiler::OverloadResolver::Resolve(tie, tieArgs);
+		TEST_ASSERT(amb.status == C4Compiler::OverloadResolution::Status::Ambiguous);
 
 		// Same-category beats cross-category: int32 -> int64 (cost 1) wins over int32 -> float32 (cost 2).
-		const auto* crossCat = ParityFn({ Scripting::TypeKind::Float32 });
-		const auto* sameCat = ParityFn({ Scripting::TypeKind::Int64 });
-		Core::Vector<Scripting::OverloadCandidate> mixed;
+		const auto* crossCat = ParityFn({ C4Compiler::TypeKind::Float32 });
+		const auto* sameCat = ParityFn({ C4Compiler::TypeKind::Int64 });
+		Core::Vector<C4Compiler::OverloadCandidate> mixed;
 		mixed.Push({ crossCat, nullptr, 1 });
 		mixed.Push({ sameCat, nullptr, 1 });
-		auto picked = Scripting::OverloadResolver::Resolve(mixed, tieArgs);
-		TEST_ASSERT(picked.status == Scripting::OverloadResolution::Status::Resolved);
+		auto picked = C4Compiler::OverloadResolver::Resolve(mixed, tieArgs);
+		TEST_ASSERT(picked.status == C4Compiler::OverloadResolution::Status::Resolved);
 		TEST_ASSERT(picked.chosen == sameCat);
 
 		// NoMatch: empty candidate set.
-		Core::Vector<Scripting::OverloadCandidate> none;
-		auto no = Scripting::OverloadResolver::Resolve(none, args);
-		TEST_ASSERT(no.status == Scripting::OverloadResolution::Status::NoMatch);
+		Core::Vector<C4Compiler::OverloadCandidate> none;
+		auto no = C4Compiler::OverloadResolver::Resolve(none, args);
+		TEST_ASSERT(no.status == C4Compiler::OverloadResolution::Status::NoMatch);
 		TEST_PASSED();
 	}
 } // namespace Testing

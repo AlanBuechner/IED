@@ -15,7 +15,7 @@
 #include "Parser/Nodes/Expressions/TypeOfExpressionNode.h"
 #include "Parser/Nodes/Expressions/UnaryExpressionNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	// sizeof / alignof / offsetof in a constant (an array extent, a const initializer): the operand is a type,
 	// or an expression the model can type without a function body around it.

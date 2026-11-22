@@ -34,9 +34,9 @@ namespace C4LSP::Server
 		m_Owned.clear();
 		m_Stamp = m_Options.projectsFile.empty() ? "" : StampOf(m_Options.projectsFile);
 		if (m_Stamp.empty()) return;
-		const Scripting::ProjectFileResult read = Scripting::ReadProjectFile(PathOf(m_Options.projectsFile));
+		const C4Compiler::ProjectFileResult read = C4Compiler::ReadProjectFile(PathOf(m_Options.projectsFile));
 		if (!read.error.empty()) return;
-		Scripting::ProjectSetResult checked = Scripting::ProjectSet::Check(read.list);
+		C4Compiler::ProjectSetResult checked = C4Compiler::ProjectSet::Check(read.list);
 		if (checked.set) m_Projects = std::move(*checked.set);
 	}
 
@@ -69,7 +69,7 @@ namespace C4LSP::Server
 
 	bool Program::InLibrary(const std::string& path) const
 	{
-		const std::string library = ComparablePath(m_Options.libraryFolder.empty() ? Scripting::Toolchain::Bedrock().generic_string() : m_Options.libraryFolder);
+		const std::string library = ComparablePath(m_Options.libraryFolder.empty() ? C4Compiler::Toolchain::Bedrock().generic_string() : m_Options.libraryFolder);
 		const std::string file = ComparablePath(path);
 		return file.size() > library.size() && file.compare(0, library.size(), library) == 0 && file[library.size()] == '/';
 	}
@@ -195,7 +195,7 @@ namespace C4LSP::Server
 	}
 
 	std::shared_ptr<CompilationSession> Program::Analyze(const std::string& rootFolder, const EditorDocuments& documents,
-		std::shared_ptr<const Scripting::PriorParses> prior) const
+		std::shared_ptr<const C4Compiler::PriorParses> prior) const
 	{
 		auto session = std::make_shared<CompilationSession>();
 		if (!rootFolder.empty()) session->SetRootFolder(rootFolder);

@@ -14,7 +14,7 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h> // CreateVAStart / CreateVAEnd free functions
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -261,4 +261,4 @@ namespace Scripting
 		llvm::Value* isNull = B.CreateICmpEQ(src, llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(src->getType())));
 		return B.CreateSelect(isNull, src, moved);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

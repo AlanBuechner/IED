@@ -1,6 +1,6 @@
 #include "ErrorTracker.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	void ErrorTracker::AddError(const SourceLocation& loc, const Core::String& message, ErrorSeverity severity)
 	{

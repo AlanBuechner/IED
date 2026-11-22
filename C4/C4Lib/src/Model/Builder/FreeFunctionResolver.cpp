@@ -10,7 +10,7 @@
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -276,4 +276,4 @@ namespace Scripting
 		const_cast<ObjectType&>(target).AddMethod(m);
 		m_Ctx.model->m_MethodRecords[&target].Push(stored);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

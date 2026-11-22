@@ -28,7 +28,7 @@
 #include "Model/OperatorAnnotations.h" // [group("name")] collection for reflection (plan 14)
 #include <functional>
 
-namespace Scripting
+namespace C4Compiler
 {
 	ModelBuilder::ModelBuilder(ErrorTracker* errors) : m_Errors(errors) {}
 
@@ -432,4 +432,4 @@ namespace Scripting
 		hidden.scope = ctx.model->m_HiddenPrelude;
 		VisitDeclaration(hidden, function);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

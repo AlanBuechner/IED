@@ -5,7 +5,7 @@
 #include "Model/Types/ArrayType.h"
 #include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	DeclarationQueries::DeclarationQueries(ModelBuilder& builder, ModelBuilder::Context& ctx) : m_Builder(builder), m_Ctx(ctx)
 	{
@@ -275,4 +275,4 @@ namespace Scripting
 		for (auto& function : m_Builder.m_PendingQualifiedFuncs)
 			(void)Ask(function.resolution, { &function, "the function", function.prefix + "::" + function.last }, [&] { return functions.ResolveQualified(function); });
 	}
-} // namespace Scripting
+} // namespace C4Compiler

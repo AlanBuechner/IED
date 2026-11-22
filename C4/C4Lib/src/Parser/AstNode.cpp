@@ -1,6 +1,6 @@
 #include "AstNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	Core::String NodeTypeToName(NodeType type)
 	{
@@ -77,4 +77,4 @@ namespace Scripting
 		}
 		return "Unknown";
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -1,7 +1,7 @@
 #pragma once
 #include "Backend/HIR/LoweringContext.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Binding a reference (docs/language/04 4.4): a reference local, parameter or field names a location of its
 	/// referent's type, held as its address. A reference field (docs/language/05) is that address stored in the
@@ -36,4 +36,4 @@ namespace Scripting
 		/// The message for an object of `type` starting with `field` unbound.
 		Core::String Unbound(const ObjectType* type, const ObjectType::FieldInfo& field);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

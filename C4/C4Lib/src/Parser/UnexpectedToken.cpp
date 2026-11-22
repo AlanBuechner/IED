@@ -1,7 +1,7 @@
 #include "Parser/UnexpectedToken.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

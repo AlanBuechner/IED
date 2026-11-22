@@ -14,7 +14,7 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h> // CreateVAStart / CreateVAEnd free functions
 
-namespace Scripting
+namespace C4Compiler
 {
 	llvm::Value* ExprEmitter::Emit(const HIRNode* node)
 	{
@@ -581,4 +581,4 @@ namespace Scripting
 		llvm::Function* cast = mc.RuntimeFunction("c4_dynamic_cast", mc.ManagedPtr(), { mc.ManagedPtr(), ptr });
 		return m_Ctx.Call(cast, { object, target }, false);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

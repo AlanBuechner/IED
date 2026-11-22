@@ -4,7 +4,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 
@@ -32,4 +32,4 @@ namespace Scripting
 		const ProgramModel& m_Model;
 		std::unordered_map<const Type*, std::vector<const FunctionRecord*>> m_Entries;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

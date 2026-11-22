@@ -3,7 +3,7 @@
 #include <span>
 #include <string_view>
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct FunctionRecord;
 
@@ -47,4 +47,4 @@ namespace Scripting
 
 	/// A method (in a type, static or not, or an extension method) or a free function.
 	AnnotationPlace PlaceOfFunction(const FunctionRecord& function);
-} // namespace Scripting
+} // namespace C4Compiler

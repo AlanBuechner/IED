@@ -1,7 +1,7 @@
 #pragma once
 #include "Model/Builder/ModelBuilder.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class DeclarationQueries;
 
@@ -59,4 +59,4 @@ namespace Scripting
 		ModelBuilder::Context& m_Ctx;
 		DeclarationQueries& m_Queries;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

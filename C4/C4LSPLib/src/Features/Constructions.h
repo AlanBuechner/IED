@@ -3,7 +3,7 @@
 #include "Features/ReferenceScanner.h"
 #include <vector>
 
-namespace Scripting { class AstNode; class ObjectType; class ProgramModel; }
+namespace C4Compiler { class AstNode; class ObjectType; class ProgramModel; }
 namespace C4LSP::Server { class SemanticResolver; }
 
 namespace C4LSP::Features
@@ -16,17 +16,17 @@ namespace C4LSP::Features
 	public:
 		struct Construction
 		{
-			const Scripting::ObjectType* type = nullptr;
+			const C4Compiler::ObjectType* type = nullptr;
 			uint32 argumentCount = 0;
 			ReferenceScanner::NameRange name; // the type's name where it is written; the variable's for `T x(args)`
 		};
 
 		/// The constructions `node` makes (`path` ends at it): one, or for a variable definition one a declarator.
-		static Core::Vector<Construction> Of(const Scripting::AstNode& node, const Core::Vector<const Scripting::AstNode*>& path,
+		static Core::Vector<Construction> Of(const C4Compiler::AstNode& node, const Core::Vector<const C4Compiler::AstNode*>& path,
 			const Server::SemanticResolver& resolver);
 
 		/// The declarations of the create operators the construction may call: those of its type that take its count of
 		/// arguments (the LSP types no argument, so overloads of one count all fit).
-		static std::vector<const Scripting::AstNode*> Called(const Scripting::ProgramModel& model, const Construction& construction);
+		static std::vector<const C4Compiler::AstNode*> Called(const C4Compiler::ProgramModel& model, const Construction& construction);
 	};
 } // namespace C4LSP::Features

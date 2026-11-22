@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The storage of one HIR tree: objects are placed in large blocks and destroyed together with the arena, so making
 	/// one is a pointer bump instead of a heap allocation and the tree is freed a block at a time. Addresses are stable.
@@ -103,4 +103,4 @@ namespace Scripting
 		std::byte* m_Next = nullptr;
 		std::byte* m_End = nullptr;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

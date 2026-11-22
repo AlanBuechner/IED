@@ -2,7 +2,7 @@
 #include "Script/ScriptJit.h"
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Where a debug script's module goes: `<folder>/<name>.dll`, its `.pdb` beside it. Each load is a name of its own,
 	/// so a debugger never sees a file change under it.
@@ -29,4 +29,4 @@ namespace Scripting
 	/// link or load.
 	std::unique_ptr<LinkedScript> LinkScriptDll(ScriptCode code, const HostSymbolTable& host, const CpuTarget& target,
 		const ScriptDllFile& file, std::string* error);
-} // namespace Scripting
+} // namespace C4Compiler

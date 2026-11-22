@@ -8,7 +8,7 @@
 #include "../Statements/CodeBlockNode.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	uint32 FunctionDefinitionNode::TrailingDefaultCount() const
 	{
@@ -593,4 +593,4 @@ namespace Scripting
 			m_Children.Push(m_Body);
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

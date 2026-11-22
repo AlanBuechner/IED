@@ -1,7 +1,7 @@
 #include "Backend/MIR/MirBuilder.h"
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -587,4 +587,4 @@ namespace Scripting
 		label.placed = true;
 		m_Body.labels.push_back(label.block);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

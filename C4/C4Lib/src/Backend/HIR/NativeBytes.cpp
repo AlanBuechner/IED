@@ -13,7 +13,7 @@
 #include "Model/Types/PointerType.h"
 #include "Model/Types/QualifiedName.h"
 
-namespace Scripting::NativeBytes
+namespace C4Compiler::NativeBytes
 {
 	namespace
 	{
@@ -241,4 +241,4 @@ namespace Scripting::NativeBytes
 		fn.complete = sum.Ok() && !errors.HasErrors();
 		return fn;
 	}
-} // namespace Scripting::NativeBytes
+} // namespace C4Compiler::NativeBytes

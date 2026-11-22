@@ -4,7 +4,7 @@
 #include <string_view>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A token of the macro pass (docs/language/02): what a use and its arguments are read as, what a macro's body is, and
 	/// what a use expands to. Expansion works on these, never on text (R8).

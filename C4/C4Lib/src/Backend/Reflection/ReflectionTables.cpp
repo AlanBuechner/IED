@@ -3,7 +3,7 @@
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/Module.h>
 
-namespace Scripting
+namespace C4Compiler
 {
 	ReflectionTables::ReflectionTables(llvm::Module& module, Strings strings)
 		: m_Module(module), m_Context(module.getContext()), m_Strings(std::move(strings))
@@ -125,4 +125,4 @@ namespace Scripting
 		global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
 		return global;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

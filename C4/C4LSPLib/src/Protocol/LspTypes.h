@@ -1,6 +1,6 @@
 #pragma once
 #include "Core/Core.h"
-#include "Lexer/Token.h" // Scripting::SourceLocation
+#include "Lexer/Token.h" // C4Compiler::SourceLocation
 #include <string>
 
 namespace C4LSP::Protocol
@@ -12,7 +12,7 @@ namespace C4LSP::Protocol
 		uint32 line = 0;      // 0-based
 		uint32 character = 0; // 0-based UTF-8 bytes, as the compiler counts; LspServer converts for a UTF-16 client
 
-		static Position FromSourceLocation(const Scripting::SourceLocation& loc);
+		static Position FromSourceLocation(const C4Compiler::SourceLocation& loc);
 	};
 
 	struct Range
@@ -20,7 +20,7 @@ namespace C4LSP::Protocol
 		Position start;
 		Position end;
 
-		static Range FromSourceRange(const Scripting::SourceLocation& start, const Scripting::SourceLocation& end);
+		static Range FromSourceRange(const C4Compiler::SourceLocation& start, const C4Compiler::SourceLocation& end);
 	};
 
 	/// One text replacement (LSP `TextEdit`): replace [range.start, range.end) with newText.
@@ -45,7 +45,7 @@ namespace C4LSP::Protocol
 		std::string uri;
 		Range range;
 
-		static Location Make(const std::string& uri, const Scripting::SourceLocation& start, const Scripting::SourceLocation& end);
+		static Location Make(const std::string& uri, const C4Compiler::SourceLocation& start, const C4Compiler::SourceLocation& end);
 	};
 
 	enum class DiagnosticSeverity : int { Error = 1, Warning = 2, Information = 3, Hint = 4 };

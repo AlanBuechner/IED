@@ -13,7 +13,7 @@
 #include "Model/Types/SwizzleType.h"
 #include "Model/Types/QualifiedName.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -287,4 +287,4 @@ namespace Scripting
 		auto allowed = AccessCheck::CheckCall(ctx, *plan.value.create);
 		return allowed.Ok() ? plan : ctx.Fail(site, Plan::Fail(allowed.error, allowed.message));
 	}
-} // namespace Scripting
+} // namespace C4Compiler

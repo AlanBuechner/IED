@@ -2,7 +2,7 @@
 #include "Compiler/ErrorTracker.h"
 #include "Core/Vector.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Aggregates everything a compilation run produced: every diagnostic from every phase
 	/// (front end, backend, exceptions) plus the outcome of the code generation step.

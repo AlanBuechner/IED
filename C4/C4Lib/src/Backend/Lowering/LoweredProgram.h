@@ -9,7 +9,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// What a lowered tree is, which says where codegen emits it and what it makes of it.
 	enum class UnitKind
@@ -75,4 +75,4 @@ namespace Scripting
 			return nullptr;
 		}
 	};
-} // namespace Scripting
+} // namespace C4Compiler

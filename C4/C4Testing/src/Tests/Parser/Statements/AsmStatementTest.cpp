@@ -8,18 +8,18 @@ namespace Testing
 	{
 		struct Parsed
 		{
-			Ref<Scripting::AsmStatementNode> node;
+			Ref<C4Compiler::AsmStatementNode> node;
 			uint32 errors = 0;
 		};
 
 		Parsed Parse(const char* text)
 		{
-			auto stream = Scripting::Source::FromMemory(text);
-			Scripting::Lexer lexer(*stream, 0);
-			Scripting::ErrorTracker errorTracker;
-			Scripting::ParserState state(lexer, errorTracker);
+			auto stream = C4Compiler::Source::FromMemory(text);
+			C4Compiler::Lexer lexer(*stream, 0);
+			C4Compiler::ErrorTracker errorTracker;
+			C4Compiler::ParserState state(lexer, errorTracker);
 			Parsed parsed;
-			parsed.node = Scripting::AsmStatementNode::TryParse(state);
+			parsed.node = C4Compiler::AsmStatementNode::TryParse(state);
 			parsed.errors = errorTracker.GetErrors().Count();
 			return parsed;
 		}
@@ -43,12 +43,12 @@ namespace Testing
 		TEST_ASSERT(p.node != nullptr && p.errors == 0);
 		const auto& ops = p.node->GetOperands();
 		TEST_ASSERT(ops.Count() == 7);
-		TEST_ASSERT(ops[0].kind == Scripting::AsmOperand::Kind::In && ops[0].name == "a" && ops[0].registerClass == "reg");
-		TEST_ASSERT(ops[1].kind == Scripting::AsmOperand::Kind::Out && ops[1].explicitRegister && ops[1].registerClass == "eax");
-		TEST_ASSERT(ops[2].kind == Scripting::AsmOperand::Kind::InOut && ops[2].name == "v" && ops[2].registerClass == "xmm");
+		TEST_ASSERT(ops[0].kind == C4Compiler::AsmOperand::Kind::In && ops[0].name == "a" && ops[0].registerClass == "reg");
+		TEST_ASSERT(ops[1].kind == C4Compiler::AsmOperand::Kind::Out && ops[1].explicitRegister && ops[1].registerClass == "eax");
+		TEST_ASSERT(ops[2].kind == C4Compiler::AsmOperand::Kind::InOut && ops[2].name == "v" && ops[2].registerClass == "xmm");
 		TEST_ASSERT(ops[3].name == "n" && ops[3].value != nullptr);
 		TEST_ASSERT(ops[4].name == "o");
-		TEST_ASSERT(ops[5].kind == Scripting::AsmOperand::Kind::Const && ops[5].name == "k");
+		TEST_ASSERT(ops[5].kind == C4Compiler::AsmOperand::Kind::Const && ops[5].name == "k");
 		TEST_ASSERT(ops[6].name.empty()); // an expression with no name is positional only
 		TEST_ASSERT(p.node->Children().size() == 7);
 		TEST_PASSED();

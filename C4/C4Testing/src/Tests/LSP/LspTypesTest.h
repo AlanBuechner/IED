@@ -2,7 +2,7 @@
 #include "UnitTesting/TestBase.h"
 #include "UnitTesting/TestAssertions.h"
 #include "Protocol/LspTypes.h"
-#include "Lexer/Token.h" // Scripting::SourceLocation
+#include "Lexer/Token.h" // C4Compiler::SourceLocation
 
 namespace Testing
 {

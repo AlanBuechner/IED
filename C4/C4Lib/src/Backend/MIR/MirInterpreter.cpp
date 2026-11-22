@@ -3,7 +3,7 @@
 #include "Model/TypeHandle.h"
 #include "Model/SymbolTable.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -170,4 +170,4 @@ namespace Scripting
 		}
 		return Fail("compile-time evaluation found a block it has no region of (a compiler fault)", m_At);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

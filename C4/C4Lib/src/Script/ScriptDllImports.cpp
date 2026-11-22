@@ -23,7 +23,7 @@
 #endif
 #include <windows.h>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -273,5 +273,5 @@ namespace Scripting
 		Rebind(reinterpret_cast<uint8*>(handle), Rebinding(imports, thunks, standIns), thunks, std::max<size_t>(imports.size(), 1) * sizeof(void*));
 		return true;
 	}
-} // namespace Scripting
+} // namespace C4Compiler
 #endif

@@ -10,7 +10,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ParallelLowering;
 	class ProgramModel;
@@ -62,4 +62,4 @@ namespace Scripting
 		std::vector<const FunctionRecord*> m_Targets;               // the last plan's targets
 		std::vector<Wanted> m_Wanted;                                // what each of them wants
 	};
-} // namespace Scripting
+} // namespace C4Compiler

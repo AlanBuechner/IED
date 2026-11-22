@@ -5,7 +5,7 @@
 #include "Lexer/Token.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// `annotation` starts an annotation declaration at namespace scope; anywhere else it is a name like any other.
 	constexpr const char* kAnnotationKeyword = "annotation";
@@ -59,4 +59,4 @@ namespace Scripting
 		Token m_SemicolonToken;
 		Core::Vector<Ref<AstNode>> m_Children; // the parameters
 	};
-} // namespace Scripting
+} // namespace C4Compiler

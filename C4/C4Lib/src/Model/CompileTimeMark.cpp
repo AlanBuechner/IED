@@ -3,7 +3,7 @@
 #include "Parser/Nodes/Declarations/AnnotationNode.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -21,4 +21,4 @@ namespace Scripting
 								if (item && item->GetName() == c_CompileTime) return item.Get();
 		return nullptr;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -1,6 +1,6 @@
 #include "Model/TypeStore.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -165,4 +165,4 @@ namespace Scripting
 		}
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

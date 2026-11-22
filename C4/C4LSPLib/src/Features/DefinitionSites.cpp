@@ -14,15 +14,15 @@
 
 namespace C4LSP::Features
 {
-	using Scripting::AstNode;
-	using Scripting::FunctionDefinitionNode;
-	using Scripting::NamespaceNode;
-	using Scripting::NodeType;
-	using Scripting::ObjectDefinitionNode;
+	using C4Compiler::AstNode;
+	using C4Compiler::FunctionDefinitionNode;
+	using C4Compiler::NamespaceNode;
+	using C4Compiler::NodeType;
+	using C4Compiler::ObjectDefinitionNode;
 
 	namespace
 	{
-		bool Present(const Scripting::Token& token) { return token.GetStartLocation().line != 0; }
+		bool Present(const C4Compiler::Token& token) { return token.GetStartLocation().line != 0; }
 
 		// ------------------------------------------------------------------------------------------- the file's text --
 

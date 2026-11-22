@@ -2,7 +2,7 @@
 #include "../Declarations/QualTypeNode.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	void TypeCheckNode::SetOperand(Ref<AstNode> operand)
 	{

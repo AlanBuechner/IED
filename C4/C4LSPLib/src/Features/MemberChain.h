@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting { struct AstNode; class Type; }
+namespace C4Compiler { struct AstNode; class Type; }
 
 namespace C4LSP::Server { class SemanticResolver; }
 
@@ -35,7 +35,7 @@ namespace C4LSP::Features
 
 		/// The type of the chain's value as the compiler resolves its names from `path` (the caret's lexical path) in the file
 		/// `unitId`; null when a link does not resolve.
-		const Scripting::Type* TypeIn(const Server::SemanticResolver& resolver, uint32 unitId, const Core::Vector<const Scripting::AstNode*>& path) const;
+		const C4Compiler::Type* TypeIn(const Server::SemanticResolver& resolver, uint32 unitId, const Core::Vector<const C4Compiler::AstNode*>& path) const;
 
 		const std::vector<Link>& Links() const { return m_Links; }
 

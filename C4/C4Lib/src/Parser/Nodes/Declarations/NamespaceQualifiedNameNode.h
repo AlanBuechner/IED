@@ -4,7 +4,7 @@
 #include "Lexer/Token.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Comma-separated template arguments inside angle brackets.
 	/// Created inline by NamespaceQualifiedNameNode; not parsed as a standalone construct.

@@ -4,7 +4,7 @@
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DataLayout.h>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The constant a pointer to a string literal is (the literal's private global).
 	using StringConstant = std::function<llvm::Constant*(const ConstantValue&)>;
@@ -15,4 +15,4 @@ namespace Scripting
 	/// pointer whose bytes are not zero.
 	llvm::Constant* DataImage(llvm::Type* type, const ConstantData& data, uint64 offset, const llvm::DataLayout& layout,
 		const StringConstant& stringAt);
-} // namespace Scripting
+} // namespace C4Compiler

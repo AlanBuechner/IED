@@ -9,7 +9,7 @@
 #include "Parser/Nodes/Expressions/PackExpansionNode.h"
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	Core::Vector<const ProgramModel::TemplateDef*> Specializations::InScope(const std::unordered_map<Core::String, Core::Vector<ProgramModel::TemplateDef>>& table, const Core::String& name,
 		const Scope* scope)
@@ -151,4 +151,4 @@ namespace Scripting
 		auto resolved = TemplateArgumentResolver::ResolveWritten(model, arg.IsType(), pattern, unitId, binding, nullptr);
 		return resolved.Ok() && SameArgument(resolved.value, arg);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -10,7 +10,7 @@
 #include "TemplateDefinitionNode.h"
 #include "ParameterNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct CodeBlockNode;
 

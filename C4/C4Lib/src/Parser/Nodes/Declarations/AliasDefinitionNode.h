@@ -6,7 +6,7 @@
 #include "AnnotationNode.h"
 #include "QualTypeNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct TemplateDefinitionNode;
 

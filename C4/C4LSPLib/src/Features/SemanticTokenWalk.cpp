@@ -42,31 +42,31 @@
 namespace C4LSP::Features::TokenWalk
 {
 	/// True when `node` (the last entry of `path`) is what its parent call calls: `x.Get` in `x.Get()`.
-	bool IsCallee(const Scripting::AstNode& node, const Core::Vector<const Scripting::AstNode*>& path)
+	bool IsCallee(const C4Compiler::AstNode& node, const Core::Vector<const C4Compiler::AstNode*>& path)
 	{
-		if (path.Count() < 2 || path[path.Count() - 2]->Type() != Scripting::NodeType::FunctionCall)
+		if (path.Count() < 2 || path[path.Count() - 2]->Type() != C4Compiler::NodeType::FunctionCall)
 			return false;
-		return static_cast<const Scripting::FunctionCallNode*>(path[path.Count() - 2])->GetCallee().Get() == &node;
+		return static_cast<const C4Compiler::FunctionCallNode*>(path[path.Count() - 2])->GetCallee().Get() == &node;
 	}
 
 	/// A modifier the parser commits by its text (`inline`, `final`, `volatile`, ...): the lexer gives it as an identifier,
 	/// so it reads as a keyword only when its node records it. A modifier the declaration does not have is an unset token,
 	/// which RecordOffset skips.
-	void RecordContextualKeyword(Ctx& ctx, const Scripting::Token& token)
+	void RecordContextualKeyword(Ctx& ctx, const C4Compiler::Token& token)
 	{
 		RecordOffset(ctx, token.GetStartLocation(), TokInfo{ K(SemanticTokenKind::Keyword), None });
 	}
 
 	// --- AST walk -----------------------------------------------------------
-	void Walk(const Scripting::AstNode& node, Ctx& ctx, const Core::Vector<const Scripting::AstNode*>& pathIn, int objectDepth, bool directMember)
+	void Walk(const C4Compiler::AstNode& node, Ctx& ctx, const Core::Vector<const C4Compiler::AstNode*>& pathIn, int objectDepth, bool directMember)
 	{
-		Core::Vector<const Scripting::AstNode*> path = pathIn;
+		Core::Vector<const C4Compiler::AstNode*> path = pathIn;
 		path.Push(&node);
 
 		switch (node.Type())
 		{
-		case Scripting::NodeType::Namespace: {
-			const auto& ns = static_cast<const Scripting::NamespaceNode&>(node);
+		case C4Compiler::NodeType::Namespace: {
+			const auto& ns = static_cast<const C4Compiler::NamespaceNode&>(node);
 			if (!ns.IsRoot() && !ns.Name().empty())
 			{
 				TokInfo info{ K(SemanticTokenKind::Namespace), SemanticTokenModifiers::Definition };
@@ -75,8 +75,8 @@ namespace C4LSP::Features::TokenWalk
 			}
 			break;
 		}
-		case Scripting::NodeType::ObjectDefinition: {
-			const auto& obj = static_cast<const Scripting::ObjectDefinitionNode&>(node);
+		case C4Compiler::NodeType::ObjectDefinition: {
+			const auto& obj = static_cast<const C4Compiler::ObjectDefinitionNode&>(node);
 			RecordContextualKeyword(ctx, obj.GetAbstractToken());
 			RecordContextualKeyword(ctx, obj.GetFinalToken());
 			TokInfo info{ ObjectKindToToken(obj.Kind()), SemanticTokenModifiers::Definition };
@@ -86,8 +86,8 @@ namespace C4LSP::Features::TokenWalk
 				ctx.typeNames.emplace(obj.GetNameToken().GetText(), info.kind);
 			break;
 		}
-		case Scripting::NodeType::EnumDefinition: {
-			const auto& en = static_cast<const Scripting::EnumDefinitionNode&>(node);
+		case C4Compiler::NodeType::EnumDefinition: {
+			const auto& en = static_cast<const C4Compiler::EnumDefinitionNode&>(node);
 			TokInfo info{ K(SemanticTokenKind::Enum), SemanticTokenModifiers::Definition };
 			RecordOffset(ctx, en.GetNameToken().GetStartLocation(), info);
 			RecordName(ctx, en.GetNameToken().GetStartLocation(), en.GetNameToken().GetText(), info);
@@ -103,26 +103,26 @@ namespace C4LSP::Features::TokenWalk
 			}
 			break;
 		}
-		case Scripting::NodeType::UnionDefinition: {
-			const auto& un = static_cast<const Scripting::UnionDefinitionNode&>(node);
+		case C4Compiler::NodeType::UnionDefinition: {
+			const auto& un = static_cast<const C4Compiler::UnionDefinitionNode&>(node);
 			TokInfo info{ K(SemanticTokenKind::Type), SemanticTokenModifiers::Definition }; // no `union` kind in the legend
 			RecordOffset(ctx, un.GetNameToken().GetStartLocation(), info);
 			RecordName(ctx, un.GetNameToken().GetStartLocation(), un.GetNameToken().GetText(), info);
 			break;
 		}
-		case Scripting::NodeType::SwizzleView: {
-			const auto& sv = static_cast<const Scripting::SwizzleViewNode&>(node);
+		case C4Compiler::NodeType::SwizzleView: {
+			const auto& sv = static_cast<const C4Compiler::SwizzleViewNode&>(node);
 			// `packed` / `unpacked` is lexed as an identifier (the parser commits it by text), so no AST name node
 			// exists for it and the re-lex pass would otherwise fall through to variable. The keyword token is the
 			// view's first token: record its exact span with kind Keyword, like `const` / `static`.
-			const Scripting::SourceLocation kwLoc = sv.startLocation;
+			const C4Compiler::SourceLocation kwLoc = sv.startLocation;
 			if (kwLoc.line > 0)
 				RecordOffset(ctx, kwLoc, TokInfo{ K(SemanticTokenKind::Keyword), None });
 
 			// Lane names are stored as raw tokens (not VariableDefinition nodes): color them like field
 			// definitions so `v.x` reads at the same family as a plain struct member.
 			for (const auto& lane : sv.GetLanes())
-				if (lane.GetType() == Scripting::TokenType::Identifier)
+				if (lane.GetType() == C4Compiler::TokenType::Identifier)
 					RecordOffset(ctx, lane.GetStartLocation(), TokInfo{ K(SemanticTokenKind::Field), SemanticTokenModifiers::Definition });
 
 			// SwizzleViewNode reports NO children, so the element type (`packed float x, y;`) is never reached by
@@ -132,61 +132,61 @@ namespace C4LSP::Features::TokenWalk
 				Walk(*sv.GetElementType().Get(), ctx, path, objectDepth, directMember);
 			break; // the element type was just walked explicitly; there are no other children
 		}
-		case Scripting::NodeType::AliasDefinition: {
-			const auto& al = static_cast<const Scripting::AliasDefinitionNode&>(node);
+		case C4Compiler::NodeType::AliasDefinition: {
+			const auto& al = static_cast<const C4Compiler::AliasDefinitionNode&>(node);
 			TokInfo info{ K(SemanticTokenKind::Type), SemanticTokenModifiers::Definition };
 			RecordOffset(ctx, al.GetNameToken().GetStartLocation(), info);
 			RecordName(ctx, al.GetNameToken().GetStartLocation(), al.GetNameToken().GetText(), info);
 			break;
 		}
-		case Scripting::NodeType::AnnotationDeclaration: {
+		case C4Compiler::NodeType::AnnotationDeclaration: {
 			// `annotation`, `on` and the places are keywords only here; the name reads as its uses do.
-			const auto& declaration = static_cast<const Scripting::AnnotationDeclarationNode&>(node);
+			const auto& declaration = static_cast<const C4Compiler::AnnotationDeclarationNode&>(node);
 			RecordContextualKeyword(ctx, declaration.GetKeywordToken());
 			RecordOffset(ctx, declaration.GetNameToken().GetStartLocation(), TokInfo{ K(SemanticTokenKind::Macro), SemanticTokenModifiers::Definition });
 			RecordContextualKeyword(ctx, declaration.GetOnToken());
-			for (const Scripting::Token& place : declaration.GetPlaceTokens())
+			for (const C4Compiler::Token& place : declaration.GetPlaceTokens())
 				RecordContextualKeyword(ctx, place);
 			break;
 		}
-		case Scripting::NodeType::CastExpression:
-			RecordContextualKeyword(ctx, static_cast<const Scripting::CastExpressionNode&>(node).GetCastKeywordToken());
+		case C4Compiler::NodeType::CastExpression:
+			RecordContextualKeyword(ctx, static_cast<const C4Compiler::CastExpressionNode&>(node).GetCastKeywordToken());
 			break;
-		case Scripting::NodeType::TypeOfExpression:
-			RecordContextualKeyword(ctx, static_cast<const Scripting::TypeOfExpressionNode&>(node).GetKeywordToken());
+		case C4Compiler::NodeType::TypeOfExpression:
+			RecordContextualKeyword(ctx, static_cast<const C4Compiler::TypeOfExpressionNode&>(node).GetKeywordToken());
 			break;
-		case Scripting::NodeType::ExternDeclaration: {
-			const auto& ext = static_cast<const Scripting::ExternDeclarationNode&>(node);
+		case C4Compiler::NodeType::ExternDeclaration: {
+			const auto& ext = static_cast<const C4Compiler::ExternDeclarationNode&>(node);
 			RecordContextualKeyword(ctx, ext.GetKindToken());
-			for (const Scripting::Token& directive : ext.GetDirectiveTokens())
+			for (const C4Compiler::Token& directive : ext.GetDirectiveTokens())
 				RecordContextualKeyword(ctx, directive);
 			break;
 		}
-		case Scripting::NodeType::TemplateDefinition: {
-			const auto& tpl = static_cast<const Scripting::TemplateDefinitionNode&>(node);
+		case C4Compiler::NodeType::TemplateDefinition: {
+			const auto& tpl = static_cast<const C4Compiler::TemplateDefinitionNode&>(node);
 			for (uint32 pi = 0; pi < tpl.ParameterCount(); ++pi)
 			{
-				auto param = tpl.GetParameter(pi).As<Scripting::TemplateParameterNode>();
+				auto param = tpl.GetParameter(pi).As<C4Compiler::TemplateParameterNode>();
 				if (!param || !param->GetNameToken().GetText().size())
 					continue;
 
-				const Scripting::Token& nameTok = param->GetNameToken();
+				const C4Compiler::Token& nameTok = param->GetNameToken();
 				TokInfo info{ K(SemanticTokenKind::TypeParameter), None };
 				RecordOffset(ctx, nameTok.GetStartLocation(), info);
 				ctx.templateParamNames.insert(nameTok.GetText()); // references to T resolve through this
 
 				// The `typename` / `class` marker token (when spelled as an identifier) is not a keyword;
 				// it reads like one. Non-type parameters keep their type specifier colored by the QualType walk.
-				const Scripting::Token& kw = param->GetKeywordToken();
-				if (kw.GetType() == Scripting::TokenType::Identifier &&
+				const C4Compiler::Token& kw = param->GetKeywordToken();
+				if (kw.GetType() == C4Compiler::TokenType::Identifier &&
 				    (kw.GetText() == "typename" || kw.GetText() == "class"))
 					RecordOffset(ctx, kw.GetStartLocation(), TokInfo{ K(SemanticTokenKind::Keyword), None });
 			}
 			break;
 		}
-		case Scripting::NodeType::FunctionDefinition: {
-			const auto& fn = static_cast<const Scripting::FunctionDefinitionNode&>(node);
-			for (const Scripting::Token* modifier : { &fn.GetInlineToken(), &fn.GetFinalToken(), &fn.GetAbstractToken(), &fn.GetNoexceptToken() })
+		case C4Compiler::NodeType::FunctionDefinition: {
+			const auto& fn = static_cast<const C4Compiler::FunctionDefinitionNode&>(node);
+			for (const C4Compiler::Token* modifier : { &fn.GetInlineToken(), &fn.GetFinalToken(), &fn.GetAbstractToken(), &fn.GetNoexceptToken() })
 				RecordContextualKeyword(ctx, *modifier);
 			if (fn.GetName())
 			{
@@ -197,7 +197,7 @@ namespace C4LSP::Features::TokenWalk
 				{
 					// Plain function/method name: the whole token is the definition.
 					TokInfo info{ kind, SemanticTokenModifiers::Definition };
-					const Scripting::Token& nameTok = qn.GetFirstIdentifierToken();
+					const C4Compiler::Token& nameTok = qn.GetFirstIdentifierToken();
 					RecordOffset(ctx, nameTok.GetStartLocation(), info);
 					RecordName(ctx, nameTok.GetStartLocation(), nameTok.GetText(), info);
 				}
@@ -220,14 +220,14 @@ namespace C4LSP::Features::TokenWalk
 							ownerPrefix += (j ? "::" : "") + segs[j];
 						if (ctx.resolver)
 						{
-							const Scripting::SymbolInfo* owner = ctx.resolver->Lookup(ownerPrefix, 0);
+							const C4Compiler::SymbolInfo* owner = ctx.resolver->Lookup(ownerPrefix, 0);
 							if (AsObject(owner))
 								kind = K(SemanticTokenKind::Method);
 						}
 					}
 
 					TokInfo info{ kind, SemanticTokenModifiers::Definition };
-					const Scripting::Token& nameTok = qn.GetSegments()[qn.SegmentCount() - 1].nameToken;
+					const C4Compiler::Token& nameTok = qn.GetSegments()[qn.SegmentCount() - 1].nameToken;
 					RecordOffset(ctx, nameTok.GetStartLocation(), info);
 					RecordName(ctx, nameTok.GetStartLocation(), nameTok.GetText(), info);
 
@@ -239,8 +239,8 @@ namespace C4LSP::Features::TokenWalk
 			}
 			break;
 		}
-		case Scripting::NodeType::VariableDefinition: {
-			const auto& var = static_cast<const Scripting::VariableDefinitionNode&>(node);
+		case C4Compiler::NodeType::VariableDefinition: {
+			const auto& var = static_cast<const C4Compiler::VariableDefinitionNode&>(node);
 			RecordContextualKeyword(ctx, var.GetVolatileToken());
 			RecordContextualKeyword(ctx, var.GetThreadLocalToken());
 			uint32 kind = directMember ? K(SemanticTokenKind::Field) : K(SemanticTokenKind::Variable);
@@ -254,8 +254,8 @@ namespace C4LSP::Features::TokenWalk
 				ctx.fields.insert(&node); // so bare references to this member also classify as field
 			break;
 		}
-		case Scripting::NodeType::Parameter: {
-			const auto& param = static_cast<const Scripting::ParameterNode&>(node);
+		case C4Compiler::NodeType::Parameter: {
+			const auto& param = static_cast<const C4Compiler::ParameterNode&>(node);
 			if (param.HasName())
 			{
 				TokInfo info{ K(SemanticTokenKind::Variable), None }; // house style: parameters are not a distinct color from variables
@@ -263,8 +263,8 @@ namespace C4LSP::Features::TokenWalk
 			}
 			break;
 		}
-		case Scripting::NodeType::QualType: {
-			const auto& qt = static_cast<const Scripting::QualTypeNode&>(node);
+		case C4Compiler::NodeType::QualType: {
+			const auto& qt = static_cast<const C4Compiler::QualTypeNode&>(node);
 			RecordContextualKeyword(ctx, qt.GetPackedToken());
 			if (qt.IsTypename())
 				RecordContextualKeyword(ctx, qt.BaseName()->GetFirstIdentifierToken()); // an annotation's parameter that takes a type
@@ -272,14 +272,14 @@ namespace C4LSP::Features::TokenWalk
 				ClassifyTypeSegments(qt, ctx, path);
 			break;
 		}
-		case Scripting::NodeType::AnnotationItem: {
-			const auto& item = static_cast<const Scripting::AnnotationItem&>(node);
+		case C4Compiler::NodeType::AnnotationItem: {
+			const auto& item = static_cast<const C4Compiler::AnnotationItem&>(node);
 			for (const auto& nameTok : item.GetNameTokens())
 				RecordOffset(ctx, nameTok.GetStartLocation(), TokInfo{ K(SemanticTokenKind::Macro), None });
 			break;
 		}
-		case Scripting::NodeType::IdentifierExpression: {
-			const auto& id = static_cast<const Scripting::IdentifierExpressionNode&>(node);
+		case C4Compiler::NodeType::IdentifierExpression: {
+			const auto& id = static_cast<const C4Compiler::IdentifierExpressionNode&>(node);
 			const Server::NodeResolution res = ctx.resolver ? ctx.resolver->ResolveReference(node, path) : Server::NodeResolution{};
 			// UNRESOLVED identifier (no type AND no declaration): do not record it. A recorded Variable would
 			// otherwise shadow the macro-usage check at relex time - an undefined name that is a project #define
@@ -291,8 +291,8 @@ namespace C4LSP::Features::TokenWalk
 			RecordOffset(ctx, id.GetNameToken().GetStartLocation(), TokInfo{ kind, None });
 			break;
 		}
-		case Scripting::NodeType::MemberAccess: {
-			const auto& ma = static_cast<const Scripting::MemberAccessNode&>(node);
+		case C4Compiler::NodeType::MemberAccess: {
+			const auto& ma = static_cast<const C4Compiler::MemberAccessNode&>(node);
 			uint32 kind = ClassifyReference(ctx, node, path, /*isMemberAccess=*/true);
 			// A member the resolver could not place (its owner is itself a member, `o.inner.Get()`) is still a method
 			// when it is called; a resolved declaration keeps its own kind (a called function-pointer field stays a field).
@@ -302,26 +302,26 @@ namespace C4LSP::Features::TokenWalk
 			RecordOffset(ctx, ma.GetMemberNameToken().GetStartLocation(), TokInfo{ kind, None });
 			break;
 		}
-		case Scripting::NodeType::StaticAccess: {
-			const auto& sa = static_cast<const Scripting::StaticAccessNode&>(node);
+		case C4Compiler::NodeType::StaticAccess: {
+			const auto& sa = static_cast<const C4Compiler::StaticAccessNode&>(node);
 
 			// `A::B::C` nests as StaticAccess(StaticAccess(A, B), C): descend to the base collecting member names.
 			std::vector<std::string> revSegments; // innermost member first
-			std::vector<Scripting::Token> revTokens;
-			const Scripting::AstNode* cur = &node;
-			while (cur && cur->Type() == Scripting::NodeType::StaticAccess)
+			std::vector<C4Compiler::Token> revTokens;
+			const C4Compiler::AstNode* cur = &node;
+			while (cur && cur->Type() == C4Compiler::NodeType::StaticAccess)
 			{
-				const auto& inner = static_cast<const Scripting::StaticAccessNode&>(*cur);
+				const auto& inner = static_cast<const C4Compiler::StaticAccessNode&>(*cur);
 				revSegments.push_back(std::string(inner.GetMemberNameToken().GetText()));
 				revTokens.push_back(inner.GetMemberNameToken());
 				cur = inner.GetBaseType().Get();
 			}
 
 			bool ok = false; // the chain must terminate in a plain identifier to be classifiable per segment
-			if (cur && cur->Type() == Scripting::NodeType::IdentifierExpression)
+			if (cur && cur->Type() == C4Compiler::NodeType::IdentifierExpression)
 			{
-				const auto& id = static_cast<const Scripting::IdentifierExpressionNode&>(*cur);
-				if (id.GetNameToken().GetType() == Scripting::TokenType::Identifier)
+				const auto& id = static_cast<const C4Compiler::IdentifierExpressionNode&>(*cur);
+				if (id.GetNameToken().GetType() == C4Compiler::TokenType::Identifier)
 				{
 					revSegments.push_back(std::string(id.GetNameToken().GetText()));
 					revTokens.push_back(id.GetNameToken());
@@ -344,10 +344,10 @@ namespace C4LSP::Features::TokenWalk
 			break;
 		}
 
-		case Scripting::NodeType::LambdaExpression: {
+		case C4Compiler::NodeType::LambdaExpression: {
 			// A capture names a variable (`[&counter]`); an init capture's variable is walked as its declaration.
-			for (const Scripting::LambdaCapture& capture : static_cast<const Scripting::LambdaNode&>(node).GetCaptures())
-				if (capture.kind == Scripting::LambdaCapture::Kind::Variable)
+			for (const C4Compiler::LambdaCapture& capture : static_cast<const C4Compiler::LambdaNode&>(node).GetCaptures())
+				if (capture.kind == C4Compiler::LambdaCapture::Kind::Variable)
 					RecordOffset(ctx, capture.name.GetStartLocation(), TokInfo{ K(SemanticTokenKind::Variable), None });
 			break;
 		}
@@ -359,17 +359,17 @@ namespace C4LSP::Features::TokenWalk
 		// Recurse into children. Body members of an object are direct members (fields / methods);
 		// everything nested inside a function body resets to non-member so locals stay `variable`.
 		bool childDirectMember = directMember;
-		if (node.Type() == Scripting::NodeType::ObjectDefinition)
+		if (node.Type() == C4Compiler::NodeType::ObjectDefinition)
 			childDirectMember = true;
-		else if (node.Type() == Scripting::NodeType::FunctionDefinition ||
-		         node.Type() == Scripting::NodeType::VariableDefinition)
+		else if (node.Type() == C4Compiler::NodeType::FunctionDefinition ||
+		         node.Type() == C4Compiler::NodeType::VariableDefinition)
 			childDirectMember = false; // inside a body / initializer: not object members
 
 		int childDepth = objectDepth;
-		if (node.Type() == Scripting::NodeType::ObjectDefinition)
+		if (node.Type() == C4Compiler::NodeType::ObjectDefinition)
 			childDepth = objectDepth + 1;
 
-		Server::ForEachWrittenChild(node, [&](const Scripting::AstNode& child) { Walk(child, ctx, path, childDepth, childDirectMember); });
+		Server::ForEachWrittenChild(node, [&](const C4Compiler::AstNode& child) { Walk(child, ctx, path, childDepth, childDirectMember); });
 	}
 
 	// --- What the included headers declare --------------------------------------------------------------------------------
@@ -378,43 +378,43 @@ namespace C4LSP::Features::TokenWalk
 	{
 		// A header's type names and its objects' fields, as Walk records them; function bodies and initializers declare
 		// neither.
-		void CollectDeclared(const Scripting::AstNode& node, Ctx& ctx, bool directMember)
+		void CollectDeclared(const C4Compiler::AstNode& node, Ctx& ctx, bool directMember)
 		{
 			switch (node.Type())
 			{
-			case Scripting::NodeType::ObjectDefinition: {
-				const auto& obj = static_cast<const Scripting::ObjectDefinitionNode&>(node);
+			case C4Compiler::NodeType::ObjectDefinition: {
+				const auto& obj = static_cast<const C4Compiler::ObjectDefinitionNode&>(node);
 				ctx.typeNames.emplace(obj.GetNameToken().GetText(), ObjectKindToToken(obj.Kind())); // first declaration wins
 				break;
 			}
-			case Scripting::NodeType::EnumDefinition:
-				ctx.typeNames.emplace(static_cast<const Scripting::EnumDefinitionNode&>(node).GetNameToken().GetText(), K(SemanticTokenKind::Enum));
+			case C4Compiler::NodeType::EnumDefinition:
+				ctx.typeNames.emplace(static_cast<const C4Compiler::EnumDefinitionNode&>(node).GetNameToken().GetText(), K(SemanticTokenKind::Enum));
 				break;
-			case Scripting::NodeType::VariableDefinition:
+			case C4Compiler::NodeType::VariableDefinition:
 				if (directMember)
 					ctx.fields.insert(&node);
 				return;
-			case Scripting::NodeType::FunctionDefinition:
+			case C4Compiler::NodeType::FunctionDefinition:
 				return;
 			default:
 				break;
 			}
-			const bool childDirectMember = directMember || node.Type() == Scripting::NodeType::ObjectDefinition;
-			Server::ForEachWrittenChild(node, [&](const Scripting::AstNode& child) { CollectDeclared(child, ctx, childDirectMember); });
+			const bool childDirectMember = directMember || node.Type() == C4Compiler::NodeType::ObjectDefinition;
+			Server::ForEachWrittenChild(node, [&](const C4Compiler::AstNode& child) { CollectDeclared(child, ctx, childDirectMember); });
 		}
 
 		// The headers `unitId` includes, each in the place of its include (as the compiler's include merge splices them);
 		// the unit's own declarations too when `own`.
-		void CollectIncludes(Scripting::CompilerInstance& compiler, uint32 unitId, bool own, std::unordered_set<uint32>& seen, Ctx& ctx)
+		void CollectIncludes(C4Compiler::CompilerInstance& compiler, uint32 unitId, bool own, std::unordered_set<uint32>& seen, Ctx& ctx)
 		{
-			const Ref<Scripting::CompilationUnit> unit = compiler.GetCompilationUnit(unitId);
+			const Ref<C4Compiler::CompilationUnit> unit = compiler.GetCompilationUnit(unitId);
 			if (!unit)
 				return;
 			for (const auto& child : unit->GetOriginalChildren())
 			{
 				if (!child)
 					continue;
-				if (const auto include = child.PointerCast<Scripting::IncludeDeclarationNode>())
+				if (const auto include = child.PointerCast<C4Compiler::IncludeDeclarationNode>())
 				{
 					const uint32 header = compiler.GetSourceManager().ResolveIncludePath(include->FilePath(), unitId);
 					if (header != 0 && seen.insert(header).second)
@@ -426,7 +426,7 @@ namespace C4LSP::Features::TokenWalk
 		}
 	}
 
-	void CollectIncludedDeclarations(Scripting::CompilerInstance& compiler, Ctx& ctx)
+	void CollectIncludedDeclarations(C4Compiler::CompilerInstance& compiler, Ctx& ctx)
 	{
 		std::unordered_set<uint32> seen{ ctx.sourceId };
 		CollectIncludes(compiler, ctx.sourceId, false, seen, ctx);

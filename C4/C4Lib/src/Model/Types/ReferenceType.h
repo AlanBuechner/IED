@@ -1,7 +1,7 @@
 #pragma once
 #include "Model/Types/Type.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A reference type: `T&`. Size is pointer-sized (mirrors PointerType).
 	class ReferenceType : public Type
@@ -17,4 +17,4 @@ namespace Scripting
 		const Type* m_ReferentType = nullptr;
 		bool m_ConstReferent = false; // `const T&` - the referent is read-only (mirrors PointerType)
 	};
-} // namespace Scripting
+} // namespace C4Compiler

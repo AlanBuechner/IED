@@ -1,6 +1,6 @@
 #include "Compiler/PriorParses.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -35,4 +35,4 @@ namespace Scripting
 	{
 		m_Parses[sourceId] = std::move(parse);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

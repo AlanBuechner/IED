@@ -2,7 +2,7 @@
 #include "Backend/HIR/LoweringContext.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The labels of one switch (docs/language/09 4): each an integer, char or enum constant that the selector's
 	/// type holds exactly, each named once. A scoped enum is matched only by its own members (D-32).
@@ -25,4 +25,4 @@ namespace Scripting
 		const Type* m_Selector;
 		std::vector<int64> m_Values;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

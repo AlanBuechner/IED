@@ -2,7 +2,7 @@
 #include "Core/Core.h"
 #include "Protocol/LspTypes.h"
 
-namespace Scripting { struct AstNode; }
+namespace C4Compiler { struct AstNode; }
 
 namespace C4LSP::Server { class CompilationSession; }
 
@@ -28,7 +28,7 @@ namespace C4LSP::Features
 		static Core::Vector<FoldingRange> ForDocument(Server::CompilationSession& session, const std::string& uri);
 
 	private:
-		static void CollectNode(const Scripting::AstNode& node, uint32 sourceId, Core::Vector<FoldingRange>& out);
+		static void CollectNode(const C4Compiler::AstNode& node, uint32 sourceId, Core::Vector<FoldingRange>& out);
 		static void AddCommentFolds(Server::CompilationSession& session, const std::string& uri, Core::Vector<FoldingRange>& out);
 	};
 } // namespace C4LSP::Features

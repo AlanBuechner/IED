@@ -2,7 +2,7 @@
 #include "Model/TypeHandle.h"
 #include "Model/Types/PointerType.h"
 
-namespace Scripting::SimdMemory
+namespace C4Compiler::SimdMemory
 {
 	using namespace SimdOperands;
 
@@ -99,4 +99,4 @@ namespace Scripting::SimdMemory
 		default: return Store(call, pointer.value, op);
 		}
 	}
-} // namespace Scripting::SimdMemory
+} // namespace C4Compiler::SimdMemory

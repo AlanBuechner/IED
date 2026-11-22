@@ -4,7 +4,7 @@
 #include "Server/NodeLocator.h"
 #include "Model/DeclaredAnnotations.h"
 
-namespace Scripting { class AstNode; class ProgramModel; struct Source; struct FunctionDefinitionNode; struct ParameterNode; class Type; }
+namespace C4Compiler { class AstNode; class ProgramModel; struct Source; struct FunctionDefinitionNode; struct ParameterNode; class Type; }
 namespace C4LSP::Server { class CompilationSession; class SemanticResolver; }
 
 namespace C4LSP::Features
@@ -38,8 +38,8 @@ namespace C4LSP::Features
 		static SignatureHelpResult At(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position);
 
 	private:
-		static bool FindEnclosingCall(const Scripting::Source& source, const Server::LocatedNode& located, uint32 sourceId,
-			const Protocol::Position& position, const Scripting::AstNode*& outCallee, uint32& activeArg);
+		static bool FindEnclosingCall(const C4Compiler::Source& source, const Server::LocatedNode& located, uint32 sourceId,
+			const Protocol::Position& position, const C4Compiler::AstNode*& outCallee, uint32& activeArg);
 
 		// Lexical fallback for a call that has NOT yet parsed into a FunctionCall node because it is still being
 		// typed (e.g. `Add(`, `Add(1`, or an auto-closed `Add()` with no trailing `;` - C4 requires the `;`). VS2022 /
@@ -47,26 +47,26 @@ namespace C4LSP::Features
 		// recover the callee from raw text: find the nearest unclosed `(` before the caret, read the identifier/member/
 		// static chain that precedes it (the callee), and count top-level commas inside those parens to get the active
 		// argument slot. Returns false when there is no such call-shaped pattern at the caret.
-		static bool LexicalCall(const Scripting::Source& source, size_t caretOffset, std::string& outCalleeName, uint32& activeArg,
+		static bool LexicalCall(const C4Compiler::Source& source, size_t caretOffset, std::string& outCalleeName, uint32& activeArg,
 			size_t* outCalleeStart = nullptr);
 
 		// Whether the callee starting at `calleeStart` is written in an annotation group (`[Range(` of `[Range(0, 1)]`): an open
 		// `[` comes before it with no `;`, brace or open `(` between.
-		static bool InAnnotationGroup(const Scripting::Source& source, size_t calleeStart);
+		static bool InAnnotationGroup(const C4Compiler::Source& source, size_t calleeStart);
 
 		// Every overload of the declared annotation `name`, the one `arguments` arguments most likely mean active.
-		static bool AnnotationSignatures(const Server::SemanticResolver& resolver, const std::string& name, const Scripting::AnnotationContext& at,
+		static bool AnnotationSignatures(const Server::SemanticResolver& resolver, const std::string& name, const C4Compiler::AnnotationContext& at,
 			uint32 activeArg, SignatureHelpResult& result);
 
 		// Resolve a free function (or method) definition by its simple name so the lexical fallback can build a
 		// signature. Prefers the unit that contains the caret; falls back to any other unit in the project (the call's
 		// callee is often defined in an included file). Returns nullptr when no FunctionDefinition matches.
-		static const Scripting::AstNode* FindFunctionByName(Server::CompilationSession& session, uint32 sourceId, const std::string& name);
+		static const C4Compiler::AstNode* FindFunctionByName(Server::CompilationSession& session, uint32 sourceId, const std::string& name);
 
-		static SignatureInfo BuildSignature(const Server::SemanticResolver& resolver, const Core::Vector<const Scripting::AstNode*>& path, const Scripting::AstNode& callee);
-		static std::string CalleeName(const Scripting::AstNode& callee);
-		static SignatureInfo BuildFromDeclaration(const Scripting::FunctionDefinitionNode& decl, const std::string& name);
-		static SignatureInfo BuildFromParameterTypes(const Core::Vector<const Scripting::Type*>& paramTypes, bool variadic, const std::string& name);
-		static std::string ParameterText(const Scripting::ParameterNode& param);
+		static SignatureInfo BuildSignature(const Server::SemanticResolver& resolver, const Core::Vector<const C4Compiler::AstNode*>& path, const C4Compiler::AstNode& callee);
+		static std::string CalleeName(const C4Compiler::AstNode& callee);
+		static SignatureInfo BuildFromDeclaration(const C4Compiler::FunctionDefinitionNode& decl, const std::string& name);
+		static SignatureInfo BuildFromParameterTypes(const Core::Vector<const C4Compiler::Type*>& paramTypes, bool variadic, const std::string& name);
+		static std::string ParameterText(const C4Compiler::ParameterNode& param);
 	};
 } // namespace C4LSP::Features

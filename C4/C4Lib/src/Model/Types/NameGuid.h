@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-namespace Scripting::NameGuid
+namespace C4Compiler::NameGuid
 {
 	/// The 16 bytes, in Win32 _GUID layout, of the RFC 4122 version 5 UUID of `name` in the URL namespace: the
 	/// UUID `uuid.uuid5(uuid.NAMESPACE_URL, name)` gives. __uuidof(T) of a type without [uuid] is this for

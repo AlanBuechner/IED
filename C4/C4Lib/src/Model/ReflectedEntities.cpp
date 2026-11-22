@@ -2,7 +2,7 @@
 #include "Model/ProgramModel.h"
 #include "Model/Types/ObjectType.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	bool ReflectedFunction(const FunctionRecord& function)
 	{
@@ -14,4 +14,4 @@ namespace Scripting
 	{
 		return object && object->IsDefined() && !model.ClosureOf(object) && !object->IsReturnList() && !object->GetName().empty();
 	}
-} // namespace Scripting
+} // namespace C4Compiler

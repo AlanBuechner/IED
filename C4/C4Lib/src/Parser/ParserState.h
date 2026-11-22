@@ -8,7 +8,7 @@
 #include <vector>
 #include <condition_variable>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class CompilerMessageQueue;
 

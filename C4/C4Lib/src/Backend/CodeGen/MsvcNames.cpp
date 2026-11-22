@@ -2,7 +2,7 @@
 #include "Model/TypeHandle.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace MsvcNames
 	{
@@ -141,4 +141,4 @@ namespace Scripting
 			return ".PEA" + Mangler().Encode(pointee);
 		}
 	}
-} // namespace Scripting
+} // namespace C4Compiler

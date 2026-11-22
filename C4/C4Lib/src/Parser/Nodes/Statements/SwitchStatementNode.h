@@ -4,7 +4,7 @@
 #include "Lexer/Token.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// One case in a switch: 'case' expr ':' statements*  OR  'default': statements*
 	struct SwitchCaseNode : public AstNode

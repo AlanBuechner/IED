@@ -11,7 +11,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A host interface's lookups, made once for every compile against it.
 	struct HostIndex
@@ -61,4 +61,4 @@ namespace Scripting
 		for (const ScriptChain* at = top; at; at = at->parent.get()) layers.insert(layers.begin(), at);
 		return layers;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

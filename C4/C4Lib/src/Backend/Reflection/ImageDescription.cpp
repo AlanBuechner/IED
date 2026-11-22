@@ -3,7 +3,7 @@
 #include <llvm/Support/xxhash.h>
 #include <cstdio>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -83,4 +83,4 @@ namespace Scripting
 		m_Tables.push_back({ shape, std::move(rows) });
 		return { ImageValue::Kind::Table, m_Tables.size() - 1 };
 	}
-} // namespace Scripting
+} // namespace C4Compiler

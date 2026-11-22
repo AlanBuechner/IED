@@ -1,6 +1,6 @@
 #pragma once
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ObjectType;
 	class ProgramModel;
@@ -12,4 +12,4 @@ namespace Scripting
 
 	/// Whether reflection registers the object type: a defined one with a name, not a closure or a return list.
 	bool ReflectedType(const ProgramModel& model, const ObjectType* object);
-} // namespace Scripting
+} // namespace C4Compiler

@@ -4,7 +4,7 @@
 #include "Parser/Nodes/Expressions/LiteralNode.h"
 #include <tuple>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -171,4 +171,4 @@ namespace Scripting
 		}
 		return LikelyOverload(overloads, arguments.Count());
 	}
-} // namespace Scripting
+} // namespace C4Compiler

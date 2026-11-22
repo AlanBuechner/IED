@@ -7,7 +7,7 @@
 #include <string_view>
 #include <unordered_set>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A file's interface text (docs/runtime/04 section 3.2): the file's text as its parse read it - `written` through its
 	/// macro layout `macros` (null: none) - which its top-level declarations `nodes` were parsed from, with the body of
@@ -19,4 +19,4 @@ namespace Scripting
 	/// range does not fit the text (the nodes were not parsed from it).
 	std::optional<std::string> InterfaceText(std::string_view written, const MacroLayout* macros, const Core::Vector<Ref<AstNode>>& nodes,
 		const std::unordered_set<const AstNode*>& declaredElsewhere = {}, const std::unordered_set<const AstNode*>& compileTime = {});
-} // namespace Scripting
+} // namespace C4Compiler

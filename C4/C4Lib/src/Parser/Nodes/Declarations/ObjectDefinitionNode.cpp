@@ -14,7 +14,7 @@
 #include "Parser/UnexpectedToken.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	static bool IsAccessModifier(TokenType type)
 	{
@@ -666,4 +666,4 @@ namespace Scripting
 	}
 
 
-} // namespace Scripting
+} // namespace C4Compiler

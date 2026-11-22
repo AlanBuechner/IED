@@ -17,7 +17,7 @@
 #include <cstring>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

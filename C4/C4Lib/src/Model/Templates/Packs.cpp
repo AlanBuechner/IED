@@ -6,7 +6,7 @@
 #include "Parser/Nodes/Expressions/PackExpansionNode.h"
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -92,4 +92,4 @@ namespace Scripting
 		}
 		return Result::Success(args);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

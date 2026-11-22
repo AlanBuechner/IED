@@ -23,20 +23,20 @@ namespace C4LSP::Features
 {
 	// A parameter, a for statement's variable, or a variable declared inside a function: nothing outside that function
 	// names it.
-	static bool IsFunctionLocal(Server::CompilationSession& session, const Scripting::AstNode& declaration)
+	static bool IsFunctionLocal(Server::CompilationSession& session, const C4Compiler::AstNode& declaration)
 	{
-		if (declaration.Type() == Scripting::NodeType::Parameter || declaration.Type() == Scripting::NodeType::ForLoop)
+		if (declaration.Type() == C4Compiler::NodeType::Parameter || declaration.Type() == C4Compiler::NodeType::ForLoop)
 			return true;
-		if (declaration.Type() != Scripting::NodeType::VariableDefinition)
+		if (declaration.Type() != C4Compiler::NodeType::VariableDefinition)
 			return false;
-		const Core::Vector<const Scripting::AstNode*> path = DeclarationText::PathTo(session, declaration);
+		const Core::Vector<const C4Compiler::AstNode*> path = DeclarationText::PathTo(session, declaration);
 		for (uint32 i = 0; i + 1 < path.Count(); ++i)
-			if (path[i]->Type() == Scripting::NodeType::FunctionDefinition)
+			if (path[i]->Type() == C4Compiler::NodeType::FunctionDefinition)
 				return true;
 		return false;
 	}
 
-	static const Scripting::AstNode* TypeWrittenAt(Server::CompilationSession& session, const Server::LocatedNode& located);
+	static const C4Compiler::AstNode* TypeWrittenAt(Server::CompilationSession& session, const Server::LocatedNode& located);
 
 	std::optional<Protocol::Location> Definition::SharedDeclarationAt(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position)
 	{
@@ -46,9 +46,9 @@ namespace C4LSP::Features
 		auto unit = session.GetCompiler().GetCompilationUnit(sourceId);
 		if (!unit || !unit->GetRootAST())
 			return std::nullopt;
-		const Scripting::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
+		const C4Compiler::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
 		const Server::LocatedNode located = Server::NodeLocator::Locate(source, sourceId, unit->GetRootAST(), position);
-		const Scripting::AstNode* target = located.Found() ? TargetAt(session, sourceId, located, position) : nullptr;
+		const C4Compiler::AstNode* target = located.Found() ? TargetAt(session, sourceId, located, position) : nullptr;
 		if (!target || IsFunctionLocal(session, *target))
 			return std::nullopt;
 		return LocationForDeclaration(session, *target);
@@ -70,21 +70,21 @@ namespace C4LSP::Features
 		if (!unit || !unit->GetRootAST())
 			return {};
 
-		const Scripting::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
+		const C4Compiler::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
 		Server::LocatedNode located = Server::NodeLocator::Locate(source, sourceId, unit->GetRootAST(), position);
 		if (!located.Found())
 			return {};
 
-		if (const Scripting::AstNode* annotation = AnnotationNamedAt(session, located, position))
+		if (const C4Compiler::AstNode* annotation = AnnotationNamedAt(session, located, position))
 			return { LocationForDeclaration(session, *annotation) };
 		auto locations = ResolveReference(session, sourceId, located);
 		if (locations.Count() > 0)
 			return locations;
-		if (const Scripting::AstNode* captured = CapturedAt(session, located, position))
+		if (const C4Compiler::AstNode* captured = CapturedAt(session, located, position))
 			return { LocationForDeclaration(session, *captured) };
-		if (const Scripting::AstNode* declared = DeclarationNamedAt(session, sourceId, located, position))
+		if (const C4Compiler::AstNode* declared = DeclarationNamedAt(session, sourceId, located, position))
 			return Counterparts(session, *declared);
-		if (const Scripting::AstNode* type = TypeWrittenAt(session, located))
+		if (const C4Compiler::AstNode* type = TypeWrittenAt(session, located))
 			return { LocationForDeclaration(session, *type) };
 
 		// Fallback: the caret is on a type name in a declaration (e.g. `ID3D12Device* g_dev`), not a
@@ -174,17 +174,17 @@ namespace C4LSP::Features
 		std::string simpleName;
 		for (int i = static_cast<int>(located.path.Count()) - 1; i >= 0 && simpleName.empty(); --i)
 		{
-			const Scripting::AstNode* node = located.path[i];
+			const C4Compiler::AstNode* node = located.path[i];
 			switch (node->Type())
 			{
-			case Scripting::NodeType::IdentifierExpression:
-				simpleName = static_cast<const Scripting::IdentifierExpressionNode&>(*node).GetName();
+			case C4Compiler::NodeType::IdentifierExpression:
+				simpleName = static_cast<const C4Compiler::IdentifierExpressionNode&>(*node).GetName();
 				break;
-			case Scripting::NodeType::MemberAccess:
-				simpleName = static_cast<const Scripting::MemberAccessNode&>(*node).GetMemberNameToken().GetText();
+			case C4Compiler::NodeType::MemberAccess:
+				simpleName = static_cast<const C4Compiler::MemberAccessNode&>(*node).GetMemberNameToken().GetText();
 				break;
-			case Scripting::NodeType::QualType: {
-				const auto& qt = static_cast<const Scripting::QualTypeNode&>(*node);
+			case C4Compiler::NodeType::QualType: {
+				const auto& qt = static_cast<const C4Compiler::QualTypeNode&>(*node);
 				if (qt.BaseName())
 					simpleName = qt.BaseName()->GetSegments().Back().nameToken.GetText();
 				break;
@@ -199,19 +199,19 @@ namespace C4LSP::Features
 		// The model is program-wide and every unit shares it, so one scope-tree scan covers the whole
 		// project - no per-unit loop needed. A name declared in a file this one does not include is
 		// still found here (build-time visibility), exactly like VS Code jumping to such a definition.
-		std::vector<const Scripting::AstNode*> decls;
+		std::vector<const C4Compiler::AstNode*> decls;
 		session.GetResolver().CollectDeclarationsByName(simpleName, decls);
 
-		std::set<const Scripting::AstNode*> seen;
+		std::set<const C4Compiler::AstNode*> seen;
 		Core::Vector<Protocol::Location> result;
-		for (const Scripting::AstNode* decl : decls)
+		for (const C4Compiler::AstNode* decl : decls)
 			if (seen.insert(decl).second) // same declaration reachable through several units' merged trees
 				result.Push(LocationForDeclaration(session, *decl));
 		return result;
 	}
 
 	// Whether a 0-based position is on the text from `start` to `end`, or just after it (a caret at a word's end).
-	static bool Within(const Protocol::Position& position, const Scripting::SourceLocation& start, const Scripting::SourceLocation& end)
+	static bool Within(const Protocol::Position& position, const C4Compiler::SourceLocation& start, const C4Compiler::SourceLocation& end)
 	{
 		const uint32 line = position.line + 1;
 		const uint32 column = position.character + 1;
@@ -221,8 +221,8 @@ namespace C4LSP::Features
 	}
 
 	// The type an out-of-line definition's qualifier names at `position` (`Ring` of `Ring::Push`); null off it.
-	static const Scripting::AstNode* QualifierAt(Server::CompilationSession& session, uint32 sourceId, const Scripting::FunctionDefinitionNode& func,
-		const Core::Vector<const Scripting::AstNode*>& path, const Protocol::Position& position)
+	static const C4Compiler::AstNode* QualifierAt(Server::CompilationSession& session, uint32 sourceId, const C4Compiler::FunctionDefinitionNode& func,
+		const Core::Vector<const C4Compiler::AstNode*>& path, const Protocol::Position& position)
 	{
 		std::string written;
 		const auto& segments = func.GetName()->GetSegments();
@@ -231,74 +231,74 @@ namespace C4LSP::Features
 			written += (written.empty() ? "" : "::") + std::string(segments[i].nameToken.GetText());
 			if (!Within(position, segments[i].nameToken.GetStartLocation(), segments[i].nameToken.GetEndLocation()))
 				continue;
-			const Scripting::SymbolInfo* info = session.GetResolver().Lookup(written, sourceId, &path);
-			return info && info->kind == Scripting::SymbolKind::Type ? info->declNode : nullptr;
+			const C4Compiler::SymbolInfo* info = session.GetResolver().Lookup(written, sourceId, &path);
+			return info && info->kind == C4Compiler::SymbolKind::Type ? info->declNode : nullptr;
 		}
 		return nullptr;
 	}
 
-	const Scripting::AstNode* Definition::DeclarationNamedAt(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position)
+	const C4Compiler::AstNode* Definition::DeclarationNamedAt(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position)
 	{
 		for (uint32 i = located.path.Count(); i-- > 0;)
 		{
-			const Scripting::AstNode& node = *located.path[i];
+			const C4Compiler::AstNode& node = *located.path[i];
 			const DeclarationText::NameLocation name = DeclarationText::NameLocationOf(node);
 			if (!name.found)
 				continue;
 			if (Within(position, name.simpleStart, name.end))
 				return &node;
-			if (node.Type() == Scripting::NodeType::FunctionDefinition && Within(position, name.start, name.simpleStart))
-				return QualifierAt(session, sourceId, static_cast<const Scripting::FunctionDefinitionNode&>(node), located.path, position);
+			if (node.Type() == C4Compiler::NodeType::FunctionDefinition && Within(position, name.start, name.simpleStart))
+				return QualifierAt(session, sourceId, static_cast<const C4Compiler::FunctionDefinitionNode&>(node), located.path, position);
 		}
 		return nullptr;
 	}
 
 	// A type written at the position (`LspPool` of `LspPool* lsp`, of `new LspPool(...)`, of a cast): its declaration;
 	// the innermost, so `T` of `Array<T>` is T.
-	static const Scripting::AstNode* TypeWrittenAt(Server::CompilationSession& session, const Server::LocatedNode& located)
+	static const C4Compiler::AstNode* TypeWrittenAt(Server::CompilationSession& session, const Server::LocatedNode& located)
 	{
 		for (uint32 i = located.path.Count(); i-- > 0;)
-			if (located.path[i]->Type() == Scripting::NodeType::QualType)
-				return session.GetResolver().DeclarationOfWrittenType(static_cast<const Scripting::QualTypeNode&>(*located.path[i]), located.path);
+			if (located.path[i]->Type() == C4Compiler::NodeType::QualType)
+				return session.GetResolver().DeclarationOfWrittenType(static_cast<const C4Compiler::QualTypeNode&>(*located.path[i]), located.path);
 		return nullptr;
 	}
 
 	// A reference, else a variable a lambda captures, else a declaration's own name, else a type written there: what
 	// references, highlight and rename are about.
-	const Scripting::AstNode* Definition::AnnotationNamedAt(Server::CompilationSession& session, const Server::LocatedNode& located, const Protocol::Position& position)
+	const C4Compiler::AstNode* Definition::AnnotationNamedAt(Server::CompilationSession& session, const Server::LocatedNode& located, const Protocol::Position& position)
 	{
 		return session.GetResolver().AnnotationNamedAt(located.path, position.line + 1, position.character + 1); // LSP is 0-based
 	}
 
-	const Scripting::AstNode* Definition::TargetAt(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position)
+	const C4Compiler::AstNode* Definition::TargetAt(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position)
 	{
-		if (const Scripting::AstNode* target = AnnotationNamedAt(session, located, position))
+		if (const C4Compiler::AstNode* target = AnnotationNamedAt(session, located, position))
 			return target;
-		if (const Scripting::AstNode* target = FindTargetDeclaration(session, sourceId, located))
+		if (const C4Compiler::AstNode* target = FindTargetDeclaration(session, sourceId, located))
 			return target;
-		if (const Scripting::AstNode* target = CapturedAt(session, located, position))
+		if (const C4Compiler::AstNode* target = CapturedAt(session, located, position))
 			return target;
-		if (const Scripting::AstNode* target = DeclarationNamedAt(session, sourceId, located, position))
+		if (const C4Compiler::AstNode* target = DeclarationNamedAt(session, sourceId, located, position))
 			return target;
 		return TypeWrittenAt(session, located);
 	}
 
-	const Scripting::Token* Definition::CaptureNameAt(const Server::LocatedNode& located, const Protocol::Position& position)
+	const C4Compiler::Token* Definition::CaptureNameAt(const Server::LocatedNode& located, const Protocol::Position& position)
 	{
-		if (!located.Found() || located.node->Type() != Scripting::NodeType::LambdaExpression)
+		if (!located.Found() || located.node->Type() != C4Compiler::NodeType::LambdaExpression)
 			return nullptr;
-		for (const Scripting::LambdaCapture& capture : static_cast<const Scripting::LambdaNode&>(*located.node).GetCaptures())
-			if (capture.kind == Scripting::LambdaCapture::Kind::Variable && Within(position, capture.name.GetStartLocation(), capture.name.GetEndLocation()))
+		for (const C4Compiler::LambdaCapture& capture : static_cast<const C4Compiler::LambdaNode&>(*located.node).GetCaptures())
+			if (capture.kind == C4Compiler::LambdaCapture::Kind::Variable && Within(position, capture.name.GetStartLocation(), capture.name.GetEndLocation()))
 				return &capture.name;
 		return nullptr;
 	}
 
-	const Scripting::AstNode* Definition::CapturedAt(Server::CompilationSession& session, const Server::LocatedNode& located, const Protocol::Position& position)
+	const C4Compiler::AstNode* Definition::CapturedAt(Server::CompilationSession& session, const Server::LocatedNode& located, const Protocol::Position& position)
 	{
-		const Scripting::Token* name = CaptureNameAt(located, position);
+		const C4Compiler::Token* name = CaptureNameAt(located, position);
 		if (!name)
 			return nullptr;
-		Core::Vector<const Scripting::AstNode*> outside = located.path;
+		Core::Vector<const C4Compiler::AstNode*> outside = located.path;
 		outside.Pop();
 		return session.GetResolver().ResolveIdentifier(name->GetText(), outside).declaration;
 	}
@@ -306,15 +306,15 @@ namespace C4LSP::Features
 	// Where going to the definition of a declaration's own name leads (BUG-406): a function's other declarations - its
 	// declaration in its type or header from its definition, its definition from a declaration - else the declaration
 	// itself, which an editor answers with its references.
-	Core::Vector<Protocol::Location> Definition::Counterparts(Server::CompilationSession& session, const Scripting::AstNode& declared)
+	Core::Vector<Protocol::Location> Definition::Counterparts(Server::CompilationSession& session, const C4Compiler::AstNode& declared)
 	{
-		std::vector<const Scripting::AstNode*> declarations;
+		std::vector<const C4Compiler::AstNode*> declarations;
 		session.GetResolver().CollectFunctionDeclarations(&declared, declarations);
-		const bool hasBody = declared.Type() == Scripting::NodeType::FunctionDefinition && static_cast<const Scripting::FunctionDefinitionNode&>(declared).IsDefinition();
+		const bool hasBody = declared.Type() == C4Compiler::NodeType::FunctionDefinition && static_cast<const C4Compiler::FunctionDefinitionNode&>(declared).IsDefinition();
 		Core::Vector<Protocol::Location> result;
-		for (const Scripting::AstNode* node : declarations)
+		for (const C4Compiler::AstNode* node : declarations)
 		{
-			const bool nodeHasBody = node->Type() == Scripting::NodeType::FunctionDefinition && static_cast<const Scripting::FunctionDefinitionNode&>(*node).IsDefinition();
+			const bool nodeHasBody = node->Type() == C4Compiler::NodeType::FunctionDefinition && static_cast<const C4Compiler::FunctionDefinitionNode&>(*node).IsDefinition();
 			if (node != &declared && nodeHasBody != hasBody)
 				result.Push(LocationForDeclaration(session, *node));
 		}
@@ -323,31 +323,31 @@ namespace C4LSP::Features
 		return result;
 	}
 
-	const Scripting::AstNode* Definition::FindTargetDeclaration(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located)
+	const C4Compiler::AstNode* Definition::FindTargetDeclaration(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located)
 	{
 		Server::SemanticResolver& resolver = session.GetResolver();
 
 		for (int i = static_cast<int>(located.path.Count()) - 1; i >= 0; --i)
 		{
-			const Scripting::AstNode* node = located.path[i];
-			if (node->Type() == Scripting::NodeType::LambdaExpression)
+			const C4Compiler::AstNode* node = located.path[i];
+			if (node->Type() == C4Compiler::NodeType::LambdaExpression)
 				break; // a lambda is a function of its own: the call it is an argument of is not what its code names
-			if (node->Type() == Scripting::NodeType::QualType)
+			if (node->Type() == C4Compiler::NodeType::QualType)
 				break; // on a type (`T` of `Get<T>()`): the call or type around it is not what it names (BUG-472)
 
 			if (Server::SemanticResolver::IsReference(*node, i > 0 ? located.path[i - 1] : nullptr))
 			{
-				if (const Scripting::AstNode* declaration = resolver.ResolveReference(*node, located.path).declaration)
+				if (const C4Compiler::AstNode* declaration = resolver.ResolveReference(*node, located.path).declaration)
 					return declaration;
 			}
 
 			// A call's callee is itself a reference node; jumping from the argument list or
 			// parentheses should still land on the function definition.
-			if (node->Type() == Scripting::NodeType::FunctionCall)
+			if (node->Type() == C4Compiler::NodeType::FunctionCall)
 			{
-				const auto& call = static_cast<const Scripting::FunctionCallNode&>(*node);
+				const auto& call = static_cast<const C4Compiler::FunctionCallNode&>(*node);
 				if (call.GetCallee())
-					if (const Scripting::AstNode* declaration = resolver.ResolveReference(*call.GetCallee().Get(), located.path).declaration)
+					if (const C4Compiler::AstNode* declaration = resolver.ResolveReference(*call.GetCallee().Get(), located.path).declaration)
 						return declaration;
 			}
 		}
@@ -356,22 +356,22 @@ namespace C4LSP::Features
 
 	Core::Vector<Protocol::Location> Definition::ResolveReference(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located)
 	{
-		if (const Scripting::AstNode* declaration = FindTargetDeclaration(session, sourceId, located))
+		if (const C4Compiler::AstNode* declaration = FindTargetDeclaration(session, sourceId, located))
 			return { LocationForDeclaration(session, *WithBody(session, declaration)) };
 		return {};
 	}
 
-	const Scripting::AstNode* Definition::WithBody(Server::CompilationSession& session, const Scripting::AstNode* declaration)
+	const C4Compiler::AstNode* Definition::WithBody(Server::CompilationSession& session, const C4Compiler::AstNode* declaration)
 	{
-		std::vector<const Scripting::AstNode*> declarations;
+		std::vector<const C4Compiler::AstNode*> declarations;
 		session.GetResolver().CollectFunctionDeclarations(declaration, declarations);
-		for (const Scripting::AstNode* node : declarations)
-			if (node->Type() == Scripting::NodeType::FunctionDefinition && static_cast<const Scripting::FunctionDefinitionNode&>(*node).IsDefinition())
+		for (const C4Compiler::AstNode* node : declarations)
+			if (node->Type() == C4Compiler::NodeType::FunctionDefinition && static_cast<const C4Compiler::FunctionDefinitionNode&>(*node).IsDefinition())
 				return node;
 		return declaration;
 	}
 
-	Protocol::Location Definition::LocationForDeclaration(Server::CompilationSession& session, const Scripting::AstNode& declaration)
+	Protocol::Location Definition::LocationForDeclaration(Server::CompilationSession& session, const C4Compiler::AstNode& declaration)
 	{
 		const DeclarationText::NameLocation name = DeclarationText::NameLocationOf(declaration);
 		if (name.found)

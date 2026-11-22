@@ -1,6 +1,6 @@
 #include "Model/Types/EnumType.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	EnumType::EnumType(const Core::String& name, const Type* underlyingType)
 		: Type(TypeKind::Enum), m_FullName(name), m_UnderlyingType(underlyingType)
@@ -29,4 +29,4 @@ namespace Scripting
 		}
 		return nullptr;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -359,7 +359,7 @@ namespace Testing
 		const Workspace ws = MakeWorkspace("c4lsp_programs_library");
 		ServerHarness server(FileUri(ws.root));
 		server.Initialize(ws.WithPrograms());
-		const fs::path header = fs::absolute(Scripting::Toolchain::Bedrock() / "Text" / "string.ch").lexically_normal();
+		const fs::path header = fs::absolute(C4Compiler::Toolchain::Bedrock() / "Text" / "string.ch").lexically_normal();
 		const std::string text = ReadText(header);
 		const std::string uri = FileUri(header);
 		server.Open(uri, text);
@@ -370,7 +370,7 @@ namespace Testing
 		params.SetMember("context", context);
 		const std::string uris = UrisOf(server.Request("textDocument/references", params));
 		// The library's tests are its own program's sources: no client or tool compiles them.
-		TEST_ASSERT(Names(uris, FileUri(fs::absolute(Scripting::Toolchain::Bedrock() / "Tests" / "string_tests.cf").lexically_normal())));
+		TEST_ASSERT(Names(uris, FileUri(fs::absolute(C4Compiler::Toolchain::Bedrock() / "Tests" / "string_tests.cf").lexically_normal())));
 		fs::remove_all(ws.root);
 		TEST_PASSED();
 	}
@@ -380,7 +380,7 @@ namespace Testing
 		const Workspace ws = MakeWorkspace("c4lsp_programs_library_sources");
 		const fs::path library = ws.root / "Lang" / "Library"; // the library's sources in a checkout, beside the programs
 		fs::create_directories(library / "Prelude");
-		fs::copy_file(Scripting::Toolchain::Bedrock() / "Prelude" / "prelude.ch", library / "Prelude" / "prelude.ch");
+		fs::copy_file(C4Compiler::Toolchain::Bedrock() / "Prelude" / "prelude.ch", library / "Prelude" / "prelude.ch");
 		WriteFile(library / "bedrock.ch", "include \"Widgets/widget.ch\"\n");
 		WriteFile(library / "Widgets/widget.ch", "namespace Widgets\n{\n\tint32 Size();\n}\n");
 		const std::string source = "include \"widget.ch\"\n\nnamespace Widgets\n{\n\tint32 Size() { return 4; }\n}\n";

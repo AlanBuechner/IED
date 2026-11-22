@@ -4,7 +4,7 @@
 #include "Model/Types/ClassHierarchy.h"
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -57,4 +57,4 @@ namespace Scripting
 			if (const FunctionRecord* record = VtableEntry(m_Model, complete, location, slot))
 				if (std::find(entries.begin(), entries.end(), record) == entries.end()) entries.push_back(record);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

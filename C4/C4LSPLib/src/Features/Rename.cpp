@@ -21,13 +21,13 @@ namespace C4LSP::Features
 		if (!unit || !unit->GetRootAST())
 			return result;
 
-		const Scripting::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
+		const C4Compiler::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
 		Server::LocatedNode located = Server::NodeLocator::Locate(source, sourceId, unit->GetRootAST(), position);
 		if (!located.Found())
 			return result;
 
 		// Target declaration: from a reference (usual case), or directly under the cursor.
-		const Scripting::AstNode* targetDecl = Definition::TargetAt(session, sourceId, located, position);
+		const C4Compiler::AstNode* targetDecl = Definition::TargetAt(session, sourceId, located, position);
 		if (!targetDecl)
 			return result; // not on a rename-able symbol
 
@@ -35,9 +35,9 @@ namespace C4LSP::Features
 
 		// A function's declaration and its out-of-line definition are one symbol: each is renamed, and a
 		// reference to either counts.
-		std::vector<const Scripting::AstNode*> declarations;
+		std::vector<const C4Compiler::AstNode*> declarations;
 		session.GetResolver().CollectFunctionDeclarations(targetDecl, declarations);
-		for (const Scripting::AstNode* declaration : declarations)
+		for (const C4Compiler::AstNode* declaration : declarations)
 		{
 			NameSpan declSpan = DeclarationNameSpan(*declaration);
 			if (declSpan.valid)
@@ -54,10 +54,10 @@ namespace C4LSP::Features
 	}
 
 	// The innermost type written at the located position, or null.
-	static const Scripting::AstNode* WrittenType(const Server::LocatedNode& located)
+	static const C4Compiler::AstNode* WrittenType(const Server::LocatedNode& located)
 	{
 		for (uint32 i = located.path.Count(); i-- > 0;)
-			if (located.path[i]->Type() == Scripting::NodeType::QualType)
+			if (located.path[i]->Type() == C4Compiler::NodeType::QualType)
 				return located.path[i];
 		return nullptr;
 	}
@@ -73,7 +73,7 @@ namespace C4LSP::Features
 		if (!unit || !unit->GetRootAST())
 			return result;
 
-		const Scripting::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
+		const C4Compiler::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
 		Server::LocatedNode located = Server::NodeLocator::Locate(source, sourceId, unit->GetRootAST(), position);
 		if (!located.Found())
 			return result;
@@ -82,7 +82,7 @@ namespace C4LSP::Features
 		// click a use, select the declaration-style span at that use). Otherwise fall back to a
 		// declaration whose own name token covers the position. Both resolve through the same logic
 		// Rename::At uses to pick its target, so prepare and rename can never disagree about the symbol.
-		const Scripting::AstNode* ref = nullptr;
+		const C4Compiler::AstNode* ref = nullptr;
 		if (ReferenceScanner::IsReferenceNode(*located.node, ReferenceScanner::ParentOfLast(located.path)))
 		{
 			if (session.GetResolver().ResolveReference(*located.node, located.path).declaration)
@@ -95,13 +95,13 @@ namespace C4LSP::Features
 			const ReferenceScanner::NameRange name = ReferenceScanner::NameOf(*ref);
 			span = { true, name.start, name.end };
 		}
-		else if (const Scripting::Token* capture = Definition::CaptureNameAt(located, position))
+		else if (const C4Compiler::Token* capture = Definition::CaptureNameAt(located, position))
 		{
 			// A lambda's capture spells the variable it captures: its name here, when it names one.
 			if (Definition::CapturedAt(session, located, position))
 				span = { true, capture->GetStartLocation(), capture->GetEndLocation() };
 		}
-		else if (const Scripting::AstNode* written = WrittenType(located))
+		else if (const C4Compiler::AstNode* written = WrittenType(located))
 		{
 			// A type written here (`LspPool` of `LspPool* lsp`): its name here, when it names a declared type.
 			if (Definition::TargetAt(session, sourceId, located, position))
@@ -112,7 +112,7 @@ namespace C4LSP::Features
 		}
 		else
 		{
-			const Scripting::AstNode* targetDecl = Definition::TargetAt(session, sourceId, located, position);
+			const C4Compiler::AstNode* targetDecl = Definition::TargetAt(session, sourceId, located, position);
 			if (targetDecl)
 				span = DeclarationNameSpan(*targetDecl);
 		}
@@ -129,7 +129,7 @@ namespace C4LSP::Features
 		return result;
 	}
 
-	Rename::NameSpan Rename::DeclarationNameSpan(const Scripting::AstNode& decl)
+	Rename::NameSpan Rename::DeclarationNameSpan(const C4Compiler::AstNode& decl)
 	{
 		const DeclarationText::NameLocation name = DeclarationText::NameLocationOf(decl);
 		if (!name.found)
@@ -137,7 +137,7 @@ namespace C4LSP::Features
 		return { true, name.simpleStart, name.end };
 	}
 
-	RenameOccurrence Rename::MakeOccurrence(Server::CompilationSession& session, uint32 sourceId, const Scripting::SourceLocation& start, const Scripting::SourceLocation& end)
+	RenameOccurrence Rename::MakeOccurrence(Server::CompilationSession& session, uint32 sourceId, const C4Compiler::SourceLocation& start, const C4Compiler::SourceLocation& end)
 	{
 		RenameOccurrence occ;
 		occ.uri = session.UriForSourceId(sourceId);

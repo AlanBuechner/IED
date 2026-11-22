@@ -18,7 +18,7 @@ namespace llvm
 	class Type;
 }
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The Windows subsystem an executable runs in: a console program, or a windowed one that gets no console (its
 	/// entry is still `main`).
@@ -140,4 +140,4 @@ namespace Scripting
 		/// `name` as a shared library of the target names it: `C4Script.dll`, `C4Script.so`.
 		std::string SharedLibrary(const char* name) const { return std::string(name) + SharedLibraryExtension(); }
 	};
-} // namespace Scripting
+} // namespace C4Compiler

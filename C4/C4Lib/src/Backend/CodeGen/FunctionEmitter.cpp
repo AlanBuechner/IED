@@ -3,7 +3,7 @@
 #include "Backend/CodeGen/MirEmitter.h"
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
 
-namespace Scripting
+namespace C4Compiler
 {
 	// The personality (the MSVC frame handler, or C4's on Linux) is a definition's before any EH pad exists (LLVM
 	// requires that order); a function without exceptions ignores it. A declaration has none. Every definition's unwind
@@ -113,4 +113,4 @@ namespace Scripting
 		// What only an expression after a region that never ends left behind.
 		llvm::EliminateUnreachableBlocks(*fn);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

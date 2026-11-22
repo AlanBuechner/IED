@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <bit>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -68,4 +68,4 @@ namespace Scripting
 		const auto share = m_Shares.find(sourceId);
 		return static_cast<unsigned>(1 + (file->second + byName % (share == m_Shares.end() ? 1 : share->second)) % others);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

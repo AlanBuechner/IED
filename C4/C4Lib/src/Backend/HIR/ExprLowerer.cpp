@@ -42,7 +42,7 @@
 #include "Model/TypeHandle.h"
 #include "Model/Types/ArrayType.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	QueryResult<Value> ExprLowerer::ResolveExpr(const AstNode* node)
 	{
@@ -352,4 +352,4 @@ namespace Scripting
 	{
 		return LambdaLowerer(m_Ctx, *this).Lower(*n);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -18,12 +18,12 @@ namespace C4LSP::Features
 		if (!unit || !unit->GetRootAST())
 			return {};
 
-		const Scripting::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
+		const C4Compiler::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
 		Server::LocatedNode located = Server::NodeLocator::Locate(source, sourceId, unit->GetRootAST(), position);
 		if (!located.Found())
 			return {};
 
-		const Scripting::AstNode* targetDecl = Definition::TargetAt(session, sourceId, located, position);
+		const C4Compiler::AstNode* targetDecl = Definition::TargetAt(session, sourceId, located, position);
 		if (!targetDecl)
 			return {};
 
@@ -35,9 +35,9 @@ namespace C4LSP::Features
 		// file its Write highlight belongs to THAT document and is skipped here.
 		// A function's declaration and its out-of-line definition are each a declaration site.
 		Core::Vector<Protocol::DocumentHighlight> result;
-		std::vector<const Scripting::AstNode*> declarations;
+		std::vector<const C4Compiler::AstNode*> declarations;
 		session.GetResolver().CollectFunctionDeclarations(targetDecl, declarations);
-		for (const Scripting::AstNode* declaration : declarations)
+		for (const C4Compiler::AstNode* declaration : declarations)
 		{
 			const Protocol::Location declaredName = Definition::LocationForDeclaration(session, *declaration);
 			if (declaredName.uri != uri)

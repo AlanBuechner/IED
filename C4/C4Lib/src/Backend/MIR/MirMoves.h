@@ -3,7 +3,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A copy of a local's or by-value parameter's object (Lifecycle::CopyOf), which may move instead (D-05).
 	struct MirTransfer
@@ -46,4 +46,4 @@ namespace Scripting
 	{
 		void Apply(HIRFunction& fn, MirBody& mir, const MirMoveSites& sites, const Type* boolType);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

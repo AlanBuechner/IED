@@ -5,7 +5,7 @@
 #include <utility>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// What a compiled script assumed of its host beyond the interface files it read (docs/runtime/04 section 4.6): the
 	/// names it asked the host's table about and the types it asked whether the host registered, each with the answer,
@@ -49,4 +49,4 @@ namespace Scripting
 	/// Whether every one of `assumptions` holds of the host as `index` (with the layers below the script), its inline
 	/// body `chunks` and its files' `digests` describe it.
 	bool AssumptionsHold(const HostAssumptions& assumptions, const HostIndex& index, const std::vector<std::string>& chunks, InterfaceDigests& digests);
-} // namespace Scripting
+} // namespace C4Compiler

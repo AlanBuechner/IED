@@ -3,7 +3,7 @@
 #include "Model/SymbolTable.h"
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ObjectType;
 
@@ -28,4 +28,4 @@ namespace Scripting
 		/// host's, registered by the host or, out of its reflection scope (D-89), by no one - never by a script.
 		bool HostDeclares(const ObjectType& type) const;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

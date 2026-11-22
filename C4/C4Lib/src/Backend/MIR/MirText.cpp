@@ -1,6 +1,6 @@
 #include "Backend/MIR/MirText.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -103,4 +103,4 @@ namespace Scripting
 		}
 		return text;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

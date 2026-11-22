@@ -17,7 +17,7 @@
 #include "Nodes/Expressions/ParenthesizedExpressionNode.h"
 #include "Nodes/Expressions/BracedInitializerNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	Ref<AstNode> PrattParser::ParseInfix(ParserState& state, Ref<AstNode> left, uint32 leftBindPower)
 	{
@@ -178,4 +178,4 @@ namespace Scripting
 	// =========================================================================
 	// Postfix parsing - chained operators: (), [], ., ->, ::, ++, --
 	// =========================================================================
-} // namespace Scripting
+} // namespace C4Compiler

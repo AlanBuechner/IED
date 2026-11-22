@@ -7,7 +7,7 @@
 #include <array>
 #include <utility>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -235,4 +235,4 @@ namespace Scripting
 		macros["SIMD_FLOAT_LANES"] = std::to_string(FloatLanes());
 		return macros;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

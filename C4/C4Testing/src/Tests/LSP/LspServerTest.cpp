@@ -761,7 +761,7 @@ int32 main() {
 			return messages;
 		};
 
-		const std::string install = Scripting::Toolchain::Bedrock().parent_path().string();
+		const std::string install = C4Compiler::Toolchain::Bedrock().parent_path().string();
 		const std::string withLibrary = diagnosticsFor(install);
 		TEST_ASSERT_EQ(withLibrary, std::string());
 		const std::string withoutLibrary = diagnosticsFor((root / "emptyhome").string());
@@ -785,7 +785,7 @@ int32 main() {
 		if (!host.index) std::cout << host.diagnostics << std::endl;
 		TEST_ASSERT(host.index != nullptr);
 		std::string error;
-		TEST_ASSERT(Scripting::WriteInterface(host.interface, (root / "host.c4i").string(), &error));
+		TEST_ASSERT(C4Compiler::WriteInterface(host.interface, (root / "host.c4i").string(), &error));
 		const std::string rootUri = C4LSP::Protocol::DocumentUri::ToUri(root.string());
 		const std::string docUri = C4LSP::Protocol::DocumentUri::ToUri((root / "plugin" / "main.cf").string());
 

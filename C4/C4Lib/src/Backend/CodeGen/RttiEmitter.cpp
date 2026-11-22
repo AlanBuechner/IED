@@ -2,7 +2,7 @@
 #include "Backend/CodeGen/MsvcNames.h"
 #include "Backend/CodeGen/PeTables.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -114,4 +114,4 @@ namespace Scripting
 		auto* arrayTy = llvm::ArrayType::get(llvm::Type::getInt32Ty(ctx), entries.size());
 		return PeTables::Private(m_Module, "c4.rtti.bca." + typeName, llvm::ConstantArray::get(arrayTy, entries));
 	}
-} // namespace Scripting
+} // namespace C4Compiler

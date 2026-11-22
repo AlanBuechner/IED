@@ -20,10 +20,10 @@ namespace Testing::Dap
 		constexpr auto kReplyWait = std::chrono::seconds(30);
 
 		// A program's file name where the tests run: `.exe` on Windows.
-		std::string ProgramName(const char* name) { return name + std::string(Scripting::TargetAbi::For(Scripting::HostSystem()).ExecutableExtension()); }
+		std::string ProgramName(const char* name) { return name + std::string(C4Compiler::TargetAbi::For(C4Compiler::HostSystem()).ExecutableExtension()); }
 
 		// The compiler of this build: C4Testing runs from bin/<config>/C4Testing, C4.exe is in bin/<config>/C4.
-		fs::path Compiler() { return Scripting::Toolchain::Home().parent_path() / "C4" / ProgramName("C4"); }
+		fs::path Compiler() { return C4Compiler::Toolchain::Home().parent_path() / "C4" / ProgramName("C4"); }
 
 #ifdef _WIN32
 		constexpr DWORD kBuildMilliseconds = 120000;
@@ -49,7 +49,7 @@ namespace Testing::Dap
 			for (const std::string& arg : args) line.Push(arg);
 			int exitCode = 1;
 			std::string output, errors;
-			return Scripting::RunToolWithOutput(line, exitCode, output, errors) && exitCode == 0;
+			return C4Compiler::RunToolWithOutput(line, exitCode, output, errors) && exitCode == 0;
 		}
 #endif
 	}

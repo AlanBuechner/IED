@@ -2,7 +2,7 @@
 #include "Backend/HIR/HIRNodes.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The census's counter (docs/runtime/01) code that allocates objects of `type` needs: of one object, or with
 	/// `countBytes`, of a counted array of them (CountedArray). Only for a type that can hold native memory.
@@ -26,4 +26,4 @@ namespace Scripting
 	};
 
 	BodyNeeds NeedsOf(const HIRFunction& body);
-} // namespace Scripting
+} // namespace C4Compiler

@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <unordered_set>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -88,4 +88,4 @@ namespace Scripting
 		std::sort(imports.begin(), imports.end(), [](const FunctionRecord* a, const FunctionRecord* b) { return a->mangledName < b->mangledName; });
 		return imports;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

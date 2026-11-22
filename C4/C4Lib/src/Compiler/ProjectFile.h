@@ -1,7 +1,7 @@
 #pragma once
 #include "Compiler/Projects.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A build description as read, or why it could not be: `line N: ...`.
 	struct ProjectFileResult

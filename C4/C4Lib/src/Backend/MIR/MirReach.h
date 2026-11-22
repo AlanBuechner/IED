@@ -3,7 +3,7 @@
 #include "Model/QueryResult.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Where control can go in a function's MIR (docs/compiler/06-mir.md "Checks").
 	namespace MirReach
@@ -22,4 +22,4 @@ namespace Scripting
 		/// D-39: a case whose end can be reached from its start runs into the next one, an error at the case.
 		QueryResult<void> CheckCases(const MirBody& mir);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

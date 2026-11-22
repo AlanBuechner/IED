@@ -7,7 +7,7 @@
 #include <cstring>
 #include <iterator>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -344,4 +344,4 @@ namespace Scripting
 		if (!DeserializeInterface(bytes, host, &why)) return Fail(error, path + ": " + why);
 		return true;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

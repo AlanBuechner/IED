@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <cctype>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -87,4 +87,4 @@ namespace Scripting
 		if (Core::String renamed = Renamed(name, members); !renamed.empty()) return renamed;
 		return Closest(name, members);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

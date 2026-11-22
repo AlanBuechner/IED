@@ -4,7 +4,7 @@
 #include "StatementParser.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 
 	Ref<CodeBlockNode> CodeBlockNode::TryParse(ParserState& state)
@@ -133,4 +133,4 @@ namespace Scripting
 		return result;
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

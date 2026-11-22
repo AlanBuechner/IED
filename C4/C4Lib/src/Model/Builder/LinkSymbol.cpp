@@ -1,7 +1,7 @@
 #include "Model/Builder/LinkSymbol.h"
 #include "Parser/Nodes/Expressions/LiteralNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	Core::String LinkedInitializerMessage(const Core::String& variable, const Core::String& symbol)
 	{
@@ -21,4 +21,4 @@ namespace Scripting
 		}
 		return Core::String();
 	}
-} // namespace Scripting
+} // namespace C4Compiler

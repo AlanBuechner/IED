@@ -7,7 +7,7 @@
 #include "../Expressions/LiteralNode.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	Core::String UnionDefinitionNode::ToString() const
 	{
@@ -199,4 +199,4 @@ namespace Scripting
 			m_Children.Push(m_Members[i]);
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

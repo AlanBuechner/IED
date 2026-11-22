@@ -1,6 +1,6 @@
 #include "SwizzleViewNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	Core::String SwizzleViewNode::ToString() const
 	{
@@ -96,4 +96,4 @@ namespace Scripting
 
 		return node;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

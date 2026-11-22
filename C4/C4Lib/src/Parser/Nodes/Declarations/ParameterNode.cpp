@@ -5,7 +5,7 @@
 #include "Parser/PrattParser.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	std::span<const Ref<AstNode>> ParameterNode::Children() const
 	{
@@ -192,4 +192,4 @@ namespace Scripting
 		return result;
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

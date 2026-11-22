@@ -1,7 +1,7 @@
 #pragma once
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 	class ObjectType;
@@ -19,4 +19,4 @@ namespace Scripting
 
 	/// What `type`'s methods say now: ProgramModel::LifecycleMethodsOf remembers it.
 	LifecycleMethods FindLifecycleMethods(const ProgramModel& model, const ObjectType* type);
-} // namespace Scripting
+} // namespace C4Compiler

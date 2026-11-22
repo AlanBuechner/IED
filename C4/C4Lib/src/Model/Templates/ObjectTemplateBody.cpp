@@ -21,7 +21,7 @@
 #include "Parser/Nodes/Declarations/TemplateParameterNode.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -385,4 +385,4 @@ namespace Scripting
 		if (!own) return;
 		m_Model.m_FuncInstantiationBindings.emplace(rec, BindingsFor(m_Model, *own, m_Args));
 	}
-} // namespace Scripting
+} // namespace C4Compiler

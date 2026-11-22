@@ -1,7 +1,7 @@
 #include "Compiler/FunctionSize.h"
 #include <llvm/IR/Function.h>
 
-namespace Scripting
+namespace C4Compiler
 {
 	bool HasAtMostInstructions(const llvm::Function& function, unsigned limit)
 	{

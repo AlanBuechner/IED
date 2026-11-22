@@ -8,12 +8,12 @@ namespace Testing
 {
 	void AnnotationTest::TestSimpleAnnotation()
 	{
-		auto stream = Scripting::Source::FromMemory("[Serialize]");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("[Serialize]");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::AnnotationNode::TryParse(state);
+		auto node = C4Compiler::AnnotationNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->GetBracketGroups().Count() == 1);
 		TEST_ASSERT(node->TotalAnnotationCount() == 1);
@@ -27,12 +27,12 @@ namespace Testing
 
 	void AnnotationTest::TestAnnotationWithStringArg()
 	{
-		auto stream = Scripting::Source::FromMemory("[Test(\"stuff\")]");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("[Test(\"stuff\")]");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::AnnotationNode::TryParse(state);
+		auto node = C4Compiler::AnnotationNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->GetBracketGroups().Count() == 1);
 		TEST_ASSERT(node->TotalAnnotationCount() == 1);
@@ -43,18 +43,18 @@ namespace Testing
 		TEST_ASSERT(item->GetArguments().Count() == 1);
 
 		auto arg = item->GetArguments()[0];
-		TEST_ASSERT(arg->Type() == Scripting::NodeType::LiteralExpression);
+		TEST_ASSERT(arg->Type() == C4Compiler::NodeType::LiteralExpression);
 		TEST_PASSED();
 	}
 
 	void AnnotationTest::TestMultipleAnnotationsInOneBracket()
 	{
-		auto stream = Scripting::Source::FromMemory("[A, B(1), C]");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("[A, B(1), C]");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::AnnotationNode::TryParse(state);
+		auto node = C4Compiler::AnnotationNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->GetBracketGroups().Count() == 1);
 		TEST_ASSERT(node->TotalAnnotationCount() == 3);
@@ -73,12 +73,12 @@ namespace Testing
 
 	void AnnotationTest::TestConsecutiveBrackets()
 	{
-		auto stream = Scripting::Source::FromMemory("[A][B]");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("[A][B]");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::AnnotationNode::TryParse(state);
+		auto node = C4Compiler::AnnotationNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->GetBracketGroups().Count() == 2);
 		TEST_ASSERT(node->TotalAnnotationCount() == 2);
@@ -90,12 +90,12 @@ namespace Testing
 
 	void AnnotationTest::TestComplexExample()
 	{
-		auto stream = Scripting::Source::FromMemory("[Annotation, Test(\"stuff\")][AnotherAnnotation]");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("[Annotation, Test(\"stuff\")][AnotherAnnotation]");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::AnnotationNode::TryParse(state);
+		auto node = C4Compiler::AnnotationNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->GetBracketGroups().Count() == 2);
 		TEST_ASSERT(node->TotalAnnotationCount() == 3);
@@ -114,12 +114,12 @@ namespace Testing
 
 	void AnnotationTest::TestQualifiedNameAnnotation()
 	{
-		auto stream = Scripting::Source::FromMemory("[NC::SomeAttr]");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("[NC::SomeAttr]");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::AnnotationNode::TryParse(state);
+		auto node = C4Compiler::AnnotationNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->TotalAnnotationCount() == 1);
 
@@ -132,24 +132,24 @@ namespace Testing
 
 	void AnnotationTest::TestNoBracketReturnsNullptr()
 	{
-		auto stream = Scripting::Source::FromMemory("namespace Foo {}");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("namespace Foo {}");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::AnnotationNode::TryParse(state);
+		auto node = C4Compiler::AnnotationNode::TryParse(state);
 		TEST_ASSERT(node == nullptr);
 		TEST_PASSED();
 	}
 
 	void AnnotationTest::TestEmptyBrackets()
 	{
-		auto stream = Scripting::Source::FromMemory("[]");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("[]");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::AnnotationNode::TryParse(state);
+		auto node = C4Compiler::AnnotationNode::TryParse(state);
 		// Empty brackets should return nullptr since no valid annotation was found
 		TEST_ASSERT(node == nullptr);
 		TEST_PASSED();
@@ -159,19 +159,19 @@ namespace Testing
 	{
 		struct ParsedAnnotation
 		{
-			Scripting::ErrorTracker errors;
-			Ref<Scripting::AnnotationNode> node;
+			C4Compiler::ErrorTracker errors;
+			Ref<C4Compiler::AnnotationNode> node;
 		};
 
 		void ParseAnnotation(const char* text, ParsedAnnotation& out)
 		{
-			auto stream = Scripting::Source::FromMemory(text);
-			Scripting::Lexer lexer(*stream, 0);
-			Scripting::ParserState state(lexer, out.errors);
-			out.node = Scripting::AnnotationNode::TryParse(state);
+			auto stream = C4Compiler::Source::FromMemory(text);
+			C4Compiler::Lexer lexer(*stream, 0);
+			C4Compiler::ParserState state(lexer, out.errors);
+			out.node = C4Compiler::AnnotationNode::TryParse(state);
 		}
 
-		const Scripting::AnnotationItem* FirstItem(const ParsedAnnotation& parsed)
+		const C4Compiler::AnnotationItem* FirstItem(const ParsedAnnotation& parsed)
 		{
 			if (!parsed.node || parsed.node->GetBracketGroups().Empty()) return nullptr;
 			const auto& items = parsed.node->GetBracketGroups()[0].annotations;
@@ -183,13 +183,13 @@ namespace Testing
 	{
 		ParsedAnnotation parsed;
 		ParseAnnotation("[Range(-1, Limits::kMax * 2, \"label\")]", parsed);
-		const Scripting::AnnotationItem* item = FirstItem(parsed);
+		const C4Compiler::AnnotationItem* item = FirstItem(parsed);
 		TEST_ASSERT(item != nullptr);
 		TEST_ASSERT_EQ((int)parsed.errors.GetErrors().Count(), 0);
 		TEST_ASSERT_EQ((int)item->GetArguments().Count(), 3);
-		TEST_ASSERT(item->GetArguments()[0]->Type() != Scripting::NodeType::LiteralExpression); // `-1` is a unary expression
-		TEST_ASSERT(item->GetArguments()[1]->Type() != Scripting::NodeType::LiteralExpression);
-		TEST_ASSERT(item->GetArguments()[2]->Type() == Scripting::NodeType::LiteralExpression);
+		TEST_ASSERT(item->GetArguments()[0]->Type() != C4Compiler::NodeType::LiteralExpression); // `-1` is a unary expression
+		TEST_ASSERT(item->GetArguments()[1]->Type() != C4Compiler::NodeType::LiteralExpression);
+		TEST_ASSERT(item->GetArguments()[2]->Type() == C4Compiler::NodeType::LiteralExpression);
 		TEST_PASSED();
 	}
 
@@ -197,7 +197,7 @@ namespace Testing
 	{
 		ParsedAnnotation parsed;
 		ParseAnnotation("[Obsolete()]", parsed);
-		const Scripting::AnnotationItem* item = FirstItem(parsed);
+		const C4Compiler::AnnotationItem* item = FirstItem(parsed);
 		TEST_ASSERT(item != nullptr);
 		TEST_ASSERT_EQ((int)parsed.errors.GetErrors().Count(), 0);
 		TEST_ASSERT(item->GetArguments().Empty());
@@ -242,11 +242,11 @@ namespace Testing
 
 	void AnnotationTest::TestEnumKeepsAnnotations()
 	{
-		auto stream = Scripting::Source::FromMemory("[Flags, Tag(3)] public enum class Mode { A, B }");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
-		auto node = Scripting::EnumDefinitionNode::TryParse(state);
+		auto stream = C4Compiler::Source::FromMemory("[Flags, Tag(3)] public enum class Mode { A, B }");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
+		auto node = C4Compiler::EnumDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT_EQ((int)node->GetAnnotations().Count(), 1);
 		TEST_ASSERT_EQ((int)node->GetAnnotations()[0]->TotalAnnotationCount(), 2);
@@ -255,11 +255,11 @@ namespace Testing
 
 	void AnnotationTest::TestUnionKeepsAnnotations()
 	{
-		auto stream = Scripting::Source::FromMemory("[Packed] union Bits { int32 a; float b; }");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
-		auto node = Scripting::UnionDefinitionNode::TryParse(state);
+		auto stream = C4Compiler::Source::FromMemory("[Packed] union Bits { int32 a; float b; }");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
+		auto node = C4Compiler::UnionDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT_EQ((int)node->GetAnnotations().Count(), 1);
 		TEST_PASSED();

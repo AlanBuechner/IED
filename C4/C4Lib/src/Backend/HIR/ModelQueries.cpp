@@ -5,7 +5,7 @@
 #include "Model/TypeHandle.h" // UnwrapToValue
 #include "Model/Types/ClassHierarchy.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	// Token -> built-in op for PRIMITIVES. Null = not a primitive op (the caller tried an operator
 	// method first; if that also failed it is an error). Mirrors the model's OperatorTable so the
@@ -156,4 +156,4 @@ namespace Scripting
 		}
 		return nullptr;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

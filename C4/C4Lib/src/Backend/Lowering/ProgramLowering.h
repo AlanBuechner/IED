@@ -12,7 +12,7 @@
 #include <utility>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 
@@ -76,4 +76,4 @@ namespace Scripting
 		std::unordered_set<const SymbolInfo*> m_StorageSeen; // globals whose storage's needs are known
 		std::vector<std::pair<const char*, double>> m_StepSeconds;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

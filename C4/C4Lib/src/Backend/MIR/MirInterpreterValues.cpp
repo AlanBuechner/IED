@@ -9,7 +9,7 @@
 #include <cmath>
 #include <cstring>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -461,4 +461,4 @@ namespace Scripting
 		default: return Fail("compile-time evaluation cannot run this bit intrinsic", m_At);
 		}
 	}
-} // namespace Scripting
+} // namespace C4Compiler

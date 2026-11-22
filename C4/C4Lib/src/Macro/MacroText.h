@@ -3,7 +3,7 @@
 #include <string_view>
 #include <vector>
 
-namespace Scripting::MacroText
+namespace C4Compiler::MacroText
 {
 	bool IsIdentStart(char c);
 	bool IsIdentChar(char c);

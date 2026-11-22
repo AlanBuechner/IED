@@ -10,7 +10,7 @@
 #include <cctype>
 #include <charconv>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -196,4 +196,4 @@ namespace Scripting
 		}
 		return out;
 	}
-} // namespace Scripting
+} // namespace C4Compiler

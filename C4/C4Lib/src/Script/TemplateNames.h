@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The templates a file's declarations declare - a class with a member template counts, its members being defined
 	/// out of line by name - by qualified name (`Store::Box`), and those they add to by a specialization, a member defined
@@ -23,4 +23,4 @@ namespace Scripting
 	/// The qualified names the addition `extended` (as TemplateNames writes one) can name: written in namespace `A::B` as
 	/// `Q::T`, `A::B::Q::T`, `A::Q::T` and `Q::T`, innermost first.
 	std::vector<std::string> TemplateAdditionTargets(const std::string& extended);
-} // namespace Scripting
+} // namespace C4Compiler

@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class CompilerInstance;
 
@@ -62,4 +62,4 @@ namespace Scripting
 	/// the host's files as they did in the host. A file given as text sits in the script's own folder under kInterfaceRoot. Empty, with the reason, when a
 	/// script file cannot be read or the interface's ids do not come out as recorded.
 	std::optional<ScriptUnits> RegisterScriptSources(CompilerInstance& compiler, const HostInterface& host, const ScriptSourcesDesc& desc, std::string* error);
-} // namespace Scripting
+} // namespace C4Compiler

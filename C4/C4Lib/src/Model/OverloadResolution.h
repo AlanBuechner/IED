@@ -3,7 +3,7 @@
 #include "Core/Core.h"
 #include <functional>
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct FunctionRecord; // per-declaration identity (SymbolTable.h); a signature alone is not unique
 	/// One member of an overload set (doc 08): a signature plus its minimum arity (params minus
@@ -57,4 +57,4 @@ namespace Scripting
 		static int BracedCost(const Type* param, uint32 entries);
 	};
 
-} // namespace Scripting
+} // namespace C4Compiler

@@ -11,7 +11,7 @@
 #include <algorithm>
 #include <limits>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -188,4 +188,4 @@ namespace Scripting
 	{
 		return m_Ctx.out->NewNode<LoadNode>(location->type, location);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct NamespaceNode;
 

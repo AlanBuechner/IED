@@ -4,7 +4,7 @@
 #include "Model/TypeHandle.h"
 #include "Model/Types/ClassHierarchy.h"
 
-namespace Scripting::AccessCheck
+namespace C4Compiler::AccessCheck
 {
 	namespace
 	{
@@ -119,4 +119,4 @@ namespace Scripting::AccessCheck
 		if (LifecycleFacts::NeedsConstruct(ctx.queries(), obj)) return QueryResult<void>::Success();
 		return CheckPartCreates(ctx, obj);
 	}
-} // namespace Scripting::AccessCheck
+} // namespace C4Compiler::AccessCheck

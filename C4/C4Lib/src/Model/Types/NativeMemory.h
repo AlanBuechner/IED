@@ -1,7 +1,7 @@
 #pragma once
 #include "Model/Types/ObjectType.h"
 
-namespace Scripting::NativeMemory
+namespace C4Compiler::NativeMemory
 {
 	/// The type's own [operator("native_bytes")] method, or null: a base's answers for the base alone.
 	const ObjectType::MethodInfo* OwnOperator(const ObjectType* type);
@@ -13,4 +13,4 @@ namespace Scripting::NativeMemory
 
 	/// Whether `field` is counted in its object's native memory.
 	bool Counted(const ObjectType::FieldInfo& field);
-} // namespace Scripting::NativeMemory
+} // namespace C4Compiler::NativeMemory

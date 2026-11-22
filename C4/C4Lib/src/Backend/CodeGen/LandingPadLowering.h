@@ -2,7 +2,7 @@
 #include "Backend/CodeGen/EhLowering.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Exceptions as landing pads on libgcc's unwinder (Linux, D-86, docs/compiler/04 "Landing pads"): an exception
 	/// raised with step `s` first lands at s's landingpad, whose clauses are those of every dispatch on its way out
@@ -43,4 +43,4 @@ namespace Scripting
 		llvm::Value* m_ExceptionSlot = nullptr; // the exception in flight and its selector
 		llvm::Value* m_SelectorSlot = nullptr;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

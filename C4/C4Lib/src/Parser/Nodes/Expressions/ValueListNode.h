@@ -4,7 +4,7 @@
 #include "Lexer/Token.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// `[e0, e1, ...]` (D-34): the values a function returns together (`return [1.0f, true];`), or the right side
 	/// of a destructuring (`[a, b] = [b, a];`). An element may be a pack expansion (`[args...]`).
@@ -24,4 +24,4 @@ namespace Scripting
 	private:
 		Core::Vector<Ref<AstNode>> m_Elements;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

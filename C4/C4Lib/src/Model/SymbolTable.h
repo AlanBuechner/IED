@@ -14,7 +14,7 @@
 #include <unordered_set>
 #include <functional>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class Scope; // scope tree layer (defined below); FunctionRecord references it by pointer
 
@@ -458,4 +458,4 @@ namespace Scripting
 		std::unordered_map<uint32, std::unordered_set<uint32>> m_Closures;
 	};
 
-} // namespace Scripting
+} // namespace C4Compiler

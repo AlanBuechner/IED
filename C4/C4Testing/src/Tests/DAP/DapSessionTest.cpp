@@ -431,9 +431,20 @@ int32 main() {
 		client.Request("initialize");
 		client.Request("launch", Object({ { "program", Str(program.exe.string()) } }));
 		client.Request("configurationDone");
-		TEST_ASSERT(client.Request("pause", Object({ { "threadId", Num(0) } })).Member("success").GetBool());
-		const Json::Value stop = client.WaitEvent("stopped");
-		TEST_ASSERT_EQ(ReasonOf(stop), std::string("pause"));
+		// A pause on a busy machine can land before main reaches Spin (BUG-495): look, let the program go on, and pause again.
+		constexpr int pauseAttempts = 50;
+		Json::Value stop = Json::Value::Null();
+		Json::Value frames = Json::Value::MakeArray();
+		bool inSpin = false;
+		for (int attempt = 0; attempt < pauseAttempts && !inSpin; ++attempt)
+		{
+			if (attempt > 0) TEST_ASSERT(client.Request("continue", Object({ { "threadId", Num(ThreadOf(stop)) } })).Member("success").GetBool());
+			TEST_ASSERT(client.Request("pause", Object({ { "threadId", Num(0) } })).Member("success").GetBool());
+			stop = client.WaitEvent("stopped");
+			TEST_ASSERT_EQ(ReasonOf(stop), std::string("pause"));
+			frames = client.Request("stackTrace", Object({ { "threadId", Num(ThreadOf(stop)) } })).Member("body").Member("stackFrames");
+			for (uint32_t i = 0; i < frames.Size(); ++i) inSpin = inSpin || NameOf(frames.At(i)) == "Spin";
+		}
 		// The thread a pause injects is not the program's: every thread listed is one the client was told started.
 		const Json::Value threads = client.Request("threads").Member("body").Member("threads");
 		TEST_ASSERT_GE(threads.Size(), 1u);
@@ -445,9 +456,6 @@ int32 main() {
 				announced = announced || event.Member("body").Member("threadId").GetInt() == threads.At(i).Member("id").GetInt();
 			TEST_ASSERT(announced);
 		}
-		const Json::Value frames = client.Request("stackTrace", Object({ { "threadId", Num(ThreadOf(stop)) } })).Member("body").Member("stackFrames");
-		bool inSpin = false;
-		for (uint32_t i = 0; i < frames.Size(); ++i) inSpin = inSpin || NameOf(frames.At(i)) == "Spin";
 		TEST_ASSERT(inSpin);
 		TEST_ASSERT(client.Request("terminate").Member("success").GetBool());
 		TEST_ASSERT(!client.WaitEvent("exited").IsNull());

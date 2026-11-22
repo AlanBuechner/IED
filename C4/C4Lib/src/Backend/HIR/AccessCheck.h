@@ -1,7 +1,7 @@
 #pragma once
 #include "Backend/HIR/LoweringContext.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Member visibility at a use site (D-28, docs/language/05 5.7). The code asking is the function being
 	/// lowered: a method sees the private members of its own type and of every type it is nested in, and the
@@ -29,4 +29,4 @@ namespace Scripting
 		/// Default-constructing a `type` (an array's elements): the access of the create that runs.
 		QueryResult<void> CheckDefaultCreate(LoweringContext& ctx, const Type* type);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

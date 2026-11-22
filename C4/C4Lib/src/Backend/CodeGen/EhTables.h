@@ -5,7 +5,7 @@
 #include <functional>
 #include <unordered_map>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The MSVC EH tables behind throw and catch (D-13, docs/compiler/04). A thrown type's ThrowInfo lists
 	/// every type a handler may catch it as: the type itself and each unambiguous base (with the offset of
@@ -41,4 +41,4 @@ namespace Scripting
 		std::function<llvm::Function*(const FunctionRecord&)> m_FunctionFor;
 		std::unordered_map<const Type*, llvm::GlobalVariable*> m_ThrowInfos;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

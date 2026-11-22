@@ -2,7 +2,7 @@
 #include "Interop/InteropPass.h"
 #include <string>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Whether `fo`'s object is still what compiling it now would give (BUG-285): the object, its depfile (`<obj>.d`,
 	/// which clang writes) and its key (`<obj>.key`) are there, and the key of the source's bytes, the flags, the

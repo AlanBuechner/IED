@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A hash map that only grows, read without a lock while it is added to: what lowering on several threads reads of
 	/// the model while one of them makes something new (a template instance, a closure). An entry never moves or goes
@@ -146,4 +146,4 @@ namespace Scripting
 
 		std::unique_ptr<State> m_State; // behind a pointer, so the map moves with what owns it
 	};
-} // namespace Scripting
+} // namespace C4Compiler

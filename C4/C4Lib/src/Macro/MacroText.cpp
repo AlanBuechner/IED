@@ -1,7 +1,7 @@
 #include "Macro/MacroText.h"
 #include <cctype>
 
-namespace Scripting::MacroText
+namespace C4Compiler::MacroText
 {
 	bool IsIdentStart(char c) { return std::isalpha(static_cast<unsigned char>(c)) || c == '_'; }
 	bool IsIdentChar(char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; }

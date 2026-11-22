@@ -8,7 +8,7 @@
 #include <llvm/Support/xxhash.h>
 #include <cstdio>
 
-namespace Scripting::StableNames
+namespace C4Compiler::StableNames
 {
 	namespace
 	{

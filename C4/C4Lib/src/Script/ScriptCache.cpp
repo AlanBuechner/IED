@@ -18,7 +18,7 @@
 #include <dlfcn.h>
 #endif
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace fs = std::filesystem;
 
@@ -329,4 +329,4 @@ namespace Scripting
 			std::to_string(stamp->modified);
 #endif
 	}
-} // namespace Scripting
+} // namespace C4Compiler

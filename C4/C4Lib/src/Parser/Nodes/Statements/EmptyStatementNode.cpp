@@ -1,6 +1,6 @@
 #include "EmptyStatementNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 
 	Ref<EmptyStatementNode> EmptyStatementNode::TryParse(ParserState& state)
@@ -28,4 +28,4 @@ namespace Scripting
 		lexer.NextCompoundToken();
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler

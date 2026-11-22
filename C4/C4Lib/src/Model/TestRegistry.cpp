@@ -7,7 +7,7 @@
 #include "Parser/Nodes/Declarations/NamespaceQualifiedNameNode.h"
 #include "Parser/Nodes/Expressions/LiteralNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -111,4 +111,4 @@ namespace Scripting
 		slot = &function;
 		return Result::Success();
 	}
-} // namespace Scripting
+} // namespace C4Compiler

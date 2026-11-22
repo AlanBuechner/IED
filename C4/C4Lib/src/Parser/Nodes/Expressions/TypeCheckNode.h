@@ -3,7 +3,7 @@
 #include "Core/Core.h"
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Type check expression: operand is Type.
 	struct TypeCheckNode : public AstNode

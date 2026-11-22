@@ -17,7 +17,7 @@
 #include "../Declarations/UnionDefinitionNode.h"
 #include "../Declarations/VariableDefinitionNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	Ref<AstNode> ParseAnyStatement(ParserState& state)
 	{

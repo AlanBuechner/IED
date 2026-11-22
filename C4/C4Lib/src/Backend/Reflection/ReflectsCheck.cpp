@@ -15,7 +15,7 @@
 #include <unordered_set>
 #include <utility>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

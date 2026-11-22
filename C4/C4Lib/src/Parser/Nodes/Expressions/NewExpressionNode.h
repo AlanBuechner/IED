@@ -4,7 +4,7 @@
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
 #include "Parser/Nodes/Expressions/BracedInitializerNode.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// `new T(args)` / `new T{args}` (a managed heap object) or `new (storage) T(args)` (the object is
 	/// built in existing storage, docs/language/06). `new T[n]` / `new T[n]{...}` allocates n elements

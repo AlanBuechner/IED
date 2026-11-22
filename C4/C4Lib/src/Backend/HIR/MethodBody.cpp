@@ -10,7 +10,7 @@
 #include "Model/TypeHandle.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -145,4 +145,4 @@ namespace Scripting
 			return stmts.LowerFunctionBody(body, root, 0, nullptr);
 		}
 	}
-} // namespace Scripting
+} // namespace C4Compiler

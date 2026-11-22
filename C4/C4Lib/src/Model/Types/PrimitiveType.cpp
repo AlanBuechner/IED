@@ -1,6 +1,6 @@
 #include "Model/Types/PrimitiveType.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	PrimitiveType::PrimitiveType(TypeKind kind)
 		: Type(kind)
@@ -92,4 +92,4 @@ namespace Scripting
 		default: return "<unknown>";
 		}
 	}
-} // namespace Scripting
+} // namespace C4Compiler

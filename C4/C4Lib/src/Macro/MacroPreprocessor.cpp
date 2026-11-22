@@ -3,7 +3,7 @@
 #include "Macro/MacroExpander.h"
 #include "Macro/MacroText.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	using namespace MacroText;
 

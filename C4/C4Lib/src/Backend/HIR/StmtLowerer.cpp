@@ -33,7 +33,7 @@
 #include "Model/Types/QualifiedName.h"
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	RegionScope::RegionScope(LoweringContext& ctx, const BlockNode* block, const char* name)
 		: m_Ctx(ctx), m_Scope(ctx.queries().PushScope(Scope::Kind::Block, name))
@@ -503,4 +503,4 @@ namespace Scripting
 			return LowerStmt(n->GetStatement().Get(), region);
 		return QueryResult<void>::Success();
 	}
-} // namespace Scripting
+} // namespace C4Compiler

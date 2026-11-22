@@ -1,6 +1,6 @@
 #include "Backend/HIR/CountedArray.h"
 
-namespace Scripting::CountedArray
+namespace C4Compiler::CountedArray
 {
 	namespace
 	{
@@ -12,4 +12,4 @@ namespace Scripting::CountedArray
 		const uint64 align = elementAlignment ? elementAlignment : 1;
 		return (kCountSize + align - 1) / align * align;
 	}
-} // namespace Scripting::CountedArray
+} // namespace C4Compiler::CountedArray

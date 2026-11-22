@@ -4,7 +4,7 @@
 
 namespace C4LSP::Server { class CompilationSession; }
 
-namespace Scripting { struct AstNode; }
+namespace C4Compiler { struct AstNode; }
 
 namespace C4LSP::Features
 {
@@ -31,12 +31,12 @@ namespace C4LSP::Features
 
 	private:
 		static Protocol::Diagnostic MakeDiag(const Server::CompilationSession& session, uint32 sourceId,
-			const Scripting::SourceLocation& start, const Scripting::SourceLocation& end,
+			const C4Compiler::SourceLocation& start, const C4Compiler::SourceLocation& end,
 			Protocol::DiagnosticSeverity severity, const std::string& message);
 
 		static void CheckUnusedLocals(Server::CompilationSession& session, uint32 sourceId,
-			const Ref<Scripting::AstNode>& root, Core::Vector<Protocol::Diagnostic>& out);
+			const Ref<C4Compiler::AstNode>& root, Core::Vector<Protocol::Diagnostic>& out);
 		static void CheckExpressionTautologies(Server::CompilationSession& session, uint32 sourceId,
-			const Core::Vector<const Scripting::AstNode*>& path, const Scripting::AstNode& node, Core::Vector<Protocol::Diagnostic>& out);
+			const Core::Vector<const C4Compiler::AstNode*>& path, const C4Compiler::AstNode& node, Core::Vector<Protocol::Diagnostic>& out);
 	};
 } // namespace C4LSP::Features

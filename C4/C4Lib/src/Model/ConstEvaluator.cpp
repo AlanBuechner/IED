@@ -26,7 +26,7 @@
 #include "Parser/Nodes/Declarations/NamespaceQualifiedNameNode.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	// Build the qualified name path for a constant expression, or "" when it is not a (qualified)
 	// name. A plain identifier returns "" so the caller's identifier branch handles it (that branch
@@ -505,5 +505,5 @@ namespace Scripting
 		});
 	}
 
-} // namespace Scripting
+} // namespace C4Compiler
 

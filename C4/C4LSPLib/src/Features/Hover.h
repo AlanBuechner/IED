@@ -3,7 +3,7 @@
 #include "Protocol/LspTypes.h"
 #include "Server/NodeLocator.h"
 
-namespace Scripting { class AstNode; class Type; class ProgramModel; class QualTypeNode; }
+namespace C4Compiler { class AstNode; class Type; class ProgramModel; class QualTypeNode; }
 
 namespace C4LSP::Server { class CompilationSession; class SemanticResolver; }
 
@@ -24,15 +24,15 @@ namespace C4LSP::Features
 	public:
 		static HoverResult At(Server::CompilationSession& session, const std::string& uri, const Protocol::Position& position);
 		/// A declaration's markdown: a kind line for a parameter or a local, the `c4` block, then its doc comment.
-		static std::string DeclarationMarkdown(Server::CompilationSession& session, const Scripting::AstNode& declaration);
+		static std::string DeclarationMarkdown(Server::CompilationSession& session, const C4Compiler::AstNode& declaration);
 		/// A declared annotation: how each overload is written, where it goes, and the doc comment of `declaration` (else the
 		/// first overload's that has one).
-		static std::string AnnotationMarkdown(Server::CompilationSession& session, const Scripting::AstNode& declaration);
+		static std::string AnnotationMarkdown(Server::CompilationSession& session, const C4Compiler::AstNode& declaration);
 
 	private:
 		static std::string BuildHoverText(Server::CompilationSession& session, uint32 sourceId, const Server::LocatedNode& located, const Protocol::Position& position);
-		static std::string BuildReferenceHover(Server::CompilationSession& session, const Scripting::Type* type, const Scripting::AstNode* declaration);
-		static std::string BuildTypeHover(Server::CompilationSession& session, const Scripting::QualTypeNode& type, const Core::Vector<const Scripting::AstNode*>& path);
+		static std::string BuildReferenceHover(Server::CompilationSession& session, const C4Compiler::Type* type, const C4Compiler::AstNode* declaration);
+		static std::string BuildTypeHover(Server::CompilationSession& session, const C4Compiler::QualTypeNode& type, const Core::Vector<const C4Compiler::AstNode*>& path);
 		static std::string MacroHover(const std::string& definition, const std::string& expansion, const std::string& doc);
 	};
 } // namespace C4LSP::Features

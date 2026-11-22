@@ -5,7 +5,7 @@
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Intrinsics.h>
 
-namespace Scripting
+namespace C4Compiler
 {
 	LandingPadLowering::LandingPadLowering(MirEmitter& emitter) : m_Emitter(emitter)
 	{
@@ -230,4 +230,4 @@ namespace Scripting
 		ctx.Call(violation, {}, false);
 		ctx.builder().CreateUnreachable();
 	}
-} // namespace Scripting
+} // namespace C4Compiler

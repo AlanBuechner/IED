@@ -4,7 +4,7 @@
 #include "Lexer/Token.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Represents an expression followed by a semicolon.
 	/// The most common statement type: function calls, assignments, increments, etc.

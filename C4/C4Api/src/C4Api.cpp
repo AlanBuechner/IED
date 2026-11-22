@@ -14,7 +14,7 @@
 struct c4a_parse
 {
 	bool read = true;
-	Scripting::SourceOutline outline;
+	C4Compiler::SourceOutline outline;
 };
 
 namespace
@@ -25,7 +25,7 @@ namespace
 	std::string VersionText()
 	{
 		std::ostringstream text;
-		text << Scripting::CompilerVersion::Major << "." << Scripting::CompilerVersion::Minor << "." << Scripting::CompilerVersion::Patch;
+		text << C4Compiler::CompilerVersion::Major << "." << C4Compiler::CompilerVersion::Minor << "." << C4Compiler::CompilerVersion::Patch;
 		return text.str();
 	}
 
@@ -35,7 +35,7 @@ namespace
 		for (uint32_t i = 0; i < options.define_count; ++i)
 			if (options.defines && options.defines[i])
 			{
-				const Scripting::MacroDefine define = Scripting::ParseMacroDefine(options.defines[i]);
+				const C4Compiler::MacroDefine define = C4Compiler::ParseMacroDefine(options.defines[i]);
 				defines[define.name] = define.value;
 			}
 		return defines;
@@ -49,11 +49,11 @@ namespace
 		return true;
 	}
 
-	c4a_position PositionOf(const Scripting::OutlinePosition& at) { return { at.line, at.column }; }
+	c4a_position PositionOf(const C4Compiler::OutlinePosition& at) { return { at.line, at.column }; }
 
-	c4a_kind KindOf(Scripting::OutlineKind kind)
+	c4a_kind KindOf(C4Compiler::OutlineKind kind)
 	{
-		using Scripting::OutlineKind;
+		using C4Compiler::OutlineKind;
 		switch (kind)
 		{
 		case OutlineKind::Namespace: return C4A_NAMESPACE;
@@ -75,7 +75,7 @@ namespace
 	{
 		c4a_parse* parse = new c4a_parse();
 		parse->read = false;
-		parse->outline.diagnostics.push_back({ Scripting::OutlineSeverity::Error, {}, std::string("cannot read ") + (path ? path : "(no path)") });
+		parse->outline.diagnostics.push_back({ C4Compiler::OutlineSeverity::Error, {}, std::string("cannot read ") + (path ? path : "(no path)") });
 		return parse;
 	}
 }
@@ -97,7 +97,7 @@ extern "C"
 		if (options->text) text.assign(options->text, static_cast<size_t>(options->length));
 		else if (!ReadFile(options->path, text)) return Unread(options->path);
 		c4a_parse* parse = new c4a_parse();
-		parse->outline = Scripting::OutlineOf(text, DefinesOf(*options));
+		parse->outline = C4Compiler::OutlineOf(text, DefinesOf(*options));
 		return parse;
 	}
 
@@ -108,8 +108,8 @@ extern "C"
 	int32_t c4a_diagnostic_at(const c4a_parse* parse, uint32_t index, c4a_diagnostic* out)
 	{
 		if (!parse || !out || index >= parse->outline.diagnostics.size()) return 0;
-		const Scripting::OutlineDiagnostic& found = parse->outline.diagnostics[index];
-		*out = { found.severity == Scripting::OutlineSeverity::Warning ? C4A_WARNING : C4A_ERROR, PositionOf(found.at), found.message.c_str() };
+		const C4Compiler::OutlineDiagnostic& found = parse->outline.diagnostics[index];
+		*out = { found.severity == C4Compiler::OutlineSeverity::Warning ? C4A_WARNING : C4A_ERROR, PositionOf(found.at), found.message.c_str() };
 		return 1;
 	}
 
@@ -118,7 +118,7 @@ extern "C"
 	int32_t c4a_declaration_at(const c4a_parse* parse, uint32_t index, c4a_declaration* out)
 	{
 		if (!parse || !out || index >= parse->outline.declarations.size()) return 0;
-		const Scripting::OutlineDeclaration& found = parse->outline.declarations[index];
+		const C4Compiler::OutlineDeclaration& found = parse->outline.declarations[index];
 		*out = { KindOf(found.kind), found.name.c_str(), PositionOf(found.start), PositionOf(found.end), PositionOf(found.nameAt), found.parent };
 		return 1;
 	}

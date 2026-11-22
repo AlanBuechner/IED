@@ -6,7 +6,7 @@
 #include "Parser/Nodes/Expressions/PackExpansionNode.h"
 #include <array>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -149,4 +149,4 @@ namespace Scripting
 		sequence->fresh = Lifecycle::IsFresh(value);
 		return Value::R(sequence, value->type);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

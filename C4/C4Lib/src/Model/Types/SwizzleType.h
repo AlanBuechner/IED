@@ -1,7 +1,7 @@
 #pragma once
 #include "Model/Types/Type.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Swizzle type (plan item 1 - language swizzling). A first-class SIMD vector with named
 	/// single-character lanes. `packed` lowers to an LLVM <N x T> vector register; `unpacked` to a
@@ -60,4 +60,4 @@ namespace Scripting
 		bool m_RegionPacked = false;    // the region's packed-ness, even when it has no named lanes
 		Core::String m_ArrayAlias;      // whole-region array alias name (`data`), empty if none
 	};
-} // namespace Scripting
+} // namespace C4Compiler

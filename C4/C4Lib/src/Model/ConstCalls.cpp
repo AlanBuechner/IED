@@ -11,7 +11,7 @@
 #include <limits>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -108,4 +108,4 @@ namespace Scripting
 		if (!calls) return Result::Fail(QueryError::Unsupported, "compile-time evaluation is not available here: '" + name + "' cannot run");
 		return Result::Success(CompileTimeCall{ record, std::move(values), calls });
 	}
-} // namespace Scripting
+} // namespace C4Compiler

@@ -1,7 +1,7 @@
 #pragma once
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class Type;
 
@@ -19,4 +19,4 @@ namespace Scripting
 		/// operator (D-25: an operator is a method of its left operand's type).
 		Core::String MissingOperator(const Core::String& tok, const Type* l, const Type* r);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

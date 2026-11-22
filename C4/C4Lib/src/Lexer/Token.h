@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <typeinfo>
 
-namespace Scripting
+namespace C4Compiler
 {
 
 	enum class TokenType

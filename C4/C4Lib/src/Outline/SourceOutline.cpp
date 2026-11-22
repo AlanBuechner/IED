@@ -16,7 +16,7 @@
 #include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
 #include "SourceManager/Source.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

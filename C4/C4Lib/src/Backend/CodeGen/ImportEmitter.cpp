@@ -2,7 +2,7 @@
 #include "Backend/CodeGen/ImportPlanner.h"
 #include <unordered_map>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -53,4 +53,4 @@ namespace Scripting
 				if (const auto tree = trees.find(record); tree != trees.end()) imported[i].push_back(tree->second);
 		partitions.EmitCopies(model, imported, pool);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

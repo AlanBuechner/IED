@@ -3,7 +3,7 @@
 #include "Parser/Nodes/Expressions/LiteralNode.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	std::span<const Ref<AstNode>> BracedInitializerNode::Children() const
 	{
@@ -173,4 +173,4 @@ namespace Scripting
 	}
 
 
-} // namespace Scripting
+} // namespace C4Compiler

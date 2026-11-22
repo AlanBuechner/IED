@@ -4,7 +4,7 @@
 
 namespace llvm { class Instruction; class LLVMContext; class MDNode; }
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The type-based alias metadata of a module (D-64): a `!tbaa` scalar node per AliasClass under the root
 	/// `C4 TBAA`, `bytes` the parent of the others, and an access tag for each. When strict aliasing is off every
@@ -33,4 +33,4 @@ namespace Scripting
 
 	/// Gives a load or store (a masked one, a gather) its alias tag, when it has one; returns the access.
 	llvm::Instruction* Attach(llvm::Instruction* access, llvm::MDNode* tag);
-} // namespace Scripting
+} // namespace C4Compiler

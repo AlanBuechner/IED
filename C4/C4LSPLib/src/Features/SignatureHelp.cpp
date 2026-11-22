@@ -17,7 +17,7 @@
 namespace C4LSP::Features
 {
 	// An annotation's name as written before its `(`, qualifier and all: `Lib::Range` of `[Lib::Range(0, `.
-	static std::string WrittenName(const Scripting::Source& source, size_t start)
+	static std::string WrittenName(const C4Compiler::Source& source, size_t start)
 	{
 		std::string name;
 		for (size_t i = start; i < source.Size(); ++i)
@@ -40,10 +40,10 @@ namespace C4LSP::Features
 		if (!unit || !unit->GetRootAST())
 			return result;
 
-		const Scripting::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
+		const C4Compiler::Source& source = *session.GetSourceManager().GetInfo(sourceId).source;
 		Server::LocatedNode located = Server::NodeLocator::Locate(source, sourceId, unit->GetRootAST(), position);
 
-		const Scripting::AstNode* callee = nullptr;
+		const C4Compiler::AstNode* callee = nullptr;
 		uint32 activeArg = 0;
 		if (located.Found() && FindEnclosingCall(source, located, sourceId, position, callee, activeArg))
 		{
@@ -72,10 +72,10 @@ namespace C4LSP::Features
 			if (InAnnotationGroup(source, calleeStart) &&
 				AnnotationSignatures(session.GetResolver(), WrittenName(source, calleeStart), session.GetResolver().AnnotationContextAt(located.path, sourceId), lexicalArg, result))
 				return result;
-			const Scripting::AstNode* declaration = FindFunctionByName(session, sourceId, calleeName);
+			const C4Compiler::AstNode* declaration = FindFunctionByName(session, sourceId, calleeName);
 			if (declaration)
 			{
-				auto info = BuildFromDeclaration(static_cast<const Scripting::FunctionDefinitionNode&>(*declaration), calleeName);
+				auto info = BuildFromDeclaration(static_cast<const C4Compiler::FunctionDefinitionNode&>(*declaration), calleeName);
 				result.found = true;
 				result.signatures.Push(info);
 				result.activeSignature = 0;
@@ -85,16 +85,16 @@ namespace C4LSP::Features
 		return result;
 	}
 
-	bool SignatureHelp::FindEnclosingCall(const Scripting::Source& source, const Server::LocatedNode& located, uint32 sourceId,
-		const Protocol::Position& position, const Scripting::AstNode*& outCallee, uint32& activeArg)
+	bool SignatureHelp::FindEnclosingCall(const C4Compiler::Source& source, const Server::LocatedNode& located, uint32 sourceId,
+		const Protocol::Position& position, const C4Compiler::AstNode*& outCallee, uint32& activeArg)
 	{
 		for (int i = static_cast<int>(located.path.Count()) - 1; i >= 0; --i)
 		{
-			const Scripting::AstNode* node = located.path[i];
-			if (node->Type() != Scripting::NodeType::FunctionCall || node->startLocation.sourceId != sourceId)
+			const C4Compiler::AstNode* node = located.path[i];
+			if (node->Type() != C4Compiler::NodeType::FunctionCall || node->startLocation.sourceId != sourceId)
 				continue;
 
-			const auto& call = static_cast<const Scripting::FunctionCallNode&>(*node);
+			const auto& call = static_cast<const C4Compiler::FunctionCallNode&>(*node);
 			if (!call.GetCallee())
 				return false;
 
@@ -111,7 +111,7 @@ namespace C4LSP::Features
 		return false;
 	}
 
-	bool SignatureHelp::LexicalCall(const Scripting::Source& source, size_t caretOffset, std::string& outCalleeName, uint32& activeArg,
+	bool SignatureHelp::LexicalCall(const C4Compiler::Source& source, size_t caretOffset, std::string& outCalleeName, uint32& activeArg,
 		size_t* outCalleeStart)
 	{
 		const auto& src = source; // Source is non-copyable; the lambda must capture by reference.
@@ -177,7 +177,7 @@ namespace C4LSP::Features
 		return true;
 	}
 
-	bool SignatureHelp::InAnnotationGroup(const Scripting::Source& source, size_t calleeStart)
+	bool SignatureHelp::InAnnotationGroup(const C4Compiler::Source& source, size_t calleeStart)
 	{
 		int parens = 0;
 		int brackets = 0;
@@ -193,19 +193,19 @@ namespace C4LSP::Features
 		return false;
 	}
 
-	bool SignatureHelp::AnnotationSignatures(const Server::SemanticResolver& resolver, const std::string& name, const Scripting::AnnotationContext& at,
+	bool SignatureHelp::AnnotationSignatures(const Server::SemanticResolver& resolver, const std::string& name, const C4Compiler::AnnotationContext& at,
 		uint32 activeArg, SignatureHelpResult& result)
 	{
-		const Scripting::DeclaredAnnotations::Overloads overloads = resolver.Annotations().Find(name, at);
+		const C4Compiler::DeclaredAnnotations::Overloads overloads = resolver.Annotations().Find(name, at);
 		if (overloads.Empty())
 			return false;
-		const Scripting::AnnotationSignature* likely = Scripting::LikelyOverload(overloads, activeArg + 1);
+		const C4Compiler::AnnotationSignature* likely = C4Compiler::LikelyOverload(overloads, activeArg + 1);
 		for (uint32 i = 0; i < overloads.Count(); ++i)
 		{
-			const Scripting::AnnotationSignature& overload = *overloads[i];
+			const C4Compiler::AnnotationSignature& overload = *overloads[i];
 			SignatureInfo info;
 			info.label = overload.ToString().c_str();
-			for (const Scripting::AnnotationParameter& parameter : overload.parameters)
+			for (const C4Compiler::AnnotationParameter& parameter : overload.parameters)
 				info.parameters.Push(SignatureParameter{ parameter.ToString().c_str() });
 			if (&overload == likely)
 			{
@@ -219,20 +219,20 @@ namespace C4LSP::Features
 		return true;
 	}
 
-	const Scripting::AstNode* SignatureHelp::FindFunctionByName(Server::CompilationSession& session, uint32 sourceId, const std::string& name)
+	const C4Compiler::AstNode* SignatureHelp::FindFunctionByName(Server::CompilationSession& session, uint32 sourceId, const std::string& name)
 	{
 		// The model is program-wide and every unit shares it, so one scope-tree scan covers the whole
 		// project - no per-unit loop needed. A name declared in an included file is still found here
 		// (build-time visibility), which is exactly what a call to such a function needs.
-		std::vector<const Scripting::AstNode*> decls;
+		std::vector<const C4Compiler::AstNode*> decls;
 		session.GetResolver().CollectDeclarationsByName(name, decls);
-		for (const Scripting::AstNode* decl : decls)
-			if (decl && decl->Type() == Scripting::NodeType::FunctionDefinition)
+		for (const C4Compiler::AstNode* decl : decls)
+			if (decl && decl->Type() == C4Compiler::NodeType::FunctionDefinition)
 				return decl;
 		return nullptr;
 	}
 
-	SignatureInfo SignatureHelp::BuildSignature(const Server::SemanticResolver& resolver, const Core::Vector<const Scripting::AstNode*>& path, const Scripting::AstNode& callee)
+	SignatureInfo SignatureHelp::BuildSignature(const Server::SemanticResolver& resolver, const Core::Vector<const C4Compiler::AstNode*>& path, const C4Compiler::AstNode& callee)
 	{
 		std::string name = CalleeName(callee);
 		if (name.empty())
@@ -241,44 +241,44 @@ namespace C4LSP::Features
 		const Server::NodeResolution res = resolver.ResolveReference(callee, path);
 
 		// Prefer the resolved declaration: it carries parameter names and types.
-		if (res.declaration && res.declaration->Type() == Scripting::NodeType::FunctionDefinition)
-			return BuildFromDeclaration(static_cast<const Scripting::FunctionDefinitionNode&>(*res.declaration), name);
+		if (res.declaration && res.declaration->Type() == C4Compiler::NodeType::FunctionDefinition)
+			return BuildFromDeclaration(static_cast<const C4Compiler::FunctionDefinitionNode&>(*res.declaration), name);
 
 		// Fallback: a built-in / extern function with no C4 declaration. The callee's resolved type is
 		// its signature; parameter names are unavailable there.
 		if (res.type)
 		{
-			const Scripting::Type* t = res.type;
-			if (t->GetKind() == Scripting::TypeKind::Function)
+			const C4Compiler::Type* t = res.type;
+			if (t->GetKind() == C4Compiler::TypeKind::Function)
 			{
-				const auto& ft = static_cast<const Scripting::FunctionType*>(t);
-				Core::Vector<const Scripting::Type*> types;
+				const auto& ft = static_cast<const C4Compiler::FunctionType*>(t);
+				Core::Vector<const C4Compiler::Type*> types;
 				for (const auto& p : ft->GetParameters())
 					types.Push(p.m_Type);
 				return BuildFromParameterTypes(types, ft->IsVariadic(), name);
 			}
-			if (t->GetKind() == Scripting::TypeKind::FunPtr)
-				return BuildFromParameterTypes(static_cast<const Scripting::FunPtrType*>(t)->GetParameterTypes(), false, name);
+			if (t->GetKind() == C4Compiler::TypeKind::FunPtr)
+				return BuildFromParameterTypes(static_cast<const C4Compiler::FunPtrType*>(t)->GetParameterTypes(), false, name);
 		}
 		return {};
 	}
 
-	std::string SignatureHelp::CalleeName(const Scripting::AstNode& callee)
+	std::string SignatureHelp::CalleeName(const C4Compiler::AstNode& callee)
 	{
 		switch (callee.Type())
 		{
-		case Scripting::NodeType::IdentifierExpression:
-			return static_cast<const Scripting::IdentifierExpressionNode&>(callee).GetNameToken().GetText();
-		case Scripting::NodeType::MemberAccess:
-			return static_cast<const Scripting::MemberAccessNode&>(callee).GetMemberNameToken().GetText();
-		case Scripting::NodeType::StaticAccess:
-			return static_cast<const Scripting::StaticAccessNode&>(callee).GetMemberNameToken().GetText();
+		case C4Compiler::NodeType::IdentifierExpression:
+			return static_cast<const C4Compiler::IdentifierExpressionNode&>(callee).GetNameToken().GetText();
+		case C4Compiler::NodeType::MemberAccess:
+			return static_cast<const C4Compiler::MemberAccessNode&>(callee).GetMemberNameToken().GetText();
+		case C4Compiler::NodeType::StaticAccess:
+			return static_cast<const C4Compiler::StaticAccessNode&>(callee).GetMemberNameToken().GetText();
 		default:
 			return std::string();
 		}
 	}
 
-	SignatureInfo SignatureHelp::BuildFromDeclaration(const Scripting::FunctionDefinitionNode& decl, const std::string& name)
+	SignatureInfo SignatureHelp::BuildFromDeclaration(const C4Compiler::FunctionDefinitionNode& decl, const std::string& name)
 	{
 		SignatureInfo info;
 		info.label = name + "(";
@@ -297,7 +297,7 @@ namespace C4LSP::Features
 		return info;
 	}
 
-	SignatureInfo SignatureHelp::BuildFromParameterTypes(const Core::Vector<const Scripting::Type*>& paramTypes, bool variadic, const std::string& name)
+	SignatureInfo SignatureHelp::BuildFromParameterTypes(const Core::Vector<const C4Compiler::Type*>& paramTypes, bool variadic, const std::string& name)
 	{
 		SignatureInfo info;
 		info.label = name + "(";
@@ -317,7 +317,7 @@ namespace C4LSP::Features
 		return info;
 	}
 
-	std::string SignatureHelp::ParameterText(const Scripting::ParameterNode& param)
+	std::string SignatureHelp::ParameterText(const C4Compiler::ParameterNode& param)
 	{
 		std::string text;
 		if (param.GetType())

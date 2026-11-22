@@ -1,7 +1,7 @@
 #pragma once
 #include "Backend/CodeGen/IRContext.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Emits ONE HIRFunction into its llvm::Function (doc 03): builds the signature (via ModuleContext, so it
 	/// matches the forward declaration exactly), creates the entry block and slot allocas, binds parameters
@@ -28,4 +28,4 @@ namespace Scripting
 
 		ModuleContext& m_MCtx;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

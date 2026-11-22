@@ -2,7 +2,7 @@
 #include "Model/ConstantValue.h"
 #include "Model/QueryResult.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class Type;
 

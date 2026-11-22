@@ -5,7 +5,7 @@
 
 namespace Testing
 {
-	using namespace Scripting;
+	using namespace C4Compiler;
 	using Arguments = std::vector<std::string>;
 
 	void LinkArgumentsTest::LibrariesAreNamedWithTheirExtension()

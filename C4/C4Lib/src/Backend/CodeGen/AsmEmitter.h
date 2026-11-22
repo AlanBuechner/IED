@@ -3,7 +3,7 @@
 
 namespace llvm { class CallInst; }
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ExprEmitter;
 
@@ -29,4 +29,4 @@ namespace Scripting
 		IRContext& m_Ctx;
 		ExprEmitter& m_Expr;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

@@ -1,7 +1,7 @@
 #pragma once
 #include "Model/Types/Type.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A fixed-size array type: `T[N]`. Size/alignment derive from the element on demand so a forward
 	/// object type (size unknown when the array was created) still yields correct values later.
@@ -28,4 +28,4 @@ namespace Scripting
 		const Type* m_ElementType = nullptr;
 		uint64 m_ElementCount = 0;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

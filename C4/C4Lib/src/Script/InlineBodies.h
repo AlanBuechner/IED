@@ -11,7 +11,7 @@ namespace llvm
 	class Module;
 }
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// The most instructions a host function may have (lowered, before optimization) for scripts to inline it.
 	constexpr uint32 kInlineBodyLimit = 160;
@@ -50,4 +50,4 @@ namespace Scripting
 	/// does not split the module while it extracts them.
 	std::vector<std::string> InlineBodies(const llvm::Module& module, const HostNames& hostSymbols, unsigned maxGroups = 1);
 	std::vector<std::string> InlineBodies(const llvm::Module& module, const std::vector<std::string>& hostSymbols, unsigned maxGroups = 1);
-} // namespace Scripting
+} // namespace C4Compiler

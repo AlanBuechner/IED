@@ -1,6 +1,6 @@
 #include "Backend/HIR/EvaluatedOnce.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

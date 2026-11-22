@@ -2,7 +2,7 @@
 #include "Backend/CodeGen/PartitionSet.h"
 #include "Backend/Lowering/LoweredProgram.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 
@@ -11,4 +11,4 @@ namespace Scripting
 	/// the copies picked from all of them, and each partition emits its copies from their trees. With
 	/// `onlyAlwaysInline` (-O0) a partition copies only the `inline` functions it calls.
 	void EmitImports(PartitionSet& partitions, const ProgramModel& model, const LoweredProgram& program, bool onlyAlwaysInline, WorkerPool& pool);
-} // namespace Scripting
+} // namespace C4Compiler

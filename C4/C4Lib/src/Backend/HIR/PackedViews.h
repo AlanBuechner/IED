@@ -1,7 +1,7 @@
 #pragma once
 #include "Backend/HIR/LoweringContext.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A name read as one of an object's packed views (docs/language/11): its array view (`data`, the whole
 	/// vector as a `packed T[N]`), one lane (`x`) or a run of lanes (`xz`), as an lvalue at `base`. Null when the
@@ -10,4 +10,4 @@ namespace Scripting
 	/// Who may name `name`, a packed view of `obj`: the access written on the union that declares its region (BUG-477), as
 	/// reflection says it; public when the union writes none, as an anonymous union's plain fields are.
 	AccessModifier PackedViewAccess(const ObjectType* obj, const Core::String& name);
-} // namespace Scripting
+} // namespace C4Compiler

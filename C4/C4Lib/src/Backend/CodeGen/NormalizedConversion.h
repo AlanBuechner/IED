@@ -2,7 +2,7 @@
 #include "Model/ConstantValue.h"
 #include <llvm/IR/IRBuilder.h>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class Type;
 
@@ -20,4 +20,4 @@ namespace Scripting
 		/// The encoding a normalized `to` stores for the constant `value`.
 		int64 RawOf(const ConstantValue& value, const Type* to);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

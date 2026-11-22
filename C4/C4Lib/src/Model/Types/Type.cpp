@@ -1,7 +1,7 @@
 #include "Model/Types/Type.h"
 #include "Model/Types/EnumType.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	Core::String ObjectSizeProblem(const Type& type)
 	{
@@ -184,4 +184,4 @@ namespace Scripting
 			return false;
 		}
 	}
-} // namespace Scripting
+} // namespace C4Compiler

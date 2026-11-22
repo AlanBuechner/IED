@@ -25,7 +25,7 @@
 #include <unordered_map>
 #include <tuple>
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct AsmStatementNode;
 	struct NamespaceNode;
@@ -555,4 +555,4 @@ namespace Scripting
 		bool m_Valid = false;
 	};
 
-} // namespace Scripting
+} // namespace C4Compiler

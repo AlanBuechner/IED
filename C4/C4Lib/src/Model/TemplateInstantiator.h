@@ -2,7 +2,7 @@
 #include "Model/ProgramModel.h"
 #include "Model/Templates/TemplateArguments.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Turns a template and its arguments into an ordinary type or function record (docs/language/08,
 	/// compiler/02). The requester never knows a template exists: it asks for `Vec<int32>` and gets an
@@ -75,4 +75,4 @@ namespace Scripting
 		/// A member template instance's bindings plus the names its out-of-line definition gives its owner's parameters.
 		static InstantiationBindings WithOwnerNames(InstantiationBindings own, const InstantiationBindings& ownerNames);
 	};
-} // namespace Scripting
+} // namespace C4Compiler

@@ -5,7 +5,7 @@
 #include "Parser/Nodes/Declarations/NamespaceQualifiedNameNode.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// A single indirection layer on a type: pointer `*` (always GC-managed), C++ ref `&`, or array `[expr]`.
 	struct IndirectionLayer

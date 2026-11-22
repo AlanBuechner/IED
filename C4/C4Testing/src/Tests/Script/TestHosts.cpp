@@ -18,7 +18,7 @@
 
 namespace Testing
 {
-	using namespace Scripting;
+	using namespace C4Compiler;
 
 	TestHost BuildTestHost(CompilerInstance& compiler);
 

@@ -18,7 +18,7 @@
 #include <llvm/TargetParser/Triple.h>
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	ModuleContext::ModuleContext(llvm::LLVMContext& ctx, TargetSystem system)
 		: m_Context(ctx), m_Target(TargetAbi::For(system)), m_Abi(ctx, m_Target, m_DataLayout, [this](const Type* t) { return Lower(t); },
@@ -596,4 +596,4 @@ namespace Scripting
 	{
 		m_Debug = std::make_unique<DebugInfo>(*m_Module, m_Target.DebugInfoFormat(), std::move(sourcePaths));
 	}
-} // namespace Scripting
+} // namespace C4Compiler

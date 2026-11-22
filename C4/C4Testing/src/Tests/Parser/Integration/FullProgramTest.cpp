@@ -17,20 +17,20 @@ namespace Testing
 {
 	namespace
 	{
-		using Listed = std::vector<const Scripting::AstNode*>;
+		using Listed = std::vector<const C4Compiler::AstNode*>;
 
-		Listed Present(std::initializer_list<const Scripting::AstNode*> parts)
+		Listed Present(std::initializer_list<const C4Compiler::AstNode*> parts)
 		{
 			Listed held;
-			for (const Scripting::AstNode* part : parts)
+			for (const C4Compiler::AstNode* part : parts)
 				if (part) held.push_back(part);
 			return held;
 		}
 
 		// What a node the parser fills through setters holds, in Children's order; none for another kind.
-		std::optional<Listed> Held(const Scripting::AstNode& node)
+		std::optional<Listed> Held(const C4Compiler::AstNode& node)
 		{
-			using namespace Scripting;
+			using namespace C4Compiler;
 			if (const auto* call = dynamic_cast<const FunctionCallNode*>(&node))
 			{
 				Listed held = Present({ call->GetCallee().Get() });
@@ -46,19 +46,19 @@ namespace Testing
 		}
 
 		// Every node under `node`: the children of a kind Held knows are what it holds, and asking again gives the same.
-		void CheckChildren(const Scripting::AstNode& node, std::set<std::string>& kinds, int& wrong)
+		void CheckChildren(const C4Compiler::AstNode& node, std::set<std::string>& kinds, int& wrong)
 		{
-			const std::span<const Ref<Scripting::AstNode>> children = node.Children();
+			const std::span<const Ref<C4Compiler::AstNode>> children = node.Children();
 			Listed listed;
-			for (const Ref<Scripting::AstNode>& child : children) listed.push_back(child.Get());
+			for (const Ref<C4Compiler::AstNode>& child : children) listed.push_back(child.Get());
 			if (const std::optional<Listed> held = Held(node))
 			{
 				kinds.insert(typeid(node).name());
 				if (*held != listed) wrong++;
 			}
-			const std::span<const Ref<Scripting::AstNode>> again = node.Children();
+			const std::span<const Ref<C4Compiler::AstNode>> again = node.Children();
 			if (again.data() != children.data() || again.size() != children.size()) wrong++;
-			for (const Ref<Scripting::AstNode>& child : children)
+			for (const Ref<C4Compiler::AstNode>& child : children)
 				if (child) CheckChildren(*child, kinds, wrong);
 		}
 	}
@@ -67,7 +67,7 @@ namespace Testing
 	// threads may walk one body): a call, the casts and the size queries list exactly what they hold.
 	void FullProgramTest::ChildrenAreWhatEachNodeHolds()
 	{
-		auto stream = Scripting::Source::FromMemory(Core::String(
+		auto stream = C4Compiler::Source::FromMemory(Core::String(
 			"class Shape { public int32 sides; }\n"
 			"class Square : public Shape { }\n"
 			"int32 Probe(Shape* s, int32* values, int32 n)\n"
@@ -78,10 +78,10 @@ namespace Testing
 			"    total = total > 0 && n < 3 || values[1] == 2 ? Probe(s, values, n - 1) : 0;\n"
 			"    return total;\n"
 			"}\n"));
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
-		auto root = CreateRef<Scripting::NamespaceNode>();
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
+		auto root = CreateRef<C4Compiler::NamespaceNode>();
 		root->SetIsRoot(true);
 		root->ParseBody(state);
 		TEST_ASSERT(errorTracker.GetErrors().Empty());
@@ -203,12 +203,12 @@ const float GlobalConst = 3.14f;
 static int GlobalStatic = 0;
 )");
 
-		auto stream = Scripting::Source::FromMemory(source);
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory(source);
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto rootNamespace = CreateRef<Scripting::NamespaceNode>();
+		auto rootNamespace = CreateRef<C4Compiler::NamespaceNode>();
 		rootNamespace->SetIsRoot(true);
 		rootNamespace->ParseBody(state);
 
@@ -220,12 +220,12 @@ static int GlobalStatic = 0;
 
 	void FullProgramTest::TestEnumWithUnderlyingType()
 	{
-		auto stream = Scripting::Source::FromMemory("enum Flags : int32 { X = 1, Y = 2, Z = 4 };");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("enum Flags : int32 { X = 1, Y = 2, Z = 4 };");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::EnumDefinitionNode::TryParse(state);
+		auto node = C4Compiler::EnumDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->HasUnderlyingType());
 		TEST_ASSERT(node->MemberCount() == 3);
@@ -234,12 +234,12 @@ static int GlobalStatic = 0;
 
 	void FullProgramTest::TestClassWithInheritance()
 	{
-		auto stream = Scripting::Source::FromMemory("class Derived : public Base1, private Base2 { public int x; };");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("class Derived : public Base1, private Base2 { public int x; };");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ObjectDefinitionNode::TryParse(state);
+		auto node = C4Compiler::ObjectDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->HasInheritanceList());
 		TEST_PASSED();
@@ -247,12 +247,12 @@ static int GlobalStatic = 0;
 
 	void FullProgramTest::TestTemplatedClass()
 	{
-		auto stream = Scripting::Source::FromMemory("template<T> class Container { public T value; };");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("template<T> class Container { public T value; };");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::ObjectDefinitionNode::TryParse(state);
+		auto node = C4Compiler::ObjectDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->IsTemplated());
 		TEST_PASSED();
@@ -260,12 +260,12 @@ static int GlobalStatic = 0;
 
 	void FullProgramTest::TestFunctionWithBody()
 	{
-		auto stream = Scripting::Source::FromMemory("int Add(int a, int b) { return a + b; }");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("int Add(int a, int b) { return a + b; }");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::FunctionDefinitionNode::TryParse(state);
+		auto node = C4Compiler::FunctionDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->IsDefinition());
 		TEST_ASSERT(node->ParameterCount() == 2);
@@ -274,12 +274,12 @@ static int GlobalStatic = 0;
 
 	void FullProgramTest::TestFunctionDeclaration()
 	{
-		auto stream = Scripting::Source::FromMemory("int Add(int a, int b);");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("int Add(int a, int b);");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::FunctionDefinitionNode::TryParse(state);
+		auto node = C4Compiler::FunctionDefinitionNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->IsDeclaration());
 		TEST_PASSED();
@@ -287,12 +287,12 @@ static int GlobalStatic = 0;
 
 	void FullProgramTest::TestNestedControlFlow()
 	{
-		auto stream = Scripting::Source::FromMemory("if (a) { while (b) { for (int k = 0; k < 10; k++) { if (k == 5) break; } } }");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("if (a) { while (b) { for (int k = 0; k < 10; k++) { if (k == 5) break; } } }");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::IfStatementNode::TryParse(state);
+		auto node = C4Compiler::IfStatementNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->GetThenBody() != nullptr);
 		TEST_PASSED();
@@ -300,12 +300,12 @@ static int GlobalStatic = 0;
 
 	void FullProgramTest::TestCodeBlockDispatch()
 	{
-		auto stream = Scripting::Source::FromMemory("{ int x = 0; if (x > 0) { return x; } while (true) { break; } }");
-		Scripting::Lexer lexer(*stream, 0);
-		Scripting::ErrorTracker errorTracker;
-		Scripting::ParserState state(lexer, errorTracker);
+		auto stream = C4Compiler::Source::FromMemory("{ int x = 0; if (x > 0) { return x; } while (true) { break; } }");
+		C4Compiler::Lexer lexer(*stream, 0);
+		C4Compiler::ErrorTracker errorTracker;
+		C4Compiler::ParserState state(lexer, errorTracker);
 
-		auto node = Scripting::CodeBlockNode::TryParse(state);
+		auto node = C4Compiler::CodeBlockNode::TryParse(state);
 		TEST_ASSERT(node != nullptr);
 		TEST_ASSERT(node->StatementCount() >= 3);
 		TEST_PASSED();

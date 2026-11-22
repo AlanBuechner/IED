@@ -7,7 +7,7 @@
 #include <cstdio>
 #include <filesystem>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{
@@ -395,4 +395,4 @@ namespace Scripting
 		LoadOrUndo(*built.script, std::move(built.linked), built.threadLocals);
 		return std::move(built.script);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

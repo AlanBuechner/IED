@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Owns every Type* in the program (doc 03 ownership invariant): builtins, user types, and
 	/// wrapper types. A phase never constructs a type - it asks the model, which asks this store.
@@ -162,4 +162,4 @@ namespace Scripting
 		std::unordered_map<SignatureKey<const Type*>, const FunctionType*, KeyHash> m_FunctionCache; // every function's signature
 	};
 
-} // namespace Scripting
+} // namespace C4Compiler

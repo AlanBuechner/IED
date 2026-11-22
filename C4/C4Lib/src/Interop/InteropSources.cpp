@@ -2,7 +2,7 @@
 #include "Compiler/SourceMacros.h"
 #include <unordered_map>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

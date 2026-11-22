@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ModuleContext;
 
@@ -48,4 +48,4 @@ namespace Scripting
 		std::map<std::pair<const ObjectType*, int64>, llvm::Constant*> m_Vtables;
 		std::map<std::pair<const FunctionRecord*, int64>, llvm::Function*> m_Thunks;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

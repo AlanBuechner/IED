@@ -2,7 +2,7 @@
 #include "Core/Core.h"
 #include "Model/Types/TypeKind.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// No object is larger: its size must fit a signed 32-bit offset, as in MSVC (C2148).
 	constexpr uint64 kLargestObjectBytes = 0x7FFFFFFF;
@@ -71,4 +71,4 @@ namespace Scripting
 	/// class shares its kind with.
 	template <typename T>
 	const T* TypeAs(const Type* type) { return type && type->GetKind() == T::kTypeKind ? static_cast<const T*>(type) : nullptr; }
-} // namespace Scripting
+} // namespace C4Compiler

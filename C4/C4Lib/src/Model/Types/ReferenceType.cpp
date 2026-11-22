@@ -1,7 +1,7 @@
 #include "Model/Types/ReferenceType.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	ReferenceType::ReferenceType(const Type* referentType, bool constReferent)
 		: Type(TypeKind::Reference), m_ReferentType(referentType), m_ConstReferent(constReferent)
@@ -20,4 +20,4 @@ namespace Scripting
 	{
 		return ToString();
 	}
-} // namespace Scripting
+} // namespace C4Compiler

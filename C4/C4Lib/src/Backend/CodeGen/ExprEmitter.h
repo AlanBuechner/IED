@@ -5,7 +5,7 @@
 
 namespace llvm { class Value; class Constant; class MDNode; }
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// Emits rvalue HIR nodes to SSA values (doc 03). Also owns the lvalue -> address resolution every load,
 	/// store, and address-of builds on. Pure with respect to control flow: it never creates basic blocks -
@@ -91,4 +91,4 @@ namespace Scripting
 		llvm::Value* FromAtomicMemory(llvm::Value* v, const Type* value);
 		llvm::Value* VaIntrinsic(const char* name, std::vector<llvm::Value*> args);
 	};
-} // namespace Scripting
+} // namespace C4Compiler

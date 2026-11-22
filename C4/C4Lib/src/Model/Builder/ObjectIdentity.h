@@ -2,7 +2,7 @@
 #include "Model/Types/ObjectType.h"
 #include "Model/SymbolTable.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct ObjectDefinitionNode;
 
@@ -17,4 +17,4 @@ namespace Scripting
 	/// The names around a type (class or enum) declared in a function body: the scopes' names, then the
 	/// position of its name token.
 	Core::Vector<Core::String> LocalEnclosingNames(const Scope* declScope, const SourceLocation& name);
-} // namespace Scripting
+} // namespace C4Compiler

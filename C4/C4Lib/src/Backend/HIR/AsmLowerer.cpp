@@ -8,7 +8,7 @@
 #include "Parser/Nodes/Statements/AsmStatementNode.h"
 #include <algorithm>
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

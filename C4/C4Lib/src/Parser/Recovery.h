@@ -3,7 +3,7 @@
 #include "Parser/Nodes/ErrorNode.h"
 #include "Core/Core.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// What the parse of a body goes on with after a piece of it did not parse.
 	enum class Resume

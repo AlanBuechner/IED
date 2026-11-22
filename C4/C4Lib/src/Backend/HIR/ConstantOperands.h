@@ -3,7 +3,7 @@
 #include "Model/Types/ArrayType.h"
 #include <optional>
 
-namespace Scripting
+namespace C4Compiler
 {
 	// An operand written as a constant already shows a mistake that is undefined at run time: an integer division
 	// by zero, a shift by the type's width or more, an index outside a fixed-size array. Each is an error.
@@ -17,4 +17,4 @@ namespace Scripting
 		/// Why `index` is outside `array`, or empty.
 		Core::String IndexProblem(const ArrayType& array, const HIRNode* index);
 	}
-} // namespace Scripting
+} // namespace C4Compiler

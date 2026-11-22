@@ -3,7 +3,7 @@
 #include "Model/Types/ObjectType.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ProgramModel;
 
@@ -18,4 +18,4 @@ namespace Scripting
 		/// The name of element `index`'s field.
 		static Core::String FieldName(uint32 index);
 	};
-} // namespace Scripting
+} // namespace C4Compiler

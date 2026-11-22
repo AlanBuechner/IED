@@ -4,7 +4,7 @@
 #include <functional>
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	/// How far compile-time evaluation may go (roadmap 6's guards): it must end, so a call runs at most `steps`
 	/// statements and terminators in all, at most `depth` calls deep.
@@ -85,4 +85,4 @@ namespace Scripting
 		SourceLocation m_At;
 		QueryResult<void> m_Failure = QueryResult<void>::Success();
 	};
-} // namespace Scripting
+} // namespace C4Compiler

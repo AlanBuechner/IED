@@ -3,7 +3,7 @@
 #include "Parser/Nodes/Expressions/LiteralNode.h"
 #include "Core/StringFormat.h"
 
-namespace Scripting
+namespace C4Compiler
 {
 	namespace
 	{

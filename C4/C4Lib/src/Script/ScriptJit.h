@@ -17,7 +17,7 @@ namespace llvm
 	namespace orc { class LLJIT; }
 }
 
-namespace Scripting
+namespace C4Compiler
 {
 	class LinkedScript;
 
@@ -103,4 +103,4 @@ namespace Scripting
 	/// the machine code generated from a module. Empty, with the reason, when it does not link.
 	std::unique_ptr<LinkedScript> LinkScript(ScriptCode code, const HostSymbolTable& host, const CpuTarget& target, std::string* generated,
 		std::string* error);
-} // namespace Scripting
+} // namespace C4Compiler

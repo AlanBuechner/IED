@@ -1,10 +1,10 @@
 #include "Protocol/LspTypes.h"
-#include "Lexer/Token.h" // Scripting::SourceLocation
+#include "Lexer/Token.h" // C4Compiler::SourceLocation
 #include <algorithm>
 
 namespace C4LSP::Protocol
 {
-	Position Position::FromSourceLocation(const Scripting::SourceLocation& loc)
+	Position Position::FromSourceLocation(const C4Compiler::SourceLocation& loc)
 	{
 		Position p;
 		p.line = loc.line > 0 ? loc.line - 1 : 0;
@@ -12,7 +12,7 @@ namespace C4LSP::Protocol
 		return p;
 	}
 
-	Range Range::FromSourceRange(const Scripting::SourceLocation& start, const Scripting::SourceLocation& end)
+	Range Range::FromSourceRange(const C4Compiler::SourceLocation& start, const C4Compiler::SourceLocation& end)
 	{
 		Range r;
 		r.start = Position::FromSourceLocation(start);
@@ -66,7 +66,7 @@ namespace C4LSP::Protocol
 		return path;
 	}
 
-	Location Location::Make(const std::string& uri, const Scripting::SourceLocation& start, const Scripting::SourceLocation& end)
+	Location Location::Make(const std::string& uri, const C4Compiler::SourceLocation& start, const C4Compiler::SourceLocation& end)
 	{
 		Location loc;
 		loc.uri = uri;

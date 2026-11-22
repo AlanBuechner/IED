@@ -11,7 +11,7 @@
 
 namespace llvm { class Function; class GlobalVariable; }
 
-namespace Scripting
+namespace C4Compiler
 {
 	class ModuleContext;
 	class ObjectType;
@@ -72,4 +72,4 @@ namespace Scripting
 
 	/// The qualified names of the types, enums and unions the program's image registers, in its order.
 	std::vector<std::string> ReflectedTypeNames(const ProgramModel& model);
-} // namespace Scripting
+} // namespace C4Compiler

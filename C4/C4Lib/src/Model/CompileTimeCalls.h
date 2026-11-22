@@ -3,7 +3,7 @@
 #include "Model/QueryResult.h"
 #include <vector>
 
-namespace Scripting
+namespace C4Compiler
 {
 	struct FunctionRecord;
 
@@ -19,4 +19,4 @@ namespace Scripting
 		/// The bytes of what `callee` returns - an array, an object - as the target lays them out.
 		virtual QueryResult<std::vector<uint8>> CallForData(const FunctionRecord& callee, const std::vector<ConstantValue>& arguments, const SourceLocation& at) = 0;
 	};
-} // namespace Scripting
+} // namespace C4Compiler

@@ -13,11 +13,11 @@
 
 namespace C4LSP::Features
 {
-	using Scripting::AstNode;
-	using Scripting::FunctionDefinitionNode;
-	using Scripting::NodeType;
-	using Scripting::ObjectDefinitionNode;
-	using Scripting::TypeKind;
+	using C4Compiler::AstNode;
+	using C4Compiler::FunctionDefinitionNode;
+	using C4Compiler::NodeType;
+	using C4Compiler::ObjectDefinitionNode;
+	using C4Compiler::TypeKind;
 
 	namespace
 	{
@@ -71,8 +71,8 @@ namespace C4LSP::Features
 		DeclarationOwners owners;
 		for (const AstNode* node : DeclarationText::PathTo(session, declaration))
 		{
-			if (node->Type() == NodeType::Namespace && !static_cast<const Scripting::NamespaceNode*>(node)->IsRoot())
-				owners.namespaces.push_back(static_cast<const Scripting::NamespaceNode*>(node)->Name());
+			if (node->Type() == NodeType::Namespace && !static_cast<const C4Compiler::NamespaceNode*>(node)->IsRoot())
+				owners.namespaces.push_back(static_cast<const C4Compiler::NamespaceNode*>(node)->Name());
 			else if (node->Type() == NodeType::ObjectDefinition)
 				owners.types.push_back(static_cast<const ObjectDefinitionNode*>(node));
 		}
@@ -189,11 +189,11 @@ namespace C4LSP::Features
 		return Body("", style, DefaultReturn(missing.record, returnType, IsTemplated(declaration, OwnersOf(session, declaration))));
 	}
 
-	std::string DefinitionWriter::DefaultReturn(const Scripting::FunctionRecord* record, std::string_view writtenReturnType, bool templated)
+	std::string DefinitionWriter::DefaultReturn(const C4Compiler::FunctionRecord* record, std::string_view writtenReturnType, bool templated)
 	{
 		if (templated || !record || !record->type)
 			return {}; // a template's instances decide what its type is
-		const Scripting::Type* type = Scripting::TypeHandle::UnwrapAliases(record->type->GetReturnType());
+		const C4Compiler::Type* type = C4Compiler::TypeHandle::UnwrapAliases(record->type->GetReturnType());
 		if (!type)
 			return {};
 		switch (type->GetKind())
