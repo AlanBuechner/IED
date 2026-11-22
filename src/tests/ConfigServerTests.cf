@@ -257,7 +257,8 @@ class ConfigServerTests {
 		assert_true(again->Get(Core::StringView("other.key"), value, problem) && value.View() == "second", "another store over the file reads it");
 		Core::String list = store->ListJson();
 		assert_true(list.View().Contains(Core::StringView("\"name\":\"configServer\"")) && list.View().Contains(Core::StringView("\"available\":true")), list.CStr());
-		assert_true(!list.View().Contains(Core::StringView("plain-token")) && !list.View().Contains(Core::StringView("dpapi")), "the list holds names alone");
+		assert_true(!list.View().Contains(Core::StringView("plain-token")) && !list.View().Contains(Core::StringView("\"dpapi\":")), "the list holds names alone, no sealed value");
+		assert_true(list.View().Contains(Core::StringView("\"protection\":\"dpapi\"")), "and says how values are kept here");
 		// A sealed value moved under another name does not open: the name is its entropy.
 		Serialization::DomDoc doc;
 		Serialization::ReadResult read = Serialization::ReadJson(text.View(), doc);

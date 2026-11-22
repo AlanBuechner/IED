@@ -6,7 +6,7 @@
 // Disconnect clears the URL and keeps the mirror.
 
 import { h, icon, replace } from "/ui-kit/dom.js";
-import { SECRET_NAME, ago, normalizeUrl, servedSections, shortVersion, stateLook, tokenSource } from "./configservermodel.js";
+import { SECRET_NAME, STALE_SERVER, ago, keptNote, normalizeUrl, servedSections, shortVersion, stateLook, storeTrouble, tokenSource } from "./configservermodel.js";
 
 const URL_KEY = "configServer.url";
 const TOKEN_KEY = "configServer.token";
@@ -93,7 +93,7 @@ export class ConfigServerPage {
 	renderToken() {
 		const secrets = this.secrets();
 		const source = tokenSource(this.value(TOKEN_KEY), secrets);
-		const storeProblem = secrets && !secrets.available ? secrets.problem || "This server cannot keep secrets." : "";
+		const storeProblem = storeTrouble(secrets);
 		const remove = source.kind === "secret" && source.stored
 			? h("button.btn.flat", { title: "Delete the stored token from this machine", on: { click: () => this.removeToken(source.name) } }, icon("trash"), "Remove")
 			: null;
@@ -105,7 +105,7 @@ export class ConfigServerPage {
 		}
 		else if (source.kind === "secret" && source.stored) {
 			this.tokenField.placeholder = "Stored on this machine: type a new one to replace it";
-			replace(this.tokenNote, "Kept encrypted for your Windows user in IED's data folder, never shown again.");
+			replace(this.tokenNote, keptNote(secrets));
 		}
 		else if (source.kind === "secret") {
 			this.tokenField.placeholder = "Paste the reader token";
@@ -117,7 +117,7 @@ export class ConfigServerPage {
 		}
 		else {
 			this.tokenField.placeholder = "Paste the reader token";
-			replace(this.tokenNote, "IED keeps it encrypted for your Windows user and never shows it again.");
+			replace(this.tokenNote, keptNote(secrets));
 		}
 	}
 
@@ -211,7 +211,7 @@ export class ConfigServerPage {
 			else await this.shell.client.request("configServer.retry", {});
 		}
 		catch (e) {
-			this.say(e.message);
+			this.say(/unknown method/.test(e.message) ? STALE_SERVER : e.message);
 		}
 		finally {
 			this.setBusy(false);

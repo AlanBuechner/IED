@@ -434,6 +434,8 @@ class ConfigServerTests(ServerTestCase):
 		self.assertIn("configServer.token is not set", status["error"])
 		listed = await watcher.request("secrets.list", {})
 		self.assertEqual((True, []), (listed["available"], listed["secrets"]))
+		# Windows encrypts with DPAPI; Linux keeps the file to its user alone (docs/11 "Secrets").
+		self.assertEqual("dpapi" if os.name == "nt" else "owner-only", listed["protection"])
 		# What the page's Connect does: the token into the store, the setting naming it.
 		await watcher.request("secrets.set", {"name": "configServer", "value": self.reader})
 		await watcher.request("settings.set", {"tier": "app", "key": "configServer.token", "value": {"secret": "configServer"}})
@@ -453,7 +455,10 @@ class ConfigServerTests(ServerTestCase):
 		data = os.path.join(self.root, "stored-data")
 		for path in [os.path.join(data, "auth", "secrets.json"), os.path.join(data, "logs", "security.log"), os.path.join(data, "logs", "server.log"), os.path.join(app, "settings.json")]:
 			with open(path, encoding="utf-8") as f:
-				self.assertNotIn(self.reader, f.read(), "the token is in no file in the clear: " + path)
+				self.assertNotIn(self.reader, f.read(), "the token is in no file as text: " + path)
+		if os.name != "nt":
+			self.assertEqual(0o700, os.stat(os.path.join(data, "auth")).st_mode & 0o777, "the store's folder is its user's alone")
+			self.assertEqual(0o600, os.stat(os.path.join(data, "auth", "secrets.json")).st_mode & 0o777, "and its file")
 		self.assertNotIn(self.reader, json.dumps(snapshot))
 		security = [json.loads(line) for line in read_lines(os.path.join(data, "logs", "security.log"))]
 		self.assertIn(("secret-set", "configServer"), [(e["event"], e.get("name")) for e in security], "the security log names the secret")

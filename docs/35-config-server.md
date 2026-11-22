@@ -182,7 +182,11 @@ edits the three `configServer.*` settings, always in the User tier whatever tier
   typed in with `secrets.set {name: "configServer"}`, points `configServer.token` at it (`{ "secret": "configServer" }`,
   replacing an `{ "env" }`), writes the certificate and the URL - or, with the URL unchanged, asks `configServer.retry`.
   Enter in a field is Connect. Disconnect resets `configServer.url` (the token and the mirror stay); Remove deletes the
-  stored token and resets `configServer.token` when it named it. A refusal shows under the buttons.
+  stored token and resets `configServer.token` when it named it. A refusal shows under the buttons. The note says how the
+  store keeps it (encrypted for the Windows user; on Linux readable by the user alone). A server with no secret store in
+  its `server` topic is older than the page - an install updated while it ran keeps its old server and serves the new
+  page (owner, 2026-11-21, on Linux: "unknown method 'secrets.set'") - so the field says to restart IED, and an
+  "unknown method" refusal says the same.
 - Under it, how a reader token is made on the config server. At phone width the label column stacks over the fields.
 
 The chain it serves, checked 2026-11-21 on the owner's machines: a model service added in SparkHub (the Spark's model

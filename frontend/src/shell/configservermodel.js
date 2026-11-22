@@ -4,6 +4,23 @@
 
 export const SECRET_NAME = "configServer";
 
+// What the page says when IED's server predates the secret store: an install updated while it ran keeps its old server
+// (the installer replaces the files, not the running program) and serves the new page.
+export const STALE_SERVER = "IED's server is older than this page: IED was updated while it ran. Restart IED (ied stop, then ied; or quit and open the app) to store a token here.";
+
+// Why no token can be stored here, or "": a server with no secret store at all (an older one), or one whose system
+// keeps none.
+export function storeTrouble(secrets) {
+	if (!secrets) return STALE_SERVER;
+	return secrets.available ? "" : secrets.problem || "This server cannot keep secrets.";
+}
+
+// Where a stored token is kept, as the token field's note says it.
+export function keptNote(secrets) {
+	if (secrets && secrets.protection === "owner-only") return "Kept in IED's data folder, readable by your user alone, never shown again.";
+	return "Kept encrypted for your Windows user in IED's data folder, never shown again.";
+}
+
 // Each state of the server topic's configServer: its words and its semantic accent (docs/07: color only with meaning).
 const LOOKS = {
 	off: { label: "Not following", accent: "", trouble: false },

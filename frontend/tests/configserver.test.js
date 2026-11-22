@@ -2,7 +2,16 @@
 // reader token comes from, the URL as configServer.url keeps it, how long ago, and what the config server shares.
 
 import { test, assertEqual, assertThrows } from "./harness.js";
-import { ago, normalizeUrl, servedSections, shortVersion, stateLook, tokenSource } from "../src/shell/configservermodel.js";
+import { STALE_SERVER, ago, keptNote, normalizeUrl, servedSections, shortVersion, stateLook, storeTrouble, tokenSource } from "../src/shell/configservermodel.js";
+
+test("config server: where a token is kept, and an older server", () => {
+	assertEqual(storeTrouble(null), STALE_SERVER, "a server with no secret store predates the page: restart it");
+	assertEqual(STALE_SERVER.includes("ied stop"), true);
+	assertEqual(storeTrouble({ available: true, protection: "owner-only", secrets: [] }), "");
+	assertEqual(storeTrouble({ available: false, problem: "no store here" }), "no store here");
+	assertEqual(keptNote({ protection: "owner-only" }).includes("readable by your user alone"), true, "Linux");
+	assertEqual(keptNote({ protection: "dpapi" }).includes("encrypted for your Windows user"), true, "Windows");
+});
 
 test("config server: states", () => {
 	assertEqual([stateLook({ state: "following" }).label, stateLook({ state: "following" }).accent], ["Following", "saved"]);
