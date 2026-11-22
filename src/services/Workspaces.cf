@@ -227,8 +227,18 @@ namespace Ied
 			if (!solution->PathOf(target, relative)) relative = Core::String(target.FileName());
 			return solution;
 		}
-		for (Workspace* ws : m_Items)
-			if (ws->PathOf(target, relative)) return ws;
+		// A folder the owner opens (Open Folder, `ied <folder>`) is a workspace of its own, as in Visual Studio, even inside an
+		// open workspace - the folder of a file opened alone (often the home folder on Linux) or a project's subfolder; only
+		// one open on that very folder is it. Never its path in a workspace that holds it: the page would open that as a
+		// file. A workspace server keeps a folder inside its own (a project made there).
+		if (folder && m_Master) {
+			relative = Core::String();
+			Workspace* rooted = RootedAt(target);
+			if (rooted) return rooted;
+		}
+		else
+			for (Workspace* ws : m_Items)
+				if (ws->PathOf(target, relative)) return ws;
 		// A folder holding one solution file opens as that solution (docs/03); its Solution Explorer still shows the
 		// folder on request.
 		FS::Path solution = folder ? SolutionIn(target) : FS::Path();

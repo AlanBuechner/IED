@@ -10,6 +10,7 @@ import json
 import os
 import secrets
 import shutil
+import socket
 import stat
 import subprocess
 import sys
@@ -202,7 +203,18 @@ class ControlPipe:
 	"""The server's control channel (docs/10): one JSON-RPC 2.0 request per line."""
 
 	def __init__(self, name):
-		self.pipe = open(pipe_path(name), "r+b", buffering=0)
+		self.socket = None
+		if os.name == "nt":
+			self.pipe = open(pipe_path(name), "r+b", buffering=0)
+		else:
+			# Linux: a stream socket at "\0c4-local/<name>" in the abstract namespace (C4Runtime/Net/LocalPipesPosix.c).
+			self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+			try:
+				self.socket.connect("\0c4-local/" + name)
+			except OSError:
+				self.socket.close()
+				raise
+			self.pipe = self.socket.makefile("rwb", buffering=0)
 		self.ids = 0
 
 	def call(self, method, params=None):
@@ -224,6 +236,8 @@ class ControlPipe:
 
 	def close(self):
 		self.pipe.close()
+		if self.socket:
+			self.socket.close()
 
 
 def read_lines(path):

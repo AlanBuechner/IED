@@ -75,12 +75,39 @@ class ControlTests(ServerTestCase):
 		self.assertTrue(opened["url"].endswith("#open=w2/main.cf:1:5"), opened["url"])
 		frames = await client.wait_for(TREE_SERVER, lambda f: f["t"] == "evt" and f["kind"] == "workspace.opened", 10)
 		self.assertEqual("w2", frames[-1]["data"]["wsId"])
-		again = self.result("open", {"path": self.folder.upper()})
-		self.assertEqual(("w2", ""), (again["wsId"], again["path"]), "the same folder, whatever its case, is the same workspace")
+		# Windows' names ignore case; Linux's do not, so there the folder is named as it is.
+		again = self.result("open", {"path": self.folder.upper() if os.name == "nt" else self.folder})
+		self.assertEqual(("w2", ""), (again["wsId"], again["path"]), "the same folder (on Windows whatever its case) is the same workspace")
 		read = await client.request("fs.read", {"wsId": "w2", "path": "main.cf"})
 		self.assertIn("int32 main", read["text"])
 		self.assertEqual([], client.violations)
 		client.abort()
+
+	def test_a_folder_inside_an_open_workspace_opens_as_one_of_its_own(self):
+		"""Open Folder (`ied <folder>`) on a folder inside an open workspace - the folder of a file opened alone, as the
+		home folder often is on Linux, or a subfolder of an open folder - opens that folder as a workspace, its `path`
+		empty: never the folder's path in the workspace that holds it, which the page would open as a file and say
+		"There is no file game". Only a workspace open on that very folder is it."""
+		inner = os.path.join(self.folder, "game")
+		deeper = os.path.join(inner, "src")
+		os.makedirs(deeper)
+		alone = self.result("open", {"path": os.path.join(self.folder, "main.cf")})
+		self.assertEqual("main.cf", alone["path"])
+		opened = self.result("open", {"path": inner})
+		self.assertNotEqual(alone["wsId"], opened["wsId"], "a workspace of its own, not the file's folder's")
+		self.assertEqual("", opened["path"])
+		self.assertTrue(opened["url"].endswith("#open=%s/" % opened["wsId"]), opened["url"])
+		nested = self.result("open", {"path": deeper})
+		self.assertNotIn(nested["wsId"], (alone["wsId"], opened["wsId"]), "inside an open folder too")
+		self.assertEqual("", nested["path"])
+		again = self.result("open", {"path": inner})
+		self.assertEqual((opened["wsId"], ""), (again["wsId"], again["path"]), "the folder open already is that workspace")
+		folder = self.result("open", {"path": self.folder})
+		self.assertEqual((alone["wsId"], ""), (folder["wsId"], folder["path"]), "and so is the file's folder")
+		roots = {ws["wsId"]: (ws["kind"], os.path.normcase(os.path.realpath(ws["root"]))) for ws in self.result("status")["workspaces"]}
+		self.assertEqual(("file", os.path.normcase(os.path.realpath(self.folder))), roots[alone["wsId"]])
+		self.assertEqual(("folder", os.path.normcase(os.path.realpath(inner))), roots[opened["wsId"]])
+		self.assertEqual(("folder", os.path.normcase(os.path.realpath(deeper))), roots[nested["wsId"]])
 
 	def test_errors(self):
 		self.assertEqual(-32601, self.pipe.call("nope")["error"]["code"])
