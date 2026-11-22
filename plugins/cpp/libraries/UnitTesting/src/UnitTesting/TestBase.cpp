@@ -29,6 +29,7 @@ namespace Testing
 	uint32 s_PassedTests = 0;
 	uint32 s_FailedTests = 0;
 	uint32 s_RunawayTests = 0; // still running past their timeout
+	uint32 s_TimeoutScale = 1;  // -timeout-scale
 
 
 	// --- TestGroup ----------------------------------------------------------
@@ -227,7 +228,7 @@ namespace Testing
 		threadData->func = entry.func;
 		threadData->ownerInstance = entry.ownerInstance;
 
-		const TestThreadOutcome outcome = RunOnTestThread(threadData, entry.timeoutMs);
+		const TestThreadOutcome outcome = RunOnTestThread(threadData, entry.timeoutMs * s_TimeoutScale);
 		if (!outcome.started)
 		{
 			delete threadData;
@@ -299,7 +300,7 @@ namespace Testing
 
 			Logging::Logger::SetConsoleColor(Logging::Logger::Error);
 			if (timedOut)
-				std::cout << "Crashed: test timed out after " << entry.timeoutMs / 1000 << "s" << std::endl;
+				std::cout << "Crashed: test timed out after " << entry.timeoutMs * s_TimeoutScale / 1000 << "s" << std::endl;
 			else if (exitCode != 0)
 			{
 				// Thread died from an SEH exception. Format the code.
@@ -409,6 +410,8 @@ namespace Testing
 			for (Test* instance : instances)
 				delete instance;
 	}
+
+	void SetTimeoutScale(uint32 scale) { s_TimeoutScale = scale; }
 
 	uint32 GetRunawayTestCount()
 	{

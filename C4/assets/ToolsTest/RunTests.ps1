@@ -995,10 +995,33 @@ int32 main()
     return $failures
 }
 
+# Lowering on several threads builds the program one thread does (R10, docs/compiler/03): Bedrock's tests and TestCode,
+# compiled to IR at -j 1 and then at -j 16 into the same file, are the same text.
+function Test-LoweringThreads {
+    $failures = @()
+    $dir = Join-Path $scratch "threads"
+    if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
+    foreach ($program in @(@{ name = "bedrock"; source = (Join-Path $repoRoot "Bedrock/Tests"); flags = @("-test") },
+        @{ name = "testcode"; source = (Join-Path $repoRoot "assets/TestCode"); flags = @() })) {
+        $out = Join-Path $dir "$($program.name)/app.exe"
+        $ll = [System.IO.Path]::ChangeExtension($out, ".ll")
+        $texts = @()
+        foreach ($threads in @("1", "16")) {
+            if (Test-Path $ll) { Remove-Item $ll -Force }
+            $build = Invoke-Compiler $compiler (@($program.source, "-o", $out, "-S", "-j", $threads) + $program.flags)
+            if ($build.exit -ne 0 -or -not (Test-Path $ll)) { $failures += "$($program.name) at -j $threads wrote no IR: $(($build.output -split "`n" | Select-Object -Last 4) -join ' | ')"; continue }
+            $texts += [System.IO.File]::ReadAllText($ll)
+        }
+        if ($texts.Count -eq 2 -and $texts[0] -ne $texts[1]) { $failures += "$($program.name): the IR at -j 1 and -j 16 differ" }
+    }
+    return $failures
+}
+
 $checks = @("Test-ShippedBedrockMirrorsSource", "Test-DefineFlag", "Test-VersionFlag", "Test-UsageErrors", "Test-HelpListsEveryOption",
     "Test-OutputFlags", "Test-GcStatsFlag", "Test-TimePhasesFlag", "Test-ScriptHostFlag", "Test-FailedRelinkKeepsTheProgramsFiles", "Test-IncludeProject", "Test-LinkFlags", "Test-InstallOutsideRepository",
     "Test-HomeVariable", "Test-NukeToolchainProject", "Test-ToolchainRefreshWhileRunning", "Test-ProjectDefines", "Test-ProjectTests", "Test-ProjectBoundaries", "Test-ProjectInterop", "Test-ProjectsShareABoundHeader", "Test-ABindingDoesNotHideABuiltin", "Test-DebugInfoFlag", "Test-SourceLines", "Test-DeepFolder",
-    "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ObjectCache", "Test-IncrementalBuild", "Test-LinkStamp", "Test-StandardInput")
+    "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ObjectCache", "Test-IncrementalBuild", "Test-LinkStamp", "Test-StandardInput",
+    "Test-LoweringThreads")
 $passed = 0
 $failed = 0
 foreach ($check in $checks) {

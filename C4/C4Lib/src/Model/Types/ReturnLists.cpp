@@ -13,8 +13,9 @@ namespace Scripting
 	QueryResult<const ObjectType*> ReturnLists::Of(const ProgramModel& model, const std::vector<const Type*>& elements)
 	{
 		using Result = QueryResult<const ObjectType*>;
-		auto cached = model.m_ReturnLists.find(elements);
-		if (cached != model.m_ReturnLists.end()) return cached->second;
+		if (const ObjectType* const* cached = model.m_ReturnLists.Find(elements)) return *cached;
+		const ModelMaking::Request request(model.Making(), "a return list");
+		if (const ObjectType* const* cached = model.m_ReturnLists.Find(elements)) return *cached; // made meanwhile
 		Core::String name = "[";
 		for (size_t i = 0; i < elements.size(); ++i)
 		{
@@ -36,9 +37,10 @@ namespace Scripting
 			type->AddField(field);
 		}
 		type->CalculateLayout();
+		type->MarkLaidOut(); // read by every lowering once shown: never laid out again
 		model.m_Types->Own(type);
-		model.m_ObjectTypes.Push(type);
-		model.m_ReturnLists.emplace(elements, type);
+		model.KeepObjectType(type);
+		model.m_ReturnLists.Add(elements, type);
 		return Result(static_cast<const ObjectType*>(type));
 	}
 } // namespace Scripting

@@ -1,7 +1,8 @@
 #pragma once
 #include "Model/Types/Type.h"
 #include "Model/ConstantValue.h"
-#include "Model/ModelWrites.h"
+#include "Model/ModelMaking.h"
+#include <atomic>
 #include "Parser/AstNode.h" // AccessModifier (member visibility)
 #include <unordered_map>
 #include <vector>
@@ -253,9 +254,12 @@ namespace Scripting
 
 		void CalculateLayout();
 
-		/// The model's writes, asked before this type changes from when the model owns it (TypeStore::Own): its
-		/// members, bases and layout are read by lowering on several threads while the model is frozen.
-		void WatchWrites(const ModelWrites* writes) { m_Writes = writes; }
+		/// The model's making, which checks every change of this type from when the model owns it (TypeStore::Own): once
+		/// shown, its members, bases and layout are read by lowerings on several threads, and never change while they do.
+		void WatchMaking(const ModelMaking* making) { m_Making = making; }
+		/// Whether lowerings on other threads may read this type: set when the request that made it ends, or when the
+		/// next sharing begins for one made outside a request (docs/compiler/02, "Changes while bodies lower").
+		std::atomic<bool>& Shown() const { return m_Shown; }
 
 		// Force this object's layout to be computed now (post-order over bases) so GetSize/GetAlignment
 		// return real values. No-op when the type is not yet fully defined or is already laid out. Used by
@@ -281,7 +285,7 @@ namespace Scripting
 		void LayOutUnionRegions();
 		void Asking(const char* what) const
 		{
-			if (m_Writes) m_Writes->Ask(what);
+			if (m_Making) m_Making->AssertUnshown(m_Shown, what);
 		}
 
 		ObjectKind m_ObjectKind = ObjectKind::Class;
@@ -317,7 +321,8 @@ namespace Scripting
 		// own fields are resolved - not only after the end-of-pass-2 FinalizeLayouts sweep.
 		mutable bool m_LaidOut = false;
 		mutable bool m_LayingOut = false;
-		const ModelWrites* m_Writes = nullptr;
+		const ModelMaking* m_Making = nullptr;
+		mutable std::atomic<bool> m_Shown{ false };
 		const AstNode* m_DeclNode = nullptr;
 		Core::Vector<Core::String> m_Groups; // [group("name")] annotations (reflection, plan 14)
 		GuidParts m_Guid;

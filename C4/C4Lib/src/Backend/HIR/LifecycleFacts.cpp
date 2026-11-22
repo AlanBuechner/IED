@@ -119,19 +119,5 @@ namespace Scripting
 			return result;
 		}
 
-		uint32 MakeCompilerWritten(ProgramModel& model, uint32 from)
-		{
-			const ModelQueries q(&model);
-			const Core::Vector<const ObjectType*>& types = model.ObjectTypes();
-			for (uint32 i = from; i < types.Count(); ++i)
-			{
-				const ObjectType* type = types[i];
-				const OwnMethods& own = Own(q, type);
-				if (!own.defaultCreate && NeedsConstruct(q, type)) model.EnsureSynthesizedLifecycle(type, LifecycleOp::Create);
-				if (!own.destroy && NeedsDestroy(q, type)) model.EnsureSynthesizedLifecycle(type, LifecycleOp::Delete);
-				if (!own.copy && !own.assign && NeedsCopy(q, type)) model.EnsureSynthesizedLifecycle(type, LifecycleOp::Copy);
-			}
-			return types.Count();
-		}
 	}
 } // namespace Scripting

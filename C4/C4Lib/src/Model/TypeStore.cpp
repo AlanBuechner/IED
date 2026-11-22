@@ -13,7 +13,7 @@ namespace Scripting
 		};
 	}
 
-	TypeStore::TypeStore(const ModelWrites* writes) : m_Writes(writes), m_Builtins(64, nullptr)
+	TypeStore::TypeStore(const ModelMaking* making) : m_Making(making)
 	{
 		// Seed every primitive singleton and its name so FindBuiltin answers "int32", "float", ...; a built-in
 		// alias names the same singleton (D-01, D-02), so `int` and `int32` are one type.
@@ -35,19 +35,29 @@ namespace Scripting
 
 	const Type* TypeStore::Builtin(TypeKind kind)
 	{
-		int32 idx = static_cast<int32>(kind);
-		if (idx < 0 || idx >= static_cast<int32>(m_Builtins.Count())) return nullptr;
-		if (!m_Builtins[idx])
-		{
-			Asking("a built-in type");
-			m_Builtins[idx] = new PrimitiveType(kind);
-		}
-		return m_Builtins[idx];
+		const int32 idx = static_cast<int32>(kind);
+		if (idx < 0 || idx >= static_cast<int32>(c_BuiltinSlots)) return nullptr;
+		if (PrimitiveType* made = m_Builtins[idx].load(std::memory_order_acquire)) return made;
+		const std::unique_lock<std::shared_mutex> writing(m_Interning);
+		if (PrimitiveType* made = m_Builtins[idx].load(std::memory_order_acquire)) return made;
+		PrimitiveType* made = new PrimitiveType(kind);
+		m_Builtins[idx].store(made, std::memory_order_release);
+		return made;
 	}
 
 	void TypeStore::Watch(Type* type) const
 	{
-		if (auto* object = dynamic_cast<ObjectType*>(type)) object->WatchWrites(m_Writes);
+		auto* object = dynamic_cast<ObjectType*>(type);
+		if (!object || !m_Making) return;
+		object->WatchMaking(m_Making);
+		m_Making->Made(object->Shown());
+	}
+
+	void TypeStore::ShowMadeSoFar()
+	{
+		const std::shared_lock<std::shared_mutex> reading(m_Interning);
+		for (; m_ShownUpTo < m_Owned.Count(); ++m_ShownUpTo)
+			if (const auto* object = dynamic_cast<const ObjectType*>(m_Owned[m_ShownUpTo].get())) object->Shown().store(true, std::memory_order_release);
 	}
 
 	bool TypeStore::IsBuiltinName(const Core::String& name)

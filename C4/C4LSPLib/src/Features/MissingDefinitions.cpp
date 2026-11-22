@@ -7,6 +7,7 @@
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/NamespaceNode.h"
 #include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
+#include <atomic>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -18,10 +19,12 @@ namespace C4LSP::Features
 	using Scripting::NodeType;
 	using Scripting::ObjectDefinitionNode;
 
-	static bool s_Enabled = true; // on by default, as Visual Studio's; the client may turn it off (`missingDefinitions`)
+	// On by default, as Visual Studio's; the client may turn it off (`missingDefinitions`), on the message thread while the
+	// worker publishes (BUG-492): atomic.
+	static std::atomic<bool> s_Enabled = true;
 
-	void MissingDefinitions::SetEnabled(bool enabled) { s_Enabled = enabled; }
-	bool MissingDefinitions::IsEnabled() { return s_Enabled; }
+	void MissingDefinitions::SetEnabled(bool enabled) { s_Enabled.store(enabled, std::memory_order_relaxed); }
+	bool MissingDefinitions::IsEnabled() { return s_Enabled.load(std::memory_order_relaxed); }
 
 	namespace
 	{

@@ -60,9 +60,10 @@ namespace Scripting
 	// the current scope, so a local may name an earlier local or any global. Locals are unit-
 	// agnostic (definingUnit 0): they belong to the lowering of one function, not a file.
 	// ---------------------------------------------------------------------------
+	// A local type is its body's: made by that body's lowering alone (its name is in the body's layer), with no request
+	// but for joining the model's lists.
 	QueryResult<const Type*> LoweringScopes::RegisterLocalType(ProgramModel& model, const AstNode& decl)
 	{
-		model.Writes().Ask("a local type");
 		Scope* layer = model.m_Symbols->Current();
 		const uint32 unit = model.m_Symbols->CurrentUnit(); // a local declaration sees what the body around it sees
 		if (!layer) return QueryResult<const Type*>::Fail(QueryError::NotFound, "no scope to register a local type in");
@@ -153,7 +154,8 @@ namespace Scripting
 			}
 			const Type* owned = model.m_Types->Own(t);
 			t->CalculateLayout(); // doc 06: a local type is queryable with layout computed on demand
-			model.m_ObjectTypes.Push(static_cast<const ObjectType*>(t));
+			t->MarkLaidOut();
+			model.KeepObjectType(t);
 			SymbolInfo sym; sym.kind = SymbolKind::Type; sym.type = owned; sym.definingUnit = 0; sym.declNode = &decl;
 			if (!layer->Register(name, sym))
 				return QueryResult<const Type*>::Fail(QueryError::Ambiguous, "local type '" + name + "' already declared in this scope");
@@ -193,7 +195,7 @@ namespace Scripting
 				t->AddMember(mi);
 			}
 			const Type* owned = model.m_Types->Own(t);
-			model.m_EnumTypes.Push(static_cast<const EnumType*>(t));
+			model.KeepEnumType(t);
 			SymbolInfo sym; sym.kind = SymbolKind::Type; sym.type = owned; sym.definingUnit = 0; sym.declNode = &decl;
 			if (!layer->Register(name, sym))
 				return QueryResult<const Type*>::Fail(QueryError::Ambiguous, "local enum '" + name + "' already declared in this scope");
@@ -222,9 +224,9 @@ namespace Scripting
 		return QueryResult<const Type*>::Success(at.value);
 	}
 
+	// A local function is its body's, as a local type is.
 	QueryResult<const FunctionRecord*> LoweringScopes::RegisterLocalFunction(ProgramModel& model, const FunctionDefinitionNode& fn)
 	{
-		model.Writes().Ask("a local function");
 		Scope* layer = model.m_Symbols->Current();
 		const uint32 unit = model.m_Symbols->CurrentUnit(); // a local declaration sees what the body around it sees
 		if (!layer) return QueryResult<const FunctionRecord*>::Fail(QueryError::NotFound, "no scope to register a local function in");

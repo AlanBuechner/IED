@@ -25,7 +25,7 @@ namespace Scripting
 		def.memberOf = owner;
 		def.bindingParent = site.binding;
 		def.unit = site.unit;
-		model.Writes().Ask("a member template");
+		model.Making().AssertMaking("a member template");
 		model.m_MemberTemplates[owner].push_back(def);
 		return QueryResult<void>::Success();
 	}
@@ -41,7 +41,7 @@ namespace Scripting
 		def.bindingParent = binding;
 		def.ownerNames = ownerNames;
 		def.unit = unit;
-		model.Writes().Ask("a member template");
+		model.Making().AssertMaking("a member template");
 		model.m_MemberTemplates[owner].push_back(def);
 	}
 

@@ -237,63 +237,49 @@ code names was (an internal error otherwise).
   (`GlobalStarts`, round by round, a script's host storage counting as started); the thunks again; then what every
   global's storage needs (`GlobalStorage`: its type's vtables, the function a function pointer starts at), and from
   the starts again while that lowers more. A step after a failed body still runs, so one run reports every error.
-- **One order.** Everything is lowered in the order it is found - a batch's needs in its bodies' order - so record
-  order, symbol names and each partition's bitcode do not depend on the threads.
+- **One order.** Everything is lowered in the order it is found - a batch's needs in its bodies' order - and what a
+  batch's lowerings made the model put in one order when the batch ends, so record order, symbol names and each
+  partition's bitcode do not depend on the threads.
 
 ## Lowering on several threads
 
 `ParallelLowering` (`Backend/Lowering`) lowers each batch of `ProgramReach`, and the thunks (`LowerEach`), on `-j`
-threads (`LoweringOptions::threads`), and the program is the same whatever the threads: one thread runs the same
-rounds. What each lowered tree needs (`BodyNeeds`) is worked out on the same threads, each reading its own tree, and
-merged in the batch's order. Its `WorkerPool` keeps the threads, and the emit's work on threads (each partition's
-emission, imports, thunks, the finish) runs on them too.
+threads (`LoweringOptions::threads`) in one pass: every body is lowered once, by one thread, to its end. What each
+lowered tree needs (`BodyNeeds`), its MIR and the invoke thunks' plan are worked out on the same threads (`Share`), each
+reading its own tree, and merged in the batch's order. Its `WorkerPool` keeps the threads, and the emit's work on
+threads (each partition's emission, imports, thunks, the finish) runs on them too.
 
-- **The frozen model.** Every place that changes what lowering reads asks the model's `ModelWrites` first
-  (`Model/ModelWrites.h`): a type the store takes (`TypeStore::Own`), a record (`SymbolTable::AddFunctionRecord`),
-  a class or namespace scope, a name in a permanent scope, an object type's member, base or layout, a template
-  instance, a compiler-written lifecycle function, a closure, a local type or function, a pack, a lazily kept
-  answer (lifecycle methods, a template method's owner). While the model is frozen the asking lowering stops with
-  `ModelFrozen`, so threads reading the model never see it change.
+- **Requests.** What a lowering needs the model to make - a template instance, a closure, a compiler-written lifecycle
+  function, a type's lifecycle methods, a return list - is a request ([02, Changes while bodies lower](02-program-model.md#changes-while-bodies-lower)):
+  found without a lock, made once under the model's lock by the first lowering that asks, and found by the others when
+  its outermost request ends. A body's lowering never stops for another's: nothing is lowered twice, and nothing waits
+  but a lowering asking for what is being made. A local type or function is the body's own, made by its lowering.
 - **What is not a change.** Interning (`T*`, `T&`, `T[N]`, signatures, funcptr and braced-list types) is the
   same whoever interns first and nothing walks the store, so the store's caches are read under a shared lock and
   filled under their own, and lowerings intern at once.
-- **Before a batch.** `Prepare` makes what lowering would make on first use and keeps lazily: the compiler-written
-  create, delete and copy each object type made since the last batch needs and declares none of
-  (`LifecycleFacts::MakeCompilerWritten`, in the model's order of types; one nothing calls is never emitted, and one a
-  type needs later is made on first use), and `ProgramModel::Settle` (layouts, lifecycle methods, template method
-  owners).
-- **Rounds.** A round lowers the pending bodies at once against the frozen model, each with its own diagnostics
-  and scope cursor (a `WorkerPool` keeps the threads between rounds). A body that stopped for a change that can be
-  made apart from its lowering (`ModelFrozen::make`) - a function or class template instance, made from its
-  template and arguments alone, or a lambda's closure, made from its spec and kept by the code that writes it and
-  the lambda's body (`ProgramModel::ClosureMadeFor`) - has it made after the round, in the batch's order, and goes
-  to the next round, which finds it made (a body with lambdas finds one more a round, so the closures of one piece
-  of code are numbered in its order). After sixteen rounds, or for a change only its lowering can make (a local
-  type or function), the bodies left are lowered alone, in the batch's order, making their changes.
-- **What a body sees.** A body never sees a change another body of its batch made unless it needed that change
-  itself (it then stops and finds it next round), and the changes are made in one order, so record order and
-  symbol names (`_1` for a second record with a symbol) do not depend on the threads.
+- **A pass shares the model** (`ProgramModel::SharedLowering`): it begins by settling what the model keeps lazily (the
+  layouts and lifecycle methods of the types made since, the owners of out-of-line template methods) and showing what
+  was made since; while it lasts, what other lowerings read does not change; when it ends, what its requests made is
+  put in one order - records (with the `_<n>` of a symbol two of them have), object and enum types, scopes - so record
+  order and symbol names do not depend on the threads, and one thread lowers the same program. A change outside a
+  request while a pass shares the model is a violation of the compiler's own, reported as an internal error
+  (`ProgramLowering::ReportViolations`).
+- **Its gates.** `Semantic.ParallelLowering` lowers programs on one thread and on eight and compares the modules
+  (`LoweringOnEightThreadsBuildsTheSameModule`, `ManyLoweringsAskForTheSameInstancesAtOnce`,
+  `RecordsMadeOnThreadsAreNamedInOneOrder`), and checks each piece: a request is shown when its outermost request ends,
+  an instance is made once for every lowering that asks, a change outside a request is a violation. ToolsTest compiles
+  Bedrock's tests and TestCode at `-j 1` and `-j 16` and compares their IR. `assets/tsan_unit.py` runs C4Testing built
+  with ThreadSanitizer on Linux ([tools/05](../tools/05-test-suites.md)): a race is what no other suite finds.
 - `-ftime` prints the steps of `lower` - lowering's (bodies, vtables, thunks, global starts, globals), then
-  emission's (emit, starts, reflection, imports, nounwind, finish) - then the rounds, the changes made between
-  them, the bodies lowered alone, what stopped bodies by kind, and the time spent preparing. IED server: 13346 bodies
-  (thunks included) in 92 rounds (0.06 s), 2432 instances and closures made between rounds, 10 lowered alone; the
-  `lower` phase 0.51 s with every body lowered in order, 0.35 s with bodies on threads, 0.33 s with closures and
-  thunks in the rounds and the emit on the kept threads. With lowering decided before emission (R2, 16 threads,
-  23966 bodies): `lower` 0.42 s cold and 0.46 s after an edit at `-O0` (0.43 s and 0.51 s before), 0.55-0.60 s at
-  `-O3` (0.57-0.60 s before).
-
-**Planned (R10, designed, not started):** the model's changes during lowering become requests answered once -
-an instance from (template, arguments), a closure from the code that writes it, a lifecycle function on first use, a
-local type or function owned by its body - so bodies lower in one pass with no rounds, no `ModelFrozen` and no bodies
-lowered alone. What it needs: the tables lowering reads while another body's request writes them (`Scope`'s names and
-children, `SymbolTable::Records`, the `TypeStore`'s lists, an object type's members) as grow-only containers read
-without a lock; one request made at a time (double-checked: found without the lock, else made under it), every
-`ModelWrites::Ask` site either such a request or an assertion that it runs inside one; a type or record seen by other
-bodies only when its outermost request ends; names made from a request's inputs alone and each batch's new records and
-types sorted at its end, so the program does not depend on the threads. Measured on Claymore's editor (42001 bodies, 16
-threads): 8671 of 50672 lowerings are repeats or run alone today, about 0.1 s of a 1.3 s `lower` phase - the gain is
-the architecture (requests with explicit inputs, which an incremental front end can keep), not the time. Its gate is a
-thread-sanitizer run of C4Testing on the Linux builder besides `ParallelLowering.LoweringOnEightThreadsBuildsTheSameModule`.
+  emission's (emit, starts, reflection, imports, nounwind, finish) - then the bodies lowered and the passes, the time
+  on the threads lowering and doing the other work, the time settling and ordering, and the requests made by kind (a
+  lowering that found the lock taken by one making the same answer counts one too, so they vary a little run to run).
+- **Measured** (R10, 16 threads, the median of three warm runs, the rounds' compiler and this one in one session): the
+  IED server's 23973 bodies took 105 rounds and 29078 lowerings (5105 thrown away and done again, 41 bodies lowered
+  alone) and now 46 passes, each body lowered once; its bodies step 0.139 -> 0.117 s, its `lower` phase 0.61 -> 0.63 s
+  (within the noise). Claymore's editor, 42001 bodies: 107 rounds and 51011 lowerings (9010 again, 473 alone) -> 48
+  passes; bodies 0.277 -> 0.201 s, `lower` 1.42 -> 1.31 s, the whole rebuild 3.3 -> 3.16 s. The time was never the
+  point: requests with explicit inputs are what an incremental front end keeps.
 
 ## Diagnostics
 

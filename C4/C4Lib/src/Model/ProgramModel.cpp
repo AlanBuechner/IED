@@ -25,24 +25,97 @@
 #include "Parser/Nodes/Declarations/FunPtrTypeNode.h"
 #include "Parser/Nodes/Expressions/LiteralNode.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h" // complete type: bodies are stored as pointers
+#include <algorithm>
+#include <tuple>
 
 namespace Scripting
 {
+	namespace
+	{
+		// Where a declaration is, as one total order: its file, its byte, its place in a macro use.
+		bool LocatedBefore(const SourceLocation& a, const SourceLocation& b)
+		{
+			return std::tie(a.sourceId, a.byteOffset, a.expansion, a.inExpansion) < std::tie(b.sourceId, b.byteOffset, b.expansion, b.inExpansion);
+		}
+
+		// The types of `list` from `from` on, in the order `before` sets.
+		template <typename T, typename Before>
+		void OrderFrom(Core::Vector<const T*>& list, uint32 from, Before&& before)
+		{
+			if (list.Count() <= from + 1) return;
+			std::vector<const T*> made(list.begin() + from, list.end());
+			std::stable_sort(made.begin(), made.end(), before);
+			for (size_t i = 0; i < made.size(); ++i) list[from + static_cast<uint32>(i)] = made[i];
+		}
+	}
+
 	ProgramModel::ProgramModel()
-		: m_Writes(std::make_unique<ModelWrites>()), m_Types(std::make_unique<TypeStore>(m_Writes.get())),
-		  m_Symbols(std::make_unique<SymbolTable>(m_Writes.get()))
+		: m_Making(std::make_unique<ModelMaking>()), m_Types(std::make_unique<TypeStore>(m_Making.get())),
+		  m_Symbols(std::make_unique<SymbolTable>(m_Making.get()))
 	{
 	}
 
 	void ProgramModel::Settle() const
 	{
-		for (const ObjectType* type : m_ObjectTypes)
+		for (; m_SettledTypes < m_ObjectTypes.Count(); ++m_SettledTypes)
 		{
-			type->GetSize();
-			LifecycleMethodsOf(type);
+			m_ObjectTypes[m_SettledTypes]->GetSize();
+			LifecycleMethodsOf(m_ObjectTypes[m_SettledTypes]);
 		}
 		for (const UnionType* type : m_UnionTypes) type->GetSize();
 		for (const TemplateMethodDef& def : m_TemplateMethodDefs) TemplateMethodDefinitions::OwnerScope(*this, def);
+		m_Types->ShowMadeSoFar();
+		m_Symbols->ShowMadeSoFar();
+	}
+
+	ProgramModel::SharedLowering::SharedLowering(const ProgramModel& model)
+		: m_Model(model), m_Records(0), m_ObjectTypes(0), m_EnumTypes(0)
+	{
+		m_Model.Settle();
+		m_Records = m_Model.m_Symbols->Records().Count();
+		m_ObjectTypes = m_Model.m_ObjectTypes.Count();
+		m_EnumTypes = m_Model.m_EnumTypes.Count();
+		m_Sharing.emplace(*m_Model.m_Making);
+	}
+
+	ProgramModel::SharedLowering::~SharedLowering()
+	{
+		m_Sharing.reset(); // one thread again: the order is set below
+		m_Model.OrderMade(m_Records, m_ObjectTypes, m_EnumTypes);
+	}
+
+	// What requests made while lowerings shared the model came in the order the threads asked: sorted by their names
+	// (a symbol, a type's), which depend on what they were made from alone, and on where they are declared.
+	void ProgramModel::OrderMade(uint32 records, uint32 objectTypes, uint32 enumTypes) const
+	{
+		m_Symbols->OrderRecordsFrom(records);
+		OrderFrom(m_ObjectTypes, objectTypes, [this](const ObjectType* a, const ObjectType* b) {
+			const Core::String nameA = TypeSymbol(a);
+			const Core::String nameB = TypeSymbol(b);
+			if (nameA != nameB) return nameA < nameB;
+			return LocatedBefore(a->GetDeclLocation(), b->GetDeclLocation());
+		});
+		OrderFrom(m_EnumTypes, enumTypes, [](const EnumType* a, const EnumType* b) {
+			const Core::String nameA = QualifiedName(a);
+			const Core::String nameB = QualifiedName(b);
+			if (nameA != nameB) return nameA < nameB;
+			const AstNode* declA = a->GetDeclNode();
+			const AstNode* declB = b->GetDeclNode();
+			return declA && declB && LocatedBefore(declA->startLocation, declB->startLocation);
+		});
+		m_Symbols->AttachMadeScopes();
+	}
+
+	void ProgramModel::KeepObjectType(const ObjectType* type) const
+	{
+		const ModelMaking::Request request(*m_Making, nullptr);
+		m_ObjectTypes.Push(type);
+	}
+
+	void ProgramModel::KeepEnumType(const EnumType* type) const
+	{
+		const ModelMaking::Request request(*m_Making, nullptr);
+		m_EnumTypes.Push(type);
 	}
 	ProgramModel::~ProgramModel() = default;
 
@@ -54,14 +127,15 @@ namespace Scripting
 
 	const FunctionRecord* ProgramModel::SynthesizedLifecycle(const ObjectType* type, LifecycleOp op) const
 	{
-		auto it = m_SynthesizedLifecycle.find({ type, op });
-		return it == m_SynthesizedLifecycle.end() ? nullptr : it->second;
+		const FunctionRecord* const* made = m_SynthesizedLifecycle.Find({ type, op });
+		return made ? *made : nullptr;
 	}
 
 	const FunctionRecord* ProgramModel::EnsureSynthesizedLifecycle(const ObjectType* type, LifecycleOp op) const
 	{
 		if (const FunctionRecord* existing = SynthesizedLifecycle(type, op)) return existing;
-		m_Writes->Ask("a compiler-written lifecycle function");
+		const ModelMaking::Request request(*m_Making, "a compiler-written lifecycle function");
+		if (const FunctionRecord* made = SynthesizedLifecycle(type, op)) return made; // by another lowering meanwhile
 		static const char* const kNames[] = { "", "create", "delete", "copy" };
 		Core::Vector<const Type*> params;
 		FunctionRecord rec;
@@ -71,8 +145,7 @@ namespace Scripting
 			rec.paramNames.Push("other");
 		}
 		rec.type = m_Types->Function(m_Types->Builtin(TypeKind::Void), params);
-		auto scopeIt = m_TypeScopes.find(type);
-		rec.scope = scopeIt != m_TypeScopes.end() ? scopeIt->second : nullptr;
+		rec.scope = TypeScope(type);
 		rec.containingType = type;
 		rec.synthesized = op;
 		rec.minArity = params.Count();
@@ -81,8 +154,15 @@ namespace Scripting
 		// program that writes this function names it alike.
 		rec.mangledName = "__c4_" + Core::String(kNames[static_cast<int>(op)]) + "_" + TypeSymbol(type);
 		const FunctionRecord* stored = m_Symbols->AddFunctionRecord(rec);
-		m_SynthesizedLifecycle[{ type, op }] = stored;
+		m_SynthesizedLifecycle.Add({ type, op }, stored);
 		return stored;
+	}
+
+	Core::Vector<const FunctionRecord*> ProgramModel::PrimitiveExtensions(const Type* type) const
+	{
+		Core::Vector<const FunctionRecord*> extensions;
+		m_PrimitiveExtensions.ForEach(type, [&](const FunctionRecord* record) { extensions.Push(record); });
+		return extensions;
 	}
 
 	Core::String ProgramModel::TypeSymbol(const ObjectType* type) const
@@ -136,17 +216,23 @@ namespace Scripting
 		return nullptr;
 	}
 
+	// A type other lowerings read has its methods and records for good, so its answer is made once; a type being made
+	// may gain methods, and is answered again when it has.
 	const LifecycleMethods& ProgramModel::LifecycleMethodsOf(const ObjectType* type) const
 	{
 		const auto records = m_MethodRecords.find(type);
 		const uint32 recordCount = records == m_MethodRecords.end() ? 0 : records->second.Count();
-		const auto kept = m_LifecycleMethods.find(type);
-		if (kept != m_LifecycleMethods.end() && kept->second.methods == type->GetMethodCount() && kept->second.records == recordCount)
-			return kept->second.found;
-		m_Writes->Ask("lifecycle methods");
-		KnownLifecycle& known = m_LifecycleMethods[type];
-		known = { type->GetMethodCount(), recordCount, FindLifecycleMethods(*this, type) };
-		return known.found;
+		const auto current = [&](const KnownLifecycle* known) {
+			return known && known->methods == type->GetMethodCount() && known->records == recordCount;
+		};
+		if (const auto kept = m_LifecycleMethods.find(type); kept != m_LifecycleMethods.end())
+			if (const KnownLifecycle* known = kept->second->known.load(std::memory_order_acquire); current(known)) return known->found;
+		const ModelMaking::Request request(*m_Making, "lifecycle methods");
+		LifecycleSlot& slot = *m_LifecycleMethods.emplace(type, std::make_unique<LifecycleSlot>()).first->second;
+		if (const KnownLifecycle* known = slot.known.load(std::memory_order_acquire); current(known)) return known->found;
+		const KnownLifecycle& made = m_LifecycleAnswers.emplace_back(KnownLifecycle{ type->GetMethodCount(), recordCount, FindLifecycleMethods(*this, type) });
+		slot.known.store(&made, std::memory_order_release);
+		return made.found;
 	}
 
 	const ObjectType::MethodInfo* ProgramModel::MethodForRecord(const FunctionRecord& record) const
@@ -294,8 +380,8 @@ namespace Scripting
 
 	const Closure* ProgramModel::ClosureMadeFor(const Core::String& owner, const AstNode* body) const
 	{
-		const auto made = m_ClosuresMade.find({ owner, body });
-		return made == m_ClosuresMade.end() ? nullptr : made->second;
+		const Closure* const* made = m_ClosuresMade.Find({ owner, body });
+		return made ? *made : nullptr;
 	}
 
 	const Closure* ProgramModel::ClosureOf(const Type* t) const
@@ -369,9 +455,11 @@ namespace Scripting
 		return SymbolQueries().QuerySymbol(*this, name, unitId, context);
 	}
 
+	// A pack a lowering binds is that lowering's (its ScopeCursor keeps it); one bound outside a lowering, the model's.
 	const std::vector<SymbolInfo>* ProgramModel::StorePack(std::vector<SymbolInfo> elements) const
 	{
-		m_Writes->Ask("a pack");
+		if (ScopeCursor* cursor = m_Symbols->Cursor()) return cursor->KeepPack(std::move(elements));
+		const ModelMaking::Request request(*m_Making, "a pack");
 		m_PackStorage.push_back(std::move(elements));
 		return &m_PackStorage.back();
 	}

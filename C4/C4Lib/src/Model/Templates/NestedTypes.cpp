@@ -19,8 +19,7 @@ namespace Scripting
 		def.unit = owner.unitId;
 		if (nested.IsTemplated())
 		{
-			model.Writes().Ask("a nested template");
-			model.m_TypeTemplates[name].push_back(def);
+			model.m_TypeTemplates.Add(name, def);
 			return QueryResult<void>::Success();
 		}
 		auto type = TemplateInstantiator().InstantiateMemberType(model, def, name, { *owner.bindings, EnclosingNames(owner), owner.unitId });
@@ -57,8 +56,7 @@ namespace Scripting
 			en->AddMember({ member->GetNameToken().GetText(), value, member.Get() });
 			next = value + 1;
 		}
-		model.Writes().Ask("a nested enum");
-		model.m_EnumTypes.Push(en);
+		model.KeepEnumType(en);
 		Register(owner, name, TypeSymbol(en));
 		if (nested.IsScoped()) return QueryResult<void>::Success();
 		for (const auto& member : en->GetMembers())

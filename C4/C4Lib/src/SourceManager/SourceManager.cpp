@@ -67,10 +67,12 @@ namespace Scripting
 		return id;
 	}
 
+	// A virtual source's path is kept as every lookup spells it, lexically normal (BUG-493): on Linux `//c4test/a.ch` is
+	// `/c4test/a.ch`, and an include beside it is looked up so.
 	uint32 SourceManager::RegisterVirtual(const std::string& absPath, const std::string& displayName, const std::string& text, uint32 project,
 		bool library)
 	{
-		const std::string path = NormalizePath(absPath);
+		const std::string path = NormalizePath(Utf8(PathOf(absPath).lexically_normal()));
 		if (m_AbsPaths.count(path)) return 0;
 		const uint32 id = m_NextId++;
 		SourceInfo info{ id, displayName, NormalizePath(Utf8(PathOf(path).parent_path())), path, Source::FromMemory(text) };
@@ -85,7 +87,7 @@ namespace Scripting
 
 	void SourceManager::AddFolder(const std::string& folder, uint32 project)
 	{
-		const std::string normalized = NormalizePath(folder);
+		const std::string normalized = NormalizePath(Utf8(PathOf(folder).lexically_normal()));
 		if (std::find(m_Folders.begin(), m_Folders.end(), std::make_pair(normalized, project)) == m_Folders.end())
 			m_Folders.push_back({ normalized, project });
 	}

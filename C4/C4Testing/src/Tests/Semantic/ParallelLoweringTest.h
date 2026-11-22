@@ -9,9 +9,9 @@
 namespace Testing
 {
 	// LOWERING ON SEVERAL THREADS (ParallelLowering): each piece run on several threads at once - the scope cursors,
-	// the type store's interning, the worker pool - the frozen model's refusals and the changes it lets be made between
-	// rounds, and whole programs lowered on one thread and on eight, which must build the same module and report the
-	// same diagnostics in the same order.
+	// the type store's interning, the worker pool - the model's changes as requests (made once, shown when the outermost
+	// request ends, a change outside one counted as a violation), and whole programs lowered on one thread and on eight,
+	// which must build the same module, name the same records alike and report the same diagnostics in the same order.
 	CLASS(GROUP = Testing) ParallelLoweringTest : public Test
 	{
 	public:
@@ -33,16 +33,28 @@ namespace Testing
 		void ARunInsideARunRunsOnItsThread();
 
 		TEST_FUNC(Semantic.ParallelLowering)
-		void AFrozenModelRefusesEveryChange();
+		void ARequestIsShownWhenItsOutermostRequestEnds();
 
 		TEST_FUNC(Semantic.ParallelLowering)
-		void AStoppedLoweringNamesAnInstanceToMake();
+		void AListAddedToInARequestIsShownInItsOrder();
 
 		TEST_FUNC(Semantic.ParallelLowering)
-		void ClosuresAreMadeOneARoundInTheirOrder();
+		void AChangeOutsideARequestIsAViolationWhileLoweringsShare();
+
+		TEST_FUNC(Semantic.ParallelLowering)
+		void EveryLoweringThatAsksFindsTheOneInstance();
+
+		TEST_FUNC(Semantic.ParallelLowering)
+		void ALoweringMakesItsClosuresInItsOrder();
+
+		TEST_FUNC(Semantic.ParallelLowering)
+		void RecordsMadeOnThreadsAreNamedInOneOrder();
 
 		TEST_FUNC(Semantic.ParallelLowering)
 		void LoweringOnEightThreadsBuildsTheSameModule();
+
+		TEST_FUNC(Semantic.ParallelLowering)
+		void ManyLoweringsAskForTheSameInstancesAtOnce();
 
 		TEST_FUNC(Semantic.ParallelLowering)
 		void DiagnosticsKeepTheOrderOfTheFunctions();

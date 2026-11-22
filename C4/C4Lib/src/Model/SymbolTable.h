@@ -2,7 +2,8 @@
 #include <vector>
 #include "Model/Types.h"
 #include "Model/ConstantValue.h"
-#include "Model/ModelWrites.h"
+#include "Model/ModelMaking.h"
+#include <atomic>
 #include "Compiler/AskedNames.h"
 #include "Compiler/ErrorTracker.h"
 #include "Core/Core.h"
@@ -227,9 +228,11 @@ namespace Scripting
 		Kind m_Kind;
 		Core::String m_Name;
 		Scope* m_Parent = nullptr;
-		// Asked before a name joins this layer: a permanent layer (the root, a namespace, a class, a template's
-		// binding) has the model's; a lowering's own layer, which no other lowering sees, has none.
-		const ModelWrites* m_Writes = nullptr;
+		// Checks a name joining this layer: a permanent layer (the root, a namespace, a class, a template's binding) has
+		// the model's, and once shown it is read by lowerings on several threads and takes no name while they do; a
+		// lowering's own layer, which no other lowering sees, has none.
+		const ModelMaking* m_Making = nullptr;
+		std::atomic<bool> m_Shown{ false };
 		static constexpr size_t kComparedNames = 4; // Entries compares names in a layer of at most this many
 		using Symbols = std::unordered_map<Core::String, Core::Vector<std::unique_ptr<SymbolInfo>>>;
 		// Made by the first Register: most of lowering's block layers declare nothing, and an empty map allocates.
@@ -351,8 +354,9 @@ namespace Scripting
 	class SymbolTable
 	{
 	public:
-		/// `writes` is asked before a permanent layer, a name in one, or a record is added (a frozen model adds none).
-		explicit SymbolTable(const ModelWrites* writes = nullptr);
+		/// `making` serializes the records and permanent layers lowerings on several threads add, and checks the names
+		/// that join a permanent layer (docs/compiler/02, "Changes while bodies lower").
+		explicit SymbolTable(const ModelMaking* making = nullptr);
 
 		/// The program root scope; every namespace and file-scope declaration hangs under it.
 		Scope* GetRoot() const { return m_Root.get(); }
@@ -382,12 +386,24 @@ namespace Scripting
 		Scope* Current() const;
 		/// The unit of the calling thread's lowering (its ScopeCursor's); 0, which sees every file, when it has none.
 		uint32 CurrentUnit() const;
+		/// The calling thread's lowering's ScopeCursor; null outside a lowering.
+		ScopeCursor* Cursor() const { return ActiveCursor(); }
+
+		/// Shows every permanent layer made since it last ran: from now on lowerings read them, and they take no name.
+		void ShowMadeSoFar();
+		/// The permanent layers made while lowerings shared the model, under their parents in one order (by kind, then
+		/// name); a block among them joins no parent (no walk of the tree looks into blocks), kept like a lowering's.
+		void AttachMadeScopes();
 
 		// --- Records ----------------------------------------------------------------------
 		/// Own a FunctionRecord for a symbol. Stable for the model's lifetime. A C4 function's symbol that
 		/// another function already has gets `_<n>`, so every function has its own (BUG-153); a builtin or
-		/// [link] symbol names a foreign function and is kept.
+		/// [link] symbol names a foreign function and is kept. While lowerings share the model, a record made by a request
+		/// (not a body's own local function or lambda) gets its `_<n>` from OrderRecordsFrom, in one order.
 		const FunctionRecord* AddFunctionRecord(FunctionRecord record);
+		/// The records added from the `from`th on, in one order: by symbol, then by where they are declared; each record
+		/// added while lowerings shared the model is given its `_<n>` in that order.
+		void OrderRecordsFrom(uint32 from);
 		/// The symbols two functions or more had, before the later ones' `_<n>`, each with the units that declared them in
 		/// the order their records came in: which one is which follows from that order.
 		const std::unordered_map<Core::String, std::vector<uint32>>& CollidedSymbols() const { return m_CollidedSymbols; }
@@ -417,9 +433,19 @@ namespace Scripting
 		friend class ScopeCursor; // hands its layers over when it ends
 		ScopeCursor* ActiveCursor() const;
 		void Adopt(ScopeCursor& cursor);
+		static bool HasOwnSymbol(const FunctionRecord& record);
+		/// Gives the record its symbol: `_<n>` when another function has it already.
+		void Claim(FunctionRecord& record);
+		/// A permanent layer made under `base`: under it at once, or when lowerings share the model, kept to be attached
+		/// in one order when they stop (AttachMadeScopes).
+		void AddPermanent(std::unique_ptr<Scope> scope, Scope* base);
 
-		const ModelWrites* m_Writes = nullptr;
+		const ModelMaking* m_Making = nullptr;
 		std::unique_ptr<Scope> m_Root;
+		std::vector<Scope*> m_Permanent;                     // every permanent layer, in the order made (ShowMadeSoFar)
+		size_t m_ShownScopes = 0;
+		std::vector<std::unique_ptr<Scope>> m_MadeScopes;    // made while lowerings shared the model, not attached yet
+		std::vector<FunctionRecord*> m_Unclaimed;            // added while lowerings shared the model, given no `_<n>` yet
 		Core::Vector<std::unique_ptr<Scope>> m_Retired; // popped lowering layers, kept so pointers into them stay valid
 		Core::Vector<std::unique_ptr<std::deque<std::vector<SymbolInfo>>>> m_RetiredPacks; // the packs their lowerings bound
 		std::mutex m_Adopting; // lowerings on several threads end at once

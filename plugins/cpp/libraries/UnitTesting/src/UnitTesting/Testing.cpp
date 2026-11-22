@@ -1,6 +1,7 @@
 #include "Testing.h"
 #include "TestFilter.h"
 #include "BenchmarkFilter.h"
+#include <charconv>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
@@ -52,6 +53,16 @@ namespace Testing
 		if (benchmarkFilter != nullptr && benchmarkFilter->value != benchmarkFilter->name)
 		{
 			s_BenchmarkFilter = benchmarkFilter->value;
+		}
+
+		const Core::Arg* timeoutScale = argList.GetArg("-timeout-scale");
+		if (timeoutScale != nullptr && timeoutScale->value != timeoutScale->name)
+		{
+			uint32 scale = 0;
+			const Core::String& text = timeoutScale->value;
+			const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), scale);
+			if (error == std::errc() && end == text.data() + text.size() && scale > 0) SetTimeoutScale(scale);
+			else std::cout << "-timeout-scale needs a whole number from 1: '" << text << "' ignored" << std::endl;
 		}
 
 		return listOnly;

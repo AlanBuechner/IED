@@ -17,7 +17,7 @@ ends in `_const`, so `Get()` and `Get() const` are two functions), `synthesized`
 operator annotations, groups. |
 | Object types | `Model/Types/ObjectType` | Fields (with offsets), methods (`MethodInfo`), bases, extension methods, packed view regions, vtable slot order, layout, `[uuid]`, groups. |
 | Template definitions | `ProgramModel` | Type templates by name (several per name, one per declaring scope), function templates by simple name (overloads, namespaces and extension templates side by side), out-of-line template method bodies keyed by (owner, method, arity) and matched by parameter types. |
-| Instantiation caches | `ProgramModel` (mutable) | Value-keyed caches of instantiated types and function records, plus the bindings each was produced with. |
+| Instantiation caches | `ProgramModel` (mutable) | Value-keyed caches of instantiated types and function records, plus the bindings each was produced with; filled by requests while bodies lower on threads and read without a lock ([Changes while bodies lower](#changes-while-bodies-lower)). |
 | Test registry | `ProgramModel` | `[test]`, `[test_setup]`, `[test_teardown]` metadata collected by the builder; read by the codegen harness. |
 
 Ownership invariant: the store owns every type and the symbol table owns every record for the lifetime of
@@ -363,21 +363,62 @@ While HIR lowers a body it changes scopes ONLY through the model's RAII API (`Mo
 - `CreateClosure(spec)` / `ClosureOf(type)` (`Model/Closures`): a lambda's closure type - a struct whose
   fields are the captures (`ClosureCapture`: by value, by reference as a pointer, `this` as a pointer,
   `*this` as a copy) with an `[operator("call")]` method record (static when nothing is captured), built
-  while the enclosing function lowers. `ClosureMadeFor(owner, body)` finds the closure made for a lambda in a piece
-  of code, so lowering it again (a round of ParallelLowering) uses it. Closures are not reflected.
+  while the enclosing function lowers: a request, made once for a lambda in a piece of code. `ClosureMadeFor(owner,
+  body)` finds it, so lowering that code again (the language server, a `[compile_time]` call) uses it. Closures are not
+  reflected.
 
-## Changes and the frozen model
+## Changes while bodies lower
 
-The model changes after it is built only while bodies are lowered (instances, compiler-written lifecycle
-functions, closures, local types, lazily kept answers), and lowering runs on several threads
-([03-hir](03-hir.md#lowering-on-several-threads)). So every change asks the model's `ModelWrites` first
-(`ProgramModel::Writes()`): `TypeStore::Own`, `SymbolTable::AddFunctionRecord`, `CreateScope` of a class or
-namespace scope, `Scope::Register` on a permanent scope, `ObjectType::AddField` / `AddMethod` / `AddBaseType` /
-`CalculateLayout`, `EnsureSynthesizedLifecycle`, `LifecycleMethodsOf`'s memo, `StorePack`, `CreateClosure`, the
-template instantiators' misses. A frozen model answers with `ModelFrozen` instead; a template instance's miss
-carries how to make it (`ModelFrozen::make`). `ProgramModel::Settle()` makes every lazily kept answer lowering
-reads, so a frozen model is never asked for one. Interning is not a change: the type store's caches are read
-under a shared lock and filled under their own.
+The model changes after it is built only while bodies are lowered, and bodies lower on several threads at once
+([03-hir](03-hir.md#lowering-on-several-threads)). Every such change is a **request**: answered from its inputs alone,
+made once by the first lowering that asks for it, and found by every other (`Model/ModelMaking`):
+
+| Request | Made from | Kept in |
+|---|---|---|
+| a class template instance (its member types, nested templates and enums, statics, extensions) | the template and its arguments (R4: it resolves in its template's file, whoever asks) | `m_TypeInstantiations` |
+| a function template instance, a member or extension template's | the template, its arguments and the extended type | `m_FunctionInstantiations` |
+| a lambda's closure (`ClosureTypes::Create`) | the code that writes it (`ClosureSpec::owner`, a function's symbol) and the lambda's body; numbered in that code's order, which one lowering writes | `m_ClosuresMade` |
+| a compiler-written create, delete or copy (`EnsureSynthesizedLifecycle`) | the type and the operation, on first use | `m_SynthesizedLifecycle` |
+| a type's lifecycle methods (`LifecycleMethodsOf`) | the type's methods and records | `m_LifecycleMethods` |
+| a return list's struct (`ReturnLists::Of`) | its element types | `m_ReturnLists` |
+| a pack a template's arguments bind outside a lowering (`StorePack`) | - | `m_PackStorage` |
+
+A local type or function is not a request: its body's lowering makes it alone, its name is in that body's layer, and a
+pack a lowering binds is kept by its `ScopeCursor`. Interning (`T*`, `T&`, `T[N]`, signatures) is no change either: the
+store's caches are read under a shared lock and filled under their own.
+
+- **One maker at a time, readers never wait.** A request looks for its answer without a lock; on a miss it takes the
+  model's one lock (`ModelMaking::Request`, recursive: requests nest on the thread that makes), looks again - another
+  lowering may have made it meanwhile - and makes it. Every table a request fills is read without a lock while another
+  thread adds to it: `Model/Concurrent/GrowOnlyMap` (entries never move, a grown table keeps the old one for the
+  readers still in it) and `GrowOnlyList`.
+- **Nothing half-made is seen.** An instance is in its table before its body is built, since the body may name it
+  (`Node<T>` holding `Node<T>*`). So a table keyed by what its answer is made from is a `MadeMap` (`MadeLists` for a
+  list): the thread making an answer finds it at once, the others only when its outermost request has ended, whole -
+  an instance whose fields name another instance being built shows both together. A failed instance is forgotten
+  before it is shown. A table keyed by the type or record a request made needs no such care: only that new type finds
+  it. The types and scopes a request makes are *shown* when it ends (`ObjectType::Shown`, a scope's); one made outside
+  a request (a local type) when the next sharing begins.
+- **What other lowerings read never changes.** While lowerings share the model (`ProgramModel::SharedLowering`), a
+  shown type takes no member, base or layout, a shown scope takes no name, and a table changes only inside a request.
+  `SharedLowering` begins by making what the model keeps lazily (`Settle`: the layouts and lifecycle methods of the
+  types made since, the owners of out-of-line template methods) and showing what was made since it last began. A change
+  outside these rules is a race: `ModelMaking` keeps it as a violation, and lowering reports it as an internal error,
+  at `-j 1` too, so a test finds a missed site whether or not the race did harm that time.
+- **One order, whatever the threads.** A request's answer is named by its inputs alone (an instance by its arguments,
+  a closure by its code and its place there, a lifecycle function by its type). When a sharing ends, what its requests
+  made is put in one order (`OrderMade`): the records added (by symbol, then where they are declared), the object and
+  enum types (by `TypeSymbol`, then where declared) and the class and namespace scopes, attached under their parents
+  (by name). A record a request makes gets the `_<n>` of a symbol another record has in that order too
+  (`SymbolTable::OrderRecordsFrom`) - a template declared ahead of its definition has two instances of one symbol,
+  and which is `_1` must not follow which thread asked first. A body's own local function or lambda is named at once:
+  its symbol starts with its body's, which no other body has. So record order, symbol names and each partition's
+  bitcode are the same at `-j 1` and `-j 16`.
+
+This is what the incremental front end (roadmap 5.3) keys on: every request's inputs are explicit - a template and its
+resolved arguments (`DefinitionKey`), a closure's code and lambda, a type and an operation - and the answer depends on
+nothing else, so a cached answer is valid while its inputs' declarations are unchanged; a declaration's resolution is
+[Declaration queries](#declaration-queries)' (a declaration's node, unit and scope).
 
 ## Constant evaluation
 

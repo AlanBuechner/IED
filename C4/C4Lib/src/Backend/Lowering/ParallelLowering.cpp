@@ -1,26 +1,32 @@
 #include "Backend/Lowering/ParallelLowering.h"
-#include "Backend/HIR/LifecycleFacts.h"
 #include "Backend/HIR/LoweringDriver.h"
 #include "Model/ProgramModel.h"
 #include <algorithm>
 #include <chrono>
-#include <numeric>
+#include <optional>
 
 namespace Scripting
 {
 	namespace
 	{
-		// Rounds of lowering at once a batch gets before the rest is lowered alone: a body with lambdas finds one more
-		// closure made each round.
-		constexpr unsigned kRounds = 16;
-
-		double SecondsSince(std::chrono::steady_clock::time_point start)
+		double SecondsBetween(std::chrono::steady_clock::time_point from, std::chrono::steady_clock::time_point to)
 		{
-			return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+			return std::chrono::duration<double>(to - from).count();
+		}
+
+		// The requests made since `before`, by kind, added to `into`.
+		void AddRequests(const std::map<std::string, uint64>& before, const std::map<std::string, uint64>& after, std::map<std::string, uint64_t>& into)
+		{
+			for (const auto& [what, count] : after)
+			{
+				const auto earlier = before.find(what);
+				const uint64 made = count - (earlier == before.end() ? 0 : earlier->second);
+				if (made) into[what] += made;
+			}
 		}
 	}
 
-	ParallelLowering::ParallelLowering(unsigned threads) : m_Threads(std::max(threads, 1u)), m_Pool(std::make_unique<WorkerPool>(m_Threads))
+	ParallelLowering::ParallelLowering(unsigned threads) : m_Pool(std::make_unique<WorkerPool>(std::max(threads, 1u)))
 	{
 	}
 
@@ -36,85 +42,35 @@ namespace Scripting
 	{
 		std::vector<LoweredBody> bodies(count);
 		m_Stats.bodies += count;
-		Prepare(model);
-		const auto start = std::chrono::steady_clock::now();
-		LowerInRounds(model, lower, bodies); // on one thread too, so the program is the same whatever the threads
-		const auto alone = std::chrono::steady_clock::now();
-		for (size_t i = 0; i < count; ++i)
-			if (!bodies[i].tree)
-			{
-				bodies[i] = LowerAlone(lower, i);
-				++m_Stats.alone;
-			}
-		m_Stats.atOnceSeconds += std::chrono::duration<double>(alone - start).count();
-		m_Stats.aloneSeconds += SecondsSince(alone);
+		RunShared(model, count, [&](size_t i) { bodies[i].tree = std::make_unique<HIRFunction>(lower(i, bodies[i].errors)); }, m_Stats.lowerSeconds);
 		return bodies;
 	}
 
-	// Whatever the threads, so the program is the same: what lowering would make on first use, made first, and every
-	// answer the model keeps lazily made.
-	void ParallelLowering::Prepare(ProgramModel& model)
+	void ParallelLowering::Share(const ProgramModel& model, size_t count, const std::function<void(size_t)>& work)
 	{
+		RunShared(model, count, work, m_Stats.otherSeconds);
+	}
+
+	// Whatever the threads, so the program is the same: one thread shares the model as several do.
+	void ParallelLowering::RunShared(const ProgramModel& model, size_t count, const std::function<void(size_t)>& work, double& seconds)
+	{
+		if (count == 0) return;
 		const auto start = std::chrono::steady_clock::now();
-		m_PreparedTypes = LifecycleFacts::MakeCompilerWritten(model, m_PreparedTypes);
-		model.Settle();
-		m_Stats.prepareSeconds += SecondsSince(start);
-	}
-
-	// A round lowers every body still pending at once; a body that stopped for a change the change itself can make (a
-	// template instance, a closure) has it made, in the batch's order, and is lowered again in the next round.
-	void ParallelLowering::LowerInRounds(ProgramModel& model, const LoweringJob& lower, std::vector<LoweredBody>& bodies)
-	{
-		std::vector<size_t> pending(bodies.size());
-		std::iota(pending.begin(), pending.end(), size_t(0));
-		for (unsigned round = 0; round < kRounds && !pending.empty(); ++round)
+		const std::map<std::string, uint64> before = model.Making().Requests();
+		std::chrono::steady_clock::time_point shared;
+		std::chrono::steady_clock::time_point done;
 		{
-			std::vector<ModelFrozen> stops = LowerAtOnce(model, lower, pending, bodies);
-			std::vector<size_t> again;
-			for (size_t k = 0; k < pending.size(); ++k)
-			{
-				if (bodies[pending[k]].tree) continue;
-				++m_Stats.changes[stops[k].what];
-				if (!stops[k].make) continue;
-				stops[k].make();
-				++m_Stats.made;
-				again.push_back(pending[k]);
-			}
-			if (again.empty()) return;
-			Prepare(model);
-			pending = std::move(again);
+			const ProgramModel::SharedLowering sharing(model);
+			shared = std::chrono::steady_clock::now();
+			m_Pool->Run(count, work);
+			done = std::chrono::steady_clock::now();
 		}
-	}
-
-	std::vector<ModelFrozen> ParallelLowering::LowerAtOnce(ProgramModel& model, const LoweringJob& lower, const std::vector<size_t>& pending,
-		std::vector<LoweredBody>& bodies)
-	{
-		std::vector<ModelFrozen> stops(pending.size());
-		model.Writes().Freeze(true);
-		m_Pool->Run(pending.size(), [&](size_t k) {
-			LoweredBody& body = bodies[pending[k]];
-			body = {};
-			try
-			{
-				body.tree = std::make_unique<HIRFunction>(lower(pending[k], body.errors));
-			}
-			catch (ModelFrozen& frozen)
-			{
-				body = {};
-				stops[k] = std::move(frozen);
-			}
-		});
-		model.Writes().Freeze(false);
-		++m_Stats.rounds;
-		m_Stats.attempts += pending.size();
-		return stops;
-	}
-
-	LoweredBody ParallelLowering::LowerAlone(const LoweringJob& lower, size_t i)
-	{
-		LoweredBody body;
-		body.tree = std::make_unique<HIRFunction>(lower(i, body.errors));
-		++m_Stats.attempts;
-		return body;
+		const auto ordered = std::chrono::steady_clock::now();
+		seconds += SecondsBetween(shared, done);
+		m_Stats.prepareSeconds += SecondsBetween(start, shared) + SecondsBetween(done, ordered);
+		++m_Stats.passes;
+		AddRequests(before, model.Making().Requests(), m_Stats.requests);
+		for (std::string& violation : model.Making().TakeViolations())
+			if (std::find(m_Violations.begin(), m_Violations.end(), violation) == m_Violations.end()) m_Violations.push_back(std::move(violation));
 	}
 } // namespace Scripting

@@ -224,7 +224,7 @@ namespace
 			return !info.library && info.project == sources.Projects().Root();
 		}
 
-		// -ftime: how many bodies were lowered at once, and what stopped the others (ParallelLowering).
+		// -ftime: the bodies lowered on the threads in passes, and the changes they asked the model for (ParallelLowering).
 		static void ReportLowering(const Scripting::LoweringStats& stats, const std::vector<std::pair<const char*, double>>& steps)
 		{
 			const char* lead = "lower: ";
@@ -234,17 +234,18 @@ namespace
 				lead = ", ";
 			}
 			if (!steps.empty()) std::printf("\n");
-			std::printf("lowering: %llu bodies in %llu round(s) (%.3f s), %llu changes made between rounds, %llu lowered alone (%.3f s), "
-				"%llu lowerings in all, %.3f s preparing", (unsigned long long)stats.bodies, (unsigned long long)stats.rounds, stats.atOnceSeconds,
-				(unsigned long long)stats.made, (unsigned long long)stats.alone, stats.aloneSeconds, (unsigned long long)stats.attempts,
-				stats.prepareSeconds);
+			uint64_t requests = 0;
+			for (const auto& [what, count] : stats.requests) requests += count;
+			std::printf("lowering: %llu bodies in %llu pass(es) (%.3f s), other work on the threads %.3f s, %.3f s settling and ordering, "
+				"%llu requests", (unsigned long long)stats.bodies, (unsigned long long)stats.passes, stats.lowerSeconds, stats.otherSeconds,
+				stats.prepareSeconds, (unsigned long long)requests);
 			const char* separator = " (";
-			for (const auto& [what, count] : stats.changes)
+			for (const auto& [what, count] : stats.requests)
 			{
 				std::printf("%s%s %llu", separator, what.c_str(), (unsigned long long)count);
 				separator = ", ";
 			}
-			std::printf("%s\n", stats.changes.empty() ? "" : ")");
+			std::printf("%s\n", stats.requests.empty() ? "" : ")");
 		}
 
 		// --- Phase 1: input registration -------------------------------------------------

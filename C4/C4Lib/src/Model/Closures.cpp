@@ -40,10 +40,12 @@ namespace Scripting
 		return nullptr;
 	}
 
+	// A request: made once for the lambda whose body is `spec.body` in the code `spec.owner`, which one lowering writes, so
+	// its lambdas are numbered in its order.
 	const Closure* ClosureTypes::Create(ProgramModel& model, const ClosureSpec& spec)
 	{
-		// Made from the spec alone, so a frozen model has it made between rounds (ParallelLowering).
-		model.Writes().Ask("a closure", [&model, spec] { Create(model, spec); });
+		const ModelMaking::Request request(model.Making(), "a closure");
+		if (const Closure* made = model.ClosureMadeFor(spec.owner, spec.body)) return made;
 		// Named for the code that writes it and its place there, so every program with that code names it alike.
 		const uint32 index = model.m_ClosuresByOwner[spec.owner]++;
 		const Core::String name = "__c4_closure_" + spec.owner + "_" + std::to_string(index);
@@ -55,15 +57,16 @@ namespace Scripting
 
 		ObjectType* type = NewClosureType(name, closure->captures, *model.m_Types);
 		model.m_Types->Own(type);
-		model.m_ObjectTypes.Push(type);
+		model.KeepObjectType(type);
 		closure->type = type;
 		const FunctionType* signature = model.m_Types->Own(new FunctionType(spec.returned, spec.params));
 		closure->call = AddCallMethod(model, type, spec, signature, closure->CapturesNothing());
 		type->CalculateLayout();
+		type->MarkLaidOut(); // read by every lowering once shown: never laid out again
 
 		const Closure* stored = closure.get();
 		model.m_Closures.emplace(type, std::move(closure));
-		model.m_ClosuresMade.emplace(std::make_pair(spec.owner, spec.body), stored);
+		model.m_ClosuresMade.Add(std::make_pair(spec.owner, spec.body), stored);
 		return stored;
 	}
 

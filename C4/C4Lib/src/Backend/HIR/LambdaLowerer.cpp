@@ -78,7 +78,8 @@ namespace Scripting
 	{
 		if (!dynamic_cast<const CodeBlockNode*>(lambda.GetBody().Get()))
 			return m_Ctx.Fail(&lambda, QueryResult<Value>::Fail(QueryError::NotAValue, "lambda has no body"));
-		// A body lowered again (ParallelLowering) finds the closure made for it; its captures' values are planned anew.
+		// A body lowered again (the language server, a [compile_time] call) finds the closure made for it; its captures'
+		// values are planned anew.
 		const Closure* closure = m_Ctx.model().ClosureMadeFor(m_Ctx.CodeSymbol(), lambda.GetBody().Get());
 		ClosureSpec spec;
 		if (!closure)

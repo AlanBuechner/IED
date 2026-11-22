@@ -99,7 +99,7 @@ namespace Scripting
 			def.objectBody = &obj;
 			def.declScope = ctx.scope;
 			def.unit = ctx.unitId;
-			ctx.model->m_TypeTemplates[name].push_back(def);
+			ctx.model->m_TypeTemplates.Add(name, def);
 			if (!ctx.scope->Find(name))
 			{
 				SymbolInfo info;
@@ -222,7 +222,7 @@ namespace Scripting
 			// Same-named templates in different scopes coexist (a global `Wedge` and `Weld::Wedge`):
 			// keep every def, selected by scope proximity at lookup. A flat map keyed by name alone
 			// would let the last registration shadow every other same-named template program-wide.
-			ctx.model->m_TypeTemplates[name].push_back(def);
+			ctx.model->m_TypeTemplates.Add(name, def);
 			return; // no members to queue: instantiation handles them with bindings
 		}
 
@@ -322,7 +322,7 @@ namespace Scripting
 			def.isAlias = true;
 			def.declScope = ctx.scope;
 			def.unit = ctx.unitId;
-			ctx.model->m_TypeTemplates[name].push_back(def); // coexist with same-named templates in other scopes
+			ctx.model->m_TypeTemplates.Add(name, def); // coexist with same-named templates in other scopes
 			SymbolInfo info;
 			info.kind = SymbolKind::Type;
 			info.definingUnit = ctx.unitId;

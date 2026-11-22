@@ -280,9 +280,9 @@ namespace Scripting
 		const Core::Vector<const Type*>& argTypes, const LookupContext& ctx, const FunctionRecord** outRecord) const
 	{
 		Core::Vector<OverloadCandidate> candidates;
-		if (const auto* extensions = model.PrimitiveExtensions(receiverType))
-			for (const FunctionRecord* rec : *extensions)
-				if (rec->name == name && (rec->isBuiltin || model.Symbols()->DeclarationVisible(*rec, ctx.unitId))) candidates.Push({ rec->type, rec, rec->minArity });
+		model.m_PrimitiveExtensions.ForEach(receiverType, [&](const FunctionRecord* rec) {
+			if (rec->name == name && (rec->isBuiltin || model.Symbols()->DeclarationVisible(*rec, ctx.unitId))) candidates.Push({ rec->type, rec, rec->minArity });
+		});
 		if (!candidates.Empty()) return ResolveAndReturn(model, candidates, argTypes, name, outRecord);
 		Core::String message = "'" + receiverType->GetName() + "' has no method '" + name + "'";
 		if (receiverType->GetKind() == TypeKind::Void) message += ": a void* points at no type in particular; cast it to the type whose method '" + name + "' is";
@@ -419,10 +419,9 @@ namespace Scripting
 			{
 				// Two primitives always use the built-in operator; an extension on a primitive serves an object on the right.
 				if (!rhsType || rhsType->GetKind() != TypeKind::Object) return;
-				auto prim = model.m_PrimitiveExtensions.find(lhsType);
-				if (prim == model.m_PrimitiveExtensions.end()) return;
-				for (const FunctionRecord* rec : prim->second)
+				model.m_PrimitiveExtensions.ForEach(lhsType, [&](const FunctionRecord* rec) {
 					if (ContainsAnnotation(rec, annotation)) found.Push({ rec, nullptr });
+				});
 				return;
 			}
 			ClassHierarchy::ForEachSubobject(static_cast<const ObjectType*>(lhsType), [&](const ObjectType* ty, int64) {

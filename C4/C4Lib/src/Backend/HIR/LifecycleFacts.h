@@ -32,11 +32,5 @@ namespace Scripting
 		/// Calls `visit` with the first member of each anonymous-union region of `type`, in declaration order: the
 		/// region is that member's offset less its m_UnionIntraOffset, m_UnionRegionSize bytes long.
 		void ForEachUnionRegion(const ObjectType* type, const std::function<void(const ObjectType::FieldInfo&)>& visit);
-
-		/// Makes the compiler-written create, delete and copy of every object type from the model's `from`th on that
-		/// needs one and declares none (what Lifecycle::DefaultCreate, Destroy and Copy would make on first use), in the
-		/// model's order of types, so lowerings on several threads find them made; returns how many types there are.
-		/// One that nothing calls is never emitted, and one a type needs later is made on first use.
-		uint32 MakeCompilerWritten(ProgramModel& model, uint32 from);
 	}
 } // namespace Scripting

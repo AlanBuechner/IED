@@ -2,7 +2,6 @@
 #include "Backend/HIR/HIRNodes.h"
 #include "Compiler/ErrorTracker.h"
 #include "Compiler/WorkerPool.h"
-#include "Model/ModelWrites.h"
 #include <functional>
 #include <map>
 #include <memory>
@@ -28,50 +27,47 @@ namespace Scripting
 	/// How lowering on several threads went (-ftime).
 	struct LoweringStats
 	{
-		uint64_t bodies = 0;    // functions lowered
-		uint64_t attempts = 0;  // lowerings run, those thrown away included
-		uint64_t alone = 0;     // lowered alone, after the rounds
-		uint64_t rounds = 0;    // rounds of lowering at once
-		uint64_t made = 0;      // changes made between rounds
-		double atOnceSeconds = 0; // in rounds of lowering at once
-		double aloneSeconds = 0;  // lowering bodies alone
-		double prepareSeconds = 0; // making what lowering would make on first use, before each round
-		std::map<std::string, uint64_t> changes; // what stopped bodies in a round, by kind
+		uint64_t bodies = 0;        // bodies lowered, each once
+		uint64_t passes = 0;        // times work ran on the threads sharing the model (a batch, its needs, its MIR)
+		double lowerSeconds = 0;    // lowering bodies on the threads
+		double otherSeconds = 0;    // the other work on the threads (needs, MIR, thunk plans)
+		double prepareSeconds = 0;  // settling the model before each pass and putting what it made in order after
+		std::map<std::string, uint64_t> requests; // the changes lowering asked the model for, by kind
 	};
 
-	/// Lowers a batch of function bodies on several threads, the same whatever the threads. A round lowers the pending
-	/// bodies at once against the frozen model (ModelWrites), each with its own diagnostics and scope cursor; a body
-	/// whose lowering would change the model stops. A change that can be made apart from its lowering (a template
-	/// instance) is made after the round, in the batch's order, and its body goes to the next round; after a few
-	/// rounds, or for any other change (a closure, a local type), the bodies left are lowered alone, in the batch's
-	/// order, making their changes. So a body never sees a change another body of its batch made unless it needed that
-	/// change itself, and the changes are made in one order.
+	/// Lowers a batch of function bodies on several threads in one pass, the same whatever the threads. Every lowering
+	/// reads the model without a lock; what one needs the model to make - a template instance, a closure, a
+	/// compiler-written lifecycle function, lifecycle facts - is a request, made once under the model's lock by the
+	/// first that asks and found by the others when it ends (docs/compiler/02, "Changes while bodies lower"). When the
+	/// pass ends, what its requests made is put in one order (ProgramModel::SharedLowering), so record order and symbol
+	/// names do not follow which thread asked first.
 	class ParallelLowering
 	{
 	public:
-		/// `threads` counts the calling thread; with one, the rounds run on it.
+		/// `threads` counts the calling thread; with one, the pass runs on it.
 		explicit ParallelLowering(unsigned threads);
 
 		std::vector<LoweredBody> Lower(ProgramModel& model, const std::vector<const FunctionRecord*>& records);
 		/// The same for lowerings of another kind (an invoke thunk): `lower(i, errors)` lowers the ith of `count`; the
 		/// bodies have no record.
 		std::vector<LoweredBody> LowerEach(ProgramModel& model, size_t count, const LoweringJob& lower);
+		/// Other work on the threads that reads the model and may ask it for changes (what lowered trees need, their MIR):
+		/// `work(i)` for each i below `count`, sharing the model as a pass of lowering does.
+		void Share(const ProgramModel& model, size_t count, const std::function<void(size_t)>& work);
+
 		const LoweringStats& Stats() const { return m_Stats; }
+		/// The model's changes made outside a request, or to what other lowerings read, while they shared it: each a race,
+		/// the compiler's bug (empty when there was none).
+		const std::vector<std::string>& Violations() const { return m_Violations; }
 		/// The threads lowering keeps, for the other work of the emit to run on.
 		WorkerPool& Pool() { return *m_Pool; }
 
 	private:
-		void Prepare(ProgramModel& model);
-		void LowerInRounds(ProgramModel& model, const LoweringJob& lower, std::vector<LoweredBody>& bodies);
-		/// Lowers the `pending` bodies at once; a body that would change the model is left without a tree, and what
-		/// stopped it is at its place in the result.
-		std::vector<ModelFrozen> LowerAtOnce(ProgramModel& model, const LoweringJob& lower, const std::vector<size_t>& pending,
-			std::vector<LoweredBody>& bodies);
-		LoweredBody LowerAlone(const LoweringJob& lower, size_t i);
+		/// `work` on the threads while they share the model; the seconds spent in it are added to `seconds`.
+		void RunShared(const ProgramModel& model, size_t count, const std::function<void(size_t)>& work, double& seconds);
 
-		unsigned m_Threads;
 		std::unique_ptr<WorkerPool> m_Pool;
-		uint32 m_PreparedTypes = 0; // the model's object types whose compiler-written functions are made
 		LoweringStats m_Stats;
+		std::vector<std::string> m_Violations;
 	};
 } // namespace Scripting

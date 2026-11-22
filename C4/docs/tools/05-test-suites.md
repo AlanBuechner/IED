@@ -31,6 +31,7 @@ and runs every gate suite in turn: C4Testing, TestCode (also with `-Incremental`
 | Bedrock | `Bedrock/Tests/` | the default library, through the built-in `[test]` framework | `C4.exe Bedrock\Tests -o <out>.exe -test`, then run `<out>.exe` |
 | DifferentialTest | `assets/DifferentialTest/` | random programs (every primitive type, operators, conversions, control flow, struct parameters and results, pointers) print the same as the same program compiled as C by clang, at `-O0` and `-O2` | `python assets/DifferentialTest/run.py [--start n --count n --size x]` |
 | Benchmarks | `Benchmarks/gemm/`, `Benchmarks/math/` | generated-code performance vs clang C++ at `-O2` (integer GEMM; Bedrock Math vs GLM); `-Check` only builds and compares results | `Benchmarks/<name>/run-benchmark.ps1 [-Check]` |
+| ThreadSanitizer | `assets/tsan_unit.py` | C4Testing built with `-fsanitize=thread` on Linux runs without a data race: lowering on several threads shares the model (compiler/02, "Changes while bodies lower") | `python -I assets/tsan_unit.py [--filter GLOB] [--jobs n]` (needs Docker) |
 
 ---
 
@@ -56,6 +57,14 @@ and runs every gate suite in turn: C4Testing, TestCode (also with `-Incremental`
   (their reasons name the original test), and the rest is covered by the current classes.
 - `-testall` reports a crash exit code during ReflectionTesting teardown even when green; read the
   `Total/Passed/Failed` lines.
+- **With ThreadSanitizer** (`assets/tsan_unit.py`, after a change to how lowering shares the model on threads): every
+  C++ project C4Testing needs is built in `tools/linux/tsan`'s container (the Linux builder with clang's sanitizer
+  runtimes) with `-fsanitize=thread`, which `CCC_OVERRIDE_OPTIONS` adds to each compile and link of Nuke's C/C++ driver,
+  into Docker volumes of the checkout's own (its `build/` and `toolchains/` keep their builds), and C4Testing runs from
+  `C4/` with `-timeout-scale=20` (ThreadSanitizer is 5 to 15 times slower). Reports go to `assets/build-output/tsan/`,
+  not to the output the tests read; any report fails the run, which prints each one's summary and first frames; the
+  whole output is `assets/build-output/tsan/output.txt`. Not a `nuke gates` step: it needs Docker and takes the
+  compiler's build twice as long.
 
 ---
 

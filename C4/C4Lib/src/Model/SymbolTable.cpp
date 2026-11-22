@@ -1,4 +1,8 @@
 #include "Model/SymbolTable.h"
+#include "Parser/AstNode.h"
+#include <algorithm>
+#include <optional>
+#include <tuple>
 
 namespace Scripting
 {
@@ -6,13 +10,32 @@ namespace Scripting
 	{
 		// The ScopeCursor of the lowering running on this thread, innermost first (each points at its outer one).
 		thread_local ScopeCursor* t_Cursor = nullptr;
+
+		SourceLocation DeclaredAt(const FunctionRecord& record)
+		{
+			return record.declarations.Empty() || !record.declarations[0] ? SourceLocation() : record.declarations[0]->startLocation;
+		}
+
+		// One order of the records requests made, whatever the threads: by symbol (made from what the record was made
+		// from), then by where it is declared, then by its signature.
+		bool RecordBefore(const FunctionRecord& a, const FunctionRecord& b)
+		{
+			if (a.mangledName != b.mangledName) return a.mangledName < b.mangledName;
+			if (a.LookupUnit() != b.LookupUnit()) return a.LookupUnit() < b.LookupUnit();
+			const SourceLocation la = DeclaredAt(a);
+			const SourceLocation lb = DeclaredAt(b);
+			if (la != lb) return std::tie(la.sourceId, la.byteOffset, la.expansion, la.inExpansion) < std::tie(lb.sourceId, lb.byteOffset, lb.expansion, lb.inExpansion);
+			const Core::String ta = a.type ? a.type->ToString() : Core::String();
+			const Core::String tb = b.type ? b.type->ToString() : Core::String();
+			return ta < tb;
+		}
 	}
 
 	// --- Scope ---
 
 	bool Scope::Register(const Core::String& name, const SymbolInfo& info, const FunctionRecord* fn)
 	{
-		if (m_Writes) m_Writes->Ask("a name in a permanent scope");
+		if (m_Making) m_Making->AssertUnshown(m_Shown, "a name in a scope lowerings read");
 		if (!m_Symbols) m_Symbols = std::make_unique<Symbols>();
 		auto it = m_Symbols->find(name);
 		if (it != m_Symbols->end())
@@ -142,10 +165,11 @@ namespace Scripting
 
 	// --- SymbolTable ---
 
-	SymbolTable::SymbolTable(const ModelWrites* writes) : m_Writes(writes)
+	SymbolTable::SymbolTable(const ModelMaking* making) : m_Making(making)
 	{
 		m_Root = std::make_unique<Scope>(Scope::Kind::File, "program");
-		m_Root->m_Writes = writes;
+		m_Root->m_Making = making;
+		m_Permanent.push_back(m_Root.get());
 		m_Current = m_Root.get();
 	}
 
@@ -177,6 +201,7 @@ namespace Scripting
 			cursor->m_Position = raw;
 			return ScopeGuard(this, cursor, raw);
 		}
+		if (m_Making) m_Making->AssertMaking("a layer on the table's own position, outside a lowering's ScopeCursor");
 		raw->m_Parent = m_Current;
 		m_Current->m_Children.Push(std::move(scope));
 		m_Current = raw; // the newest layer is the lowering position until its guard pops
@@ -203,10 +228,43 @@ namespace Scripting
 			cursor->m_Layers.Push(std::move(scope));
 			return raw;
 		}
-		if (m_Writes) m_Writes->Ask("a class or namespace scope");
-		raw->m_Writes = m_Writes;
-		base->m_Children.Push(std::move(scope));
+		raw->m_Making = m_Making;
+		AddPermanent(std::move(scope), base);
 		return raw; // permanent: owned by its parent, not the lowering position
+	}
+
+	void SymbolTable::AddPermanent(std::unique_ptr<Scope> scope, Scope* base)
+	{
+		Scope* raw = scope.get();
+		if (!m_Making || !m_Making->Shared())
+		{
+			m_Permanent.push_back(raw);
+			base->m_Children.Push(std::move(scope));
+			return;
+		}
+		m_Making->Made(raw->m_Shown); // shown when the request making it ends; one made outside a request, at the next sharing
+		const ModelMaking::Request request(*m_Making, nullptr);
+		m_Permanent.push_back(raw);
+		m_MadeScopes.push_back(std::move(scope));
+	}
+
+	void SymbolTable::ShowMadeSoFar()
+	{
+		for (; m_ShownScopes < m_Permanent.size(); ++m_ShownScopes) m_Permanent[m_ShownScopes]->m_Shown.store(true, std::memory_order_release);
+	}
+
+	void SymbolTable::AttachMadeScopes()
+	{
+		std::stable_sort(m_MadeScopes.begin(), m_MadeScopes.end(), [](const std::unique_ptr<Scope>& a, const std::unique_ptr<Scope>& b) {
+			return std::tie(a->m_Kind, a->m_Name) < std::tie(b->m_Kind, b->m_Name);
+		});
+		for (std::unique_ptr<Scope>& scope : m_MadeScopes)
+		{
+			Scope* parent = scope->m_Parent;
+			if (scope->m_Kind == Scope::Kind::Block) m_Retired.Push(std::move(scope));
+			else parent->m_Children.Push(std::move(scope));
+		}
+		m_MadeScopes.clear();
 	}
 
 	Core::String FunctionSymbol(const Scope* scope, const Core::String& name, const FunctionType& signature)
@@ -222,10 +280,14 @@ namespace Scripting
 		return isConst ? symbol + "_const" : symbol;
 	}
 
-	const FunctionRecord* SymbolTable::AddFunctionRecord(FunctionRecord record)
+	bool SymbolTable::HasOwnSymbol(const FunctionRecord& record)
 	{
-		if (m_Writes) m_Writes->Ask("a function record");
-		if (!record.isBuiltin && !record.isLinked && !record.mangledName.empty())
+		return !record.isBuiltin && !record.isLinked && !record.mangledName.empty();
+	}
+
+	void SymbolTable::Claim(FunctionRecord& record)
+	{
+		if (HasOwnSymbol(record))
 		{
 			const Core::String base = record.mangledName;
 			const uint32 unit = record.declUnit ? record.declUnit : record.definingUnit;
@@ -240,10 +302,39 @@ namespace Scripting
 			}
 		}
 		record.isHostDefined = m_HostSymbols && !HasBody(record) && !record.isLinked && m_HostSymbols->Has(record.mangledName.c_str());
+	}
+
+	// A record a request makes while lowerings share the model is named in one order when they stop (OrderRecordsFrom):
+	// which of two records with one symbol gets `_1` must not follow which thread asked first. A body's own local
+	// function or lambda is named at once: its symbol starts with its body's, which no other body has.
+	const FunctionRecord* SymbolTable::AddFunctionRecord(FunctionRecord record)
+	{
+		std::optional<ModelMaking::Request> request;
+		if (m_Making) request.emplace(*m_Making, nullptr);
+		const bool later = m_Making && m_Making->Shared() && !record.isLocal && HasOwnSymbol(record);
+		if (later) record.isHostDefined = m_HostSymbols && !HasBody(record) && !record.isLinked && m_HostSymbols->Has(record.mangledName.c_str());
+		else Claim(record);
 		auto rec = std::make_unique<FunctionRecord>(std::move(record));
-		const FunctionRecord* raw = rec.get();
+		FunctionRecord* raw = rec.get();
 		m_Records.Push(std::move(rec));
+		if (later) m_Unclaimed.push_back(raw);
 		return raw;
+	}
+
+	void SymbolTable::OrderRecordsFrom(uint32 from)
+	{
+		if (m_Records.Count() > from + 1)
+		{
+			std::vector<std::unique_ptr<FunctionRecord>> made;
+			for (uint32 i = from; i < m_Records.Count(); ++i) made.push_back(std::move(m_Records[i]));
+			std::stable_sort(made.begin(), made.end(), [](const std::unique_ptr<FunctionRecord>& a, const std::unique_ptr<FunctionRecord>& b) {
+				return RecordBefore(*a, *b);
+			});
+			for (size_t i = 0; i < made.size(); ++i) m_Records[from + static_cast<uint32>(i)] = std::move(made[i]);
+		}
+		std::stable_sort(m_Unclaimed.begin(), m_Unclaimed.end(), [](const FunctionRecord* a, const FunctionRecord* b) { return RecordBefore(*a, *b); });
+		for (FunctionRecord* record : m_Unclaimed) Claim(*record);
+		m_Unclaimed.clear();
 	}
 
 	void SymbolTable::SetIncludeClosure(uint32 unitId, const Core::Vector<uint32>& closure)

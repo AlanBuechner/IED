@@ -10,6 +10,7 @@ namespace Testing
 	///   --list-benchmarks / -list-benchmarks  Print all discoverable benchmark paths and return true (skip execution).
 	///   --filter=<pattern>                   Run only tests matching the wildcard pattern.
 	///   --benchmark-filter=<pattern>         Run only benchmarks matching the wildcard pattern.
+	///   --timeout-scale=<n>                  Every test's timeout times n (a slower build: a sanitizer's).
 	/// Returns true if a "list" flag was set (caller should exit without running tests/benchmarks).
 	bool ProcessCliArgs(Core::ArgList& argList);
 

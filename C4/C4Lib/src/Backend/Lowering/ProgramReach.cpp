@@ -43,7 +43,7 @@ namespace Scripting
 	void ProgramReach::Keep(std::vector<LoweredUnit> units)
 	{
 		// A thunk's or a round of starts' tree is made without LowerFunction: its MIR is built here, as codegen emits it.
-		m_Lowering.Pool().Run(units.size(), [&](size_t i) { EnsureMir(*units[i].tree); });
+		m_Lowering.Share(m_Model, units.size(), [&](size_t i) { EnsureMir(*units[i].tree); });
 		std::vector<const HIRFunction*> trees;
 		for (const LoweredUnit& unit : units) trees.push_back(unit.tree.get());
 		const std::vector<BodyNeeds> needs = NeedsOfEach(trees);
@@ -74,7 +74,7 @@ namespace Scripting
 	std::vector<BodyNeeds> ProgramReach::NeedsOfEach(const std::vector<const HIRFunction*>& trees)
 	{
 		std::vector<BodyNeeds> needs(trees.size());
-		m_Lowering.Pool().Run(trees.size(), [&](size_t i) { needs[i] = NeedsOf(*trees[i]); });
+		m_Lowering.Share(m_Model, trees.size(), [&](size_t i) { needs[i] = NeedsOf(*trees[i]); });
 		return needs;
 	}
 

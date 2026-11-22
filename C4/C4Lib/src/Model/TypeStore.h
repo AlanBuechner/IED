@@ -1,6 +1,7 @@
 #pragma once
 #include "Model/Types.h"
-#include "Model/ModelWrites.h"
+#include "Model/ModelMaking.h"
+#include <atomic>
 #include "Core/Core.h"
 #include <functional>
 #include <map>
@@ -19,8 +20,9 @@ namespace Scripting
 	class TypeStore
 	{
 	public:
-		/// `writes` is asked before every new type (a frozen model makes none); none for a store of names only.
-		explicit TypeStore(const ModelWrites* writes = nullptr);
+		/// `making` checks the object types it owns (ObjectType::WatchMaking) and shows those a request makes when it ends;
+		/// none for a store of names only.
+		explicit TypeStore(const ModelMaking* making = nullptr);
 
 		// --- Builtins (interned singletons per kind) -----------------------------------
 		/// The canonical primitive for a kind: the same instance every time (pointer identity is
@@ -32,17 +34,19 @@ namespace Scripting
 		static bool IsBuiltinName(const Core::String& name);
 
 		// --- User types (owned, returned by pointer) ------------------------------------
-		/// Take ownership of a user-defined type and return the stable pointer to it. An object type asks the model's
-		/// writes before it changes from then on (ObjectType::WatchWrites).
+		/// Take ownership of a user-defined type and return the stable pointer to it. An object type's changes are checked
+		/// from then on (ObjectType::WatchMaking); one a request makes is shown when the request ends. Lowerings on several
+		/// threads own types at once.
 		template <typename T>
 		const T* Own(T* type)
 		{
-			Asking("a type");
 			Watch(type);
 			const std::unique_lock<std::shared_mutex> writing(m_Interning);
 			m_Owned.Push(std::unique_ptr<Type>(type));
 			return type;
 		}
+		/// Shows every object type owned since it last ran (ObjectType::Shown): from now on lowerings read them.
+		void ShowMadeSoFar();
 
 		// --- Wrapper interning (one canonical instance per logical type) -----------------
 		/// `const T*`, `T&`, `T[N]`, and funcptr types are interned: a logical type is ONE
@@ -82,10 +86,6 @@ namespace Scripting
 		const Core::Vector<std::unique_ptr<Type>>& All() const { return m_Owned; }
 
 	private:
-		void Asking(const char* what) const
-		{
-			if (m_Writes) m_Writes->Ask(what);
-		}
 		void Watch(Type* type) const;
 
 		/// The type `cache` keeps for `key`, else the one `make` builds (new and unowned), kept: read under a shared
@@ -109,8 +109,10 @@ namespace Scripting
 
 		std::shared_mutex m_Interning; // the caches and m_Owned
 
-		const ModelWrites* m_Writes = nullptr;
-		Core::Vector<PrimitiveType*> m_Builtins; // one per TypeKind index, nullptr until made
+		static constexpr size_t c_BuiltinSlots = 64; // one per TypeKind index
+		const ModelMaking* m_Making = nullptr;
+		std::atomic<PrimitiveType*> m_Builtins[c_BuiltinSlots] = {}; // made once, by whichever lowering asks first
+		uint32 m_ShownUpTo = 0; // the owned types ShowMadeSoFar has shown
 		std::unordered_map<Core::String, const Type*> m_BuiltinByName;
 		Core::Vector<std::unique_ptr<Type>> m_Owned;
 		// What a signature is interned by: what it returns (a funcptr's and a func's by name), its parameters and

@@ -75,11 +75,12 @@ namespace Scripting
 			return true;
 		}
 
+		// What a request made for `key`: shown to every lowering, or made by this thread's request in progress.
 		template <typename T>
-		const T* Cached(const std::unordered_map<Core::String, const T*>& cache, const Core::String& key)
+		const T* Cached(const MadeMap<Core::String, const T*>& cache, const Core::String& key)
 		{
-			auto found = cache.find(key);
-			return found != cache.end() ? found->second : nullptr;
+			const T* const* found = cache.Find(key);
+			return found ? *found : nullptr;
 		}
 
 		// One more instance being built inside the ones being built, while it lives.
@@ -126,9 +127,8 @@ namespace Scripting
 
 		const Core::String key = DefinitionKey(name, def, complete.value);
 		if (const Type* cached = Cached(model.m_TypeInstantiations, key)) return QueryResult<const Type*>::Success(cached);
-		model.Writes().Ask("a class template instance", [&model, name, declScope, &args, unitId, outerBinding, argContext] {
-			(void)model.InstantiateTypeTemplate(name, declScope, args, unitId, outerBinding, argContext);
-		});
+		const ModelMaking::Request request(model.Making(), "a class template instance");
+		if (const Type* cached = Cached(model.m_TypeInstantiations, key)) return QueryResult<const Type*>::Success(cached); // made meanwhile
 
 		if (def->isAlias && def->aliasTarget)
 		{
@@ -136,7 +136,7 @@ namespace Scripting
 			auto target = model.ResolveTypeInternal(*def->aliasTarget, def->unit, binding, nullptr);
 			if (!target.Ok()) return target;
 			model.m_InstantiationBindings.emplace(target.value, BindingsFor(model, *def->params, complete.value));
-			model.m_TypeInstantiations.emplace(key, target.value);
+			model.m_TypeInstantiations.Add(key, target.value);
 			return target;
 		}
 		auto chosen = Specializations::ForType(model, *def, name, complete.value);
@@ -160,23 +160,21 @@ namespace Scripting
 		const Scope* declScope, uint32 unitId) const
 	{
 		using Result = QueryResult<const ProgramModel::TemplateDef*>;
-		auto it = model.m_TypeTemplates.find(name);
-		if (it == model.m_TypeTemplates.end() || it->second.empty()) return Result::Fail(QueryError::NotFound, "not a template: " + name);
+		if (!model.m_TypeTemplates.Has(name)) return Result::Fail(QueryError::NotFound, "not a template: " + name);
 		const ProgramModel::TemplateDef* unseen = nullptr;
 		for (const Scope* s = declScope; s; s = s->GetParent())
 		{
 			bool visible = false;
-			for (const auto& candidate : it->second)
-			{
-				if (!DeclaredIn(candidate, s)) continue;
+			model.m_TypeTemplates.ForEach(name, [&](const ProgramModel::TemplateDef& candidate) {
+				if (!DeclaredIn(candidate, s)) return;
 				visible = visible || model.m_Symbols->IsVisible(candidate.unit, unitId);
 				if (!unseen) unseen = &candidate;
-			}
+			});
 			if (visible) return Result::Success(ChooseTypeDefinition(model, name, s));
 		}
 		if (!unseen)
 		{
-			unseen = &it->second[0];
+			unseen = model.m_TypeTemplates.First(name);
 			if (model.m_Symbols->IsVisible(unseen->unit, unitId)) return Result::Success(unseen);
 		}
 		const Core::String elsewhere = DeclaredElsewhere(model, name, "type", unseen->unit);
@@ -196,23 +194,22 @@ namespace Scripting
 		// Same-named templates in different scopes coexist (a global `Wedge` and `Weld::Wedge`): the one declared
 		// innermost on the lookup chain from `declScope` wins, like ordinary name lookup; else the first. In one
 		// scope a definition wins over a declaration of the same template.
-		auto it = model.m_TypeTemplates.find(name);
-		if (it == model.m_TypeTemplates.end() || it->second.empty()) return nullptr;
+		if (!model.m_TypeTemplates.Has(name)) return nullptr;
 		auto defined = [](const ProgramModel::TemplateDef& d) { return d.isAlias || (d.objectBody && !d.objectBody->IsDeclaration()); };
 		for (const Scope* s = declScope; s; s = s->GetParent())
 		{
 			const ProgramModel::TemplateDef* found = nullptr;
-			for (const auto& candidate : it->second)
+			model.m_TypeTemplates.ForEach(name, [&](const ProgramModel::TemplateDef& candidate) {
 				if (DeclaredIn(candidate, s) && (!found || (!defined(*found) && defined(candidate)))) found = &candidate;
+			});
 			if (found) return found;
 		}
-		return &it->second[0];
+		return model.m_TypeTemplates.First(name);
 	}
 
 	QueryResult<const Type*> TemplateInstantiator::InstantiateObject(const ProgramModel& model, const ProgramModel::TemplateDef& def, const Core::String& name,
 		const Core::String& key, const TemplateArgs& instanceArgs, const TemplateArgs& args, Scope* binding) const
 	{
-		model.Writes().Ask("a class template instance");
 		const Nesting nesting(model.m_InstantiationDepth);
 		if (nesting.TooDeep()) return NeverEnds(name);
 		ObjectType* obj = new ObjectType(TypeKind::Object, name);
@@ -223,24 +220,27 @@ namespace Scripting
 		obj->SetDefined(true);
 
 		// The instance is cached before its body is walked: a template may name its own instance inside its
-		// body (`T Combine(const Shape<T>& o)`), which must find this type instead of recursing.
+		// body (`T Combine(const Shape<T>& o)`), which must find this type instead of recursing. Other lowerings find it
+		// when the outermost request ends, built.
 		const Type* self = model.m_Types->Own(obj);
-		model.m_ObjectTypes.Push(static_cast<const ObjectType*>(obj));
-		model.m_TypeInstantiations.emplace(key, self);
+		model.KeepObjectType(obj);
+		model.m_TypeInstantiations.Add(key, self);
 		// Inside its body the template's bare name is this instance (C++'s injected class name).
 		binding->Register(name, InjectedName(self, *def.objectBody));
 
 		ObjectTemplateBody body(model, *obj, def, name, args, { binding, InstanceScope(model, *obj, def, name), def.unit });
 		if (auto built = body.Build(); !built.Ok())
 		{
-			model.m_TypeInstantiations.erase(key); // a later use may retry
+			model.m_TypeInstantiations.Forget(key); // a later use may retry
 			if (built.error == QueryError::CyclicDependency) return QueryResult<const Type*>::Fail(built.error, built.message);
 			return QueryResult<const Type*>::Fail(built.error, "cannot instantiate " + name + ": " + NotIncludedIn(model, def.unit, built.message));
 		}
 		if (auto cycle = ValueContainment::CheckNotSelfContaining(obj); !cycle.Ok())
 			return QueryResult<const Type*>::Fail(cycle.error, "cannot instantiate " + name + ": " + cycle.message);
-		// Query-time instantiation runs after the program's layouts were finalized: lay this one out now.
+		// Query-time instantiation runs after the program's layouts were finalized: lay this one out now, and keep it, so
+		// the lowerings that read the instance once it is shown never lay it out again.
 		obj->CalculateLayout();
+		obj->MarkLaidOut();
 		InstantiationBindings bindings = BindingsFor(model, *def.params, args);
 		bindings.typeParams.Push({ name, self });
 		model.m_InstantiationBindings.emplace(self, bindings);
@@ -251,7 +251,7 @@ namespace Scripting
 	QueryResult<const Type*> TemplateInstantiator::InstantiateMemberType(const ProgramModel& model, const ProgramModel::TemplateDef& def,
 		const Core::String& name, const MemberTypeSite& site) const
 	{
-		model.Writes().Ask("a member type");
+		const ModelMaking::Request request(model.Making(), "a member type");
 		const Nesting nesting(model.m_InstantiationDepth);
 		if (nesting.TooDeep()) return NeverEnds(name);
 		ObjectType* obj = new ObjectType(TypeKind::Object, name);
@@ -261,7 +261,7 @@ namespace Scripting
 		obj->SetEnclosingNames(site.enclosing);
 		obj->SetDefined(true);
 		const Type* self = model.m_Types->Own(obj);
-		model.m_ObjectTypes.Push(static_cast<const ObjectType*>(obj));
+		model.KeepObjectType(obj);
 		Scope* binding = model.m_Symbols->CreateScope(Scope::Kind::Block, "member", BodyParent(model, def));
 		binding->Register(name, InjectedName(self, *def.objectBody));
 
@@ -270,6 +270,7 @@ namespace Scripting
 		if (auto built = body.Build(); !built.Ok())
 			return QueryResult<const Type*>::Fail(built.error, built.error == QueryError::CyclicDependency ? built.message : "cannot build " + name + ": " + built.message);
 		obj->CalculateLayout();
+		obj->MarkLaidOut();
 		InstantiationBindings bindings = site.ownerBindings;
 		bindings.typeParams.Push({ name, self });
 		model.m_InstantiationBindings.emplace(self, bindings);
@@ -290,7 +291,7 @@ namespace Scripting
 		Scope* parent = const_cast<Scope*>(def.declScope ? def.declScope : model.m_Symbols->GetRoot());
 		Scope* scope = model.m_Symbols->CreateScope(Scope::Kind::Class, InstanceToken(instance, name), parent);
 		scope->objectType = &instance;
-		model.m_TypeScopes[&instance] = scope;
+		model.m_TypeScopes.emplace(&instance, scope);
 		return scope;
 	}
 
@@ -315,9 +316,8 @@ namespace Scripting
 	{
 		const Core::String key = FunctionKey(name, def, args, receiver);
 		if (const FunctionRecord* cached = Cached(model.m_FunctionInstantiations, key)) return QueryResult<const FunctionRecord*>::Success(cached);
-		model.Writes().Ask("a function template instance", [&model, &def, name, args, binding, receiver] {
-			(void)TemplateInstantiator().InstantiateFunction(model, def, name, args, binding, receiver);
-		});
+		const ModelMaking::Request request(model.Making(), "a function template instance");
+		if (const FunctionRecord* cached = Cached(model.m_FunctionInstantiations, key)) return QueryResult<const FunctionRecord*>::Success(cached); // made meanwhile
 
 		// The signature and the body are the template's: their names resolve as its file's do.
 		auto expanded = FunctionSignature(model, *def.functionBody, binding, def.unit);
@@ -378,12 +378,13 @@ namespace Scripting
 			else rec.primitiveReceiverType = r;
 		}
 
+		// The instance's bindings and template first: whoever finds the instance finds them.
 		const FunctionRecord* stored = model.m_Symbols->AddFunctionRecord(rec);
 		model.m_RecordBySignature.emplace(rec.type, stored);
-		if (rec.primitiveReceiverType) model.m_PrimitiveExtensions[rec.primitiveReceiverType].Push(stored);
-		model.m_FunctionInstantiations.emplace(key, stored);
 		model.m_FuncInstantiationBindings.emplace(stored, WithOwnerNames(BindingsFor(model, *def.params, args), def.ownerNames)); // the body binds T := int32 too
-		model.m_TemplateOfInstance[stored] = &def;
+		model.m_TemplateOfInstance.emplace(stored, &def);
+		if (rec.primitiveReceiverType) model.m_PrimitiveExtensions.Add(rec.primitiveReceiverType, stored);
+		model.m_FunctionInstantiations.Add(key, stored);
 		return QueryResult<const FunctionRecord*>::Success(stored);
 	}
 
@@ -448,7 +449,6 @@ namespace Scripting
 		if (!rt.Ok()) return Result::Fail(rt.error, rt.message);
 		auto params = ExpandParameters(model, fn, binding, unitId);
 		if (!params.Ok()) return Result::Fail(params.error, params.message);
-		model.Writes().Ask("a function template instance's signature");
 		FunctionType* sig = new FunctionType(rt.value, params.value.list, fn.IsVariadic());
 		Signature out;
 		out.type = model.m_Types->Own(sig);

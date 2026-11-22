@@ -15,10 +15,13 @@
 #include <unordered_map>
 #include "Model/Closures.h"
 #include "Model/LifecycleMethods.h"
+#include "Model/ModelMaking.h"
+#include "Model/Concurrent/MadeTables.h"
 #include "Parser/Nodes/Declarations/QualTypeNode.h"
 #include "Parser/Nodes/Declarations/NamespaceQualifiedNameNode.h"
 #include "Core/Core.h"
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <tuple>
 
@@ -179,12 +182,8 @@ namespace Scripting
 		const LifecycleMethods& LifecycleMethodsOf(const ObjectType* type) const;
 		/// The method a method record declares in its type; null for a free function or an extension method.
 		const ObjectType::MethodInfo* MethodForRecord(const FunctionRecord& record) const;
-		/// The extension methods whose receiver is the primitive `type` (`... extends float`); null when none.
-		const Core::Vector<const FunctionRecord*>* PrimitiveExtensions(const Type* type) const
-		{
-			auto it = m_PrimitiveExtensions.find(type);
-			return it != m_PrimitiveExtensions.end() ? &it->second : nullptr;
-		}
+		/// The extension methods whose receiver is the primitive `type` (`... extends float`), in the order they were made.
+		Core::Vector<const FunctionRecord*> PrimitiveExtensions(const Type* type) const;
 
 		/// The compiler-written lifecycle function of `type` (docs/language/06): created on first request,
 		/// owned by the model, lowered by HIR's Lifecycle. Create and Delete take no argument; Copy takes
@@ -266,22 +265,44 @@ namespace Scripting
 		/// name in the current scope layer. Signature types resolve against the current scope.
 		QueryResult<const FunctionRecord*> RegisterLocalFunction(const FunctionDefinitionNode& fn);
 
-		/// A lambda's closure type and call method (docs/language/07, D-22), built while its function lowers.
+		/// A lambda's closure type and call method (docs/language/07, D-22): a request, made once for the lambda whose
+		/// body is `spec.body` in the code `spec.owner`, while that code lowers.
 		const Closure* CreateClosure(const ClosureSpec& spec);
-		/// The closure made for the lambda whose body is `body` in the code `owner` (ClosureSpec), null before: a body
-		/// lowered again finds its lambdas' closures.
+		/// The closure made for the lambda whose body is `body` in the code `owner` (ClosureSpec), null before.
 		const Closure* ClosureMadeFor(const Core::String& owner, const AstNode* body) const;
 		/// The closure facts of a lambda's type; null for every other type.
 		const Closure* ClosureOf(const Type* t) const;
 
-		// --- Lowering on several threads ------------------------------------------------
-		/// Whether the model may change now: asked before every change lowering could read. Lowering freezes it while
-		/// several threads read it (CodeGenDriver::LowerInParallel).
-		ModelWrites& Writes() const { return *m_Writes; }
-		/// Makes every answer the model keeps lazily that lowering reads (layouts, lifecycle methods, the owners of
-		/// out-of-line template methods), so lowering on several threads finds them made instead of asking a frozen
-		/// model to make them.
+		// --- Lowering on several threads (docs/compiler/02, "Changes while bodies lower") -------
+		/// How the model changes while lowerings read it on several threads (Backend/Lowering/ParallelLowering): every
+		/// change is a request made under its lock, every table lowering reads is read without one.
+		const ModelMaking& Making() const { return *m_Making; }
+
+		/// While alive, lowerings read and change the model on several threads. It begins by making what the model keeps
+		/// lazily and showing what was made since the last one (Settle); when it ends, what its requests made is put in
+		/// one order (OrderMade), so the model's lists and the symbols' names are the same whatever the threads.
+		class SharedLowering
+		{
+		public:
+			explicit SharedLowering(const ProgramModel& model);
+			~SharedLowering();
+			SharedLowering(const SharedLowering&) = delete;
+			SharedLowering& operator=(const SharedLowering&) = delete;
+
+		private:
+			const ProgramModel& m_Model;
+			std::optional<ModelMaking::Sharing> m_Sharing;
+			uint32 m_Records;
+			uint32 m_ObjectTypes;
+			uint32 m_EnumTypes;
+		};
+
+		/// Makes every answer the model keeps lazily that lowering reads (layouts, the owners of out-of-line template
+		/// methods) and shows the types and scopes made since it last ran: from then on they do not change.
 		void Settle() const;
+		/// What the requests since the list counts given made, in one order: the records (with the `_<n>` of a symbol
+		/// two records have assigned in that order), the object and enum types, and the scopes they opened.
+		void OrderMade(uint32 records, uint32 objectTypes, uint32 enumTypes) const;
 
 		// --- Compile-time evaluation (D-91) -------------------------------------------
 		/// What runs a `[compile_time]` function a constant calls; null folds no calls. The driver that builds the model
@@ -422,14 +443,53 @@ namespace Scripting
 		/// nullptr when any segment is missing or not visible. Every name query goes through this.
 		const SymbolInfo* FindVisibleQualified(const Core::String& name, uint32 unitId, const Scope* context = nullptr) const;
 
+		// What lowering's requests key their tables by, hashed.
+		struct LifecycleKeyHash
+		{
+			size_t operator()(const std::pair<const ObjectType*, LifecycleOp>& key) const
+			{
+				return std::hash<const ObjectType*>()(key.first) * 4 + static_cast<size_t>(key.second);
+			}
+		};
+		struct TypeListHash
+		{
+			size_t operator()(const std::vector<const Type*>& types) const
+			{
+				size_t seed = types.size();
+				for (const Type* t : types) seed ^= std::hash<const Type*>()(t) + 0x9e3779b97f4a7c15ull + (seed << 6) + (seed >> 2);
+				return seed;
+			}
+		};
+		struct ClosureSiteHash
+		{
+			size_t operator()(const std::pair<Core::String, const AstNode*>& site) const
+			{
+				return std::hash<Core::String>()(site.first) ^ (std::hash<const AstNode*>()(site.second) << 1);
+			}
+		};
+		// LifecycleMethodsOf's answer for a type: the latest, read without a lock; every one given stays alive.
+		struct KnownLifecycle
+		{
+			uint32 methods = 0;
+			uint32 records = 0;
+			LifecycleMethods found;
+		};
+		struct LifecycleSlot
+		{
+			std::atomic<const KnownLifecycle*> known{ nullptr };
+		};
+		/// Keeps a type made while bodies lower in the model's list (OrderMade puts the lists in one order).
+		void KeepObjectType(const ObjectType* type) const;
+		void KeepEnumType(const EnumType* type) const;
+
 		DeclarationQueries* m_Pending = nullptr;
 		mutable uint32 m_InstantiationDepth = 0; // object instances being built inside one another (TemplateInstantiator)
-		std::unique_ptr<ModelWrites> m_Writes; // before the store and the table, which ask it
+		std::unique_ptr<ModelMaking> m_Making; // before the store, the table and the tables requests fill, which ask it
 		std::unique_ptr<TypeStore> m_Types;
 		std::unique_ptr<SymbolTable> m_Symbols;
-		mutable Core::Vector<std::pair<Core::String, ConstantValue>> m_Constants; // folded: qualified name -> value
-		mutable Core::Vector<const ObjectType*> m_ObjectTypes; // mutable: template instantiation registers new types lazily
-		mutable Core::Vector<const EnumType*> m_EnumTypes; // mutable: a class template instance's nested enums join lazily
+		mutable Core::Vector<const ObjectType*> m_ObjectTypes; // a request adds the types it makes (KeepObjectType)
+		mutable Core::Vector<const EnumType*> m_EnumTypes; // a class template instance's nested enums join (KeepEnumType)
+		mutable uint32 m_SettledTypes = 0; // the object types Settle has laid out
 		Core::Vector<const UnionType*> m_UnionTypes;
 		Core::Vector<const AsmStatementNode*> m_FileAssembly;
 		Core::Vector<AnnotatedNamespace> m_AnnotatedNamespaces;
@@ -441,37 +501,35 @@ namespace Scripting
 		const ProjectSet* m_Projects = nullptr;
 		std::unordered_map<uint32, uint32> m_ProjectOfUnit;
 		mutable uint32 m_ReachUnit = 0; // the unit whose declaration is being resolved (ProjectReach)
-		// name -> defs (one per declaring scope); a deque, because a class template instance registers its nested
-		// templates while other definitions are in use
-		mutable std::unordered_map<Core::String, std::deque<TemplateDef>> m_TypeTemplates;
+		// name -> defs (one per declaring scope); a class template instance adds its nested templates while other
+		// definitions are in use, so a definition never moves
+		mutable MadeLists<Core::String, TemplateDef> m_TypeTemplates{ *m_Making, "a type template" };
 		std::unordered_map<Core::String, Core::Vector<TemplateDef>> m_FunctionTemplates; // simple name -> every function template of that name (overloads, namespaces, extensions)
 		std::unordered_map<Core::String, Core::Vector<TemplateDef>> m_TypeSpecializations;     // name -> explicit and partial specializations of type templates
 		std::unordered_map<Core::String, Core::Vector<TemplateDef>> m_FunctionSpecializations; // name -> explicit specializations of function templates
-		mutable std::unordered_map<const FunctionRecord*, const TemplateDef*> m_TemplateOfInstance; // function template instance -> its template (partial ordering)
+		mutable GrowOnlyMap<const FunctionRecord*, const TemplateDef*> m_TemplateOfInstance; // function template instance -> its template (partial ordering)
 		ICompileTimeCalls* m_CompileTimeCalls = nullptr; // the driver's (CompileTimeCalls)
-		// Lazy caches: populated on first use from const query methods, hence mutable.
-		mutable std::unordered_map<Core::String, const Type*> m_TypeInstantiations;        // cache key -> concrete type
-		mutable std::unordered_map<const Type*, InstantiationBindings> m_InstantiationBindings; // concrete type -> bindings (its first)
-		mutable std::unordered_map<const FunctionRecord*, InstantiationBindings> m_FuncInstantiationBindings; // instantiated free-function record -> its bound params (a free function template has no containingType, so the method path's TypeInstantiationBindings cannot carry them)
-		mutable std::unordered_map<Core::String, const FunctionRecord*> m_FunctionInstantiations; // cache key -> record
-		mutable std::unordered_map<const ObjectType*, Core::Vector<const FunctionRecord*>> m_ExtensionMethods;
+		// The tables lowering's requests fill (docs/compiler/02, "Changes while bodies lower"), read without a lock. One
+		// keyed by what its answer is made from is a MadeMap: its answers are found once their request has ended. One
+		// keyed by a type or record the request made is found only through that new type or record.
+		mutable MadeMap<Core::String, const Type*> m_TypeInstantiations{ *m_Making, "a class template instance" }; // cache key -> concrete type
+		mutable GrowOnlyMap<const Type*, InstantiationBindings> m_InstantiationBindings; // concrete type -> bindings (its first)
+		mutable GrowOnlyMap<const FunctionRecord*, InstantiationBindings> m_FuncInstantiationBindings; // instantiated free-function record -> its bound params (a free function template has no containingType, so the method path's TypeInstantiationBindings cannot carry them)
+		mutable MadeMap<Core::String, const FunctionRecord*> m_FunctionInstantiations{ *m_Making, "a function template instance" }; // cache key -> record
+		mutable GrowOnlyMap<const ObjectType*, Core::Vector<const FunctionRecord*>> m_ExtensionMethods;
 		// Extension methods on a primitive receiver (`extends float`), by receiver type: they are in no method list.
-		mutable std::unordered_map<const Type*, Core::Vector<const FunctionRecord*>> m_PrimitiveExtensions;
+		mutable MadeLists<const Type*, const FunctionRecord*> m_PrimitiveExtensions{ *m_Making, "an extension of a primitive" };
 		// Parallel to each object type's method list: the lowering record for method i (null when
 		// the method has no body yet). Method order is stable - it IS the index.
-		mutable std::unordered_map<const ObjectType*, Core::Vector<const FunctionRecord*>> m_MethodRecords;
-		mutable std::unordered_map<const FunctionType*, const FunctionRecord*> m_RecordBySignature;
-		mutable std::map<std::pair<const ObjectType*, LifecycleOp>, const FunctionRecord*> m_SynthesizedLifecycle;
-		struct KnownLifecycle
-		{
-			uint32 methods = 0;
-			uint32 records = 0;
-			LifecycleMethods found;
-		};
-		mutable std::unordered_map<const ObjectType*, KnownLifecycle> m_LifecycleMethods; // LifecycleMethodsOf's
-		mutable std::unordered_map<const ObjectType*, const Scope*> m_TypeScopes; // type -> its class scope (member domain)
-		mutable std::unordered_map<const ObjectType*, std::deque<TemplateDef>> m_MemberTemplates; // type -> its member function templates (stable addresses)
-		mutable std::map<std::vector<const Type*>, const ObjectType*> m_ReturnLists; // element types -> the return list's struct
+		mutable GrowOnlyMap<const ObjectType*, Core::Vector<const FunctionRecord*>> m_MethodRecords;
+		mutable GrowOnlyMap<const FunctionType*, const FunctionRecord*> m_RecordBySignature;
+		mutable MadeMap<std::pair<const ObjectType*, LifecycleOp>, const FunctionRecord*, LifecycleKeyHash> m_SynthesizedLifecycle{ *m_Making,
+			"a compiler-written lifecycle function" };
+		mutable GrowOnlyMap<const ObjectType*, std::unique_ptr<LifecycleSlot>> m_LifecycleMethods; // LifecycleMethodsOf's
+		mutable std::deque<KnownLifecycle> m_LifecycleAnswers; // every answer LifecycleMethodsOf gave, under the lock
+		mutable GrowOnlyMap<const ObjectType*, const Scope*> m_TypeScopes; // type -> its class scope (member domain)
+		mutable GrowOnlyMap<const ObjectType*, std::deque<TemplateDef>> m_MemberTemplates; // type -> its member function templates (stable addresses)
+		mutable MadeMap<std::vector<const Type*>, const ObjectType*, TypeListHash> m_ReturnLists{ *m_Making, "a return list" }; // element types -> the return list's struct
 		// Out-of-line template methods: (class name, method name, parameter count, definition node).
 		// An out-of-line definition of a class template's method (`template<T> void Geo::Box<T>::Set(T v)`), registered
 		// in pass 1 before any binding exists; an instance takes the body when its in-class declaration has none.
@@ -490,10 +548,10 @@ namespace Scripting
 		TestRegistry m_Tests;
 		Core::Vector<AnnotationDeclarationSite> m_AnnotationSites; // each annotation declaration, as registered
 		DeclaredAnnotations m_DeclaredAnnotations;
-		mutable std::deque<std::vector<SymbolInfo>> m_PackStorage; // the elements of every bound pack (stable addresses)
-		std::unordered_map<const ObjectType*, std::unique_ptr<Closure>> m_Closures; // closure type -> its captures and call method
-		std::unordered_map<Core::String, uint32> m_ClosuresByOwner;                 // lambdas made so far in each piece of code
-		std::map<std::pair<Core::String, const AstNode*>, const Closure*> m_ClosuresMade; // ClosureMadeFor's
+		mutable std::deque<std::vector<SymbolInfo>> m_PackStorage; // the elements of every pack bound outside a lowering (stable addresses)
+		GrowOnlyMap<const ObjectType*, std::unique_ptr<Closure>> m_Closures; // closure type -> its captures and call method
+		std::unordered_map<Core::String, uint32> m_ClosuresByOwner;          // lambdas made so far in each piece of code, under the lock
+		MadeMap<std::pair<Core::String, const AstNode*>, const Closure*, ClosureSiteHash> m_ClosuresMade{ *m_Making, "a closure" }; // ClosureMadeFor's
 		bool m_Valid = false;
 	};
 

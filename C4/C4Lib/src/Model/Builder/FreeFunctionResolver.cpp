@@ -198,7 +198,7 @@ namespace Scripting
 		CheckFreeModifiers(f, rec);
 		const FunctionRecord* stored = m_Ctx.model->Symbols()->AddFunctionRecord(rec);
 		m_Ctx.model->m_RecordBySignature.emplace(sig.type, stored);
-		if (receiver.primitive) m_Ctx.model->m_PrimitiveExtensions[receiver.primitive].Push(stored);
+		if (receiver.primitive) m_Ctx.model->m_PrimitiveExtensions.Add(receiver.primitive, stored);
 		if (receiver.object) AddExtensionMethod(f, sig, stored, *receiver.object);
 		f.scope->Register(ScopeKey(*f.fn, f.name), SymbolInfo{ SymbolKind::Function }, stored); // grows the overload set (doc 08)
 		return stored;

@@ -7,6 +7,7 @@
 #include "Parser/Nodes/Expressions/BinaryExpressionNode.h"
 #include "Parser/Nodes/Expressions/AssignmentExpressionNode.h"
 #include "Parser/Nodes/Expressions/IdentifierExpressionNode.h"
+#include <atomic>
 #include <set>
 #include <vector>
 
@@ -15,11 +16,12 @@ namespace C4LSP::Features
 	// Server-side on/off flag. Defaults OFF: a bare language-server session serves stock compiler
 	// diagnostics only (override-only contract - nothing extra appears unless explicitly enabled).
 	// The editor plugin's setting feature-tidy is bound to this key and the client pushes {tidy:<value>} at
-	// startup plus live via workspace/didChangeConfiguration, so the plugin experience defaults ON.
-	static bool s_TidyEnabled = false;
+	// startup plus live via workspace/didChangeConfiguration, so the plugin experience defaults ON. Set on the message
+	// thread, read by the worker that publishes (BUG-492): atomic.
+	static std::atomic<bool> s_TidyEnabled = false;
 
-	void Tidy::SetEnabled(bool enabled) { s_TidyEnabled = enabled; }
-	bool Tidy::IsEnabled() { return s_TidyEnabled; }
+	void Tidy::SetEnabled(bool enabled) { s_TidyEnabled.store(enabled, std::memory_order_relaxed); }
+	bool Tidy::IsEnabled() { return s_TidyEnabled.load(std::memory_order_relaxed); }
 
 
 	namespace
@@ -137,7 +139,7 @@ namespace C4LSP::Features
 	Core::Vector<Protocol::Diagnostic> Tidy::ForDocument(Server::CompilationSession& session, const std::string& uri)
 	{
 		Core::Vector<Protocol::Diagnostic> result;
-		if (!s_TidyEnabled)
+		if (!IsEnabled())
 			return result; // feature off: zero tidy diagnostics, compiler diagnostics untouched
 
 		uint32 targetId = session.FindSourceIdByUri(uri);

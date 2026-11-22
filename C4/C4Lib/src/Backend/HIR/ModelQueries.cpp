@@ -148,9 +148,7 @@ namespace Scripting
 			if (found) return found;
 		}
 		// Primitive receiver: an `extends float` cast is in no method list, only in the primitive extensions.
-		const Core::Vector<const FunctionRecord*>* extensions = m_Model->PrimitiveExtensions(source);
-		if (!extensions) return nullptr;
-		for (const FunctionRecord* rec : *extensions)
+		for (const FunctionRecord* rec : m_Model->PrimitiveExtensions(source))
 		{
 			if (!rec->type || TypeHandle::UnwrapToValue(rec->type->GetReturnType()) != target) continue;
 			for (const auto& ann : rec->operatorAnnotations)

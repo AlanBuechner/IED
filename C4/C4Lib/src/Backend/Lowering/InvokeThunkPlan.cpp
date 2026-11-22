@@ -1,5 +1,6 @@
 #include "Backend/Lowering/InvokeThunkPlan.h"
 #include "Backend/HIR/InvokeThunk.h"
+#include "Backend/Lowering/ParallelLowering.h"
 #include "Backend/Reflection/RegistrationEmitter.h"
 #include "Model/ProgramModel.h"
 #include "Model/ReflectedEntities.h"
@@ -30,12 +31,12 @@ namespace Scripting
 		return targets;
 	}
 
-	std::vector<InvokeThunkPlan::Job> InvokeThunkPlan::Plan(ProgramModel& model, const std::vector<const FunctionRecord*>& targets, WorkerPool& pool,
-		std::deque<FunctionRecord>& records)
+	std::vector<InvokeThunkPlan::Job> InvokeThunkPlan::Plan(ProgramModel& model, const std::vector<const FunctionRecord*>& targets,
+		ParallelLowering& lowering, std::deque<FunctionRecord>& records)
 	{
 		m_Targets = targets;
 		m_Wanted.assign(targets.size(), Wanted());
-		pool.Run(targets.size(), [&](size_t i) {
+		lowering.Share(model, targets.size(), [&](size_t i) {
 			m_Wanted[i].shared = SharesInvokeThunk(model, *targets[i]);
 			m_Wanted[i].symbol = m_Wanted[i].shared ? SharedInvokeThunkSymbol(*targets[i]) : InvokeThunkSymbol(*targets[i]);
 		});

@@ -3,7 +3,7 @@
 Every open bug in the C4 compiler, runtime, Bedrock and tools. Add an entry when a bug is found;
 delete it when the fix lands.
 
-Next ID: **BUG-492**
+Next ID: **BUG-500**
 
 ## Rules for this file
 
@@ -46,6 +46,7 @@ Next ID: **BUG-492**
 | BUG-421 | C4LSP puts a dependency's declarations in the root project of a multi-project program | Tools | Low |
 | BUG-435 | Intermittent internal compiler error (0xC0000005) or corrupt partition bitcode compiling a large split program | Codegen | High |
 | BUG-441 | `threading.thread.sleep_is_precise` fails in the gates while the machine is busy: sleeps land on the 15.6 ms tick | Runtime | Medium |
+| BUG-495 | `Dap.Session.PauseBreaksInAndTerminateEnds` fails when its pause lands before the program reaches `Spin` | Tests | Low |
 
 ---
 
@@ -118,6 +119,19 @@ Next ID: **BUG-492**
 ## Interop, runtime and Bedrock
 
 ## Tools
+
+### BUG-495 `Dap.Session.PauseBreaksInAndTerminateEnds` fails when its pause lands before the program reaches `Spin`
+- **Area:** Tests
+- **Severity:** Low
+- **Status:** Open
+- **Found:** 2026-11-21
+- **Symptom:** `nuke gates` stopped once at unit-tests on `DapSessionTest.cpp(451): assertion "inSpin" failed` (chat I,
+  the worktree IED-i10, the machine busy with other builds); the same build passed it 6 runs of 6 alone right after.
+- **Where:** C4Testing `Tests/DAP/DapSessionTest.cpp` `PauseBreaksInAndTerminateEnds`: it sends `pause` right after
+  `configurationDone`, so on a busy machine the pause can stop the program in its start (the runtime, the global starts)
+  before `main` calls `Spin`, and no frame is `Spin`.
+- **Notes:** fix the test, not the adapter: pause until a frame is `Spin` (pause, look, `continue`, a few times), or wait
+  for the program to be in `Spin` first (a breakpoint on its loop line, removed before the pause).
 
 ### BUG-421 C4LSP puts a dependency's declarations in the root project of a multi-project program
 - **Area:** Tools

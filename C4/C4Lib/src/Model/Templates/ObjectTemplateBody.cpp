@@ -383,7 +383,6 @@ namespace Scripting
 	{
 		const TemplateDefinitionNode* own = definition.GetTemplateDefinition().Get();
 		if (!own) return;
-		m_Model.Writes().Ask("a method's bindings");
 		m_Model.m_FuncInstantiationBindings.emplace(rec, BindingsFor(m_Model, *own, m_Args));
 	}
 } // namespace Scripting

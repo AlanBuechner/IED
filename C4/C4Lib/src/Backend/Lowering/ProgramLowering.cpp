@@ -44,7 +44,17 @@ namespace Scripting
 			more = LowerGlobalStorage();
 			Timed("globals", step);
 		}
+		ReportViolations();
 		return !m_Errors.HasErrors();
+	}
+
+	// A change of the model outside a request while lowerings shared it is a race in the compiler, never the program's
+	// fault: it fails the build, so a test finds it whether or not the race did harm this time.
+	void ProgramLowering::ReportViolations()
+	{
+		for (const std::string& violation : m_Lowering.Violations())
+			m_Errors.AddError(SourceLocation(), Core::String("internal compiler error: lowering changed the model outside a request while "
+				"lowerings shared it (") + violation.c_str() + ")");
 	}
 
 	// Where lowering starts: every function written as it is that has a body of its own (a nested one comes with its
@@ -90,7 +100,7 @@ namespace Scripting
 		{
 			const std::vector<const FunctionRecord*> targets = m_Invokes.NewTargets(m_Model, defined);
 			if (targets.empty()) return;
-			const std::vector<InvokeThunkPlan::Job> jobs = m_Invokes.Plan(m_Model, targets, m_Lowering.Pool(), m_Program.records);
+			const std::vector<InvokeThunkPlan::Job> jobs = m_Invokes.Plan(m_Model, targets, m_Lowering, m_Program.records);
 			std::vector<LoweredBody> bodies = m_Lowering.LowerEach(m_Model, jobs.size(), [&](size_t i, ErrorTracker& errors) {
 				return LowerInvokeThunk(m_Model, errors, *jobs[i].target, *jobs[i].thunk, jobs[i].shared);
 			});

@@ -1,9 +1,12 @@
 #include "ParallelLoweringTest.h"
 #include "Backend/CodeGen/CodeGen.h"
+#include "Backend/Lowering/ParallelLowering.h"
 #include "Backend/ProgramBackend.h"
 #include "Compiler/Toolchain.h"
 #include "Compiler/WorkerPool.h"
-#include "Model/ModelWrites.h"
+#include "Model/Concurrent/MadeTables.h"
+#include "Model/ModelMaking.h"
+#include <algorithm>
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -21,6 +24,7 @@ namespace Testing
 	namespace
 	{
 		constexpr unsigned kThreads = 8;
+		constexpr int kRepeats = 3; // lowerings on threads compared with the one on one thread
 
 		SymbolInfo Local(uint32 slot)
 		{
@@ -44,6 +48,12 @@ namespace Testing
 			for (std::thread& thread : threads) thread.join();
 		}
 
+		// Waits on this thread until `value` is `wanted`.
+		void Await(const std::atomic<int>& value, int wanted)
+		{
+			while (value.load(std::memory_order_acquire) != wanted) std::this_thread::yield();
+		}
+
 		ProgramModel& MakeModel(CompilerInstance& compiler, const std::string& source, bool bedrock = false)
 		{
 			compiler.RegisterInMemory("t.cf", source.c_str());
@@ -53,27 +63,32 @@ namespace Testing
 			return compiler.GetProgramModelForLowering();
 		}
 
-		const FunctionRecord* Named(ProgramModel& model, const char* name)
+		std::vector<const FunctionRecord*> Records(ProgramModel& model, const std::function<bool(const FunctionRecord&)>& wanted)
 		{
 			Core::Vector<const FunctionRecord*> records;
 			model.AllFunctionRecords(records);
+			std::vector<const FunctionRecord*> out;
 			for (const FunctionRecord* record : records)
-				if (record->name == name && record->bodyNode) return record;
+				if (wanted(*record)) out.push_back(record);
+			return out;
+		}
+
+		const FunctionRecord* Named(ProgramModel& model, const char* name)
+		{
+			const auto found = Records(model, [&](const FunctionRecord& r) { return r.name == name && r.bodyNode; });
+			return found.empty() ? nullptr : found[0];
+		}
+
+		const ObjectType* TypeNamed(ProgramModel& model, const char* name)
+		{
+			for (const ObjectType* type : model.ObjectTypes())
+				if (type->GetName() == name) return type;
 			return nullptr;
 		}
 
-		// Whether `change` stops with ModelFrozen.
-		bool Refused(const std::function<void()>& change)
+		bool Contains(const std::vector<std::string>& list, const char* text)
 		{
-			try
-			{
-				change();
-				return false;
-			}
-			catch (const ModelFrozen&)
-			{
-				return true;
-			}
+			return std::any_of(list.begin(), list.end(), [&](const std::string& s) { return s.find(text) != std::string::npos; });
 		}
 
 		// Many functions that instantiate templates, make lambdas, and hold objects with compiler-written lifecycles.
@@ -94,6 +109,44 @@ namespace Testing
 					"}\n";
 				calls += "\tsum += F" + n + "(" + n + ");\n";
 			}
+			return source + "int32 main() {\n\tint32 sum = 0;\n" + calls + "\treturn sum;\n}\n";
+		}
+
+		// Functions that all ask for the same instances at once, of every kind a lowering makes: class templates with
+		// nested types and nested templates, member and extension templates, templates declared ahead of their
+		// definitions, return lists, closures, local types, compiler-written lifecycles.
+		std::string SameInstancesEverywhere(int count)
+		{
+			std::string source = "include \"bedrock.ch\"\n"
+				"template<T> struct Outer {\n"
+				"\tstruct Inner { public T value; public Core::String label; }\n"
+				"\ttemplate<U> struct Pair { public T first; public U second; }\n"
+				"\tpublic Inner inner;\n"
+				"\ttemplate<U> public U Scale(U u) { return (U)(u * (U)2); }\n"
+				"}\n"
+				"template<T> struct Two { public T first; public T second; }\n"
+				"template<T> T Sum() extends Two<T> { return first + second; }\n"
+				"template<T> T Twice(T v);\n"
+				"template<T> [T, int32] Split(T v) { return [v, 1]; }\n";
+			std::string calls;
+			for (int i = 0; i < count; ++i)
+			{
+				const std::string n = std::to_string(i);
+				const std::string kind = i % 3 == 0 ? "int32" : i % 3 == 1 ? "int64" : "double";
+				source += "int32 G" + n + "(int32 x) {\n"
+					"\tstruct Local { public int32 a; public Core::String b; }\n"
+					"\tLocal local; local.a = x;\n"
+					"\tOuter<" + kind + "> outer; outer.inner.value = (" + kind + ")x;\n"
+					"\tOuter<" + kind + ">::Pair<int16> pair; pair.second = (int16)" + n + ";\n"
+					"\tTwo<" + kind + "> two; two.first = (" + kind + ")x; two.second = (" + kind + ")" + n + ";\n"
+					"\tCore::Array<Outer<" + kind + ">::Inner> inners; inners.Push(outer.inner);\n"
+					"\tfunc<int32(int32)> add = [x](int32 v) -> int32 { return v + x; };\n"
+					"\t[" + kind + " sum, int32 one] = Split(two.Sum());\n"
+					"\treturn add(local.a) + (int32)Twice(sum) + one + (int32)outer.Scale(pair.second) + (int32)inners.Count();\n"
+					"}\n";
+				calls += "\tsum += G" + n + "(" + n + ");\n";
+			}
+			source += "template<T> T Twice(T v) { return v + v; }\n";
 			return source + "int32 main() {\n\tint32 sum = 0;\n" + calls + "\treturn sum;\n}\n";
 		}
 
@@ -210,60 +263,139 @@ namespace Testing
 		for (std::atomic<int>& hit : hits) TEST_ASSERT_EQ(hit.load(), 1);
 	}
 
-	void ParallelLoweringTest::AFrozenModelRefusesEveryChange()
+	// The thread making an answer finds it at once (an instance names itself); every other thread finds it only when
+	// the outermost request has ended, whole. A forgotten answer (a failed instance) is never shown.
+	void ParallelLoweringTest::ARequestIsShownWhenItsOutermostRequestEnds()
+	{
+		ModelMaking making;
+		MadeMap<int, int> answers(making, "an answer");
+		std::atomic<int> step = 0;
+		bool makerFoundItsOwn = false;
+		bool makerFoundTheForgotten = true;
+		std::thread maker([&] {
+			{
+				const ModelMaking::Request outer(making, "outer");
+				{
+					const ModelMaking::Request inner(making, "inner");
+					answers.Add(1, 10);
+					answers.Add(2, 20);
+					answers.Forget(2);
+				}
+				makerFoundItsOwn = answers.Find(1) && *answers.Find(1) == 10;
+				makerFoundTheForgotten = answers.Find(2) != nullptr;
+				step.store(1, std::memory_order_release);
+				Await(step, 2);
+			}
+			step.store(3, std::memory_order_release);
+		});
+		Await(step, 1);
+		const bool seenBeforeTheEnd = answers.Find(1) != nullptr;
+		step.store(2, std::memory_order_release);
+		Await(step, 3);
+		maker.join();
+		TEST_ASSERT(makerFoundItsOwn);
+		TEST_ASSERT(!makerFoundTheForgotten);
+		TEST_ASSERT(!seenBeforeTheEnd);
+		TEST_ASSERT(answers.Find(1) && *answers.Find(1) == 10);
+		TEST_ASSERT(answers.Find(2) == nullptr);
+		TEST_ASSERT_EQ(making.Requests().at("outer"), uint64(1));
+		TEST_ASSERT_EQ(making.Requests().at("inner"), uint64(1));
+	}
+
+	// A list is walked in the order added: what the request in progress added comes after what was shown, for its own
+	// thread only, and joins the end when it is shown. An element never moves.
+	void ParallelLoweringTest::AListAddedToInARequestIsShownInItsOrder()
+	{
+		ModelMaking making;
+		MadeLists<std::string, int> lists(making, "a list");
+		const int& first = lists.Add("a", 1);
+		std::atomic<int> step = 0;
+		std::vector<int> makerSaw;
+		std::thread maker([&] {
+			{
+				const ModelMaking::Request request(making, "adding");
+				lists.Add("a", 2);
+				lists.Add("b", 3);
+				lists.ForEach("a", [&](int v) { makerSaw.push_back(v); });
+				step.store(1, std::memory_order_release);
+				Await(step, 2);
+			}
+			step.store(3, std::memory_order_release);
+		});
+		Await(step, 1);
+		std::vector<int> othersSaw;
+		lists.ForEach("a", [&](int v) { othersSaw.push_back(v); });
+		const bool bSeen = lists.Has("b");
+		step.store(2, std::memory_order_release);
+		Await(step, 3);
+		maker.join();
+		TEST_ASSERT(makerSaw == std::vector<int>({ 1, 2 }));
+		TEST_ASSERT(othersSaw == std::vector<int>({ 1 }));
+		TEST_ASSERT(!bSeen);
+		std::vector<int> after;
+		lists.ForEach("a", [&](int v) { after.push_back(v); });
+		TEST_ASSERT(after == std::vector<int>({ 1, 2 }));
+		TEST_ASSERT(lists.First("b") && *lists.First("b") == 3);
+		TEST_ASSERT(lists.First("a") == &first);
+	}
+
+	// While lowerings share the model a type or scope they read never changes, and a table changes only inside a request:
+	// anything else is a race the driver reports (ProgramLowering, an internal error). A request and interning are no
+	// violation, and outside a sharing nothing is.
+	void ParallelLoweringTest::AChangeOutsideARequestIsAViolationWhileLoweringsShare()
 	{
 		CompilerInstance compiler;
 		ProgramModel& model = MakeModel(compiler, "struct S { public int32 v; }\nint32 main() { return 0; }\n");
-		const ObjectType* s = nullptr;
-		for (const ObjectType* type : model.ObjectTypes())
-			if (type->GetName() == "S") s = type;
+		const ObjectType* s = TypeNamed(model, "S");
 		TEST_ASSERT(s != nullptr);
-
-		model.Writes().Freeze(true);
-		TEST_ASSERT(Refused([&] {
-			auto type = std::make_unique<ObjectType>(TypeKind::Object, "T");
-			model.TypeStorePtr()->Own(type.get());
-			type.release();
-		}));
-		TEST_ASSERT(Refused([&] { FunctionRecord record; record.mangledName = "F"; model.Symbols()->AddFunctionRecord(record); }));
-		TEST_ASSERT(Refused([&] { model.Symbols()->CreateScope(Scope::Kind::Namespace, "N", nullptr); }));
-		TEST_ASSERT(Refused([&] { model.Symbols()->GetRoot()->Register("name", Local(0)); }));
-		TEST_ASSERT(Refused([&] { ObjectType::FieldInfo field; field.mName = "w"; const_cast<ObjectType*>(s)->AddField(field); }));
-		TEST_ASSERT(Refused([&] { model.EnsureSynthesizedLifecycle(s, LifecycleOp::Copy); }));
-		TEST_ASSERT(!Refused([&] { model.TypeStorePtr()->Pointer(s); })); // interning changes nothing lowering reads
-		model.Writes().Freeze(false);
-		TEST_ASSERT(model.EnsureSynthesizedLifecycle(s, LifecycleOp::Copy) != nullptr);
+		const FunctionRecord* copy = nullptr;
+		{
+			const ProgramModel::SharedLowering sharing(model);
+			model.Symbols()->GetRoot()->Register("name", Local(0));
+			ObjectType::FieldInfo field;
+			field.mName = "w";
+			const_cast<ObjectType*>(s)->AddField(field);
+			copy = model.EnsureSynthesizedLifecycle(s, LifecycleOp::Copy);
+			model.TypeStorePtr()->Pointer(s);
+		}
+		const std::vector<std::string> violations = model.Making().TakeViolations();
+		TEST_ASSERT_EQ(violations.size(), size_t(2));
+		TEST_ASSERT(Contains(violations, "a name in a scope lowerings read"));
+		TEST_ASSERT(Contains(violations, "a field"));
+		TEST_ASSERT(model.Making().TakeViolations().empty());
+		TEST_ASSERT(copy != nullptr && copy == model.SynthesizedLifecycle(s, LifecycleOp::Copy));
+		TEST_ASSERT_EQ(std::string(copy->mangledName.c_str()), std::string("__c4_copy_S"));
+		model.Symbols()->GetRoot()->Register("other", Local(1));
+		TEST_ASSERT(model.Making().TakeViolations().empty());
 	}
 
-	void ParallelLoweringTest::AStoppedLoweringNamesAnInstanceToMake()
+	// Every body asks for the same instances at once: each is made once, by whichever asks first, and found whole by the
+	// others, which lower to the end without a second try.
+	void ParallelLoweringTest::EveryLoweringThatAsksFindsTheOneInstance()
 	{
+		std::string source = "template<T> struct Box { public T value; public T Get() const { return value; } }\n"
+			"template<T> T Pick(T a, T b) { return a; }\n";
+		for (int i = 0; i < 64; ++i)
+			source += "int32 U" + std::to_string(i) + "() { Box<int32> b; b.value = Pick(" + std::to_string(i) + ", 1); return b.Get(); }\n";
+		source += "int32 main() { return 0; }\n";
 		CompilerInstance compiler;
-		ProgramModel& model = MakeModel(compiler,
-			"template<T> T Pick(T a, T b) { return a; }\nint32 Use() { return Pick(1, 2); }\nint32 main() { return Use(); }\n");
-		const FunctionRecord* use = Named(model, "Use");
-		TEST_ASSERT(use != nullptr);
-		ErrorTracker errors;
-		std::function<void()> make;
-		model.Writes().Freeze(true);
-		try
-		{
-			LowerFunction(model, errors, use);
-		}
-		catch (const ModelFrozen& frozen)
-		{
-			make = frozen.make;
-		}
-		model.Writes().Freeze(false);
-		TEST_ASSERT(make != nullptr);
-		make();
-		model.Writes().Freeze(true);
-		const bool refused = Refused([&] { TEST_ASSERT(LowerFunction(model, errors, use).complete); });
-		model.Writes().Freeze(false);
-		TEST_ASSERT(!refused); // the instance was made: the lowering finds it
-		TEST_ASSERT(!errors.HasErrors());
+		ProgramModel& model = MakeModel(compiler, source);
+		const std::vector<const FunctionRecord*> users = Records(model, [](const FunctionRecord& r) { return r.name.rfind("U", 0) == 0 && r.bodyNode; });
+		TEST_ASSERT_EQ(users.size(), size_t(64));
+		ParallelLowering lowering(kThreads);
+		const std::vector<LoweredBody> bodies = lowering.Lower(model, users);
+		for (const LoweredBody& body : bodies) TEST_ASSERT(body.tree->complete && !body.errors.HasErrors());
+		TEST_ASSERT(lowering.Violations().empty());
+		TEST_ASSERT_EQ(lowering.Stats().bodies, uint64_t(64));
+		TEST_ASSERT_EQ(Records(model, [](const FunctionRecord& r) { return r.mangledName.rfind("Pick_Tint32_E", 0) == 0; }).size(), size_t(1));
+		TEST_ASSERT_EQ(Records(model, [](const FunctionRecord& r) { return r.mangledName.rfind("Box_Tint32_E_Get", 0) == 0; }).size(), size_t(1));
+		uint32 instances = 0; // the template's own type is named Box too: only an instance has arguments
+		for (const ObjectType* type : model.ObjectTypes()) instances += type->GetName() == "Box" && !type->GetTemplateArguments().Empty() ? 1 : 0;
+		TEST_ASSERT_EQ(instances, 1u);
 	}
 
-	void ParallelLoweringTest::ClosuresAreMadeOneARoundInTheirOrder()
+	// A body's lambdas are made by its one lowering, numbered in its order; lowering it again finds them.
+	void ParallelLoweringTest::ALoweringMakesItsClosuresInItsOrder()
 	{
 		CompilerInstance compiler;
 		ProgramModel& model = MakeModel(compiler,
@@ -274,33 +406,36 @@ namespace Testing
 			"}\nint32 main() { return Use(3); }\n");
 		const FunctionRecord* use = Named(model, "Use");
 		TEST_ASSERT(use != nullptr);
+		const uint32 before = model.ObjectTypes().Count();
+		ParallelLowering lowering(kThreads);
+		TEST_ASSERT(lowering.Lower(model, { use })[0].tree->complete);
+		TEST_ASSERT_EQ(model.ObjectTypes().Count(), before + 2);
 		std::vector<std::string> made;
-		for (int round = 0; round < 3; ++round)
+		for (uint32 i = before; i < model.ObjectTypes().Count(); ++i) made.push_back(model.ObjectTypes()[i]->GetName().c_str());
+		TEST_ASSERT(made[0].size() > 2 && made[0].substr(made[0].size() - 2) == "_0");
+		TEST_ASSERT(made[1].size() > 2 && made[1].substr(made[1].size() - 2) == "_1");
+		TEST_ASSERT_EQ(lowering.Stats().requests.at("a closure"), uint64_t(2));
+		TEST_ASSERT(ParallelLowering(kThreads).Lower(model, { use })[0].tree->complete);
+		TEST_ASSERT_EQ(model.ObjectTypes().Count(), before + 2);
+	}
+
+	// A template declared ahead of its definition has two instances of one symbol (the declaration's, without a body,
+	// and the definition's): which is `_1` follows from where they are declared, never from which thread asked first.
+	void ParallelLoweringTest::RecordsMadeOnThreadsAreNamedInOneOrder()
+	{
+		std::string source = "template<T> T Ahead(T v);\n";
+		for (int i = 0; i < 48; ++i)
+			source += "int32 A" + std::to_string(i) + "() { return Ahead(" + std::to_string(i) + ") + (int32)Ahead((int64)" + std::to_string(i) + "); }\n";
+		source += "template<T> T Ahead(T v) { return v + (T)1; }\nint32 main() { return A0(); }\n";
+		const Lowered one = LowerOn(source, 1);
+		TEST_ASSERT(one.ok);
+		TEST_ASSERT(one.module.find("Ahead_Tint32_E") != std::string::npos);
+		for (int repeat = 0; repeat < kRepeats; ++repeat)
 		{
-			ErrorTracker errors;
-			std::function<void()> make;
-			const char* what = nullptr;
-			model.Writes().Freeze(true);
-			try
-			{
-				TEST_ASSERT(LowerFunction(model, errors, use).complete);
-			}
-			catch (const ModelFrozen& frozen)
-			{
-				make = frozen.make;
-				what = frozen.what;
-			}
-			model.Writes().Freeze(false);
-			TEST_ASSERT_EQ(std::string(what ? what : "nothing"), std::string(make ? "a closure" : "nothing"));
-			if (!make) break;
-			const uint32 before = model.ObjectTypes().Count();
-			make();
-			model.Settle(); // as between rounds: the new closure type's lazily kept answers
-			TEST_ASSERT_EQ(model.ObjectTypes().Count(), before + 1);
-			made.push_back(model.ObjectTypes().Back()->GetName().c_str());
+			const Lowered eight = LowerOn(source, kThreads);
+			TEST_ASSERT(eight.ok);
+			TEST_ASSERT(one.module == eight.module);
 		}
-		TEST_ASSERT_EQ(made.size(), size_t(2)); // one closure a round, then the body lowers
-		TEST_ASSERT(made[0].find("_0") != std::string::npos && made[1].find("_1") != std::string::npos);
 	}
 
 	void ParallelLoweringTest::LoweringOnEightThreadsBuildsTheSameModule()
@@ -311,6 +446,22 @@ namespace Testing
 		TEST_ASSERT(one.ok && eight.ok);
 		TEST_ASSERT(one.module.find("F59") != std::string::npos);
 		TEST_ASSERT(one.module == eight.module);
+	}
+
+	// The race this design must not have: many bodies asking for the same instances of every kind at once.
+	void ParallelLoweringTest::ManyLoweringsAskForTheSameInstancesAtOnce()
+	{
+		const std::string source = SameInstancesEverywhere(72);
+		const Lowered one = LowerOn(source, 1);
+		TEST_ASSERT(one.ok);
+		for (const std::string& error : one.errors) TEST_ASSERT_EQ(error, std::string());
+		TEST_ASSERT(one.module.find("G71") != std::string::npos);
+		for (int repeat = 0; repeat < kRepeats; ++repeat)
+		{
+			const Lowered eight = LowerOn(source, kThreads);
+			TEST_ASSERT(eight.ok);
+			TEST_ASSERT(one.module == eight.module);
+		}
 	}
 
 	void ParallelLoweringTest::DiagnosticsKeepTheOrderOfTheFunctions()

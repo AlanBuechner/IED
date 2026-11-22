@@ -56,8 +56,10 @@ namespace Scripting
 		std::unordered_map<const FunctionRecord*, llvm::Function*> m_ThunkFunctions; // each thunk emitted, in its partition
 		ImageDescription m_Image;              // a split program's image (D-82)
 		std::string m_ImageKey;
-		std::future<std::string> m_ImageKeying; // the key while its thread works it out
 		std::string m_ImageTriple;
 		std::string m_ImageLayout;
+		// The key while its thread works it out from the image, the triple and the layout. Last, so it is destroyed first:
+		// its thread is done before what it reads goes, also when nothing asked for the key (BUG-494).
+		std::future<std::string> m_ImageKeying;
 	};
 } // namespace Scripting

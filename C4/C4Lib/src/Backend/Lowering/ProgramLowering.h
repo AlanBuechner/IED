@@ -60,6 +60,8 @@ namespace Scripting
 		void LowerTypeThunks();
 		/// What the storage of each global not looked at yet needs. Whether that lowered any function.
 		bool LowerGlobalStorage();
+		/// The model's changes lowerings made outside a request while they shared it, as internal errors.
+		void ReportViolations();
 		/// Adds the time from `since` to now to `step`, and moves `since` to now.
 		void Timed(const char* step, std::chrono::steady_clock::time_point& since);
 

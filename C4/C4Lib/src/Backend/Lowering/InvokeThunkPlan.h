@@ -2,7 +2,6 @@
 #include "Backend/Lowering/LoweredProgram.h"
 #include "Backend/Lowering/ScriptLowering.h"
 #include "Backend/Reflection/ReflectionScope.h"
-#include "Compiler/WorkerPool.h"
 #include <deque>
 #include <functional>
 #include <optional>
@@ -13,6 +12,7 @@
 
 namespace Scripting
 {
+	class ParallelLowering;
 	class ProgramModel;
 
 	/// How reflection calls each function it registers (D-50): through a thunk of its own, or the one every function of
@@ -36,8 +36,8 @@ namespace Scripting
 		/// object, so the method is needed: docs/runtime/02 section 3.2).
 		std::vector<const FunctionRecord*> NewTargets(const ProgramModel& model, const std::function<bool(const FunctionRecord&)>& defined);
 		/// The thunks `targets` need, in their order: each its own, or the one its signature shares, once; their records
-		/// added to `records`. What each target wants is worked out on `pool` (it only reads).
-		std::vector<Job> Plan(ProgramModel& model, const std::vector<const FunctionRecord*>& targets, WorkerPool& pool,
+		/// added to `records`. What each target wants is worked out on lowering's threads.
+		std::vector<Job> Plan(ProgramModel& model, const std::vector<const FunctionRecord*>& targets, ParallelLowering& lowering,
 			std::deque<FunctionRecord>& records);
 		/// Which of the last plan's jobs lowered completely (`complete[i]`): each of its targets that has a thunk then,
 		/// with that thunk. A function whose thunk did not lower is one reflection cannot call.

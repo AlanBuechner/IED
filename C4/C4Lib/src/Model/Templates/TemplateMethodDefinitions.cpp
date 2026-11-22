@@ -130,21 +130,19 @@ namespace Scripting
 			if (def.definition->GetOwnerTemplateDefinition()) continue;
 			const Core::String qualifier = Qualifier(*def.definition);
 			const Core::String start = "the definition of '" + qualifier + "::" + def.name + "' ";
-			auto templates = model.m_TypeTemplates.find(def.owner);
 			const Scope* ownerScope = OwnerScope(model, def);
-			if (templates == model.m_TypeTemplates.end() || !ownerScope)
+			if (!model.m_TypeTemplates.Has(def.owner) || !ownerScope)
 			{
 				if (!DeclaresMemberTemplate(model, def)) out.Push({ def.definition, start + "names no class template '" + qualifier + "'" });
 				continue;
 			}
 			Candidates all;
-			for (const ProgramModel::TemplateDef& candidate : templates->second)
-			{
-				if (!candidate.objectBody || candidate.declScope != ownerScope) continue;
+			model.m_TypeTemplates.ForEach(def.owner, [&](const ProgramModel::TemplateDef& candidate) {
+				if (!candidate.objectBody || candidate.declScope != ownerScope) return;
 				const Candidates found = CandidatesIn(model, candidate.params, *candidate.objectBody, def.name, *def.definition);
 				all.named += found.named;
 				all.fitting += found.fitting;
-			}
+			});
 			if (all.fitting) continue;
 			out.Push({ def.definition, start + "matches no declaration in '" + qualifier + "': " +
 				(all.named ? "its parameters, return type or const differ from every '" + def.name + "' it declares"
@@ -156,7 +154,7 @@ namespace Scripting
 	const Scope* TemplateMethodDefinitions::OwnerScope(const ProgramModel& model, const ProgramModel::TemplateMethodDef& def)
 	{
 		if (def.ownerKnown) return def.ownerScope;
-		model.Writes().Ask("a template method's owner");
+		model.Making().AssertMaking("a template method's owner, not settled before lowering");
 		const Scope* from = QualifierScope(model, def);
 		const ProgramModel::TemplateDef* chosen = from ? TemplateInstantiator().ChooseTypeDefinition(model, def.owner, from) : nullptr;
 		def.ownerScope = chosen ? chosen->declScope : nullptr;
