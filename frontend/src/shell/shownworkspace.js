@@ -3,9 +3,12 @@
 // folder it showed: an id that names another folder now (a master that lost its workspaces.json) is never taken for
 // this window's, so a reconnecting page never goes on showing - and editing - another project under its old tabs.
 
-// Two spellings of one folder ("C:\Work\Game", "c:/work/game/") are one root, as the server's TrustKey has it.
+// Two spellings of one folder ("C:\Work\Game", "c:/work/game/") are one root, as the server's TrustKey has it: case
+// folded only for a Windows root (a drive letter, a \\server share), whose names ignore it - on Linux "/home/a/Game"
+// and "/home/a/game" are two folders (src/fs/PathCase.ch).
 export function rootKey(root) {
-	return String(root || "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+	const path = String(root || "").replace(/\\/g, "/").replace(/\/+$/, "");
+	return /^([A-Za-z]:|\/\/)/.test(path) ? path.toLowerCase() : path;
 }
 
 export function sameRoot(a, b) {

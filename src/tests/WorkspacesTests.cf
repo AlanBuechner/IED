@@ -3,6 +3,7 @@
 // opens as its solution.
 
 include "services/Workspaces.ch"
+include "fs/PathCase.ch"
 include "services/Trash.ch"
 include "solutions/Model.ch"
 
@@ -91,7 +92,8 @@ class WorkspaceTests {
 		assert_true(solution->LinkedFile(Core::StringView("@Anime")).View() == FS::Path("D:/Claymore/Plugins/Anime").View(), "the link itself is the root");
 		assert_true(solution->LinkedFile(Core::StringView("@Nothing/a.cf")).IsEmpty() && solution->LinkedFile(Core::StringView("Game/a.cf")).IsEmpty(), "no such link, or none at all");
 		Core::String path;
-		assert_true(solution->LinkedPath(FS::Path("d:\\claymore\\plugins\\anime\\src\\b.cf"), path) && path == "@Anime/src/b.cf", path.CStr());
+		assert_true(solution->LinkedPath(FS::Path("D:\\Claymore\\Plugins\\Anime\\src\\b.cf"), path) && path == "@Anime/src/b.cf", path.CStr());
+		assert_true(solution->LinkedPath(FS::Path("d:/claymore/plugins/anime/src/b.cf"), path) == Ied::PathsIgnoreCase(), "in another case only where names ignore it (Windows)");
 		assert_true(!solution->LinkedPath(FS::Path("D:/Claymore/Other/c.cf"), path), "under no linked root");
 		assert_true(!solution->LinkedPath(FS::Path("C:/Games/Mine/Game/a.cf"), path), "a file of the folder is no link's");
 

@@ -109,6 +109,31 @@ class ControlTests(ServerTestCase):
 		self.assertEqual(("folder", os.path.normcase(os.path.realpath(inner))), roots[opened["wsId"]])
 		self.assertEqual(("folder", os.path.normcase(os.path.realpath(deeper))), roots[nested["wsId"]])
 
+	async def test_folders_whose_names_differ_only_in_case(self):
+		"""Linux's names have case (src/fs/PathCase.ch): Game and game are two folders, so two workspaces, and trusting
+		one does not trust the other. On Windows they are one folder, which either spelling opens."""
+		upper = os.path.join(self.folder, "Game")
+		lower = os.path.join(self.folder, "game")
+		os.makedirs(upper)
+		first = self.result("open", {"path": upper})
+		if os.name == "nt":
+			again = self.result("open", {"path": lower})
+			self.assertEqual((first["wsId"], ""), (again["wsId"], again["path"]), "one folder on Windows")
+			return
+		os.makedirs(lower)
+		second = self.result("open", {"path": lower})
+		self.assertNotEqual(first["wsId"], second["wsId"], "two folders on Linux, two workspaces")
+		self.assertEqual("", second["path"])
+		with open(os.path.join(lower, "main.cf"), "w") as f:
+			f.write("int32 main() { return 0; }\n")
+		inside = self.result("open", {"path": os.path.join(lower, "main.cf")})
+		self.assertEqual((second["wsId"], "main.cf"), (inside["wsId"], inside["path"]), "a file of game is game's, not its twin's")
+		client = await RoutedClient.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.server.sign_in()})
+		await client.request("ws.setTrust", {"wsId": first["wsId"], "trusted": True})
+		listed = {ws["wsId"]: ws["trusted"] for ws in (await client.request("ws.list"))["workspaces"]}
+		self.assertEqual((True, False), (listed[first["wsId"]], listed[second["wsId"]]), "trusting Game is not trusting game")
+		client.abort()
+
 	def test_errors(self):
 		self.assertEqual(-32601, self.pipe.call("nope")["error"]["code"])
 		self.assertEqual(-32602, self.pipe.call("open", {})["error"]["code"])

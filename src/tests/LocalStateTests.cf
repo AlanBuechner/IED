@@ -31,7 +31,7 @@ class LocalStateTests {
 		Core::String key = Ied::TextDigest(Ied::TrustKey(LocalView("C:/Work/Notes")).View());
 		Core::String expected = Core::String("C:/AppData/IED/workspaces/") + key.View().Substring(0, 16);
 		assert_se(expected.CStr(), Ied::LocalStateFolder(FS::Path("C:/Work/Notes"), LocalView("folder"), appData.View()).CStr(), "a folder: the app data, by the folder's key");
-		assert_se(expected.CStr(), Ied::LocalStateFolder(FS::Path("c:\\work\\notes\\"), LocalView("file"), appData.View()).CStr(), "the key folds case, separators and a trailing slash");
+		assert_se(expected.CStr(), Ied::LocalStateFolder(FS::Path("C:\\Work\\Notes\\"), LocalView("file"), appData.View()).CStr(), "the key folds separators and a trailing slash (case: PathCaseTests)");
 	}
 
 	[test("what_paths_name")]
@@ -40,7 +40,7 @@ class LocalStateTests {
 		FS::Path state = FS::Path("C:/AppData/IED/workspaces/abc");
 		assert_se("C:/AppData/IED/workspaces/abc/chats/c1/media/m3-a.png", Ied::LocalOrRootFile(root, state, LocalView(".ied/local/chats/c1/media/m3-a.png")).CStr(), "under .ied/local: the local state");
 		assert_se("C:/AppData/IED/workspaces/abc", Ied::LocalOrRootFile(root, state, LocalView(".ied/local")).CStr(), "the folder itself");
-		assert_se("C:/AppData/IED/workspaces/abc/x", Ied::LocalOrRootFile(root, state, LocalView(".IED\\Local\\x")).CStr(), "any case, either separator");
+		assert_se("C:/AppData/IED/workspaces/abc/x", Ied::LocalOrRootFile(root, state, LocalView(".ied\\local\\x")).CStr(), "either separator (case: PathCaseTests)");
 		assert_se("C:/Work/Notes/.ied/localx", Ied::LocalOrRootFile(root, state, LocalView(".ied/localx")).CStr(), "a name that only starts like it");
 		assert_se("C:/Work/Notes/.ied/skills/a.md", Ied::LocalOrRootFile(root, state, LocalView(".ied/skills/a.md")).CStr(), "the rest of .ied is the folder's");
 		assert_se("C:/Work/Notes", Ied::LocalOrRootFile(root, state, LocalView("")).CStr(), "the root");

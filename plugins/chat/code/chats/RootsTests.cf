@@ -36,7 +36,12 @@ class RootsTests {
 		folders.Push(Ai::RootFolder{ Core::String("deep"), Core::String("C:/GameDev/IED/toolchains") });
 		assert_se("ied:/C4/docs/a.md", Ai::AliasedPath(folders, Core::StringView("C:\\GameDev\\IED\\C4\\docs\\a.md")).CStr(), "in a root, as the code tools print it");
 		assert_se("deep:/c4/dev/b.ch", Ai::AliasedPath(folders, Core::StringView("C:/GameDev/IED/toolchains/c4/dev/b.ch")).CStr(), "the deepest folder names it");
+		assert_se("Claymore/Plugins/a.cf", Ai::AliasedPath(folders, Core::StringView("C:\\GameDev\\Claymore\\Claymore\\Plugins\\a.cf")).CStr(), "in the workspace: relative, either separator");
+#if defined(PLATFORM_LINUX)
+		assert_se("c:/gamedev/claymore/a.cf", Ai::AliasedPath(folders, Core::StringView("c:/gamedev/claymore/a.cf")).CStr(), "a case twin of the workspace is another folder on Linux: as it is");
+#else
 		assert_se("Claymore/Plugins/a.cf", Ai::AliasedPath(folders, Core::StringView("c:/gamedev/claymore/Claymore/Plugins/a.cf")).CStr(), "in the workspace: relative, any case");
+#endif
 		assert_se("ied:/", Ai::AliasedPath(folders, Core::StringView("C:/GameDev/IED")).CStr(), "a root's folder itself");
 		assert_se("C:/GameDev/IEDX/a.cf", Ai::AliasedPath(folders, Core::StringView("C:/GameDev/IEDX/a.cf")).CStr(), "a folder of a longer name is no root's");
 		assert_se("D:/Other/a.cf", Ai::AliasedPath(folders, Core::StringView("D:/Other/a.cf")).CStr(), "outside every folder: as it is");

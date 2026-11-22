@@ -19,9 +19,20 @@ namespace Ied
 		return "failed";
 	}
 
-	Core::String FolderKey(Core::StringView root) {
-		Core::String digest = TextDigest(TrustKey(root).View());
+	static Core::String KeyDigest(Core::StringView key) {
+		Core::String digest = TextDigest(key);
 		return Core::String(digest.View().Substring(0, 16));
+	}
+
+	Core::String FolderKey(Core::StringView root) { return KeyDigest(TrustKey(root).View()); }
+
+	// servers/<key> an older Linux build named by the root's case-folded key becomes the root's own, once (its plugins'
+	// state, the language servers' stages); of two folders whose names differ only in case, the first started takes it.
+	static void TakeCaseFoldedState(Server* server, Core::StringView root, const FS::Path& state) {
+		FS::Path folded = state.Parent() / KeyDigest(FoldedTrustKey(root).View()).View();
+		if (folded.View() == state.View() || !FS::IsDirectory(folded.CStr()) || FS::IsDirectory(state.CStr())) return;
+		const bool moved = FS::Rename(folded.CStr(), state.CStr());
+		server->Log((((Core::String(moved ? "moved " : "could not move ") + folded.View()) + " to ") + state.View()).View());
 	}
 
 	bool SameSecret(Core::StringView a, Core::StringView b) {
@@ -52,6 +63,7 @@ namespace Ied
 		Core::String key = FolderKey(ws->m_Root.View());
 		FS::Path data = FS::Path(m_Server->m_Config.m_DataDir.View());
 		record->m_StateDir = Core::String((data / "servers" / key.View()).View());
+		TakeCaseFoldedState(m_Server, ws->m_Root.View(), FS::Path(record->m_StateDir.View()));
 		record->m_LogPath = Core::String((data / "logs" / (Core::String("workspace-") + key.View() + ".log").View()).View());
 		record->m_State = ServerState::Starting;
 		record->m_ExitCode = -1;

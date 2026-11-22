@@ -43,7 +43,7 @@ class ServersTests {
 		assert_true(!Ied::SameSecret(other.View(), secret.View()), "one digit off");
 		assert_true(!Ied::SameSecret(Core::StringView(""), Core::StringView("")), "an empty secret is none");
 		assert_true(!Ied::SameSecret(Core::StringView("ab"), secret.View()), "another length");
-		assert_se(Ied::FolderKey(Core::StringView("C:/Work/Game")).CStr(), Ied::FolderKey(Core::StringView("c:\\work\\game\\")).CStr(), "case and separators do not matter");
+		assert_se(Ied::FolderKey(Core::StringView("C:/Work/Game")).CStr(), Ied::FolderKey(Core::StringView("C:\\Work\\Game\\")).CStr(), "separators and a trailing slash do not matter (case: PathCaseTests)");
 		assert_eq((int64)16, Ied::FolderKey(Core::StringView("C:/Work/Game")).ByteLength(), "16 hex digits");
 	}
 

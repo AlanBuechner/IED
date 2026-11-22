@@ -32,7 +32,7 @@ class KnownWorkspacesTests {
 		// The next run opens them the other way round (the desktop app opens its windows' folders at once).
 		Ied::KnownWorkspaces again;
 		again.Load(file.View(), error);
-		assert_se("w2", again.IdFor(Core::StringView("c:\\work\\engine\\"), 300, none).CStr(), "its own id, in another spelling, opened first");
+		assert_se("w2", again.IdFor(Core::StringView("C:\\Work\\Engine\\"), 300, none).CStr(), "its own id, in another spelling, opened first");
 		assert_se("w1", again.IdFor(Core::StringView("C:/Work/Game"), 400, Ids("w2", nullptr)).CStr(), "and the other's");
 		assert_se("w3", again.IdFor(Core::StringView("C:/Work/Tools"), 500, Ids("w1", "w2")).CStr(), "a new folder: a number none had");
 		FS::RemoveAll(file.Parent().CStr());

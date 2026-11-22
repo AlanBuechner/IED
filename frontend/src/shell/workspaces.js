@@ -5,18 +5,16 @@
 
 import { h, icon, iconFrom } from "/ui-kit/dom.js";
 import { FILE, FOLDER, SOLUTION } from "/ui-kit/fileglyphs.js";
+import { rootKey } from "./shownworkspace.js";
 
 const ON_THE_SERVER = "ied <folder or .iedsln>";
 const SWITCHER_RECENT = 10;
 
-function folded(path) {
-	return (path || "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-}
-
-// Whether a recent project is the open workspace `ws`: a solution by its file's folder, anything else by its folder.
+// Whether a recent project is the open workspace `ws`: a solution by its file's folder, anything else by its folder
+// (paths compared as the server does: case only on Windows, rootKey).
 export function isProjectOf(project, ws) {
-	if (project.kind === "solution") return ws.kind === "solution" && folded(project.path).replace(/\/[^/]*$/, "") === folded(ws.root);
-	return ws.kind !== "solution" && folded(project.path) === folded(ws.root);
+	if (project.kind === "solution") return ws.kind === "solution" && rootKey(project.path).replace(/\/[^/]*$/, "") === rootKey(ws.root);
+	return ws.kind !== "solution" && rootKey(project.path) === rootKey(ws.root);
 }
 
 // The lists both views show: the open workspaces (each with its recent entry, for its star), then the favorites and the

@@ -11,7 +11,8 @@ namespace Ied
 
 	// Where a workspace of `kind` rooted at `root` keeps its per-machine state.
 	FS::Path LocalStateFolder(const FS::Path& root, Core::StringView kind, Core::StringView appData);
-	// Whether workspace-relative `path` is .ied/local or under it, in any ASCII case, with either separator.
+	// Whether workspace-relative `path` is .ied/local or under it, with either separator, in any ASCII case where names
+	// ignore it (Windows; on Linux .IED/local is a folder of the workspace's own).
 	bool InLocalState(Core::StringView path);
 	// The file workspace-relative `path` names: under `localState` for .ied/local and below, else under `root`.
 	FS::Path LocalOrRootFile(const FS::Path& root, const FS::Path& localState, Core::StringView path);
@@ -24,4 +25,9 @@ namespace Ied
 	// layouts, breakpoints, ...) into a solution's `localState` (docs/03 "Managing projects"), once: an entry the
 	// solution has already stays. What it moved or left, one line each.
 	Core::Array<Core::String> AdoptFolderState(const FS::Path& root, const FS::Path& localState, Core::StringView appData);
+	// Moves a folder's state kept by an older Linux build - under the key of its root with case folded (FoldedTrustKey) -
+	// to where the root's own key keeps it, once: an entry already there stays. Of two folders whose names differ only
+	// in case, the first opened takes it, as both had it before. Nothing on Windows, where the keys are one. What it moved
+	// or left, one line each.
+	Core::Array<Core::String> MoveCaseFoldedState(const FS::Path& root, Core::StringView appData);
 }

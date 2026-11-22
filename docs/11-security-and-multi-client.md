@@ -119,7 +119,7 @@ Three independent switches, each with a narrow meaning:
 
 | Layer | Scope | Controls | Default |
 |---|---|---|---|
-| **Workspace trust** | a folder/solution path | whether *project-defined executables* run: local plugins, toolbar/task commands from project files, project MCP servers, project LSP/DAP binaries, sandbox setup scripts, AI tools that execute code | untrusted until the owner trusts it |
+| **Workspace trust** | a folder/solution path (any case on Windows; on Linux as spelled - `trust.json` version 2, a version-1 file of an older Linux build trusting the folders its case-folded keys name) | whether *project-defined executables* run: local plugins, toolbar/task commands from project files, project MCP servers, project LSP/DAP binaries, sandbox setup scripts, AI tools that execute code | untrusted until the owner trusts it |
 | **Plugin approval** | an installed plugin (by content hash) | whether a global plugin's code may load at all, and with which permissions | built-ins approved; others need approval |
 | **AI permission mode** | a chat (with rules at app/solution tier) | which tool calls run without asking | `auto` within the rules (owner, 2026-10-23: "premissions should default to auto"); Plan mode read-only |
 

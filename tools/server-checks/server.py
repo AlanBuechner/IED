@@ -27,8 +27,11 @@ RUNNING = set()
 
 
 def trust_key(path):
-	"""The server's TrustKey: a folder's path compared without ASCII case or separator kind, no trailing slash."""
-	key = path.replace("\\", "/").lower()
+	"""The server's TrustKey: a folder's path compared without separator kind, no trailing slash, and without ASCII case
+	on Windows only - Linux's names have case (src/fs/PathCase.ch)."""
+	key = path.replace("\\", "/")
+	if os.name == "nt":
+		key = key.lower()
 	return key.rstrip("/") if len(key) > 1 else key
 
 

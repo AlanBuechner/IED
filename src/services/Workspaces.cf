@@ -5,6 +5,7 @@ include "host/Trust.ch"
 include "host/Servers.ch"
 include "web/Session.ch"
 include "fs/Reveal.ch"
+include "fs/PathCase.ch"
 
 namespace Ied
 {
@@ -122,18 +123,14 @@ namespace Ied
 		}
 	}
 
-	static int32 FoldedByte(int32 c) {
-		if (c == '\\') return '/';
-		return c >= 'A' && c <= 'Z' ? c + 32 : c;
-	}
-
+	// Case counts where the system's names have it (fs/PathCase.ch): on Linux "Game" is not inside "game".
 	bool RelativeTo(Core::StringView root, Core::StringView path, Core::String& relative) {
 		int64 rootLength = root.ByteLength();
-		while (rootLength > 0 && FoldedByte(root.ByteAt(rootLength - 1)) == '/') rootLength -= 1;
+		while (rootLength > 0 && PathByte(root.ByteAt(rootLength - 1)) == '/') rootLength -= 1;
 		if (path.ByteLength() < rootLength) return false;
 		for (int64 i = 0; i < rootLength; ++i)
-			if (FoldedByte(root.ByteAt(i)) != FoldedByte(path.ByteAt(i))) return false;
-		if (path.ByteLength() > rootLength && FoldedByte(path.ByteAt(rootLength)) != '/') return false;
+			if (PathByte(root.ByteAt(i)) != PathByte(path.ByteAt(i))) return false;
+		if (path.ByteLength() > rootLength && PathByte(path.ByteAt(rootLength)) != '/') return false;
 		Core::StringBuilder inside;
 		for (int64 i = rootLength + 1; i < path.ByteLength(); ++i) inside.AppendByte(path.ByteAt(i) == '\\' ? '/' : path.ByteAt(i));
 		relative = inside.ToString();
@@ -547,6 +544,8 @@ namespace Ied
 		ws->m_Name = Core::String(ws->m_Root.FileName());
 		ws->m_Kind = Core::String(kind);
 		ws->m_LocalState = LocalStateFolder(ws->m_Root, kind, m_Server->m_Config.m_AppDataDir.View());
+		// Before a solution adopts its folder state: an older Linux build kept it under the root's case-folded key.
+		for (const Core::String& moved : MoveCaseFoldedState(ws->m_Root, m_Server->m_Config.m_AppDataDir.View())) m_Server->Log(moved.View());
 		if (kind != "solution")
 			for (const Core::String& moved : MoveFolderState(ws->m_Root, ws->m_LocalState)) m_Server->Log(moved.View());
 		else

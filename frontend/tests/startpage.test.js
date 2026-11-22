@@ -39,6 +39,8 @@ test("start page: a recent project is an open workspace by its folder, a solutio
 	assertTrue(isProjectOf(RECENT[1], OPEN[1]), "Tools.iedsln is the solution rooted at C:/work/Tools");
 	assertTrue(!isProjectOf(RECENT[1], { kind: "folder", root: "C:/work/Tools" }), "not the same folder opened as a folder");
 	assertTrue(!isProjectOf(RECENT[2], OPEN[0]));
+	assertTrue(!isProjectOf({ kind: "folder", path: "/home/a/game" }, { kind: "folder", root: "/home/a/Game" }), "a Linux folder's case twin is another project");
+	assertTrue(isProjectOf({ kind: "solution", path: "/home/a/Game/Game.iedsln" }, { kind: "solution", root: "/home/a/Game/" }), "its own, by its file's folder");
 });
 
 test("start page: open workspaces first, then the favorites and the recent ones that are not open", () => {

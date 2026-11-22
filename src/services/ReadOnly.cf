@@ -1,16 +1,16 @@
 include "ReadOnly.ch"
 include "web/Json.ch"
+include "fs/PathCase.ch"
 
 namespace Ied
 {
-	static int32 FoldAscii(int32 c) { return c == '\\' ? '/' : c >= 'A' && c <= 'Z' ? c + 32 : c; }
-
-	// Whether `path` is `folder` or under it, as Windows compares names (ASCII case folded, either separator).
+	// Whether `path` is `folder` or under it, as the system compares names (either separator; ASCII case folded on
+	// Windows, not on Linux: fs/PathCase.ch).
 	static bool Covers(Core::StringView folder, Core::StringView path) {
 		if (path.ByteLength() < folder.ByteLength()) return false;
 		for (int64 i = 0; i < folder.ByteLength(); ++i)
-			if (FoldAscii(folder.ByteAt(i)) != FoldAscii(path.ByteAt(i))) return false;
-		return path.ByteLength() == folder.ByteLength() || folder.IsEmpty() || FoldAscii(path.ByteAt(folder.ByteLength())) == '/';
+			if (PathByte(folder.ByteAt(i)) != PathByte(path.ByteAt(i))) return false;
+		return path.ByteLength() == folder.ByteLength() || folder.IsEmpty() || PathByte(path.ByteAt(folder.ByteLength())) == '/';
 	}
 
 	static Core::String CleanPath(Core::StringView path) {

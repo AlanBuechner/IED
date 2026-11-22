@@ -11,6 +11,15 @@ test("shown workspace: one folder in two spellings is one root", () => {
 	assertTrue(sameRoot("C:\\Work\\Game", "c:/work/game/"));
 	assertTrue(!sameRoot("C:/Work/Game", "C:/Work/Games"));
 	assertTrue(!sameRoot("", ""), "no root is no folder");
+	assertTrue(sameRoot("\\\\nas\\Share\\Game", "//NAS/share/game"), "a share's names ignore case too");
+});
+
+test("shown workspace: a Linux root keeps its case", () => {
+	assertTrue(sameRoot("/home/a/Game", "/home/a/Game/"), "a trailing slash does not matter");
+	assertTrue(!sameRoot("/home/a/Game", "/home/a/game"), "two folders on Linux");
+	const twins = [{ wsId: "w1", root: "/home/a/game" }, { wsId: "w2", root: "/home/a/Game" }];
+	assertEqual(preferredWorkspaceOf({ workspaces: twins, asked: "w1", root: "/home/a/Game" }), "w2", "the tab's own folder, not its case twin");
+	assertTrue(namesAnotherFolder("/home/a/Game", "/home/a/game"));
 });
 
 test("shown workspace: the address's id while it is still the tab's folder", () => {

@@ -223,11 +223,13 @@ namespace Ai
 	}
 
 	// The project of the solution whose folder is `relative`, when there is one: what an import there would make.
+	// One folder as the system's names compare (IED::RelativeTo: case counts on Linux).
 	static bool ProjectIn(const IED::Workspace& ws, Core::StringView relative, IED::Project& found) {
-		Core::String wanted = Slashed(relative).ToLower();
+		Core::String wanted = Slashed(relative);
 		while (wanted.View().EndsWith(Core::StringView("/"))) wanted = Core::String(wanted.View().Substring(0, wanted.ByteLength() - 1));
 		for (const IED::Project& project : ws.m_Projects) {
-			if (Slashed(project.m_Folder.View()).ToLower() != wanted) continue;
+			Core::String inside;
+			if (!IED::RelativeTo(project.m_Folder.View(), wanted.View(), inside) || !inside.IsEmpty()) continue;
 			found = project;
 			return true;
 		}

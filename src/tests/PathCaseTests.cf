@@ -1,0 +1,145 @@
+// fs/pathcase: which file or folder a path names - Windows' names ignore case, Linux's do not - in every comparison that
+// tells one folder from another (a workspace's root and what is inside it, trust, the keys of a folder's state), and
+// what an older Linux build kept under case-folded keys found again.
+
+include "fs/PathCase.ch"
+include "host/Trust.ch"
+include "host/Servers.ch"
+include "services/LocalState.ch"
+include "services/Workspaces.ch"
+
+static Core::StringView CaseView(const char* text) { return Core::StringView(text); }
+
+// A fresh temporary folder.
+static FS::Path CaseScratch(const char* name) {
+	Core::StringBuilder folder;
+	folder.Append(name);
+	folder.AppendInt(Platform::UnixTimeNs());
+	FS::Path root = FS::TempDirectory() / folder.View();
+	FS::MakeDirectories(root.CStr());
+	return root;
+}
+
+static void CaseWrite(const FS::Path& file, Core::StringView text) {
+	FS::MakeDirectories(file.Parent().CStr());
+	FS::WriteFileAtomically(file.CStr(), (const void*)text.Data(), text.ByteLength());
+}
+
+// A trust file as the store writes it, of `version`, trusting `root` alone.
+static Core::String TrustFileOf(int64 version, Core::StringView root) {
+	Core::StringBuilder text;
+	text.Append("{\"version\": ");
+	text.AppendInt(version);
+	text.Append(", \"trusted\": [");
+	Serialization::WriteJsonString(root, &text);
+	text.Append("]}");
+	return text.ToString();
+}
+
+[test("server.pathcase")]
+class PathCaseTests {
+	[test("path_bytes")]
+	public static void TestPathBytes() {
+		assert_eq((int64)'/', (int64)Ied::PathByte('\\'), "either separator");
+		assert_eq((int64)(Ied::PathsIgnoreCase() ? 'g' : 'G'), (int64)Ied::PathByte('G'), "a capital folded only where names ignore case");
+		assert_eq((int64)'g', (int64)Ied::PathByte('g'), "the rest as it is");
+#if defined(PLATFORM_LINUX)
+		assert_true(!Ied::PathsIgnoreCase(), "Linux's names have case");
+#else
+		assert_true(Ied::PathsIgnoreCase(), "Windows' names ignore it");
+#endif
+	}
+
+	[test("keys")]
+	public static void TestKeys() {
+		assert_se(Ied::PathsIgnoreCase() ? "c:/work/game" : "C:/Work/Game", Ied::TrustKey(CaseView("C:\\Work\\Game\\")).CStr(), "separators and a trailing slash, case where it counts");
+		assert_se("c:/work/game", Ied::FoldedTrustKey(CaseView("C:\\Work\\Game\\")).CStr(), "the older key folds case on every system");
+		assert_se("/", Ied::TrustKey(CaseView("/")).CStr(), "the root keeps its slash");
+		const bool same = Ied::FolderKey(CaseView("/home/a/Game")).View() == Ied::FolderKey(CaseView("/home/a/game")).View();
+		assert_true(same == Ied::PathsIgnoreCase(), "case twins share a server's state only where names ignore case");
+		FS::Path appData = FS::Path("/data/ied");
+		const bool shared = Ied::LocalStateFolder(FS::Path("/home/a/Game"), CaseView("folder"), appData.View()).View() == Ied::LocalStateFolder(FS::Path("/home/a/game"), CaseView("folder"), appData.View()).View();
+		assert_true(shared == Ied::PathsIgnoreCase(), "and a folder's local state");
+	}
+
+	[test("inside_a_root")]
+	public static void TestInsideARoot() {
+		Core::String relative;
+		assert_true(Ied::RelativeTo(CaseView("/home/a/Game"), CaseView("/home/a/Game/src/a.cf"), relative) && relative == "src/a.cf", "inside, as spelled");
+		assert_true(Ied::RelativeTo(CaseView("/home/a/game"), CaseView("/home/a/Game/src"), relative) == Ied::PathsIgnoreCase(), "a case twin's file is inside only where names ignore case");
+		assert_true(Ied::RelativeTo(CaseView("/home/a/Game/"), CaseView("/home/a/Game"), relative) && relative.IsEmpty(), "the root itself");
+		assert_true(!Ied::RelativeTo(CaseView("/home/a/Game"), CaseView("/home/a/Games"), relative), "a name that only starts like it");
+		assert_true(Ied::InLocalState(CaseView(".ied\\local\\x")), "the local state with either separator");
+		assert_true(Ied::InLocalState(CaseView(".IED/Local/x")) == Ied::PathsIgnoreCase(), "and in another case only where names ignore it");
+	}
+
+	[test("trust_keeps_case")]
+	public static void TestTrustKeepsCase() {
+		FS::Path folder = CaseScratch("ied-pathcase-trust-");
+		FS::Path game = folder / "Game";
+		FS::MakeDirectories(game.CStr());
+		FS::Path file = folder / "trust.json";
+		Ied::TrustStore store;
+		Core::String error;
+		store.Load(file.View(), error);
+		assert_true(store.Set(game, true), "written");
+		Ied::TrustStore read;
+		read.Load(file.View(), error);
+		assert_true(error.IsEmpty() && read.IsTrusted(game), "trusted, read back");
+		assert_true(read.IsTrusted(folder / "GAME") == Ied::PathsIgnoreCase(), "its case twin only where names ignore case");
+		FS::File opened = FS::File(file.CStr(), "rb");
+		Core::String text = opened.ReadText();
+		opened.Close();
+		assert_true(text.View().Contains(CaseView("\"version\":2")), "version 2");
+		FS::RemoveAll(folder.CStr());
+	}
+
+	[test("older_linux_trust")]
+	public static void TestOlderLinuxTrust() {
+		// A version-1 file of a Linux build: its keys folded, so ".../game" trusted ".../Game" - and still does.
+		FS::Path folder = CaseScratch("ied-pathcase-oldtrust-");
+		FS::Path game = folder / "Game";
+		FS::MakeDirectories(game.CStr());
+		FS::Path file = folder / "trust.json";
+		CaseWrite(file, TrustFileOf(1, Ied::FoldedTrustKey(game.View()).View()).View());
+		Ied::TrustStore store;
+		Core::String error;
+		store.Load(file.View(), error);
+		assert_true(error.IsEmpty() && store.IsTrusted(game), "the folder an older key trusted");
+		// A version-2 key is the root as spelled: on Linux the lower-case spelling is another folder.
+		CaseWrite(file, TrustFileOf(2, Ied::FoldedTrustKey(game.View()).View()).View());
+		store.Load(file.View(), error);
+		assert_true(store.IsTrusted(game) == Ied::PathsIgnoreCase(), "a version-2 key trusts its own folder only");
+		// A version-1 key that names no folder now stays as it was.
+		FS::Path gone = folder / "gone";
+		CaseWrite(file, TrustFileOf(1, gone.View()).View());
+		store.Load(file.View(), error);
+		assert_true(store.IsTrusted(gone), "kept for a folder not there now");
+		FS::RemoveAll(folder.CStr());
+	}
+
+	[test("older_linux_state")]
+	public static void TestOlderLinuxState() {
+		FS::Path appData = CaseScratch("ied-pathcase-state-");
+		FS::Path root = FS::Path("/home/a/Game");
+		FS::Path current = Ied::LocalStateFolder(root, CaseView("folder"), appData.View());
+		FS::Path folded = Ied::LocalStateFolder(FS::Path(Ied::FoldedTrustKey(root.View()).View()), CaseView("folder"), appData.View());
+		if (Ied::PathsIgnoreCase()) {
+			assert_true(folded.View() == current.View() && Ied::MoveCaseFoldedState(root, appData.View()).IsEmpty(), "one key on Windows: nothing to move");
+			FS::RemoveAll(appData.CStr());
+			return;
+		}
+		CaseWrite(folded / "chats" / "c1" / "chat.json", CaseView("{}"));
+		CaseWrite(folded / "layout" / "desktop.json", CaseView("{}"));
+		CaseWrite(current / "layout" / "desktop.json", CaseView("{\"kept\":true}"));
+		Core::Array<Core::String> said = Ied::MoveCaseFoldedState(root, appData.View());
+		assert_eq((int64)2, said.Count(), "one line for each entry");
+		assert_true(FS::FileExists((current / "chats" / "c1" / "chat.json").CStr()), "the chats under the root's own key");
+		FS::File kept = FS::File((current / "layout" / "desktop.json").CStr(), "rb");
+		assert_true(kept.ReadText().View().Contains(CaseView("kept")), "an entry already there stays");
+		kept.Close();
+		assert_true(FS::IsDirectory((folded / "layout").CStr()), "and the older one is left beside it");
+		assert_true(Ied::MoveCaseFoldedState(root, appData.View()).Count() == 1, "once: only what stayed is said again");
+		FS::RemoveAll(appData.CStr());
+	}
+}

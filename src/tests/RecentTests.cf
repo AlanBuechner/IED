@@ -1,7 +1,8 @@
 // host/recent: the recent projects - newest first, opened again moves up, favorites kept past the limit, paths matched
-// without regard to case or separators, and the file read back.
+// without regard to separators (and to case where names ignore it, fs/PathCase.ch), and the file read back.
 
 include "host/Recent.ch"
+include "fs/PathCase.ch"
 
 static Core::String PathOf(int64 n) {
 	Core::StringBuilder path;
@@ -23,9 +24,10 @@ class RecentTests {
 		assert_true(recent.Opened(Core::StringView("C:/Work/Game"), Core::StringView("Game"), Core::StringView("folder"), 100), "written");
 		recent.Opened(Core::StringView("C:/Work/Tools/Tools.iedsln"), Core::StringView("Tools"), Core::StringView("solution"), 200);
 		assert_se("Tools", recent.All()[0].m_Name.CStr(), "newest first");
-		recent.Opened(Core::StringView("c:\\work\\game\\"), Core::StringView("Game"), Core::StringView("folder"), 300);
-		assert_eq(2, recent.All().Count(), "the same folder, in other case and separators");
-		assert_true(recent.All()[0].m_Opened == 300 && recent.All()[0].m_Path == "c:\\work\\game\\", "moved up, as it was opened now");
+		recent.Opened(Core::StringView("C:\\Work\\Game\\"), Core::StringView("Game"), Core::StringView("folder"), 300);
+		assert_eq(2, recent.All().Count(), "the same folder, in other separators");
+		assert_true(recent.All()[0].m_Opened == 300 && recent.All()[0].m_Path == "C:\\Work\\Game\\", "moved up, as it was opened now");
+		assert_true(recent.Contains(Core::StringView("c:/work/game")) == Ied::PathsIgnoreCase(), "in another case only where names ignore it (Windows)");
 		assert_true(recent.SetFavorite(Core::StringView("C:/Work/Tools/Tools.iedsln"), true), "a favorite");
 		assert_true(!recent.SetFavorite(Core::StringView("C:/Elsewhere"), true), "only a listed one");
 		for (int64 i = 0; i < Ied::c_RecentLimit + 5; ++i) recent.Opened(PathOf(i).View(), Core::StringView("P"), Core::StringView("folder"), 1000 + i);

@@ -325,31 +325,16 @@ namespace Ai
 		return out.ToString();
 	}
 
-	// The path with '/' separators and lowercase letters, for comparing Windows paths.
-	static Core::String ComparablePath(Core::StringView path) {
-		Core::StringBuilder out;
-		for (int64 i = 0; i < path.ByteLength(); ++i) {
-			int32 c = path.ByteAt(i);
-			out.AppendByte(c == '\\' ? '/' : (c >= 'A' && c <= 'Z' ? c + 32 : c));
-		}
-		return out.ToString();
-	}
-
 	// "ied:/C4/Bedrock/a.cf" for an absolute path inside the root a plugin names "ied" (developer mode's IED source),
-	// "" when no such root holds it: such a file is read through its root, not as a file outside the workspace.
+	// "" when no such root holds it: such a file is read through its root, not as a file outside the workspace. Inside
+	// as the system's names compare (IED::RelativeTo: case counts on Linux).
 	static Core::String RootFormOf(const ToolInvocation& call, Core::StringView requested) {
 		RootTarget root;
 		Core::String problem;
 		if (!OpenRoot(call.m_Ws.m_Id.View(), Core::StringView("ied"), root, problem)) return Core::String();
-		Core::String folder = ComparablePath(root.m_Ws.m_Root.View());
-		if (!folder.View().EndsWith(Core::StringView("/"))) folder += "/";
-		if (!ComparablePath(requested).View().StartsWith(folder.View())) return Core::String();
-		Core::StringView inside = requested.Substring(folder.ByteLength(), requested.ByteLength() - folder.ByteLength());
-		if (inside.IsEmpty()) return Core::String();
-		Core::StringBuilder out;
-		out.Append(root.m_Shown.View());
-		for (int64 i = 0; i < inside.ByteLength(); ++i) out.AppendByte(inside.ByteAt(i) == '\\' ? '/' : inside.ByteAt(i));
-		return out.ToString();
+		Core::String inside;
+		if (!IED::RelativeTo(root.m_Ws.m_Root.View(), requested, inside) || inside.IsEmpty()) return Core::String();
+		return root.m_Shown + inside.View();
 	}
 
 	static ToolOutcome ReadRun(const ToolInvocation& call) {

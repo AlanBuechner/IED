@@ -1,0 +1,17 @@
+include "PathCase.ch"
+
+namespace Ied
+{
+	bool PathsIgnoreCase() {
+#if defined(PLATFORM_LINUX)
+		return false;
+#else
+		return true;
+#endif
+	}
+
+	int32 PathByte(int32 c) {
+		if (c == '\\') return '/';
+		return PathsIgnoreCase() && c >= 'A' && c <= 'Z' ? c + 32 : c;
+	}
+}

@@ -1,18 +1,52 @@
 include "Trust.ch"
 include "web/Json.ch"
+include "fs/PathCase.ch"
 
 namespace Ied
 {
-	Core::String TrustKey(Core::StringView root) {
+	// trust.json's version: 2 keys roots as TrustKey does; 1 (before 2026-11-21) folded their case on every system.
+	const int64 c_TrustFileVersion = 2;
+	// At most this many folders take a version-1 key's trust (case twins of each name along its path).
+	const int64 c_FoldedMatchesMax = 64;
+
+	static Core::String KeyOf(Core::StringView root, bool foldCase) {
 		Core::StringBuilder key;
 		for (int64 i = 0; i < root.ByteLength(); ++i) {
 			const int32 c = root.ByteAt(i);
-			key.AppendByte(c == '\\' ? '/' : c >= 'A' && c <= 'Z' ? c + 32 : c);
+			key.AppendByte(c == '\\' ? '/' : foldCase && c >= 'A' && c <= 'Z' ? c + 32 : c);
 		}
 		Core::StringView text = key.View();
 		int64 length = text.ByteLength();
 		while (length > 1 && text.ByteAt(length - 1) == '/') length -= 1;
 		return Core::String(text.Substring(0, length));
+	}
+
+	Core::String TrustKey(Core::StringView root) { return KeyOf(root, PathsIgnoreCase()); }
+
+	Core::String FoldedTrustKey(Core::StringView root) { return KeyOf(root, true); }
+
+	// The folders on disk whose path folds to `folded` (a version-1 key of a Linux build): every folder that key trusted.
+	static Core::Array<Core::String> FoldedMatches(Core::StringView folded) {
+		Core::Array<Core::String> at;
+		if (!folded.StartsWith(Core::StringView("/"))) return at;
+		at.Push(Core::String("/"));
+		int64 start = 1;
+		while (start < folded.ByteLength() && !at.IsEmpty()) {
+			int64 end = folded.IndexOf('/', start);
+			if (end < 0) end = folded.ByteLength();
+			Core::StringView part = folded.Substring(start, end - start);
+			start = end + 1;
+			if (part.IsEmpty()) continue;
+			Core::Array<Core::String> next;
+			for (const Core::String& parent : at)
+				for (FS::DirectoryEntry& entry : FS::Directory(parent.CStr())) {
+					if (next.Count() >= c_FoldedMatchesMax || FoldedTrustKey(entry.name.View()).View() != part) continue;
+					Core::String child = parent.View() == "/" ? Core::String("/") + entry.name.View() : (parent + "/") + entry.name.View();
+					if (FS::IsDirectory(child.CStr())) next.Push(child);
+				}
+			at = next;
+		}
+		return at;
 	}
 
 	void TrustStore::Load(Core::StringView file, Core::String& error) {
@@ -28,7 +62,15 @@ namespace Ied
 			error = Core::String("ignoring ") + file + ": not a trust file";
 			return;
 		}
-		for (int64 i = 0; i < trusted.Count(); ++i) m_Roots.At(TrustKey(trusted.At(i).AsView())) = true;
+		// A version-1 file of a Linux build keyed its roots case folded: each key trusts the folders on disk it folds
+		// from, as it did then, and stays as it is only when none is there now (a drive not mounted).
+		const bool folded = !PathsIgnoreCase() && read.root.Member("version").AsInt() < c_TrustFileVersion;
+		for (int64 i = 0; i < trusted.Count(); ++i) {
+			Core::StringView root = trusted.At(i).AsView();
+			Core::Array<Core::String> matches = folded ? FoldedMatches(FoldedTrustKey(root).View()) : Core::Array<Core::String>();
+			if (matches.IsEmpty()) m_Roots.At(TrustKey(root)) = true;
+			for (const Core::String& match : matches) m_Roots.At(TrustKey(match.View())) = true;
+		}
 	}
 
 	bool TrustStore::IsTrusted(const FS::Path& root) const { return m_Roots.Contains(TrustKey(root.View())); }
@@ -47,7 +89,7 @@ namespace Ied
 		Remember(root, trusted);
 		JsonWriter json;
 		json.BeginObject();
-		json.IntField("version", 1);
+		json.IntField("version", c_TrustFileVersion);
 		json.Key(Core::StringView("trusted"));
 		json.BeginArray();
 		for (const Core::KeyValue<Core::String, bool>& entry : m_Roots) json.String(entry.key.View());
