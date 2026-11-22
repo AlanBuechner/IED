@@ -222,6 +222,7 @@ static void final_stop(GCState* gc, GCThread* self, CycleTrace* trace)
 	gc_finalize_select(&c->marker, &gc->finalizers, &gc->ready);
 	gc_mark_end_run(&c->marker, &gc->markEnds);
 	gc_threads_flush_caches(&gc->threads, &gc->heap, &gc->allocs);
+	if (gc->mapReports.on) gc_verify_maps(gc);
 	gc_reclaim(gc);
 	const uint64_t end = gc_os_now_ns();
 	trace->finalNs = end - start;

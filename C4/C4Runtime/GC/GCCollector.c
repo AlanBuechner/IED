@@ -111,6 +111,7 @@ void gc_collect(GCState* gc, GCThread* self)
 	gc_threads_flush_caches(&gc->threads, &gc->heap, &gc->allocs);
 	mark(gc, self);
 	gc_threads_flush_caches(&gc->threads, &gc->heap, &gc->allocs); // what an enumerator allocated meanwhile
+	if (gc->mapReports.on) gc_verify_maps(gc);
 	gc_reclaim(gc);
 	gc_threads_resume(&gc->threads, self);
 	const uint64_t end = gc_os_now_ns();
@@ -219,6 +220,14 @@ static void start_collection(GCState* gc, GCThread* self)
 	else gc_collect(gc, self);
 }
 
+// C4_GC_STRESS: whether this slow path is the Nth since the last stressed collection.
+static int stressed(GCState* gc)
+{
+	if (!gc->stressEvery || ++gc->stressCount < gc->stressEvery) return 0;
+	gc->stressCount = 0;
+	return 1;
+}
+
 void* gc_allocate(GCState* gc, GCThread* self, GCAllocRequest request, int64_t nativeInUse)
 {
 	check_request(request);
@@ -232,7 +241,7 @@ void* gc_allocate(GCState* gc, GCThread* self, GCAllocRequest request, int64_t n
 		gc->nextNative = next_native(nativeInUse, gc->percent);
 		gc->nativePending = 0;
 	}
-	const int due = gc_heap_live_bytes(&gc->heap) >= gc->nextCollection || nativeInUse >= gc->nextNative;
+	const int due = stressed(gc) || gc_heap_live_bytes(&gc->heap) >= gc->nextCollection || nativeInUse >= gc->nextNative;
 	if (!gc->disabled && !gc->exiting && !gc->collecting && due) start_collection(gc, self);
 	void* p = allocate_once(gc, self, request);
 	if (!p && gc_concurrent_busy(gc)) return NULL;

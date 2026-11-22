@@ -89,6 +89,12 @@ size limit, and hooks may (un)register hooks while they run.
   unmarked, so the garbage among them goes in that cycle), so a cycle that marks faster leaves the next one less to
   wait for - precise marking runs ~half a cycle more in the GC benchmark's 600 frames, each one shorter, frames even.
   Read a benchmark's cycle count as a mean over many runs: where the last trigger falls against the run's end moves it.
+- **Diagnosing a freed object still in use** (heap corruption, a crash in malloc or in a finalizer): run with
+  `C4_GC_VERIFY_MAPS=1` (or `=<file>`) - each word a pointer map says holds no pointer but that names a heap object is
+  reported (`[gc] map misses a pointer: word W of an object of T`, `UNMARKED` when the sweep frees its target) - and
+  `C4_GC_STRESS=N` (a collection every Nth cache refill) with `C4_GC_POISON=1`, so a reference the collector does not
+  see faults at its use. On Linux add glibc's checks: `LD_PRELOAD=libc_malloc_debug.so.0 GLIBC_TUNABLES=glibc.malloc.check=3
+  MALLOC_PERTURB_=165`.
 - **Exit**: once the program's exit begins (the collector's exit handler runs after every other one) a running cycle
   finishes and no collection stops a thread again, `Collect()` included (BUG-491: a stop the exit killed midway left
   the exiting thread suspended - a hang at exit, one run in five with threads collecting in a loop).

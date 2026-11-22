@@ -9,6 +9,7 @@
 #include "GC/GCPools.h"
 #include "GC/GCConcurrent.h"
 #include "GC/GCCensus.h"
+#include "GC/GCVerifyMaps.h"
 
 #define GC_DEFAULT_PERCENT 100
 #define GC_MIN_TRIGGER_BYTES ((size_t)4 << 20)
@@ -65,6 +66,9 @@ typedef struct GCState
 	int32_t percent;
 	int disabled;
 	int exiting;                        // the process is ending: no collection stops a thread any more (BUG-491)
+	uint32_t stressEvery;               // C4_GC_STRESS=N: an automatic collection at every Nth allocation slow path (0: off)
+	uint32_t stressCount;
+	GCMapReports mapReports;            // C4_GC_VERIFY_MAPS=1: what the maps miss (GCVerifyMaps.h)
 	int collecting;
 	int collected;                      // a collection ended whose callbacks and finalizers have not run yet
 	int runningFinalizers;              // a thread is running the ready finalizers

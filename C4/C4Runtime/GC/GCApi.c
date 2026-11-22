@@ -21,7 +21,10 @@ static int start_collector_thread(void);
 // C4_GC_CONCURRENT: "always", "never" or the live bytes from which automatic collections mark concurrently;
 // C4_GC_VERIFY=1 checks every concurrent mark (D-79); C4_GC_TRACE=1 prints a line about each concurrent cycle;
 // C4_GC_MIN_TRIGGER: the fewest live bytes that start an automatic collection (default 4 MiB), so small test programs
-// collect often; C4_GC_POISON=1 fills each ended object with 0xDB bytes. For tests and diagnosis.
+// collect often; C4_GC_POISON=1 fills each ended object with 0xDB bytes; C4_GC_STRESS=N collects at every Nth
+// allocation that leaves a thread's cache (whatever the heap's size); C4_GC_VERIFY_MAPS=1 reports each word a pointer
+// map leaves out that names an object of the heap on stderr, =<path> appends them to that file (GCVerifyMaps.h). For
+// tests and diagnosis.
 static void configure_from_environment(GCState* gc)
 {
 	const char* trigger = getenv("C4_GC_MIN_TRIGGER");
@@ -36,6 +39,24 @@ static void configure_from_environment(GCState* gc)
 	gc->concurrent.trace = trace && trace[0] == '1';
 	const char* poison = getenv("C4_GC_POISON");
 	gc->heap.poison = poison && poison[0] == '1';
+	const char* stress = getenv("C4_GC_STRESS");
+	if (stress && strtoll(stress, NULL, 10) > 0) gc->stressEvery = (uint32_t)strtoll(stress, NULL, 10);
+	const char* verifyMaps = getenv("C4_GC_VERIFY_MAPS");
+	gc->mapReports.on = verifyMaps && verifyMaps[0] && strcmp(verifyMaps, "0") != 0;
+	gc->mapReports.log = gc->mapReports.on && strcmp(verifyMaps, "1") != 0 ? verifyMaps : NULL;
+}
+
+// C4_GC_VERIFY_MAPS: what the last collections found, printed now that the threads run again.
+static void print_map_reports(GCState* gc)
+{
+	GCMapReport reports[GC_MAP_REPORTS];
+	gc_os_lock();
+	const uint32_t count = gc->mapReports.on ? gc_verify_maps_take(&gc->mapReports, reports, GC_MAP_REPORTS) : 0;
+	const int announce = gc->mapReports.checks && !gc->mapReports.announced;
+	gc->mapReports.announced |= announce;
+	gc_os_unlock();
+	if (announce) gc_verify_maps_announce(gc->mapReports.log);
+	for (uint32_t i = 0; i < count; ++i) gc_verify_maps_print(&reports[i], gc->mapReports.log);
 }
 
 // The lock is held.
@@ -108,6 +129,8 @@ static void stop_collecting_at_exit(void)
 	gc->exiting = 1;
 	gc_os_unlock();
 	settle_cycle(gc, self);
+	print_map_reports(gc);
+	if (gc->mapReports.on) gc_verify_maps_summary(gc->mapReports.misses, gc->mapReports.log);
 }
 
 // The main thread registers before the program's global initialization runs (a C initializer of the C runtime).
@@ -192,6 +215,7 @@ static void after_collection(void)
 	void (*printer)(const c4_gc_stats*) = gc->statsPrinter;
 	gc_os_unlock();
 	if (!collected) return;
+	print_map_reports(gc);
 	notify_results(gc);
 	if (printer) printer(&stats);
 	run_releases(gc);

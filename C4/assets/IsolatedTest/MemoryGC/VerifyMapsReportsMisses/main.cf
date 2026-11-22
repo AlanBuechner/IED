@@ -1,0 +1,46 @@
+// C4_GC_VERIFY_MAPS=1 (BUG-497's check of the pointer maps): a collection reports a word a type's map says holds no
+// pointer that names an object of the heap. The test starts itself as `child` with the check on: the child keeps an
+// object reachable only through a uint64 field beside a real pointer field (so the type has a map, and the field is
+// read as a number), collects, and the report must name that word and say its target was left unmarked. main returns
+// the failures.
+include "bedrock.ch"
+
+class Payload { public int64 value; }
+
+// Word 0 is a pointer, word 1 a number that holds one: the map names word 0 only.
+class Holder {
+	public Payload* named;
+	public uint64 hidden;
+}
+
+Holder* g_holder;
+
+int32 RunChild() {
+	g_holder = new Holder;
+	g_holder->named = new Payload;
+	g_holder->hidden = (uint64)(void*)new Payload;
+	GC::Collect();
+	return 0;
+}
+
+int32 RunParent() {
+	Process::StartInfo info;
+	info.program = Core::String(Platform::ExecutablePath().CStr());
+	info.arguments.Push(Core::String("child"));
+	info.environment.Push(Core::String("C4_GC_VERIFY_MAPS=1"));
+	info.errors = Process::Redirect::ToOutput;   // the reports go to stderr
+	const Process::Output child = Process::Run(info, 60000);
+	int32 failures = 0;
+	if (child.exitCode != 0) { printf("child exit %lld %s\n", child.exitCode, child.error.CStr()); failures++; }
+	const Core::StringView said = child.output.View();
+	if (!said.Contains(Core::StringView("map misses a pointer: word 1 of an object of Holder"))) { printf("no report of Holder's word 1:\n%s\n", child.output.CStr()); failures++; }
+	if (!said.Contains(Core::StringView("UNMARKED"))) { printf("the report does not say the target was left unmarked\n"); failures++; }
+	if (said.Contains(Core::StringView("word 0 of an object of Holder"))) { printf("the mapped word was reported\n"); failures++; }
+	if (failures == 0) printf("VERIFY MAPS OK\n");
+	return failures;
+}
+
+int32 main(int32 argc, char8** argv) {
+	if (argc > 1) return RunChild();
+	return RunParent();
+}
