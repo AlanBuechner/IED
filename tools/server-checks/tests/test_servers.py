@@ -24,8 +24,19 @@ from test_chat import ChatCase, write
 import ws
 
 
+# The exit code a server killed with SIGTERM ends with: Windows' os.kill ends a process with the signal's number as its
+# code; on Linux the signal ends it, which the server reports as the shells do, 128 + the signal.
+KILLED_CODE = int(signal.SIGTERM) if os.name == "nt" else 128 + int(signal.SIGTERM)
+
+
 def alive(pid):
-	"""Whether process `pid` still runs (os.kill(pid, 0) would end it on Windows)."""
+	"""Whether process `pid` still runs (os.kill(pid, 0) would end it on Windows; on Linux a zombie has ended)."""
+	if os.name != "nt":
+		try:
+			with open("/proc/%d/stat" % pid) as f:
+				return f.read().rsplit(")", 1)[1].split()[0] != "Z"
+		except (OSError, IndexError):
+			return False
 	kernel = ctypes.windll.kernel32
 	handle = kernel.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
 	if not handle:
@@ -197,7 +208,7 @@ class TwoWorkspaceTests(ServerTestCase):
 			states = [f["data"]["server"]["state"] for f in frames if f.get("kind") == "workspace.changed" and f["data"]["wsId"] == "w1"]
 			self.assertEqual("restarting", states[0], states)
 			back = frames[-1]["data"]["server"]
-			self.assertEqual((1, signal.SIGTERM), (back["restarts"], back["exitCode"]), back)
+			self.assertEqual((1, KILLED_CODE), (back["restarts"], back["exitCode"]), back)
 			self.assertNotEqual(killed, back["pid"])
 			self.assertTrue(beta.closed.is_set() is False, "the other workspace's socket never dropped")
 			again = await self.socket("w1")
@@ -208,9 +219,9 @@ class TwoWorkspaceTests(ServerTestCase):
 			finally:
 				again.abort()
 			log = "\n".join(read_lines(back["log"]))
-			self.assertIn("restarted after: its last run ended: code %d" % signal.SIGTERM, log)
+			self.assertIn("restarted after: its last run ended: code %d" % KILLED_CODE, log)
 			master_log = "\n".join(read_lines(os.path.join(self.server.data, "logs", "server.log")))
-			self.assertIn("workspace server w1 exited unasked (code %d)" % signal.SIGTERM, master_log)
+			self.assertIn("workspace server w1 exited unasked (code %d)" % KILLED_CODE, master_log)
 		finally:
 			alpha.abort()
 			beta.abort()
@@ -243,7 +254,7 @@ class TwoWorkspaceTests(ServerTestCase):
 				await_servers(self.server, 1, check=lambda w: w["wsId"] == "w1" and w["server"]["state"] == "ready" and w["server"]["restarts"] == attempt + 1)
 		failed = await_servers(self.server, 1, check=lambda w: w["wsId"] == "w1" and w["server"]["state"] == "failed")
 		w1 = [w for w in failed if w["wsId"] == "w1"][0]["server"]
-		self.assertIn("code %d" % signal.SIGTERM, w1["problem"])
+		self.assertIn("code %d" % KILLED_CODE, w1["problem"])
 		self.assertEqual(503, self.server.request("GET", "/w/w1/files/a.txt", headers={"Cookie": self.cookie}).status, "a failed server is not waited for")
 		master = await Client.connect(self.server.ws_url, FrameChecker(), headers={"Cookie": self.cookie})
 		try:

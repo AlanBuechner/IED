@@ -250,16 +250,25 @@ class ConfigServerTests {
 		assert_true(store->Set(Core::StringView("other.key"), Core::StringView("second"), problem), problem.CStr());
 		Core::String text = ConfigTestRead(file);
 		assert_true(!text.View().Contains(Core::StringView("plain-token")), "the file never holds a value in the clear");
+		// Windows seals each value with DPAPI; Linux keeps it base64 in a file only its user reads (docs/11 "Secrets").
+#if defined(PLATFORM_LINUX)
+		const char* kept = "owner-only";
+		assert_true(text.View().Contains(Core::StringView("\"file\"")) && !text.View().Contains(Core::StringView("\"dpapi\"")), text.CStr());
+#else
+		const char* kept = "dpapi";
 		assert_true(text.View().Contains(Core::StringView("\"dpapi\"")), text.CStr());
+#endif
 		assert_true(store->Get(Core::StringView("configServer"), value, problem), problem.CStr());
 		assert_se("plain-token-0123456789", value.CStr(), "read back");
 		Ied::SecretStore* again = new Ied::SecretStore(file.View());
 		assert_true(again->Get(Core::StringView("other.key"), value, problem) && value.View() == "second", "another store over the file reads it");
 		Core::String list = store->ListJson();
 		assert_true(list.View().Contains(Core::StringView("\"name\":\"configServer\"")) && list.View().Contains(Core::StringView("\"available\":true")), list.CStr());
-		assert_true(!list.View().Contains(Core::StringView("plain-token")) && !list.View().Contains(Core::StringView("\"dpapi\":")), "the list holds names alone, no sealed value");
-		assert_true(list.View().Contains(Core::StringView("\"protection\":\"dpapi\"")), "and says how values are kept here");
-		// A sealed value moved under another name does not open: the name is its entropy.
+		assert_true(!list.View().Contains(Core::StringView("plain-token")) && !list.View().Contains(Core::StringView("\"dpapi\":")) && !list.View().Contains(Core::StringView("\"file\":")), "the list holds names alone, no sealed value");
+		assert_true(list.View().Contains((Core::String("\"protection\":\"") + kept + "\"").View()), "and says how values are kept here");
+#if defined(PLATFORM_WINDOWS)
+		// A sealed value moved under another name does not open: the name is its entropy. (Linux's file is guarded by
+		// its mode, 0600 in a 0700 folder: test_config_server checks those.)
 		Serialization::DomDoc doc;
 		Serialization::ReadResult read = Serialization::ReadJson(text.View(), doc);
 		Core::String sealed = Core::String(read.root.Member("secrets").Member("configServer").Member("dpapi").AsView());
@@ -270,6 +279,7 @@ class ConfigServerTests {
 		problem = Core::String();
 		assert_true(!thief->Get(Core::StringView("thief"), value, problem), "a value under another name");
 		assert_true(problem.View().Contains(Core::StringView("cannot be decrypted")), problem.CStr());
+#endif
 		bool removed = false;
 		assert_true(store->Remove(Core::StringView("configServer"), removed, problem) && removed, problem.CStr());
 		assert_true(store->Remove(Core::StringView("configServer"), removed, problem) && !removed, "removed once");

@@ -87,9 +87,15 @@ class ToolchainTests {
 		assert_true(C4Plugin::SourceOfInstallRecord(Core::StringView("{\"source\": \"C:/GameDev/IED\", \"commit\": \"abc\", \"dirty\": false}")) == "C:/GameDev/IED", "an install's checkout");
 		assert_true(C4Plugin::SourceOfInstallRecord(Core::StringView("{\"commit\": \"abc\"}")).IsEmpty() && C4Plugin::SourceOfInstallRecord(Core::StringView("{\"source\": 3}")).IsEmpty(), "a record naming none");
 		assert_true(C4Plugin::SourceOfInstallRecord(Core::StringView("not json")).IsEmpty() && C4Plugin::SourceOfInstallRecord(Core::StringView("")).IsEmpty(), "no record");
+#if defined(PLATFORM_LINUX)
+		Core::Array<Core::String> candidates = C4Plugin::CommandCandidates(Core::StringView("nuke"), Core::StringView("/a::\"/b c\":"));
+		assert_eq((int64)2, candidates.Count(), "the name alone in each of the two folders: Linux runs it as it is");
+		assert_true(candidates[0] == "/a/nuke" && candidates[1] == "/b c/nuke", "in PATH's order, quotes taken off");
+#else
 		Core::Array<Core::String> candidates = C4Plugin::CommandCandidates(Core::StringView("nuke"), Core::StringView("C:\\a;;\"C:\\b c\";"));
 		assert_eq((int64)6, candidates.Count(), "three names in each of the two folders");
 		assert_true(candidates[0] == "C:\\a/nuke.cmd" && candidates[3] == "C:\\b c/nuke.cmd" && candidates[5] == "C:\\b c/nuke", "in PATH's order, quotes taken off");
+#endif
 	}
 
 	[test("filling_in")]

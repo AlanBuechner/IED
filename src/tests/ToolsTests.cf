@@ -128,7 +128,12 @@ class ToolsTests {
 		FS::MakeDirectories((root / "go" / "1.9.2").CStr());
 		FS::MakeDirectories((root / "go" / "1.27.3").CStr());
 		FS::MakeDirectories((root / "go" / "1.10.0").CStr());
+		// The program as this system names it: go.exe on Windows (PATHEXT completes "go"), go itself on Linux.
+#if defined(PLATFORM_LINUX)
+		WriteText(root / "go" / "1.27.3" / "bin" / "go", "x");
+#else
 		WriteText(root / "go" / "1.27.3" / "bin" / "go.exe", "x");
+#endif
 		Core::Array<Core::String> versions = Ied::InstalledVersions(root, Core::StringView("go"));
 		assert_true(versions.Count() == 3 && versions[0] == "1.27.3" && versions[1] == "1.10.0" && versions[2] == "1.9.2", "newest first");
 		Ied::ToolSpec* spec = Spec("go", nullptr);

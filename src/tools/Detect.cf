@@ -2,6 +2,7 @@ include "Detect.ch"
 include "Commands.ch"
 include "tasks/Missing.ch"
 include "web/Json.ch"
+include "fs/PathCase.ch"
 
 namespace Ied
 {
@@ -60,18 +61,11 @@ namespace Ied
 	// The program file at `file` (".exe" and the other PATHEXT endings tried when it has none); empty when none is.
 	static Core::String ProgramAt(const FS::Path& file) { return FoundProgram(file.View(), Core::StringView(""), Core::StringView(""), Extensions().View()); }
 
-	// The same file on Windows: ASCII case and separator kind do not matter.
+	// The same file: separator kind does not matter, nor ASCII case where names ignore it (Windows; fs/PathCase.ch).
 	static bool SamePath(Core::StringView a, Core::StringView b) {
 		if (a.ByteLength() != b.ByteLength()) return false;
-		for (int64 i = 0; i < a.ByteLength(); ++i) {
-			int32 x = a.ByteAt(i);
-			int32 y = b.ByteAt(i);
-			if (x == '\\') x = '/';
-			if (y == '\\') y = '/';
-			if (x >= 'A' && x <= 'Z') x += 32;
-			if (y >= 'A' && y <= 'Z') y += 32;
-			if (x != y) return false;
-		}
+		for (int64 i = 0; i < a.ByteLength(); ++i)
+			if (PathByte(a.ByteAt(i)) != PathByte(b.ByteAt(i))) return false;
 		return true;
 	}
 

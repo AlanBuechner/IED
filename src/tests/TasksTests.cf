@@ -51,14 +51,27 @@ class TasksTests {
 		const char* text = "@echo off";
 		assert_true(FS::WriteFileAtomically((folder / "bin" / "tool.cmd").CStr(), text, 9), "written");
 		Core::StringView extensions = Core::StringView(".COM;.EXE;.BAT;.CMD");
-		Core::String path = Core::String("C:/nowhere;") + (folder / "bin").View();
-		assert_true(Ied::FindsProgram(Core::StringView("tool"), folder.View(), path.View(), extensions), "on PATH, with PATHEXT's .CMD");
-		assert_true(Ied::FindsProgram(Core::StringView("tool"), (folder / "bin").View(), Core::StringView(""), extensions), "in the step's folder");
+		// PATH as this system writes it: two folders, the first nowhere.
+		Core::StringBuilder list;
+		list.Append("C:/nowhere");
+		list.AppendByte(Ied::c_PathListSeparator);
+		list.Append((folder / "bin").View());
+		Core::String path = list.ToString();
 		assert_true(Ied::FindsProgram(Core::StringView("bin/tool.cmd"), folder.View(), Core::StringView(""), extensions), "a path under the step's folder");
 		assert_true(!Ied::FindsProgram(Core::StringView("nuke"), folder.View(), path.View(), extensions), "nowhere");
 		assert_true(!Ied::FindsProgram(Core::StringView("tool.exe"), folder.View(), path.View(), extensions), "an extension of its own is not completed");
+#if defined(PLATFORM_WINDOWS)
+		assert_true(Ied::FindsProgram(Core::StringView("tool"), folder.View(), path.View(), extensions), "on PATH, with PATHEXT's .CMD");
+		assert_true(Ied::FindsProgram(Core::StringView("tool"), (folder / "bin").View(), Core::StringView(""), extensions), "in the step's folder");
 		assert_true(FS::WriteFileAtomically((folder / "bin" / "tool").CStr(), "#!/bin/sh", 9), "a Unix script beside it");
 		assert_se((folder / "bin" / "tool.cmd").CStr(), Ied::FoundProgram(Core::StringView("tool"), folder.View(), path.View(), extensions).CStr(), "the program, not the script beside it");
+#else
+		// Linux runs a name as it is: no PATHEXT, so tool.cmd is no "tool" until a file of that very name is there.
+		assert_true(!Ied::FindsProgram(Core::StringView("tool"), folder.View(), path.View(), extensions), "no extension tried");
+		assert_true(FS::WriteFileAtomically((folder / "bin" / "tool").CStr(), "#!/bin/sh", 9), "the program itself");
+		assert_true(Ied::FindsProgram(Core::StringView("tool"), (folder / "bin").View(), Core::StringView(""), extensions), "in the step's folder");
+		assert_se((folder / "bin" / "tool").CStr(), Ied::FoundProgram(Core::StringView("tool"), folder.View(), path.View(), extensions).CStr(), "on PATH, by its name");
+#endif
 		assert_true(FS::WriteFileAtomically((folder / "bin" / "only").CStr(), "#!/bin/sh", 9), "a file with no program beside it");
 		assert_se((folder / "bin" / "only").CStr(), Ied::FoundProgram(Core::StringView("only"), folder.View(), path.View(), extensions).CStr(), "still found as it is");
 		Core::String note = Ied::MissingProgramNote(Core::StringView("nuke"), Core::StringView("nuke.command"));

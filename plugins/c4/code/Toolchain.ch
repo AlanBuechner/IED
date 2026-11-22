@@ -41,7 +41,8 @@ namespace C4Plugin
 	Core::String CheckoutOfCommand(Core::StringView command);
 	// The checkout an IED install was made from, as its install.json's text names it (`source`); "" when it names none.
 	Core::String SourceOfInstallRecord(Core::StringView record);
-	// The files a bare command name may be in on `path` (a PATH value): <folder>/<name>.cmd, .bat, then the name itself.
+	// The files a bare command name may be in on `path` (a PATH value): <folder>/<name>.cmd, .bat, then the name itself;
+	// on Linux (':' between folders) the name itself alone.
 	Core::Array<Core::String> CommandCandidates(Core::StringView name, Core::StringView path);
 	// `entries` (JSON) with every ${c4.toolchain} replaced by `folder`.
 	Core::String WithToolchain(Core::StringView entries, Core::StringView folder);
