@@ -170,10 +170,11 @@ static const void* code_start(const void* address)
 #else
 #include <unwind.h>
 
-// On ELF the function's frame description entry knows where it starts (libgcc's unwinder looks it up).
+// On ELF the function's frame description entry knows where it starts (libgcc's unwinder looks it up). libgcc looks
+// up pc - 1, the call a return address follows, which at a function's first byte is the function before it.
 static const void* code_start(const void* address)
 {
-    return _Unwind_FindEnclosingFunction((void*)address);
+    return _Unwind_FindEnclosingFunction((void*)((const char*)address + 1));
 }
 #endif
 
