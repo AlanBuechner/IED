@@ -43,6 +43,8 @@ namespace Testing
 		TEST_FUNC(Compiler.ModulePartitions)
 		void LocalsBecomeSuffixedHiddenGlobals();
 		TEST_FUNC(Compiler.ModulePartitions)
+		void Bug496ALocalsGlobalNameHasNoVersionMark();
+		TEST_FUNC(Compiler.ModulePartitions)
 		void OnlyTheFirstPartitionKeepsFileScopeAssembly();
 		TEST_FUNC(Compiler.ModulePartitions)
 		void AddingAFunctionLeavesTheOtherPartitionsUnchanged();

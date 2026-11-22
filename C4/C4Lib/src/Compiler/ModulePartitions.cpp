@@ -16,12 +16,21 @@ namespace Scripting
 {
 	namespace
 	{
+		// A local's name as a global: without '@', which an ELF linker reads as a version (lld links `t@@.0` and `t@@.1`
+		// as one symbol `t`) - the RTTI and EH tables are named after MSVC's decorated names (`.?AVShape@@`).
+		std::string GlobalName(llvm::StringRef local)
+		{
+			std::string name = local.str();
+			std::replace(name.begin(), name.end(), '@', '$');
+			return name + kLocalSuffix;
+		}
+
 		// A partition may reach a local symbol another partition defines, so every local becomes a hidden global,
 		// renamed first so it cannot meet a foreign object's symbol of the same name in the link.
 		void MakeGlobal(llvm::GlobalValue& value)
 		{
 			if (!value.hasLocalLinkage()) return;
-			value.setName(value.getName() + kLocalSuffix);
+			value.setName(GlobalName(value.getName()));
 			value.setLinkage(llvm::GlobalValue::ExternalLinkage);
 			value.setVisibility(llvm::GlobalValue::HiddenVisibility);
 		}

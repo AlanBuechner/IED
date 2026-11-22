@@ -490,6 +490,26 @@ namespace Testing
 		TEST_ASSERT(module->getFunction("helper") == nullptr);
 	}
 
+	void ObjectCacheTest::Bug496ALocalsGlobalNameHasNoVersionMark()
+	{
+		// Two locators of one class, as a whole-program build's merge names them: lld would link both as `c4.rtti.col..?AVS`.
+		const std::string tables = "@\"c4.rtti.col..?AVS@@.0\" = private constant i32 1\n"
+			"@\"c4.rtti.col..?AVS@@.0.1559\" = private constant i32 2\n"
+			"define ptr @t0() { ret ptr @\"c4.rtti.col..?AVS@@.0\" }\n"
+			"define ptr @t1() { ret ptr @\"c4.rtti.col..?AVS@@.0.1559\" }\n";
+		const std::vector<std::string> partitions = Split(ProgramText(tables));
+		TEST_ASSERT_EQ(DefinedIn(partitions, "c4.rtti.col..?AVS$$.0.local"), DefinedIn(partitions, "t0"));
+		TEST_ASSERT_EQ(DefinedIn(partitions, "c4.rtti.col..?AVS$$.0.1559.local"), DefinedIn(partitions, "t1"));
+		for (const std::string& bitcode : partitions)
+		{
+			llvm::LLVMContext context;
+			std::unique_ptr<llvm::Module> module = ReadBack(bitcode, context);
+			TEST_ASSERT(module != nullptr);
+			for (const llvm::GlobalVariable& variable : module->globals())
+				TEST_ASSERT(!variable.getName().contains('@'));
+		}
+	}
+
 	void ObjectCacheTest::OnlyTheFirstPartitionKeepsFileScopeAssembly()
 	{
 		const std::vector<std::string> partitions = Split(ProgramText(""));

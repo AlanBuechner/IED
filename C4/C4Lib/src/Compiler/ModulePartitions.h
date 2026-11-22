@@ -25,7 +25,7 @@ namespace Scripting
 	/// partitions link back into the same program. A definition goes where AssignDefinitions places it (by its source
 	/// file, or its name), and a partition holds its definitions and declarations of only what they reach, so its
 	/// bitcode changes only when its own code does (roadmap 5.3). Every local symbol becomes a hidden global with a
-	/// ".local" suffix (left on `module` too). Only the first partition keeps the file-scope assembly and the debug
+	/// ".local" suffix and '$' for each '@', which an ELF linker reads as a version (left on `module` too). Only the first partition keeps the file-scope assembly and the debug
 	/// info's program-wide lists (enums, retained types, imports): a partition's compile unit lists only the globals it
 	/// defines. The partitions are built on up to `threads` threads, each from a copy of the module read from its
 	/// bitcode into a context of its own, so their bitcode is the same whatever the count.
