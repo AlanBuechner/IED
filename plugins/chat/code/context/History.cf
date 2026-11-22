@@ -41,7 +41,7 @@ namespace Ai
 	Core::Array<const Turn*> DroppedTurns(const Chat* chat) {
 		Core::Array<const Turn*> turns;
 		for (const Turn* turn : chat->m_Turns)
-			if (turn->m_Compressed) turns.Push(turn);
+			if (turn->m_Compressed || turn->m_SentFrom > 0) turns.Push(turn);
 		return turns;
 	}
 
@@ -157,7 +157,7 @@ namespace Ai
 			const int64 end = LineAfter(text, start);
 			out.Append("- ");
 			out.Append(hit.m_Turn->m_TurnId.View());
-			if (hit.m_Turn->m_Compressed) out.Append(" (left out)");
+			if (hit.m_Turn->m_Compressed || hit.m_Message < hit.m_Turn->m_SentFrom) out.Append(" (left out)");
 			out.Append(": ");
 			out.Append(text.Substring(start, end - start < c_HistoryLineBytes ? end - start : c_HistoryLineBytes).Trimmed());
 			out.Append("\n");
@@ -183,7 +183,13 @@ namespace Ai
 			const Turn* turn = chat->m_Turns[i];
 			out.Append("## Turn ");
 			out.Append(turn->m_TurnId.View());
-			out.Append(turn->m_Compressed ? Core::StringView(" (your context does not hold this one: compression left it out)") : Core::StringView("\n"));
+			if (turn->m_Compressed) out.Append(" (your context does not hold this one: compression left it out)");
+			else if (turn->m_SentFrom > 0) {
+				out.Append(" (a compaction summarized its first ");
+				out.AppendInt(turn->m_SentFrom);
+				out.Append(" messages; your context holds the rest)");
+			}
+			out.Append("\n");
 			out.Append(TurnDigest(turn, c_HistoryTurnBytes).View());
 		}
 		return ToolResult(out.View(), (Core::String("history_read: ") + wanted).View());
@@ -209,7 +215,7 @@ namespace Ai
 	}
 
 	void AddHistoryTools(ToolRegistry& registry, Chat* chat) {
-		ToolSpec* search = HistorySpec("history_search", "Find what this chat said in turns its context does not hold any more - the ones compression left out, named in the note it gave you. Words, not a pattern; where each was said last. Example: history_search({\"query\": \"the dock layout\"})",
+		ToolSpec* search = HistorySpec("history_search", "Find what this chat said in turns its context does not hold any more - the ones a compaction summarized (its summary says so) or compression left out. Words, not a pattern; where each was said last. Example: history_search({\"query\": \"the dock layout\"})",
 			"{\"type\": \"object\", \"properties\": {\"query\": {\"type\": \"string\", \"minLength\": 1}}, \"required\": [\"query\"], \"additionalProperties\": false}");
 		search->m_Plan = [](const ToolInvocation& call) -> ToolPlan { return HistoryPlan(call, Core::StringView("search")); };
 		search->m_Run = [chat](const ToolInvocation& call) -> ToolOutcome { return SearchRun(chat, call); };

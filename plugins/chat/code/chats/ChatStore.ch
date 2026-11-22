@@ -20,7 +20,9 @@ namespace Ai
 	void AppendTurn(const FS::Path& state, const Chat* chat, const Turn* turn);
 	void SaveRunningTurn(const FS::Path& state, const Chat* chat, const Turn* turn);
 	void ForgetRunningTurn(const FS::Path& state, const Chat* chat);
-	// context.json: {messages: [{turn, at, shown?, imagesOut?}]}, every message compression changed what requests send of.
+	// context.json: {messages: [{turn, at, shown?, imagesOut?}], sentFrom: [{turn, at}], summary?: {text, block, lastTurn,
+	// count, atMs}} - every message compression changed what requests send of, the turn a compaction cut and the summary
+	// that stands for what it cut (Compaction.ch).
 	void SaveContextView(const FS::Path& state, const Chat* chat);
 	// The chats saved for a workspace; `interruptedNote` is what an interrupted call's result tells the model. Each whose
 	// header allows starts offloaded.

@@ -208,6 +208,10 @@ button.chat-tool-head:hover { background: var(--veil); }
 .chat-harness > span { max-width: 80%; }
 .chat-harness .ci { width: 12px; height: 12px; flex: none; }
 .chat-harness.attn { color: var(--accent-warn); }
+button.chat-compacted { width: 100%; font: inherit; font-size: var(--font-size-xs); text-align: left; padding: 0; background: none; border: 0; cursor: pointer; }
+button.chat-compacted:hover { color: var(--text-1); }
+button.chat-compacted:focus-visible { outline: 1px solid var(--focus); }
+.chat-compacted-body { border-left-color: var(--border-1); white-space: normal; margin-left: 0; }
 .chat-foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); margin-top: var(--space-3); font-size: var(--font-size-xs); color: var(--text-2); }
 .chat-foot .meta { margin-left: auto; }
 .chat-stop.attn { color: var(--accent-warn); }

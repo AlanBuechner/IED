@@ -1,0 +1,261 @@
+include "Compaction.ch"
+
+namespace Ai
+{
+	Core::Array<SentMessage> SentMessages(const Chat* chat) {
+		Core::Array<SentMessage> sent;
+		for (Turn* turn : chat->m_Turns) {
+			if (turn->m_Compressed) continue;
+			for (int64 i = turn->m_SentFrom; i < turn->m_Messages.Count(); ++i) {
+				SentMessage message;
+				message.m_Turn = turn;
+				message.m_At = i;
+				message.m_Message = turn->m_Messages[i];
+				sent.Push(message);
+			}
+		}
+		return sent;
+	}
+
+	Core::Array<ModelMessage*> SentPart(const Turn* turn) {
+		if (turn->m_SentFrom <= 0) return turn->m_Messages;
+		Core::Array<ModelMessage*> part;
+		for (int64 i = turn->m_SentFrom; i < turn->m_Messages.Count(); ++i) part.Push(turn->m_Messages[i]);
+		return part;
+	}
+
+	int64 CompactLimit(int64 window, int64 maxOutput, int64 percent) {
+		if (window <= 0) return 0;
+		const int64 share = window * percent / 100;
+		if (maxOutput <= 0 || window - maxOutput >= share) return share;
+		const int64 room = window - maxOutput;
+		return room > window / 4 ? room : window / 4;   // a cap near the window itself still leaves the prompt a quarter
+	}
+
+	int64 CompactionCut(const Core::Array<SentMessage>& sent, int64 tailBudget) {
+		int64 tokens = 0;
+		int64 cut = -1;
+		for (int64 i = sent.Count() - 1; i >= 0; --i) {
+			tokens += sent[i].m_Tokens;
+			if (sent[i].m_Message->m_Role == "tool") continue;
+			if (cut >= 0 && tokens > tailBudget) break;
+			cut = i;
+		}
+		return cut > 0 ? cut : 0;
+	}
+
+	Core::String CutText(Core::StringView text, int64 most) {
+		if (text.ByteLength() <= most) return Core::String(text);
+		int64 end = most > 0 ? most : 0;
+		while (end > 0 && (text.ByteAt(end) & 0xC0) == 0x80) end -= 1;   // not inside a character
+		Core::StringBuilder out;
+		out.Append(text.Substring(0, end));
+		out.Append(" [... ");
+		out.AppendInt(text.ByteLength() - end);
+		out.Append(" more bytes]");
+		return out.ToString();
+	}
+
+	static Serialization::DomNode ParsedCalls(Core::StringView text) {
+		Serialization::DomDoc* doc = new Serialization::DomDoc();
+		Serialization::ReadResult read = Serialization::ReadJson(text, *doc);
+		return read.Ok() ? read.root : Serialization::DomNode();
+	}
+
+	// Who said the message, as the transcript heads it.
+	static void WriteHead(Core::StringBuilder& out, const SentMessage& sent) {
+		const ModelMessage* message = sent.m_Message;
+		const Turn* turn = sent.m_Turn;
+		out.Append("### ");
+		if (message->m_Role == "assistant") out.Append("Assistant");
+		else if (message->m_Role == "tool") out.Append("Tool result");
+		else if (sent.m_At > 0) out.Append("Note or message during the turn (the owner's or IED's)");
+		else if (!turn->m_FromChatId.IsEmpty()) {
+			out.Append("Message from the chat \"");
+			out.Append(turn->m_FromTitle.View());
+			out.Append("\"");
+		}
+		else if (turn->m_Origin == "background") out.Append("IED, telling of background tasks that ended");
+		else out.Append("The owner's message");
+		out.Append(" (turn ");
+		out.Append(turn->m_TurnId.View());
+		out.Append(")\n");
+	}
+
+	Core::String TranscriptEntry(const SentMessage& sent) {
+		const ModelMessage* message = sent.m_Message;
+		Core::StringBuilder out;
+		WriteHead(out, sent);
+		// What the request sent of it: a stale read's note is what the model had too. A trimmed result's whole text is
+		// worth more to a summary than its trim.
+		const bool stale = message->m_Shown.View().StartsWith(Core::StringView("[superseded:")) || message->m_Shown.View().StartsWith(Core::StringView("[out of date:"));
+		const Core::StringView text = stale ? message->m_Shown.View() : message->m_Content.View();
+		int64 most = c_CompactMessageBytes;
+		if (message->m_Role == "assistant") most = c_CompactReplyBytes;
+		else if (message->m_Role == "tool") most = c_CompactResultBytes;
+		else if (sent.m_At == 0) most = c_CompactOwnerMessageBytes;
+		const Core::StringView trimmed = text.Trimmed();
+		if (!trimmed.IsEmpty()) {
+			out.Append(CutText(trimmed, most).View());
+			out.Append("\n");
+		}
+		if (!message->m_ToolCalls.IsEmpty()) {
+			Serialization::DomNode calls = ParsedCalls(message->m_ToolCalls.View());
+			for (int64 k = 0; k < calls.Count(); ++k) {
+				Serialization::DomNode function = calls.At(k).Member("function");
+				out.Append("-> ");
+				out.Append(function.Member("name").AsView());
+				out.Append("(");
+				out.Append(CutText(function.Member("arguments").AsView(), c_CompactArgsBytes).View());
+				out.Append(")\n");
+			}
+		}
+		if (!message->m_Images.IsEmpty()) {
+			out.Append("[");
+			out.AppendInt(message->m_Images.Count());
+			out.Append(message->m_Images.Count() == 1 ? " image]\n" : " images]\n");
+		}
+		return out.ToString();
+	}
+
+	Core::Array<Core::String> TranscriptChunks(const Core::Array<SentMessage>& sent, int64 to, int64 chunkBytes, Core::Array<int64>& starts) {
+		Core::Array<Core::String> chunks;
+		Core::StringBuilder chunk;
+		int64 start = 0;
+		for (int64 i = 0; i < to && i < sent.Count(); ++i) {
+			Core::String entry = TranscriptEntry(sent[i]);
+			if (entry.ByteLength() > chunkBytes) entry = CutText(entry.View(), chunkBytes - 64);
+			if (chunk.ByteLength() > 0 && chunk.ByteLength() + entry.ByteLength() + 1 > chunkBytes) {
+				chunks.Push(chunk.ToString());
+				starts.Push(start);
+				chunk.Clear();
+				start = i;
+			}
+			if (chunk.ByteLength() > 0) chunk.Append("\n");
+			chunk.Append(entry.View());
+		}
+		if (chunk.ByteLength() > 0) {
+			chunks.Push(chunk.ToString());
+			starts.Push(start);
+		}
+		return chunks;
+	}
+
+	// `text` on one line, cut.
+	static Core::String OneLine(Core::StringView text, int64 most) {
+		Core::StringBuilder out;
+		Core::StringView trimmed = text.Trimmed();
+		for (int64 i = 0; i < trimmed.ByteLength(); ++i) {
+			const int32 c = trimmed.ByteAt(i);
+			if (c == '\n' || c == '\r' || c == '\t') {
+				if (out.ByteLength() > 0 && out.View().ByteAt(out.ByteLength() - 1) != ' ') out.AppendByte(' ');
+			}
+			else out.AppendByte(c);
+		}
+		return CutText(out.View(), most);
+	}
+
+	// One turn's line of the digest: what started it (when it is among them), its calls by tool, its last reply.
+	static void DigestTurn(Core::StringBuilder& out, const Core::Array<SentMessage>& sent, int64 from, int64 to) {
+		const Turn* turn = sent[from].m_Turn;
+		out.Append("- Turn ");
+		out.Append(turn->m_TurnId.View());
+		if (sent[from].m_At == 0) {
+			out.Append(", which started with: \"");
+			out.Append(OneLine(sent[from].m_Message->m_Content.View(), c_CompactDigestLineBytes).View());
+			out.Append("\"");
+		}
+		else out.Append(" (its later part)");
+		Core::Array<Core::String> names;
+		Core::Array<int64> counts;
+		Core::String reply;
+		for (int64 i = from; i < to; ++i) {
+			const ModelMessage* message = sent[i].m_Message;
+			if (message->m_Role != "assistant") continue;
+			if (!message->m_Content.View().Trimmed().IsEmpty()) reply = message->m_Content;
+			Serialization::DomNode calls = ParsedCalls(message->m_ToolCalls.View());
+			for (int64 k = 0; k < calls.Count(); ++k) {
+				Core::String name = Core::String(calls.At(k).Member("function").Member("name").AsView());
+				int64 at = -1;
+				for (int64 n = 0; n < names.Count(); ++n)
+					if (names[n] == name) at = n;
+				if (at < 0) {
+					names.Push(name);
+					counts.Push(1);
+				}
+				else counts[at] += 1;
+			}
+		}
+		if (!names.IsEmpty()) {
+			out.Append("; calls: ");
+			for (int64 n = 0; n < names.Count(); ++n) {
+				if (n > 0) out.Append(", ");
+				out.Append(names[n].View());
+				out.Append(" x");
+				out.AppendInt(counts[n]);
+			}
+		}
+		if (!reply.IsEmpty()) {
+			out.Append("; its last reply: \"");
+			out.Append(OneLine(reply.View(), c_CompactDigestLineBytes).View());
+			out.Append("\"");
+		}
+		out.Append("\n");
+	}
+
+	Core::String DigestOf(const Core::Array<SentMessage>& sent, int64 from, int64 to) {
+		Core::StringBuilder out;
+		int64 start = from;
+		for (int64 i = from; i < to && i < sent.Count(); ++i) {
+			const bool ends = i + 1 >= to || i + 1 >= sent.Count() || sent[i + 1].m_Turn != sent[i].m_Turn;
+			if (!ends) continue;
+			DigestTurn(out, sent, start, i + 1);
+			start = i + 1;
+		}
+		return out.ToString();
+	}
+
+	Core::String CompactionState(const Chat* chat, const Turn* cutTurn, int64 cutAt) {
+		Core::StringBuilder out;
+		if (!chat->m_Tasks.IsEmpty()) {
+			out.Append("The task list as it stood:\n");
+			out.Append(TaskLines(chat->m_Tasks).View());
+		}
+		if (!chat->m_Modified.IsEmpty()) {
+			if (out.ByteLength() > 0) out.Append("\n");
+			out.Append("Files this chat changed (lines added/removed):\n");
+			const int64 first = chat->m_Modified.Count() > c_CompactFilesMost ? chat->m_Modified.Count() - c_CompactFilesMost : 0;
+			if (first > 0) {
+				out.AppendInt(first);
+				out.Append(" more before these\n");
+			}
+			for (int64 i = first; i < chat->m_Modified.Count(); ++i) {
+				const ModifiedFile* file = chat->m_Modified[i];
+				out.Append(file->m_Path.View());
+				out.Append(" +");
+				out.AppendInt(file->m_Plus);
+				out.Append(" -");
+				out.AppendInt(file->m_Minus);
+				out.Append("\n");
+			}
+		}
+		if (cutTurn && cutAt > 0 && cutTurn == chat->Current() && !cutTurn->m_Messages.IsEmpty()) {
+			if (out.ByteLength() > 0) out.Append("\n");
+			out.Append(cutTurn->m_FromChatId.IsEmpty() ? "The message that started the current turn, as it was sent:\n" : "The message from another chat that started the current turn:\n");
+			Core::StringView text = cutTurn->m_UserText.IsEmpty() ? cutTurn->m_Messages[0]->m_Content.View() : cutTurn->m_UserText.View();
+			out.Append(CutText(text.Trimmed(), c_CompactOwnerMessageBytes).View());
+			out.Append("\n");
+		}
+		return Core::String(out.View().Trimmed());
+	}
+
+	void ForgetCompaction(Chat* chat) {
+		chat->m_Summary = Core::String();
+		chat->m_SummaryBlock = Core::String();
+		chat->m_SummaryLastTurn = Core::String();
+		for (Turn* turn : chat->m_Turns) {
+			turn->m_Compressed = false;
+			turn->m_SentFrom = 0;
+		}
+	}
+}

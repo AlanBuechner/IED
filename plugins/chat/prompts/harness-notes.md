@@ -67,9 +67,6 @@ The call {tool} ({call_id}) was interrupted by a restart; its effect is unknown.
 ## budget_warning
 You have used {percent}% of this run's {budget} budget. Wrap up: finish the current task, verify, and report.
 
-## context_compressed
-Earlier parts of this conversation were left out of your requests to save space - not summarized and not lost: they are still in this chat, whole, and a restart does not empty it. `history_search` finds where anything was said and `history_read` gives a turn back; read the files or symbols again if you need their exact contents.
-
 ## tasks_after_compaction
 The conversation was compacted to fit the context, and its summary may leave out your task list. The chat's tasks, as they stand:
 {tasks}

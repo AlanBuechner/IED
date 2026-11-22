@@ -2,7 +2,7 @@
 // model and streams the reply into segments; the reply is classified and acted on - tool calls run (permission check,
 // approval, result), an answer ends the turn in Ask and Plan mode, finish ends it in Agent mode - and every stop
 // reason gets its recovery (docs/12 "Recovery policy"): retries with backoff and the fallback models, continuing after
-// a cut, nudges as harness notes, compression on a context overflow. A reason past its bound pauses the chat, never
+// a cut, nudges as harness notes, a compaction on a context overflow. A reason past its bound pauses the chat, never
 // silently ends it. The thread holds the server lock only for what it reads and writes of the chat.
 
 include "ChatService.ch"
@@ -21,6 +21,14 @@ namespace Ai
 	const int64 c_RunProgressEveryMs = 250;   // turn.progress at most this often
 	const int64 c_RunEstimateShownMs = 3000;  // a prompt estimated to take this long to read shows the estimate
 	const int64 c_RunProbeRetryMs = 60000;    // a model's server that did not answer discovery is asked again after this
+	// What a chat's bytes are worth in tokens, for the prompt size an estimate is made of - what the prefill watchdog's
+	// budget is built from. Measured with the serving model's tokenizer on this repo's transcripts (31 windows, 2.8 MB:
+	// 3.15 bytes per token; a request's JSON of code, paths and escapes 3.0-3.4, prose 4.4), where bytes/4 read a quarter
+	// low on the same bytes (docs/12 "Truth about the model's context window").
+	const double c_ContextBytesPerToken = 3.15;
+
+	// What making room in the context did (RunCompact.cf): nothing, the mechanical tier only, or a compaction.
+	enum class RoomMade { None, Trimmed, Compacted }
 
 	class TurnRun
 	{
@@ -99,6 +107,20 @@ namespace Ai
 		// the owner's. The lock is not held.
 		private void DeliverMessages(bool inResult);
 		private void SaveRunning();
+
+		// --- RunCompact.cf: room in the context (Compaction.ch, docs/04 "Context management") ---
+		// Before a step past the model's limit - or, `forced`, after its server refused a prompt of `refusedTokens` as too
+		// long - the mechanical tier, then, when that is not enough, a compaction: the model summarizes what comes before a
+		// cut, and the summary is sent in its place. A summarizer that fails leaves IED's digest instead, so a compaction
+		// always makes room. The lock is not held.
+		private RoomMade MakeRoom(bool forced, int64 refusedTokens);
+		// `chunks` folded one at a time into `summary` by the turn's model, a chunk its server refuses as too long split in
+		// two; `words` the summary's length. How many chunks it folded; `failed` why it stopped before the last (empty when
+		// it did not). The lock is not held.
+		private int64 Summarize(Core::Array<Core::String>& chunks, Core::Array<int64>& starts, Core::String& summary, int64 window, int64 words, Core::String& failed);
+		// One summarizer request of `body`, its prompt estimated at `promptTokens`, under the profile's watchdogs. The lock
+		// is not held.
+		private StepRequest SummaryRequest(Core::StringView body, int64 promptTokens);
 
 		// --- RunTools.cf: tool calls ---
 		private void RecordAssistant(const StepResult* result, bool withCalls);
@@ -224,6 +246,10 @@ namespace Ai
 	// The tool definitions a request sends: every tool whole when `whole` (Chats::SendsWholeTools), else a deferred tool
 	// the chat has not loaded as its stub.
 	Core::String ToolsSent(const ToolRegistry* tools, const Chat* chat, bool whole);
+	// Bytes of a chat's text as tokens, at c_ContextBytesPerToken; a message as a request counts it: its text, calls and
+	// thinking at that rate, an image as an image.
+	int64 BytesToTokens(int64 bytes);
+	int64 MessageTokens(const ModelMessage* message);
 	// What fills a chat's context, estimated (bytes / 4): the system message and tool definitions of `systemBytes` and
 	// `toolsBytes`, its messages and its tool results, the turns compression left out not counted.
 	Core::Array<ContextPart> ContextParts(const Chat* chat, int64 systemBytes, int64 toolsBytes);

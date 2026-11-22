@@ -319,7 +319,30 @@ export class TranscriptView {
 		const warns = segment.kind === "no_model" || segment.kind === "harness_error";
 		const level = segment.kind === "paused" || warns ? ".attn" : "";
 		const glyph = segment.kind === "paused" ? "debug-pause" : segment.kind === "routing" ? "arrow-right" : warns ? "warning" : "sync";
-		return h("div.chat-harness" + level, { title: "A note from IED's harness" + (segment.kind ? " (" + segment.kind + ")" : "") }, icon(glyph), h("span", null, (level ? "" : "harness: ") + segment.text));
+		const text = segment.text || "";
+		const cut = segment.kind === "context_compacted" ? text.indexOf("\n\n") : -1;
+		if (cut >= 0) return this.compactedNote(segment, text.slice(0, cut), text.slice(cut + 2));
+		return h("div.chat-harness" + level, { title: "A note from IED's harness" + (segment.kind ? " (" + segment.kind + ")" : "") }, icon(glyph), h("span", null, (level ? "" : "harness: ") + text));
+	}
+
+	// A compaction's note (docs/04 "Context management"): its first line, opening on the summary the model was given in
+	// place of what was cut.
+	compactedNote(segment, line, summary) {
+		const segId = segment.segId;
+		const open = this.expanded.has(segId);
+		const toggle = () => {
+			if (open) this.expanded.delete(segId);
+			else this.expanded.add(segId);
+			const found = this.model.segment(segId);
+			const el = this.segmentEls.get(segId);
+			if (el) this.fill(el, found ? found.segment : segment);
+		};
+		const head = h("button.chat-harness.chat-compacted", { "aria-expanded": open ? "true" : "false", title: open ? "Hide the summary" : "Show the summary the model was given", on: { click: toggle } },
+			icon(open ? "chevron-down" : "chevron-right"), h("span", null, "harness: " + line));
+		if (!open) return head;
+		const body = h("div.chat-think-body.chat-compacted-body");
+		body.append(...this.markdown(summary));
+		return h("div", null, head, body);
 	}
 
 	// --- Tool cards --------------------------------------------------------------------------------------------------

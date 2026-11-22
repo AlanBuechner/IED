@@ -1,8 +1,8 @@
 // history_search and history_read (docs/04 "Context management", F-AIR-54): what a chat said in the turns its context
-// keeps no more. Compression leaves whole earlier turns out of the requests and notes that to the model - "earlier
-// parts of this conversation were left out" - so these give it a way back in: the turns stay in the chat in full, on
-// disk and in memory, and only stop being sent. search names where a word was said, read gives a turn's messages as
-// the model was sent them.
+// keeps no more. A compaction (Compaction.ch) summarizes what comes before its cut - whole earlier turns, and the first
+// part of the turn it cut - and its summary names these as the way back in: the turns stay in the chat in full, on disk
+// and in memory, and only stop being sent. search names where a word was said, read gives a turn's messages as the
+// model was sent them.
 
 include "aitools/Tool.ch"
 include "chats/Chat.ch"
@@ -30,7 +30,7 @@ namespace Ai
 
 	// The chat's turns, oldest first, as a search reads them.
 	Core::Array<const Turn*> ChatTurns(const Chat* chat);
-	// Those of them compression left out of the requests.
+	// Those of them a compaction or compression left out of the requests, wholly or in part (a cut turn's first part).
 	Core::Array<const Turn*> DroppedTurns(const Chat* chat);
 
 	// One turn's messages as the model was sent them, at most `most` bytes.

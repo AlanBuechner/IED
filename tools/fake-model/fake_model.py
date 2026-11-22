@@ -74,6 +74,7 @@ class State:
 		self.lock = threading.Lock()
 		self.counters = collections.Counter()
 		self.queue = collections.deque()
+		self.matched = []   # (text, deque): queued scripts only for requests whose messages hold the text
 		self.log = collections.deque(maxlen=LOG_LIMIT)
 		self.requests = 0
 		self.busy = 0
@@ -92,12 +93,17 @@ class State:
 		named = headers.get("X-Fake-Script") or _script_from_model(body.get("model", ""))
 		if named:
 			return named, self.library.get(named)
+		for text, scripts in self.matched:
+			if scripts and text in json.dumps(body.get("messages", [])):
+				return self._item(scripts.popleft())
 		if self.queue:
-			item = self.queue.popleft()
-			if isinstance(item, dict):
-				return "inline-%d" % self.requests, scripting.validate(item, "inline script")
-			return item, self.library.get(item)
+			return self._item(self.queue.popleft())
 		return self.config.default_script, self.library.get(self.config.default_script)
+
+	def _item(self, item):
+		if isinstance(item, dict):
+			return "inline-%d" % self.requests, scripting.validate(item, "inline script")
+		return item, self.library.get(item)
 
 	def configure(self, changes):
 		with self.lock:
@@ -115,6 +121,7 @@ class State:
 		with self.lock:
 			self.counters.clear()
 			self.queue.clear()
+			self.matched = []
 			self.log.clear()
 
 
@@ -239,9 +246,19 @@ class Handler(BaseHTTPRequestHandler):
 				scripting.validate(item, "queued script") if isinstance(item, dict) else self.state.library.get(item)
 		except (KeyError, ValueError) as e:
 			return self._json(400, {"error": {"message": str(e)}})
+		match = body.get("match")
+		if match is not None and (not isinstance(match, str) or not match):
+			return self._json(400, {"error": {"message": "match must be a non-empty string"}})
 		with self.state.lock:
-			self.state.queue.extend(items)
-			return self._json(200, {"queued": len(self.state.queue)})
+			if match is None:
+				self.state.queue.extend(items)
+				return self._json(200, {"queued": len(self.state.queue)})
+			for text, scripts in self.state.matched:
+				if text == match:
+					scripts.extend(items)
+					return self._json(200, {"queued": len(scripts)})
+			self.state.matched.append((match, collections.deque(items)))
+			return self._json(200, {"queued": len(items)})
 
 	def _completion(self, body):
 		if not isinstance(body.get("messages"), list):

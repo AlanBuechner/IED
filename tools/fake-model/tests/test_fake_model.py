@@ -88,6 +88,17 @@ class FakeModelTests(unittest.TestCase):
 		self.assertEqual(400, self.call("POST", "/_fake/queue", {"scripts": [{"responses": []}]})[0])
 		self.assertEqual(400, self.call("POST", "/v1/chat/completions", {"messages": []}, {"X-Fake-Script": "no-such-script"})[0])
 
+	def test_a_matched_queue_answers_only_requests_holding_its_text(self):
+		def inline(text):
+			return {"description": "d", "stopClass": "none", "harness": "h", "responses": [{"steps": [{"text": text}, {"finish": "stop"}]}]}
+		self.assertEqual(200, self.call("POST", "/_fake/queue", {"scripts": [inline("step one"), inline("step two")]})[0])
+		self.assertEqual(200, self.call("POST", "/_fake/queue", {"scripts": [inline("the summary")], "match": "Summarize this"})[0])
+		self.assertEqual("step one", probe.probe(self.url, time_scale=0).text, "a request without the text takes the plain queue")
+		summary = probe.probe(self.url, time_scale=0, messages=[{"role": "user", "content": "Summarize this, please"}])
+		self.assertEqual("the summary", summary.text, "one holding it takes the matched queue first")
+		self.assertEqual("step two", probe.probe(self.url, time_scale=0, messages=[{"role": "user", "content": "Summarize this"}]).text, "an empty matched queue falls through")
+		self.assertEqual(400, self.call("POST", "/_fake/queue", {"scripts": ["empty"], "match": ""})[0])
+
 	def test_request_log_and_placeholders(self):
 		probe.probe(self.url, "budget-runaway", time_scale=0)
 		second = probe.probe(self.url, "budget-runaway", time_scale=0)

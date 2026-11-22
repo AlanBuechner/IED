@@ -189,6 +189,11 @@ class FakeModel:
 	def queue(self, *scripts):
 		self.post("/_fake/queue", {"scripts": list(scripts)})
 
+	def queue_matching(self, text, *scripts):
+		"""Scripts only for requests whose messages hold `text` (tools/fake-model/README.md), such as a compaction's
+		summarizer, answered apart from the turn's own steps."""
+		self.post("/_fake/queue", {"scripts": list(scripts), "match": text})
+
 	def stop(self):
 		self.process.kill()
 		self.process.wait(10)

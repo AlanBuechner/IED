@@ -1,0 +1,404 @@
+include "api/Plugin.ch"
+include "Run.ch"
+include "Effort.ch"
+include "Probe.ch"
+include "context/Compaction.ch"
+
+namespace Ai
+{
+	const int64 c_CompactPromptTokens = 1500;      // the summarizer's own instructions, with room to spare
+	const int64 c_CompactSplitsMost = 4;           // chunks a server refused as too long, split again, per compaction
+	const int64 c_CompactLeastSummaryBytes = 40;   // a reply shorter than this is not a summary
+
+	static int64 CompactNowMs() { return Platform::UnixTimeNs() / 1000000; }
+
+	// A count of tokens as a note says it: "109k", "4.2k", "812".
+	static Core::String TokenCount(int64 tokens) {
+		Core::StringBuilder out;
+		if (tokens >= 10000) {
+			out.AppendInt(tokens / 1000);
+			out.Append("k");
+		}
+		else if (tokens >= 1000) {
+			out.AppendInt(tokens / 1000);
+			out.Append(".");
+			out.AppendInt((tokens % 1000) / 100);
+			out.Append("k");
+		}
+		else out.AppendInt(tokens);
+		return out.ToString();
+	}
+
+	// What the summarizer may write: a fifth of the window, at least 1k, at most 16k tokens (thinking counts against it
+	// on most servers), and never past the profile's own cap.
+	static int64 SummaryOutputTokens(const ModelProfile* profile, int64 window) {
+		int64 output = window / 5;
+		if (output < 1024) output = 1024;
+		if (output > 16384) output = 16384;
+		if (profile->m_MaxOutput > 0 && profile->m_MaxOutput < output) output = profile->m_MaxOutput;
+		return output;
+	}
+
+	static Core::Array<Core::String> Pairs(const char* a, Core::StringView av, const char* b, Core::StringView bv) {
+		Core::Array<Core::String> values;
+		values.Push(Core::String(a));
+		values.Push(Core::String(av));
+		if (b) {
+			values.Push(Core::String(b));
+			values.Push(Core::String(bv));
+		}
+		return values;
+	}
+
+	// The turns among `sent` [0, to).
+	static int64 TurnsIn(const Core::Array<SentMessage>& sent, int64 to) {
+		int64 turns = 0;
+		for (int64 i = 0; i < to && i < sent.Count(); ++i)
+			if (i == 0 || sent[i].m_Turn != sent[i - 1].m_Turn) turns += 1;
+		return turns;
+	}
+
+	// "23 turns (412 messages)", "its turn's first 30 messages".
+	static Core::String WhatWasCut(const Core::Array<SentMessage>& sent, int64 cut) {
+		Core::StringBuilder out;
+		const int64 turns = TurnsIn(sent, cut);
+		if (turns == 1 && sent[0].m_Turn == sent[cut].m_Turn) {
+			out.Append("the turn's first ");
+			out.AppendInt(cut);
+			out.Append(cut == 1 ? " message" : " messages");
+			return out.ToString();
+		}
+		out.AppendInt(turns);
+		out.Append(turns == 1 ? " turn (" : " turns (");
+		out.AppendInt(cut);
+		out.Append(cut == 1 ? " message)" : " messages)");
+		return out.ToString();
+	}
+
+	// Chunk `at` cut in two at the transcript entry nearest its middle (a server refused it as too long).
+	static void SplitChunk(Core::Array<Core::String>& chunks, Core::Array<int64>& starts, int64 at) {
+		const Core::StringView text = chunks[at].View();
+		const Core::StringView entry = Core::StringView("\n### ");
+		const int64 middle = text.ByteLength() / 2;
+		int64 split = text.IndexOf(entry, middle);
+		for (int64 i = middle; split < 0 && i > 0; --i)
+			if (text.Substring(i, entry.ByteLength()) == entry) split = i;
+		if (split <= 0) {
+			split = middle;
+			while (split > 0 && (text.ByteAt(split) & 0xC0) == 0x80) split -= 1;
+		}
+		Core::Array<Core::String> splitChunks;
+		Core::Array<int64> splitStarts;
+		for (int64 i = 0; i < chunks.Count(); ++i) {
+			if (i != at) {
+				splitChunks.Push(chunks[i]);
+				splitStarts.Push(starts[i]);
+				continue;
+			}
+			splitChunks.Push(Core::String(text.Substring(0, split)));
+			splitChunks.Push(Core::String(text.Substring(split, text.ByteLength() - split).Trimmed()));
+			splitStarts.Push(starts[i]);
+			splitStarts.Push(starts[i]);   // where its second half starts is not known: the digest may tell it twice
+		}
+		chunks = splitChunks;
+		starts = splitStarts;
+	}
+
+	RoomMade TurnRun::MakeRoom(bool forced, int64 refusedTokens) {
+		int64 window = 0;
+		int64 before = 0;
+		int64 words = 0;
+		int64 cut = 0;
+		bool trimmed = false;
+		Core::Array<SentMessage> sent;
+		Core::Array<Core::String> chunks;
+		Core::Array<int64> starts;
+		Core::String summary;
+		Core::String model;
+		{
+			IED::HostLock guard(*m_Context);
+			const ModelProfile* profile = m_Candidates[m_Candidate];
+			if (profile->IsClaude()) return RoomMade::None;   // the CLI holds and compacts its own conversation
+			model = profile->m_Name;
+			window = Window();
+			before = CalibratedTokens();
+			if (window <= 0) {
+				// A window nobody reported: there is no limit to keep under until the server refuses a prompt, and then
+				// the compaction is sized for a window a quarter under what it refused.
+				if (!forced) return RoomMade::None;
+				window = (refusedTokens > before ? refusedTokens : before) * 3 / 4;
+			}
+			if (!forced && before <= CompactLimit(window, profile->m_MaxOutput, c_ContextCompressAtPercent)) return RoomMade::None;
+			trimmed = Compress();
+			const RoomMade mechanical = trimmed ? RoomMade::Trimmed : RoomMade::None;
+			const int64 afterTrim = CalibratedTokens();
+			if (!forced && afterTrim <= window * c_CompactEnoughPercent / 100) return mechanical;
+			// The cut: what a request always carries (the system message, the tools, the calibration) and the summary's
+			// room come off the target; the newest messages that fit what is left - at most a fifth of the window - stay.
+			sent = SentMessages(m_Chat);
+			int64 messages = 0;
+			for (int64 i = 0; i < sent.Count(); ++i) {
+				sent[i].m_Tokens = MessageTokens(sent[i].m_Message);
+				messages += sent[i].m_Tokens;
+			}
+			const int64 fixed = afterTrim - messages - BytesToTokens(m_Chat->m_SummaryBlock.ByteLength());
+			int64 summaryRoom = window / 8;
+			if (summaryRoom > c_CompactSummaryMostTokens) summaryRoom = c_CompactSummaryMostTokens;
+			int64 tail = window * c_CompactTargetPercent / 100 - fixed - summaryRoom;
+			if (tail > window * c_CompactTailMostPercent / 100) tail = window * c_CompactTailMostPercent / 100;
+			cut = CompactionCut(sent, tail < 0 ? 0 : tail);
+			int64 cutTokens = 0;
+			for (int64 i = 0; i < cut; ++i) cutTokens += sent[i].m_Tokens;
+			// A cut that frees almost nothing is not worth a summarizer's request before a step; a refused prompt takes
+			// whatever there is.
+			if (cut <= 0 || (!forced && cutTokens < window * c_CompactLeastPercent / 100)) return mechanical;
+			words = summaryRoom * 3 / 5;
+			// Each request holds the summary so far (at most its room, and the digest of what did not fit as much again)
+			// and a chunk of the transcript, with the reply's room left over.
+			int64 chunkTokens = window - SummaryOutputTokens(profile, window) - 2 * summaryRoom - c_CompactPromptTokens;
+			if (chunkTokens > window * 60 / 100) chunkTokens = window * 60 / 100;
+			if (chunkTokens < 512) chunkTokens = 512;
+			chunks = TranscriptChunks(sent, cut, (int64)((double)chunkTokens * c_ContextBytesPerToken), starts);
+			summary = m_Chat->m_Summary;
+			if (chunks.Count() > c_CompactChunksMost) {
+				// More than one compaction reads: the oldest part is told by IED's digest, the newest summarized.
+				const int64 skip = chunks.Count() - c_CompactChunksMost;
+				Core::String older = CutText(DigestOf(sent, 0, starts[skip]).View(), (int64)((double)summaryRoom * c_ContextBytesPerToken));
+				summary = (summary.IsEmpty() ? Core::String() : summary + "\n\n") + "IED's digest of the oldest part of the conversation, too long to summarize in one compaction:\n" + older.View();
+				Core::Array<Core::String> newest;
+				Core::Array<int64> newestStarts;
+				for (int64 i = skip; i < chunks.Count(); ++i) {
+					newest.Push(chunks[i]);
+					newestStarts.Push(starts[i]);
+				}
+				chunks = newest;
+				starts = newestStarts;
+			}
+			Core::StringBuilder note;
+			note.Append("Compacting the context (");
+			note.Append(TokenCount(before).View());
+			note.Append(" of ");
+			note.Append(TokenCount(window).View());
+			note.Append(" tokens): ");
+			note.Append(model.View());
+			note.Append(" is summarizing ");
+			note.Append(WhatWasCut(sent, cut).View());
+			note.Append("; the newest ");
+			note.AppendInt(sent.Count() - cut);
+			note.Append(sent.Count() - cut == 1 ? " message stays as it was." : " messages stay as they were.");
+			UiNote(Core::StringView("context_compacting"), note.View());
+		}
+		const int64 startedMs = CompactNowMs();
+		Core::String failed;
+		const int64 folded = Summarize(chunks, starts, summary, window, words, failed);
+		IED::HostLock guard(*m_Context);
+		Prefill(Core::StringView(""));
+		if (m_Run->m_Cancelled) return trimmed ? RoomMade::Trimmed : RoomMade::None;
+		if (folded < chunks.Count()) {
+			// The summarizer stopped: what it did not fold in is IED's digest, so the compaction makes room all the same.
+			Core::String digest = DigestOf(sent, starts[folded], cut);
+			summary = (summary.IsEmpty() ? Core::String() : summary + "\n\n") + "IED's digest of the rest, which the model could not summarize (" + failed.View() + "):\n" + digest.View();
+		}
+		Turn* cutTurn = sent[cut].m_Turn;
+		const int64 cutAt = sent[cut].m_At;
+		for (int64 i = 0; i < cut; ++i)
+			if (sent[i].m_Turn != cutTurn) sent[i].m_Turn->m_Compressed = true;
+		cutTurn->m_SentFrom = cutAt;
+		m_Chat->m_Summary = summary;
+		m_Chat->m_SummaryLastTurn = sent[cut - 1].m_Turn->m_TurnId;
+		m_Chat->m_Compactions += 1;
+		m_Chat->m_CompactedMs = CompactNowMs();
+		Core::StringBuilder count;
+		count.AppendInt(m_Chat->m_Compactions);
+		Core::String block = m_Chats->m_Prompts.Compaction("block", Pairs("count", count.View(), "summary", summary.View()));
+		if (block.IsEmpty()) block = summary;   // compaction.md missing: the summary alone
+		const Core::String state = CompactionState(m_Chat, cutTurn, cutAt);
+		if (!state.IsEmpty()) block = (block + "\n\n") + m_Chats->m_Prompts.Compaction("block_state", Pairs("state", state.View(), nullptr, Core::StringView(""))).View();
+		m_Chat->m_SummaryBlock = block;
+		m_Chat->m_PromptRewritten = true;
+		SaveContextView(LocalStateOf(m_Ws), m_Chat);
+		SaveChatHeader(LocalStateOf(m_Ws), m_Chat);
+		SaveRunning();
+		Core::StringBuilder note;
+		note.Append("Compacted the context from ");
+		note.Append(TokenCount(before).View());
+		note.Append(" to ");
+		note.Append(TokenCount(CalibratedTokens()).View());
+		note.Append(" of ");
+		note.Append(TokenCount(window).View());
+		note.Append(" tokens: ");
+		if (folded == chunks.Count()) {
+			note.Append(model.View());
+			note.Append(" summarized ");
+			note.Append(WhatWasCut(sent, cut).View());
+			note.Append(" in ");
+			note.AppendInt((CompactNowMs() - startedMs + 500) / 1000);
+			note.Append(" s");
+		}
+		else if (folded > 0) {
+			note.Append(model.View());
+			note.Append(" summarized ");
+			note.AppendInt(folded);
+			note.Append(" of ");
+			note.AppendInt(chunks.Count());
+			note.Append(" parts of ");
+			note.Append(WhatWasCut(sent, cut).View());
+			note.Append(" before it failed (");
+			note.Append(failed.View());
+			note.Append("), and IED's digest tells the rest");
+		}
+		else {
+			note.Append(model.View());
+			note.Append(" could not summarize ");
+			note.Append(WhatWasCut(sent, cut).View());
+			note.Append(" (");
+			note.Append(failed.View());
+			note.Append("), so IED kept a digest of them instead");
+		}
+		note.Append(". The newest ");
+		note.AppendInt(sent.Count() - cut);
+		note.Append(sent.Count() - cut == 1 ? " message stays as it was" : " messages stay as they were");
+		note.Append(", and the chat keeps the whole history.\n\n");
+		note.Append(summary.View());
+		UiNote(Core::StringView("context_compacted"), note.View());
+		return RoomMade::Compacted;
+	}
+
+	StepRequest TurnRun::SummaryRequest(Core::StringView body, int64 promptTokens) {
+		IED::HostLock guard(*m_Context);
+		ModelProfile* profile = m_Candidates[m_Candidate];
+		StepRequest request;
+		request.m_Url = profile->CompletionsUrl();
+		Core::String key;
+		if (!profile->m_ApiKeyEnv.IsEmpty() && Platform::TryGetEnvironmentVariable(profile->m_ApiKeyEnv.CStr(), key)) request.m_Headers.Push(Core::String("Authorization: Bearer ") + key.View());
+		request.m_Body = Core::String(body);
+		request.m_PromptTokens = promptTokens;
+		request.m_ReadTokens = promptTokens;   // nothing of it is in the server's cache
+		double rate = profile->m_PrefillRate;
+		m_Chats->m_PrefillRates.TryGet(profile->m_Name, rate);
+		request.m_ConnectMs = profile->m_ConnectMs;
+		request.m_ReadMs = (int64)((double)promptTokens * 1000.0 / rate);
+		request.m_PrefillMs = profile->m_PrefillBaseMs + 2 * request.m_ReadMs;   // base + twice the estimated read (docs/12)
+		request.m_PrefillExtendMs = profile->m_PrefillBaseMs;
+		request.m_IdleMs = profile->m_IdleMs;
+		request.m_CapMs = profile->m_StepCapMs;
+		request.m_ServerRoot = ServerRoot(profile->m_Endpoint.View());
+		EstimatePrefill(request);
+		return request;
+	}
+
+	int64 TurnRun::Summarize(Core::Array<Core::String>& chunks, Core::Array<int64>& starts, Core::String& summary, int64 window, int64 words, Core::String& failed) {
+		Core::String system;
+		bool llamaCpp = false;
+		int64 output = 0;
+		ModelProfile* profile = nullptr;
+		{
+			IED::HostLock guard(*m_Context);
+			profile = m_Candidates[m_Candidate];
+			system = m_Chats->m_Prompts.Compaction("system", Core::Array<Core::String>());
+			m_Chats->m_LlamaCpp.TryGet(profile->m_Name, llamaCpp);
+			output = SummaryOutputTokens(profile, window);
+		}
+		Core::StringBuilder wordCount;
+		wordCount.AppendInt(words);
+		TurnRun* self = this;
+		// Only how far the server has read reaches the chat; the summary shows in the note once it is whole.
+		StepEvents events = [self](StepEventKind kind, Core::StringView delta, int64 call) {
+			if (kind != StepEventKind::Progress && kind != StepEventKind::Working) return;
+			IED::HostLock guard(*self->m_Context);
+			self->Prefill(delta);
+		};
+		int64 splits = 0;
+		int64 i = 0;
+		while (i < chunks.Count()) {
+			Core::String previous;
+			Core::String part;
+			Core::String request;
+			{
+				IED::HostLock guard(*m_Context);
+				previous = summary.IsEmpty() ? m_Chats->m_Prompts.Compaction("previous_none", Core::Array<Core::String>())
+					: m_Chats->m_Prompts.Compaction("previous_some", Pairs("summary", summary.View(), nullptr, Core::StringView("")));
+				Core::StringBuilder which;
+				if (chunks.Count() == 1) which.Append("the part");
+				else {
+					which.Append("part ");
+					which.AppendInt(i + 1);
+					which.Append(" of ");
+					which.AppendInt(chunks.Count());
+				}
+				part = which.ToString();
+				Core::Array<Core::String> values = Pairs("previous", previous.View(), "part", part.View());
+				values.Push(Core::String("words"));
+				values.Push(wordCount.ToString());
+				values.Push(Core::String("transcript"));
+				values.Push(chunks[i]);
+				request = m_Chats->m_Prompts.Compaction("request", values);
+				if (request.IsEmpty()) request = (previous + "\n\n") + chunks[i].View();   // compaction.md missing
+			}
+			IED::JsonWriter json;
+			json.BeginObject();
+			json.Field("model", profile->m_Model.View());
+			json.Key(Core::StringView("messages"));
+			json.BeginArray();
+			if (!system.IsEmpty()) {
+				json.BeginObject();
+				json.Field("role", "system");
+				json.Field("content", system.View());
+				json.EndObject();
+			}
+			json.BeginObject();
+			json.Field("role", "user");
+			json.Field("content", request.View());
+			json.EndObject();
+			json.EndArray();
+			json.BoolField("stream", true);
+			if (llamaCpp) json.BoolField("return_progress", true);
+			json.Key(Core::StringView("stream_options"));
+			json.BeginObject();
+			json.BoolField("include_usage", true);
+			json.EndObject();
+			WriteEffort(json, *profile, Core::StringView("low"), llamaCpp);   // a summary is not worth long thinking
+			json.IntField("max_tokens", output);
+			json.EndObject();
+			Core::String body = json.ToString();
+			StepResult* result = RunStep(SummaryRequest(body.View(), BytesToTokens(body.ByteLength())), events, &m_Run->m_Cancelled);
+			const StepVerdict verdict = Classify(*result);
+			if (verdict == StepVerdict::Cancelled) {
+				failed = Core::String("the turn was stopped");
+				return i;
+			}
+			const Core::StringView text = result->m_Text.View().Trimmed();
+			// Any reply with a summary's worth of text is one, whatever else it did: a cut by max_tokens keeps what it said.
+			if (result->m_End == WireEnd::Completed && !result->m_Completion->m_Errored && text.ByteLength() >= c_CompactLeastSummaryBytes) {
+				summary = Core::String(text);
+				i += 1;
+				continue;
+			}
+			if (verdict == StepVerdict::ContextOverflow && splits < c_CompactSplitsMost && chunks[i].ByteLength() > 2048) {
+				const Core::String error = result->m_Completion->m_Errored ? result->m_Completion->m_ErrorMessage : result->m_Error;
+				const int64 limit = ContextLimitIn(error.View());
+				if (limit > 0) {
+					IED::HostLock guard(*m_Context);
+					m_Chats->LearnWindow(profile->m_Name.View(), limit);
+				}
+				SplitChunk(chunks, starts, i);
+				splits += 1;
+				continue;
+			}
+			Core::StringBuilder why;
+			if (result->m_End == WireEnd::Completed && !result->m_Completion->m_Errored && !text.IsEmpty()) {
+				failed = Core::String("its reply was too short to be a summary");
+				return i;
+			}
+			why.Append(VerdictName(verdict));
+			if (verdict == StepVerdict::HttpError) {
+				why.Append(" ");
+				why.AppendInt(result->m_HttpStatus);
+			}
+			else if (verdict == StepVerdict::ToolCalls || verdict == StepVerdict::Empty || verdict == StepVerdict::ReasoningOnly) why.Append(": no summary in its reply");
+			failed = why.ToString();
+			return i;
+		}
+		return chunks.Count();
+	}
+}

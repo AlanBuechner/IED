@@ -18,8 +18,9 @@ First match wins:
 
 1. Header `X-Fake-Script: <name>`.
 2. `"model": "script:<name>"` (or `"fake/<name>"`).
-3. The FIFO filled by `POST /_fake/queue {"scripts": ["name", {inline script}, ...]}` - for harness tests that cannot set headers.
-4. `--default-script` (default `ok-text`).
+3. A FIFO filled with `POST /_fake/queue {"scripts": [...], "match": "text"}`, for requests whose `messages` (as JSON) hold that text only - a side request the harness makes in between, such as IED's context compaction asking for a summary, answered apart from the turn's own steps. The first FIFO with scripts left whose text the request holds wins.
+4. The FIFO filled by `POST /_fake/queue {"scripts": ["name", {inline script}, ...]}` - for harness tests that cannot set headers.
+5. `--default-script` (default `ok-text`).
 
 A script has one or more `responses`. Each request to a script uses the next response; the last one repeats forever. So `http-error-503` answers 503, 503, then succeeds, and `loop-same-call` returns the same call on every request. `POST /_fake/reset` rewinds every script and clears the queue and the request log.
 
@@ -44,7 +45,7 @@ A script has one or more `responses`. Each request to a script uses the next res
 | `POST /api/show` | Ollama: `model_info.<arch>.context_length`, `parameters: "num_ctx N"` |
 | `GET /health` | `{"status": "ok"}` |
 | `GET/POST /_fake/config` | read / change `nCtx`, `nCtxTrain`, `slots`, `model`, `timeScale`, `enforceCtx`, `ctxErrorStyle`, `defaultScript`, `vision` (what `/props` `modalities` says), `props` (false: no `/props`, a server that is not llama.cpp) |
-| `POST /_fake/queue`, `POST /_fake/reset` | script FIFO, rewind |
+| `POST /_fake/queue`, `POST /_fake/reset` | script FIFO (with `match`, one for requests holding that text), rewind |
 | `GET /_fake/requests` | the last 500 requests: script, response index, estimated `promptTokens`, full body, outcome - assert what the harness sent (e.g. the continue note after a cut) |
 | `GET /_fake/scripts` | name -> stop class + description |
 

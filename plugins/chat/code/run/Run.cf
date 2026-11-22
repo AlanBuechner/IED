@@ -337,8 +337,21 @@ namespace Ai
 			Core::String ended = m_Chats->TellEnded(m_Chat);
 			if (!ended.IsEmpty()) HarnessNote(Core::StringView("background_ended"), ended.View());
 			if (m_ClaudeCompacted) TellTasksAfterCompaction();
+		}
+		// Room in a local model's context before every step (docs/04 "Context management"), the running turn's own
+		// messages included: the mechanical tier, then a compaction with a summary. Claude compacts its own.
+		if (!onClaude) {
+			const RoomMade made = MakeRoom(false, 0);
+			IED::HostLock guard(*m_Context);
+			if (made != RoomMade::None) m_Turn->m_Recoveries.Push(CompressedAt(made));
+			if (m_Run->m_Cancelled) {
+				Finish(Core::StringView("user_cancelled"));
+				return;
+			}
+		}
+		{
+			IED::HostLock guard(*m_Context);
 			if (!onClaude) {
-				if (Window() > 0 && CalibratedTokens() * 100 > Window() * c_ContextCompressAtPercent && Compress()) m_Turn->m_Recoveries.Push(CompressedAt());
 				request = Request();
 				estimate = request.m_PromptTokens;
 				EstimatePrefill(request);
@@ -390,6 +403,10 @@ namespace Ai
 			Transport(verdict, result);
 			return;
 		}
+		if (verdict == StepVerdict::ContextOverflow) {
+			Overflow(result);
+			return;
+		}
 		IED::HostLock guard(*m_Context);
 		if (verdict == StepVerdict::Cancelled) {
 			RecordAssistant(result, false);
@@ -431,7 +448,7 @@ namespace Ai
 			if (verdict == StepVerdict::StalledPrefill) PrefillRanShort(result);
 			Retry(verdict, result, 2);
 		}
-		else Overflow(result);
+		else Pause(Core::StringView(VerdictName(verdict)), Core::StringView("the step ended in a way the harness has no recovery for"));
 	}
 
 	// --- Recovery ----------------------------------------------------------------------------------------------------
@@ -471,10 +488,11 @@ namespace Ai
 		return text.ToString();
 	}
 
-	// How a compression of the context is named in the turn's recoveries, at the percent the setting uses.
-	static Core::String CompressedAt() {
+	// How making room in the context is named in the turn's recoveries, at the percent the setting uses: "compressed"
+	// for the mechanical tier alone, "compacted" for a summary.
+	static Core::String CompressedAt(RoomMade made) {
 		Core::StringBuilder text;
-		text.Append("compressed the context at ");
+		text.Append(made == RoomMade::Compacted ? "compacted the context at " : "compressed the context at ");
 		text.AppendInt(c_ContextCompressAtPercent);
 		text.Append("%");
 		return text.ToString();
@@ -600,27 +618,42 @@ namespace Ai
 		Sleep(waitMs);
 	}
 
+	// The model's server refused the prompt as longer than its context: the window it names learned, and the context made
+	// to fit - a compaction whatever the limit said, since the server's word is the truth (docs/12 "context_overflow").
+	// The lock is not held: a compaction asks the model for its summary.
 	void TurnRun::Overflow(StepResult* result) {
-		Core::String error = result->m_Completion->m_Errored ? result->m_Completion->m_ErrorMessage : result->m_Error;
-		const int64 limit = ContextLimitIn(error.View());
-		if (limit > 0) m_Chats->LearnWindow(m_Candidates[m_Candidate]->m_Name.View(), limit);
 		Core::String key = Core::String("context_overflow");
 		int64 count = 0;
-		m_Counts.TryGet(key, count);
-		m_Counts.At(key) = count + 1;
-		if (count + 1 > 3) {
-			Pause(key.View(), Core::StringView("the conversation does not fit the model's context, even compressed"));
+		int64 limit = 0;
+		int64 refused = 0;
+		{
+			IED::HostLock guard(*m_Context);
+			Core::String error = result->m_Completion->m_Errored ? result->m_Completion->m_ErrorMessage : result->m_Error;
+			limit = ContextLimitIn(error.View());
+			if (limit > 0) m_Chats->LearnWindow(m_Candidates[m_Candidate]->m_Name.View(), limit);
+			m_Counts.TryGet(key, count);
+			m_Counts.At(key) = count + 1;
+			if (count + 1 > 3) {
+				Pause(key.View(), Core::StringView("the conversation does not fit the model's context, even compacted: the system message and tool definitions alone may be too large for its window"));
+				return;
+			}
+			refused = result->m_PromptTokens > 0 ? result->m_PromptTokens : CalibratedTokens();
+		}
+		const RoomMade made = MakeRoom(true, refused);
+		IED::HostLock guard(*m_Context);
+		if (made == RoomMade::Compacted) {
+			m_Turn->m_Recoveries.Push(Counted(Core::StringView("compacted after context_overflow"), count + 1));
 			return;
 		}
-		if (Compress()) {
+		if (made == RoomMade::Trimmed) {
 			m_Turn->m_Recoveries.Push(Counted(Core::StringView("compressed after context_overflow"), count + 1));
 			return;
 		}
-		if (limit > 0 && EstimateTokens() < limit) {
+		if (limit > 0 && CalibratedTokens() < limit) {
 			m_Turn->m_Recoveries.Push(Counted(Core::StringView("retried after context_overflow"), count + 1));
 			return;
 		}
-		Pause(key.View(), Core::StringView("the conversation does not fit the model's context and nothing is left to compress"));
+		Pause(key.View(), Core::StringView("the conversation does not fit the model's context and nothing is left to compact: the system message, the tool definitions and the newest step alone are too large for its window"));
 	}
 
 	// Waits `ms` unless the run is stopped first; the lock is not held.

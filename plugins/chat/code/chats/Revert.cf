@@ -1,6 +1,7 @@
 include "api/Plugin.ch"
 include "Revert.ch"
 include "ChatService.ch"
+include "context/Compaction.ch"
 
 namespace Ai
 {
@@ -73,6 +74,9 @@ namespace Ai
 		Core::Array<Core::String> dropped;
 		for (int64 i = at; i < chat->m_Turns.Count(); ++i) dropped.Push(chat->m_Turns[i]->m_TurnId);
 		while (chat->m_Turns.Count() > at) chat->m_Turns.RemoveAt(chat->m_Turns.Count() - 1);
+		// A compaction's summary that told of a dropped turn would tell the model of work that is gone: it goes, and the
+		// turns kept are sent whole again until the next step compacts them anew (Compaction.ch).
+		if (dropped.Contains(chat->m_SummaryLastTurn)) ForgetCompaction(chat);
 		LeaveDroppedClaude(chat, dropped);
 		SaveContextView(LocalStateOf(ws), chat);
 		// The model server's prefix cache held the dropped turns: the next read is estimated as a chat's first.

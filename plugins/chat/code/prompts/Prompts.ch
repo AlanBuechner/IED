@@ -37,13 +37,20 @@ namespace Ai
 		// `text`, a message `sent` while a turn ran, as that turn reads it: the owner's under the note "steering", another
 		// chat's under "steering_chat" - it is not the owner's, and the count of chats messaging each other goes on.
 		public Core::String Steering(const OwnerMessage& sent, const Core::String& text) const;
+		// The section `name` of compaction.md (Compaction.ch: the summarizer's system message, its request, the block
+		// requests send for a summary) with each {key} replaced in one pass, so a value that holds a {key} of its own -
+		// a summary quoting a placeholder - stays as it is.
+		public Core::String Compaction(const char* name, const Core::Array<Core::String>& values) const;
 
 		private Core::String m_Base;
 		private Core::String m_Style;
 		private Core::HashMap<Core::String, Core::String> m_Modes;   // "ask" -> its instructions; "agent-endless" Agent's until stopped
 		private Core::HashMap<Core::String, Core::String> m_Notes;   // "continue_after_max_tokens" -> its text
+		private Core::HashMap<Core::String, Core::String> m_Compaction;   // "system", "request", "block" -> its text
 	}
 
 	// The "## name" sections of a Markdown file: name -> the text under it, trimmed.
 	Core::HashMap<Core::String, Core::String> MarkdownSections(Core::StringView text);
+	// `text` with each {key} of `values` ("key", "value", ...) replaced in one pass; an unknown {word} is left as it is.
+	Core::String FillPlaceholders(Core::StringView text, const Core::Array<Core::String>& values);
 }

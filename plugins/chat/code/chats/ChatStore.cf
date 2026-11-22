@@ -167,6 +167,28 @@ namespace Ai
 				json.EndObject();
 			}
 		json.EndArray();
+		// A compaction's cut and summary (Compaction.ch): the turn it cut, sent from a message on, and what stands for
+		// everything before.
+		json.Key(Core::StringView("sentFrom"));
+		json.BeginArray();
+		for (const Turn* turn : chat->m_Turns) {
+			if (turn->m_SentFrom <= 0) continue;
+			json.BeginObject();
+			json.Field("turn", turn->m_TurnId.View());
+			json.IntField("at", turn->m_SentFrom);
+			json.EndObject();
+		}
+		json.EndArray();
+		if (!chat->m_SummaryBlock.IsEmpty()) {
+			json.Key(Core::StringView("summary"));
+			json.BeginObject();
+			json.Field("text", chat->m_Summary.View());
+			json.Field("block", chat->m_SummaryBlock.View());
+			json.Field("lastTurn", chat->m_SummaryLastTurn.View());
+			json.IntField("count", chat->m_Compactions);
+			json.IntField("atMs", chat->m_CompactedMs);
+			json.EndObject();
+		}
 		json.EndObject();
 		WriteWhole(ChatFolder(state, chat->m_ChatId.View()) / "context.json", json.View());
 	}
@@ -189,6 +211,19 @@ namespace Ai
 			turn->m_Messages[at]->m_Shown = Core::String(entry.Member("shown").AsView());
 			turn->m_Messages[at]->m_ImagesOut = entry.Member("imagesOut").AsBool();
 		}
+		Serialization::DomNode cuts = view.Member("sentFrom");
+		for (int64 i = 0; i < cuts.Count(); ++i) {
+			Turn* turn = TurnNamed(chat, cuts.At(i).Member("turn").AsView());
+			const int64 at = cuts.At(i).Member("at").AsInt();
+			if (turn && at > 0 && at <= turn->m_Messages.Count()) turn->m_SentFrom = at;
+		}
+		Serialization::DomNode summary = view.Member("summary");
+		if (summary.Kind() != Serialization::DomKind::Object) return;
+		chat->m_Summary = Core::String(summary.Member("text").AsView());
+		chat->m_SummaryBlock = Core::String(summary.Member("block").AsView());
+		chat->m_SummaryLastTurn = Core::String(summary.Member("lastTurn").AsView());
+		chat->m_Compactions = summary.Member("count").AsInt();
+		chat->m_CompactedMs = summary.Member("atMs").AsInt();
 	}
 
 	static void ReadHeader(Chat* chat, const Serialization::DomNode& header) {

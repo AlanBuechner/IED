@@ -182,6 +182,9 @@ namespace Ai
 		public Core::String m_Prefill;                  // while a request's prompt is read: its server's progress, JSON
 		public Core::Array<ModelMessage*> m_Messages;   // what the model is sent of this turn, in order
 		public bool m_Compressed;                       // left out of requests to fit the context (kept on disk)
+		// A compaction cut it (docs/04 "Context management"): requests send its messages from this one on, the chat's
+		// summary standing for the ones before. Kept in context.json; 0 sends them all.
+		public int64 m_SentFrom;
 		// Shed (docs/04 "What stays in memory"): a turn that ended keeps its segments in turns.jsonl only - clients read
 		// them in pages (Pages.ch) - with their count and its answer's first line.
 		public bool m_Shed;
@@ -409,6 +412,15 @@ namespace Ai
 		public int64 m_LastPromptTokens;
 		public int64 m_PromptHead;
 		public bool m_PromptRewritten;
+		// The last compaction (docs/04 "Context management"; Compaction.ch), kept in context.json: what the model wrote of
+		// everything before its cut (`summary`), the user message requests send for it right after the system message,
+		// fixed when it was made so the prefix stays the same (`block`), the last turn it covers (a revert that drops that
+		// turn drops the compaction), how many there have been and when the last was made. Empty: none.
+		public Core::String m_Summary;
+		public Core::String m_SummaryBlock;
+		public Core::String m_SummaryLastTurn;
+		public int64 m_Compactions;
+		public int64 m_CompactedMs;
 		public bool m_ClaudeAsked;                      // Claude was asked to count its context this server run (ClaudeCount.cf)
 		public Core::String m_Resume;                   // a call of this tool restarts the server: the chat goes on once it is back (Resume.ch)
 		public ChatRun* m_Run;                          // the running turn, or null

@@ -126,15 +126,18 @@ class PrefixTests(ChatCase):
 		results = [m["content"] for m in stored[0]["messages"] if m["role"] == "tool"]
 		self.assertEqual(whole, results[0], "the chat keeps the whole result")
 
-	async def test_a_turns_own_trimmed_results_are_kept_whole(self):
+	async def test_what_a_turns_requests_leave_out_is_kept_whole(self):
+		"""A window of a few hundred tokens: the turn's own requests trim or summarize its earlier results (a compaction,
+		docs/04 "Context management"), and the chat keeps every one of them whole."""
 		write(os.path.join(self.repo, "long.txt"), "filler line for the read result\n" * 200)
 		await self.use_model({"contextWindow": 400})
 		self.chat_id, _ = await self.chat()
+		self.model.queue_matching("<conversation>", *[text_step("SUMMARY of the reads.") for _ in range(6)])
 		self.model.queue(call_step("fs_read", {"path": "long.txt"}, "r1"), call_step("fs_read", {"path": "long.txt", "offset": 2}, "r2"),
 			call_step("fs_read", {"path": "long.txt", "offset": 4}, "r3"), text_step("Read it."))
 		await self.turn(self.chat_id)
-		sent = [m["content"] for m in body(self.model.requests()[-1])["messages"] if m["role"] == "tool"]
-		self.assertTrue(any("trimmed to save context" in text for text in sent), "a result was trimmed in the request")
+		sent = json.dumps(body(self.model.requests()[-1])["messages"])
+		self.assertTrue("trimmed to save context" in sent or "[Context summary" in sent, "the request left results out")
 		with open(os.path.join(local_state(self.data, self.repo), "chats", self.chat_id, "turns.jsonl"), encoding="utf-8") as f:
 			stored = [json.loads(line) for line in f if line.strip()]
 		kept = [m["content"] for m in stored[-1]["messages"] if m["role"] == "tool"]

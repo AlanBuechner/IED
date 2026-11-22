@@ -2,6 +2,7 @@ include "api/Plugin.ch"
 include "Run.ch"
 include "aitools/Images.ch"
 include "context/Superseded.ch"
+include "context/Compaction.ch"
 include "Effort.ch"
 
 namespace Ai
@@ -11,11 +12,6 @@ namespace Ai
 	const int64 c_TrimmedKeepBytes = 300;
 	const int64 c_TrimBelowBytes = 600;
 	const int64 c_RecentMessagesKept = 4;
-	// What a chat's bytes are worth in tokens, for the prompt size an estimate is made of - what the prefill watchdog's
-	// budget is built from. Measured with the serving model's tokenizer on this repo's transcripts (31 windows, 2.8 MB:
-	// 3.15 bytes per token; a request's JSON of code, paths and escapes 3.0-3.4, prose 4.4), where bytes/4 read a quarter
-	// low on the same bytes (docs/12 "Truth about the model's context window").
-	const double c_ContextBytesPerToken = 3.15;
 
 	static int64 StreamNowMs() { return Platform::UnixTimeNs() / 1000000; }
 
@@ -78,7 +74,7 @@ namespace Ai
 		images.m_Vision = profile->m_Vision;
 		if (!profile->m_VisionSet) m_Chats->m_SeesImages.TryGet(profile->m_Name, images.m_Vision);
 		for (Turn* each : m_Chat->m_Turns)
-			if (!each->m_Compressed) images.m_Older += CountImages(each->m_Messages);
+			if (!each->m_Compressed) images.m_Older += CountImages(SentPart(each));
 		images.m_Older -= c_RequestImagesSent;
 		IED::JsonWriter json;
 		json.BeginObject();
@@ -89,13 +85,20 @@ namespace Ai
 		json.Field("role", "system");
 		json.Field("content", m_System.View());
 		json.EndObject();
+		// A compaction's summary stands for what it cut, right after the system message (Compaction.ch).
+		if (!m_Chat->m_SummaryBlock.IsEmpty()) {
+			json.BeginObject();
+			json.Field("role", "user");
+			json.Field("content", m_Chat->m_SummaryBlock.View());
+			json.EndObject();
+		}
 		bool llamaCpp = false;
 		m_Chats->m_LlamaCpp.TryGet(profile->m_Name, llamaCpp);
 		// The turn's earlier thinking goes back to a llama.cpp server: its templates show a step's reasoning with the step,
 		// and without it the model works its plan out again at every step.
 		const bool keepThinking = llamaCpp && profile->m_KeepThinking;
 		for (Turn* each : m_Chat->m_Turns)
-			if (!each->m_Compressed) WriteMessages(json, m_Ws, each->m_Messages, images, keepThinking && each == m_Turn);
+			if (!each->m_Compressed) WriteMessages(json, m_Ws, SentPart(each), images, keepThinking && each == m_Turn);
 		json.EndArray();
 		json.RawField("tools", SentTools().View());
 		json.BoolField("stream", true);
@@ -334,18 +337,18 @@ namespace Ai
 
 	// What a chat's text counts as, and what a message counts as: its text, calls and thinking (sent back where the server
 	// keeps it) at that rate, an image as an image.
-	static int64 BytesToTokens(int64 bytes) { return (int64)((double)bytes / c_ContextBytesPerToken); }
+	int64 BytesToTokens(int64 bytes) { return (int64)((double)bytes / c_ContextBytesPerToken); }
 
-	static int64 MessageTokens(const ModelMessage* message) {
+	int64 MessageTokens(const ModelMessage* message) {
 		return BytesToTokens(message->SentText().ByteLength() + message->m_Note.ByteLength() + message->m_ToolCalls.ByteLength() + message->m_Reasoning.ByteLength())
 			+ (message->SendsImages() ? message->m_Images.Count() * c_ToolImageTokens : 0);
 	}
 
 	int64 TurnRun::EstimateTokens() const {
-		int64 tokens = BytesToTokens(m_System.ByteLength());
+		int64 tokens = BytesToTokens(m_System.ByteLength() + m_Chat->m_SummaryBlock.ByteLength());
 		for (Turn* each : m_Chat->m_Turns)
 			if (!each->m_Compressed)
-				for (ModelMessage* message : each->m_Messages) tokens += MessageTokens(message);
+				for (int64 i = each->m_SentFrom; i < each->m_Messages.Count(); ++i) tokens += MessageTokens(each->m_Messages[i]);
 		return tokens;
 	}
 
@@ -355,9 +358,12 @@ namespace Ai
 		return BytesToTokens(bodyBytes - imageBytes) + sentImages * c_ToolImageTokens;
 	}
 
+	// The calibration's offset holds what the estimate leaves out - the tool definitions, the chat template - so with no
+	// count from this model yet the tool definitions are added here: a chat's first step on a model with many tools and a
+	// small window is past its limit before anything else is (the trigger then fired a step late).
 	int64 TurnRun::CalibratedTokens() const {
 		const int64 estimate = EstimateTokens();
-		if (m_Chat->m_EstimateModel.View() != m_Candidates[m_Candidate]->m_Name.View()) return estimate;
+		if (m_Chat->m_EstimateModel.View() != m_Candidates[m_Candidate]->m_Name.View()) return estimate + BytesToTokens(SentTools().ByteLength());
 		return estimate + m_Chat->m_EstimateOffset > 0 ? estimate + m_Chat->m_EstimateOffset : estimate;
 	}
 
@@ -373,11 +379,12 @@ namespace Ai
 	Core::String TurnRun::SentTools() const { return ToolsSent(m_Tools, m_Chat, m_Chats->SendsWholeTools(m_Candidates[m_Candidate])); }
 
 	Core::Array<ContextPart> ContextParts(const Chat* chat, int64 systemBytes, int64 toolsBytes) {
-		int64 messages = 0;
+		int64 messages = BytesToTokens(chat->m_SummaryBlock.ByteLength());
 		int64 results = 0;
 		for (Turn* each : chat->m_Turns)
 			if (!each->m_Compressed)
-				for (ModelMessage* message : each->m_Messages) {
+				for (int64 i = each->m_SentFrom; i < each->m_Messages.Count(); ++i) {
+					const ModelMessage* message = each->m_Messages[i];
 					if (message->m_Role == "tool") results += MessageTokens(message);
 					else messages += MessageTokens(message);
 				}
@@ -433,23 +440,25 @@ namespace Ai
 		PublishContext(m_Turn->m_TokensIn + output);
 	}
 
-	// Mechanical compression (docs/04 "Context management"): file reads a later call made stale noted as such, tool
-	// results older than the last few messages trimmed; when that is not enough, whole earlier turns left out. Only what
-	// the requests send changes - each message's `shown`, kept in context.json so a restart sends the same - while the
-	// chat keeps every message whole. Whether anything changed.
+	// Mechanical compression (docs/04 "Context management", the first tier): file reads a later call made stale noted as
+	// such, tool results older than the last few messages trimmed. Only what the requests send changes - each message's
+	// `shown`, kept in context.json so a restart sends the same - while the chat keeps every message whole. Whole earlier
+	// turns are no longer left out here with nothing in their place: what this tier cannot fit, a compaction summarizes
+	// (RunCompact.cf). Whether anything changed. The lock is held.
 	bool TurnRun::Compress() {
 		Core::Array<ModelMessage*> sent;
 		int64 keepFrom = -1;
 		for (Turn* each : m_Chat->m_Turns) {
 			if (each->m_Compressed) continue;
-			for (int64 i = 0; i < each->m_Messages.Count(); ++i) {
+			for (int64 i = each->m_SentFrom; i < each->m_Messages.Count(); ++i) {
 				if (each == m_Turn && keepFrom < 0 && i >= each->m_Messages.Count() - c_RecentMessagesKept) keepFrom = sent.Count();
 				sent.Push(each->m_Messages[i]);
 			}
 		}
 		bool changed = DropSuperseded(sent, keepFrom < 0 ? sent.Count() : keepFrom) > 0;
-		for (Turn* each : m_Chat->m_Turns)
-			for (int64 i = 0; i < each->m_Messages.Count(); ++i) {
+		for (Turn* each : m_Chat->m_Turns) {
+			if (each->m_Compressed) continue;
+			for (int64 i = each->m_SentFrom; i < each->m_Messages.Count(); ++i) {
 				ModelMessage* message = each->m_Messages[i];
 				if (each == m_Turn && i >= each->m_Messages.Count() - c_RecentMessagesKept) continue;
 				if (message->m_Role != "tool") continue;
@@ -462,19 +471,7 @@ namespace Ai
 				message->m_Shown = Core::String(message->SentText().Substring(0, c_TrimmedKeepBytes)) + c_TrimmedNote;
 				changed = true;
 			}
-		const int64 target = Window() / 2;
-		int64 leftOut = 0;
-		for (Turn* each : m_Chat->m_Turns) {
-			if (target <= 0 || EstimateTokens() <= target || each == m_Turn) break;
-			if (each->m_Compressed) continue;
-			each->m_Compressed = true;
-			changed = true;
-			leftOut += 1;
 		}
-		// The note only for what it says: whole turns gone from the requests. Trimming a stale read or a long tool result
-		// keeps the conversation in order, so it leaves no note (the owner, on a note that appeared after a restart with
-		// nothing left out: it read as if the history had been cleared).
-		if (leftOut > 0) HarnessNote(Core::StringView("context_compressed"), m_Chats->m_Prompts.Note("context_compressed").View());
 		if (changed) {
 			m_Chat->m_PromptRewritten = true;
 			SaveContextView(LocalStateOf(m_Ws), m_Chat);

@@ -1,0 +1,203 @@
+// compaction: the limit a step is held to, where a compaction cuts (never before a tool result, the newest step kept
+// whatever its size), the transcript the summarizer reads in chunks, the digest that stands in for a failed summarizer,
+// what IED adds to the summary, and the messages a request sends once a turn is cut (docs/04 "Context management").
+
+include "Compaction.ch"
+include "prompts/Prompts.ch"
+
+static Ai::ModelMessage* CompactMessage(const char* role, const char* content) {
+	Ai::ModelMessage* message = new Ai::ModelMessage();
+	message->m_Role = Core::String(role);
+	message->m_Content = Core::String(content);
+	return message;
+}
+
+static Ai::ModelMessage* CompactCall(const char* content, const char* name, const char* arguments) {
+	Ai::ModelMessage* message = CompactMessage("assistant", content);
+	Core::StringBuilder calls;
+	calls.Append("[{\"id\": \"c1\", \"type\": \"function\", \"function\": {\"name\": \"");
+	calls.Append(name);
+	calls.Append("\", \"arguments\": \"");
+	calls.Append(arguments);
+	calls.Append("\"}}]");
+	message->m_ToolCalls = calls.ToString();
+	return message;
+}
+
+static Ai::Turn* CompactTurn(const char* turnId) {
+	Ai::Turn* turn = new Ai::Turn();
+	turn->m_TurnId = Core::String(turnId);
+	return turn;
+}
+
+static void CompactPush(Core::Array<Ai::SentMessage>& sent, Ai::Turn* turn, Ai::ModelMessage* message, int64 tokens) {
+	Ai::SentMessage each;
+	each.m_Turn = turn;
+	each.m_At = turn->m_Messages.Count();
+	each.m_Message = message;
+	each.m_Tokens = tokens;
+	turn->m_Messages.Push(message);
+	sent.Push(each);
+}
+
+// One turn of a step after the owner's message: a call, its result, another call, its result, a note.
+static Core::Array<Ai::SentMessage> CompactSteps(Ai::Turn* turn) {
+	Core::Array<Ai::SentMessage> sent;
+	CompactPush(sent, turn, CompactMessage("user", "Port the ring buffer."), 100);
+	CompactPush(sent, turn, CompactCall("Reading it.", "fs_read", "{}"), 100);
+	CompactPush(sent, turn, CompactMessage("tool", "1\tring"), 100);
+	CompactPush(sent, turn, CompactCall("", "fs_edit", "{}"), 100);
+	CompactPush(sent, turn, CompactMessage("tool", "edited"), 100);
+	CompactPush(sent, turn, CompactMessage("user", "A note."), 10);
+	return sent;
+}
+
+[test("server.ai.compaction")]
+class CompactionTests {
+	[test("limit_leaves_the_reply_room")]
+	public static void TestLimit() {
+		assert_eq((int64)85000, Ai::CompactLimit(100000, 0, 85), "the percent of the window");
+		assert_eq((int64)85000, Ai::CompactLimit(100000, 8000, 85), "a small reply cap changes nothing");
+		assert_eq((int64)68000, Ai::CompactLimit(100000, 32000, 85), "a big one leaves its room");
+		assert_eq((int64)25000, Ai::CompactLimit(100000, 90000, 85), "a cap near the window still leaves the prompt a quarter");
+		assert_eq((int64)0, Ai::CompactLimit(0, 0, 85), "no window, no limit");
+	}
+
+	[test("cut_on_a_step_boundary")]
+	public static void TestCut() {
+		Core::Array<Ai::SentMessage> sent = CompactSteps(CompactTurn("u1"));
+		assert_eq((int64)3, Ai::CompactionCut(sent, 250), "the newest messages that fit, starting on the second call");
+		assert_eq((int64)3, Ai::CompactionCut(sent, 300), "never on a tool result: the result goes with its call");
+		assert_eq((int64)5, Ai::CompactionCut(sent, 0), "the newest message at least, whatever its size");
+		assert_eq((int64)0, Ai::CompactionCut(sent, 100000), "all of it fits: nothing to summarize");
+		Core::Array<Ai::SentMessage> results;
+		Ai::Turn* turn = CompactTurn("u2");
+		CompactPush(results, turn, CompactMessage("user", "Go."), 10);
+		CompactPush(results, turn, CompactCall("", "fs_read", "{}"), 10);
+		CompactPush(results, turn, CompactMessage("tool", "big"), 5000);
+		assert_eq((int64)1, Ai::CompactionCut(results, 100), "the newest step is kept whole even past the budget");
+	}
+
+	[test("sent_from_the_cut")]
+	public static void TestSent() {
+		Ai::Chat* chat = new Ai::Chat();
+		Ai::Turn* first = CompactTurn("u1");
+		first->m_Messages.Push(CompactMessage("user", "one"));
+		first->m_Messages.Push(CompactMessage("assistant", "done one"));
+		first->m_Compressed = true;
+		Ai::Turn* second = CompactTurn("u2");
+		second->m_Messages.Push(CompactMessage("user", "two"));
+		second->m_Messages.Push(CompactCall("", "fs_read", "{}"));
+		second->m_Messages.Push(CompactMessage("tool", "read"));
+		second->m_Messages.Push(CompactMessage("assistant", "done two"));
+		second->m_SentFrom = 3;
+		Ai::Turn* third = CompactTurn("u3");
+		third->m_Messages.Push(CompactMessage("user", "three"));
+		chat->m_Turns.Push(first);
+		chat->m_Turns.Push(second);
+		chat->m_Turns.Push(third);
+		Core::Array<Ai::SentMessage> sent = Ai::SentMessages(chat);
+		assert_eq((int64)2, sent.Count(), "the left-out turn and the cut part are not sent");
+		assert_se("done two", sent[0].m_Message->m_Content.CStr(), "the cut turn from its cut on");
+		assert_eq((int64)3, sent[0].m_At, "where it is in its turn");
+		assert_eq((int64)1, Ai::SentPart(second).Count(), "a turn's part");
+		assert_eq((int64)1, Ai::SentPart(third).Count(), "a turn not cut is sent whole");
+		chat->m_SummaryBlock = Core::String("[Context summary 1]");
+		chat->m_SummaryLastTurn = Core::String("u2");
+		Ai::ForgetCompaction(chat);
+		assert_eq((int64)7, Ai::SentMessages(chat).Count(), "forgotten: every turn whole again");
+		assert_true(chat->m_SummaryBlock.IsEmpty(), "and no summary");
+	}
+
+	[test("transcript_entries")]
+	public static void TestEntries() {
+		Core::Array<Ai::SentMessage> sent = CompactSteps(CompactTurn("u7"));
+		Core::String owner = Ai::TranscriptEntry(sent[0]);
+		assert_true(owner.View().StartsWith(Core::StringView("### The owner's message (turn u7)\n")), "the owner's message is headed as theirs");
+		assert_true(owner.View().Contains(Core::StringView("Port the ring buffer.")), "whole");
+		Core::String call = Ai::TranscriptEntry(sent[1]);
+		assert_true(call.View().Contains(Core::StringView("### Assistant")), "the model's reply");
+		assert_true(call.View().Contains(Core::StringView("-> fs_read({})")), "with the call it made");
+		assert_true(Ai::TranscriptEntry(sent[5]).View().Contains(Core::StringView("Note or message during the turn")), "a later user message may be IED's");
+		Core::StringBuilder longResult;
+		for (int64 i = 0; i < 500; ++i) longResult.Append("line of output\n");
+		Ai::SentMessage result = sent[2];
+		result.m_Message = CompactMessage("tool", longResult.CStr());
+		Core::String cut = Ai::TranscriptEntry(result);
+		assert_true(cut.ByteLength() < Ai::c_CompactResultBytes + 100, "a long result is cut");
+		assert_true(cut.View().Contains(Core::StringView("more bytes]")), "saying how much was left out");
+		result.m_Message->m_Shown = Core::String("[superseded: a.cf was read again later]");
+		assert_true(Ai::TranscriptEntry(result).View().Contains(Core::StringView("[superseded: a.cf")), "a stale read as the model had it");
+	}
+
+	[test("cut_text_on_a_character")]
+	public static void TestCutText() {
+		Core::StringBuilder text;
+		text.Append("a");
+		text.AppendByte(0xC3);
+		text.AppendByte(0xA9);
+		Core::String cut = Ai::CutText(text.View(), 2);
+		assert_se("a [... 2 more bytes]", cut.CStr(), "never inside a character");
+		assert_se("abc", Ai::CutText(Core::StringView("abc"), 3).CStr(), "short enough: as it is");
+	}
+
+	[test("chunks_fit")]
+	public static void TestChunks() {
+		Core::Array<Ai::SentMessage> sent = CompactSteps(CompactTurn("u1"));
+		Core::Array<int64> starts;
+		Core::Array<Core::String> whole = Ai::TranscriptChunks(sent, 5, 100000, starts);
+		assert_eq((int64)1, whole.Count(), "one chunk when it fits");
+		assert_eq((int64)0, starts[0], "starting at the first");
+		assert_true(!whole[0].View().Contains(Core::StringView("A note.")), "only the messages before the cut");
+		Core::Array<int64> smallStarts;
+		Core::Array<Core::String> small = Ai::TranscriptChunks(sent, 5, 60, smallStarts);
+		assert_true(small.Count() >= 3, "small chunks: several");
+		for (const Core::String& chunk : small) assert_true(chunk.ByteLength() <= 60, "each within its size");
+		for (int64 i = 1; i < smallStarts.Count(); ++i) assert_true(smallStarts[i] > smallStarts[i - 1], "in order");
+	}
+
+	[test("digest_without_a_model")]
+	public static void TestDigest() {
+		Core::Array<Ai::SentMessage> sent = CompactSteps(CompactTurn("u4"));
+		Core::String digest = Ai::DigestOf(sent, 0, 5);
+		assert_true(digest.View().Contains(Core::StringView("- Turn u4, which started with: \"Port the ring buffer.\"")), digest.CStr());
+		assert_true(digest.View().Contains(Core::StringView("calls: fs_read x1, fs_edit x1")), "its calls by tool");
+		assert_true(digest.View().Contains(Core::StringView("its last reply: \"Reading it.\"")), "and its last words");
+		assert_true(Ai::DigestOf(sent, 3, 5).View().Contains(Core::StringView("(its later part)")), "a part of a turn says so");
+	}
+
+	[test("state_kept_for_certain")]
+	public static void TestState() {
+		Ai::Chat* chat = new Ai::Chat();
+		Ai::Turn* turn = CompactTurn("u9");
+		turn->m_UserText = Core::String("Port the ring buffer, keep the API.");
+		turn->m_Messages.Push(CompactMessage("user", "Port the ring buffer, keep the API.\n\n[mention: ring.cf]"));
+		turn->m_Messages.Push(CompactMessage("assistant", "ok"));
+		chat->m_Turns.Push(turn);
+		Ai::ChatTask* task = new Ai::ChatTask();
+		task->m_Id = Core::String("t1");
+		task->m_Title = Core::String("Port Ring.ch");
+		task->m_Status = Core::String("in_progress");
+		chat->m_Tasks.Push(task);
+		Ai::ModifiedFile* file = new Ai::ModifiedFile();
+		file->m_Path = Core::String("src/Ring.ch");
+		file->m_Plus = 12;
+		file->m_Minus = 3;
+		chat->m_Modified.Push(file);
+		Core::String state = Ai::CompactionState(chat, turn, 1);
+		assert_true(state.View().Contains(Core::StringView("t1 Port Ring.ch (in_progress)")), "the tasks");
+		assert_true(state.View().Contains(Core::StringView("src/Ring.ch +12 -3")), "the files changed");
+		assert_true(state.View().Contains(Core::StringView("Port the ring buffer, keep the API.")), "the message that started the turn, cut out of it");
+		assert_true(!Ai::CompactionState(chat, turn, 0).View().Contains(Core::StringView("keep the API")), "not when the turn is sent whole");
+	}
+
+	[test("placeholders_in_one_pass")]
+	public static void TestFill() {
+		Core::Array<Core::String> values;
+		values.Push(Core::String("summary"));
+		values.Push(Core::String("it said {state}"));
+		values.Push(Core::String("state"));
+		values.Push(Core::String("STATE"));
+		assert_se("it said {state} / STATE / {other}", Ai::FillPlaceholders(Core::StringView("{summary} / {state} / {other}"), values).CStr(), "a value's own braces stay");
+	}
+}

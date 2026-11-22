@@ -37,6 +37,36 @@ namespace Ai
 		const char*[4] names = { "ask", "plan", "agent", "agent-endless" };
 		for (const char* name : names) m_Modes.Insert(Core::String(name), ReadPrompt(folder / ((Core::String("mode-") + name) + ".md").View(), problems));
 		m_Notes = MarkdownSections(ReadPrompt(folder / "harness-notes.md", problems).View());
+		m_Compaction = MarkdownSections(ReadPrompt(folder / "compaction.md", problems).View());
+	}
+
+	Core::String FillPlaceholders(Core::StringView text, const Core::Array<Core::String>& values) {
+		Core::StringBuilder out;
+		int64 at = 0;
+		while (at < text.ByteLength()) {
+			const int64 open = text.IndexOf('{', at);
+			if (open < 0) break;
+			const int64 close = text.IndexOf('}', open + 1);
+			if (close < 0) break;
+			const Core::StringView key = text.Substring(open + 1, close - open - 1);
+			int64 found = -1;
+			for (int64 i = 0; i + 1 < values.Count() && found < 0; i += 2)
+				if (values[i].View() == key) found = i + 1;
+			out.Append(text.Substring(at, open - at));
+			if (found < 0) {
+				out.AppendByte('{');
+				at = open + 1;
+				continue;
+			}
+			out.Append(values[found].View());
+			at = close + 1;
+		}
+		out.Append(text.Substring(at, text.ByteLength() - at));
+		return out.ToString();
+	}
+
+	Core::String Prompts::Compaction(const char* name, const Core::Array<Core::String>& values) const {
+		return FillPlaceholders(m_Compaction.Get(Core::String(name)).View(), values);
 	}
 
 	Core::String Prompts::System(ChatMode mode, const SystemContext& context) const {

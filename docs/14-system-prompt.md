@@ -9,6 +9,7 @@ IDEplan: "a strong system prompt to help the ai design and write high quality co
 | `plugins/chat/prompts/base-system.md` | Identity, working method, tool discipline, navigating code (which code tool for which question, tuned with `tools/ai-evals/codenav_eval.py`), honesty, output rules. Language-agnostic. | App (Settings > AI > Prompts: edit / diff vs default / reset) |
 | `plugins/chat/prompts/style-default.md` | The owner's coding standards (tabs; single purpose; one level of abstraction; honest functions; no global mutable state; minimal comments; real tests; no dead code; explicit errors; performance). Derived from the family's `AGENTS.md` standards. | App ("my style"), solution `AGENTS.md` adds/overrides per project |
 | `plugins/chat/prompts/harness-notes.md` | Exact texts of recovery nudges (`docs/12`). | Not user-facing (tuned with the eval suite) |
+| `plugins/chat/prompts/compaction.md` | The summarizer's instructions and the block requests send in place of what a compaction cut (`docs/04` "Context management"). | Not user-facing; the owner sees the summary in the compaction's note |
 
 ## Assembly order
 
