@@ -3,7 +3,7 @@
 Every open bug in the C4 compiler, runtime, Bedrock and tools. Add an entry when a bug is found;
 delete it when the fix lands.
 
-Next ID: **BUG-500**
+Next ID: **BUG-501**
 
 ## Rules for this file
 
@@ -44,9 +44,7 @@ Next ID: **BUG-500**
 | ID | Title | Area | Severity |
 |---|---|---|---|
 | BUG-421 | C4LSP puts a dependency's declarations in the root project of a multi-project program | Tools | Low |
-| BUG-435 | Intermittent internal compiler error (0xC0000005) or corrupt partition bitcode compiling a large split program | Codegen | High |
 | BUG-441 | `threading.thread.sleep_is_precise` fails in the gates while the machine is busy: sleeps land on the 15.6 ms tick | Runtime | Medium |
-| BUG-495 | `Dap.Session.PauseBreaksInAndTerminateEnds` fails when its pause lands before the program reaches `Spin` | Tests | Low |
 | BUG-497 | The IED master on Linux aborted in `malloc` (heap corruption) relaying WebSocket frames after half an hour of a chat | Runtime | High |
 
 ---
@@ -75,50 +73,6 @@ Next ID: **BUG-500**
   standard error (`c4: CreateWaitableTimerExW failed (error N): Thread::Sleep ends on the system tick`); the case passed in
   two more full `nuke gates` runs. Close this when a loaded run fails without that line (the cause is then the case's
   demand on a busy machine, not the timer), or fix what the line names.
-
-### BUG-435 Intermittent internal compiler error (0xC0000005) or corrupt partition bitcode compiling a large split program
-- **Area:** Codegen
-- **Severity:** High
-- **Status:** Needs re-test (most likely not a compiler bug: the machine's memory corrupts, see Notes)
-- **Found:** 2026-10-31
-- **Symptom:** Compiling Claymore's `ClaymoreEditor` (1080 files, `-O3 -g --incremental --script-host`, the default
-  threads) fails about 4 times in 8 with no change between runs: `C4: internal compiler error: exception 0xc0000005`
-  at a different address each time, or `error: cannot read a partition of the module back: Invalid ID`. The next run
-  of the same command usually succeeds. Symbolized against the toolchain's `C4.pdb`, the crashes were in
-  `llvm::formLCSSAForInstructions` under `RunPipeline` / `AssemblePartition` on a `ParallelFor` worker
-  (`Compiler/ObjectEmission.cpp`), in `Scripting::CallEmitter::Emit`, and in `llvm::ValueEnumerator::ValueEnumerator`
-  (bitcode writing): three phases, which with the unreadable bitcode points at a module corrupted earlier, during the
-  parallel emission of the partitions (D-81), rather than a fault in any one of them.
-- **Repro:** in `C:/GameDev/Claymore/Claymore/ClaymoreEditor`: `C:/GameDev/IED/toolchains/c4/dev/C4.exe --projects
-  C:/GameDev/Claymore/build/int/Development-windows-x64/ClaymoreEditor/projects.toml -O3 -g --incremental -l user32
-  -l gdi32 -l dwmapi -l imm32 -l shell32 -l shcore -l advapi32 -l d3d12 -l dxgi -l kernel32 --script-host --int-dir
-  <a scratch folder> -o <scratch>/ClaymoreEditor.exe`, run several times (touch a source between runs or use a fresh
-  int dir, so the partitions are assembled again).
-- **Where:** suspects: `ProgramModel`'s `mutable` caches filled lazily by const getters (`m_LifecycleMethods`,
-  `m_TypeScopes`, `m_MethodRecords`, `m_RecordBySignature`, `m_ReturnLists`, `m_TypeInstantiations`, ...) reached by
-  the partitions' emitters at once in `CodeGenDriver::EmitPlaced` / `EmitImports` (`m_Lowering.Pool().Run`), where
-  only `QueryFunction` and `CensusCounterType` take `m_ModelLock` (`Backend/CodeGen/ModuleContext.cpp`); or any
-  cache that hands one partition's thread an `llvm::Type`/`Constant` of another partition's context (each
-  `PartitionEmitter` has an `LLVMContext` of its own, and a value of another context in a module writes bitcode the
-  reader rejects with "Invalid ID").
-- **Notes:** 2026-10-31 investigation: the build machine (Ryzen 7 7800X3D, 2x32 GB DDR5) bugchecked 6 times in 12 days
-  (System log: `0x1A` MEMORY_MANAGEMENT x4, `0x12B` FAULTY_HARDWARE_CORRUPTED_PAGE, `0xBE`), once at 09:43 under a
-  parallel clang build. In 38 compiles of snapshots of the repro (HEAD and the working tree, fresh and incremental,
-  up to 3 at once) C4 never crashed; the one failure was in the front end, `type not found: LPCWSTr` for the
-  `LPCWSTR` of WindowingWin32's translated `Native.ch`: one bit (0x20) flipped. clang itself crashed with access
-  violations on 3 files of a 14-way parallel compile (and the C++ driver retries clang crashes for the same reason,
-  `plugins/cpp/nuke/driver/objects.py`), and C4LSP's 6 crashes since 10/30 are at 6 different places of AST
-  teardown. Random faults in unrelated programs under memory load point at the hardware, not at C4. Re-test once
-  the memory passes a memory test (or on another machine): the repro above, 10 runs; if it still fails, build C4
-  with AddressSanitizer (`-fsanitize=address` on C4, C4Lib and Core) and run it there. Found on the way and fixed:
-  BUG-436, a parked parser thread could take its include response on a spurious wakeup before the scheduler
-  dispatched it (`CompilerMessageQueue` now hands a response over only when it is released).
-  2026-11-15: seen again in a smaller program - Claymore's root `nuke test`, compiling the `ModelFiles` test harness,
-  `exception 0xc0000005 at C4.exe+0x15ae9ad`, while IED's `nuke test ied-server` compiled beside it (memory load);
-  `nuke test ModelFiles` alone right after passed, nothing changed between.
-  2026-11-21 (chat J): the 10-run re-test on today's compiler (partitioned emission, MIR) could not run: Claymore does not
-  compile on the tree's Bedrock since 2f462091 (`Scene/LooseValue.cf`: `Core::ResizeElementBytes takes 7 arguments,
-  not 6`). Run it once Claymore is updated (`.ied/local/jwork/b435/run.ps1` runs the repro 10 times, fresh int dirs).
 
 ## Interop, runtime and Bedrock
 
