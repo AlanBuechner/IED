@@ -7,7 +7,7 @@ debugger's Flashbang (its capture library and replayer, in plugins/gpu/bin), and
 makes IED's solution files (.iedsln, .iedfed) open in it, and the folder and its bin go on the user's PATH, so
 `ied <folder>` and `nuke` work in a terminal opened afterwards.
 
-	python -I tools/install/install_ied.py --bin build/bin/Development-windows-x64 [--to <folder>] [--no-register] [--no-path]
+	python -I tools/install/install_ied.py --bin build/bin/Development-windows-x64 [--to <folder>] [--no-register] [--no-path] [--verify]
 	python -I tools/install/install_ied.py --uninstall [--to <folder>]
 	nuke install-ied                     (builds first; `nuke install-ied dist` installs an optimized build)
 
@@ -16,9 +16,15 @@ renamed aside (*.old) and the new one copied in its place, and the old copies ar
 nothing uses them. Restart IED (`ied stop`, then
 open it) to run the new one. --uninstall takes IED out of the Start menu and the PATH and removes the folder (close IED
 first). Exit code 0 when everything was done.
+
+A crash must not leave a broken install that the next one takes for whole: install.json says `complete: false` while an
+install runs and `complete: true` once every copy it made is flushed to the disk.
+An install that finds it missing, unreadable or incomplete compares every file byte for byte rather than by size and
+time - a copy the crash zero-filled keeps both (2026-11-22). --verify does that anyway.
 """
 
 import argparse
+import concurrent.futures
 import filecmp
 import json
 import os
@@ -133,8 +139,27 @@ def default_target():
 	return os.path.join(os.environ["LOCALAPPDATA"], "Programs", "IED")
 
 
-def same(source, target):
-	return os.path.exists(target) and os.path.getsize(source) == os.path.getsize(target) and filecmp.cmp(source, target, shallow=True)
+FLUSH_THREADS = 16
+
+
+def same(source, target, content=False):
+	"""Whether `target` already holds `source`: by size and time, or with `content` byte for byte (a copy a crash
+	zero-filled keeps its size and time)."""
+	return os.path.exists(target) and os.path.getsize(source) == os.path.getsize(target) and filecmp.cmp(source, target, shallow=not content)
+
+
+def flush(path):
+	"""Puts what was written to `path` on the disk now (FlushFileBuffers), not when Windows gets to it: a crash before
+	that leaves the file its size and time, full of zeros (2026-11-22: a whole install, seven minutes after it ran)."""
+	with open(path, "r+b") as f:
+		os.fsync(f.fileno())
+
+
+def flush_all(paths):
+	"""Flushes every file an install wrote, on several threads: one by one a fresh install's 11 735 files took 74 s on
+	the owner's drive, on 16 threads 7 s."""
+	with concurrent.futures.ThreadPoolExecutor(FLUSH_THREADS) as pool:
+		list(pool.map(flush, paths))
 
 
 def aside(path):
@@ -144,13 +169,15 @@ def aside(path):
 
 
 def replace_file(source, target, report):
-	"""Copies `source` over `target`; a target in use is renamed aside first."""
+	"""Copies `source` over `target` (`report["written"]` keeps it for the flush before install.json says complete); a
+	target in use is renamed aside first."""
 	try:
 		shutil.copy2(source, target)
 	except PermissionError:
 		aside(target)
 		shutil.copy2(source, target)
 		report["in_use"].append(os.path.basename(target))
+	report.setdefault("written", []).append(target)
 	report["copied"] += 1
 
 
@@ -167,7 +194,7 @@ def discard(path, report):
 
 def copy_program(source, target, report):
 	"""Copies a program; one in use is renamed aside first."""
-	if not same(source, target):
+	if not same(source, target, report.get("content", False)):
 		replace_file(source, target, report)
 
 
@@ -204,7 +231,7 @@ def mirror(source, target, skip, report, anywhere=(), keep=()):
 			path = os.path.normpath(os.path.join(relative, name))
 			wanted[os.path.normcase(path)] = path
 			destination = os.path.join(target, path)
-			if not same(os.path.join(folder, name), destination):
+			if not same(os.path.join(folder, name), destination, report.get("content", False)):
 				os.makedirs(os.path.dirname(destination), exist_ok=True)
 				replace_file(os.path.join(folder, name), destination, report)
 	if not os.path.isdir(target):
@@ -238,7 +265,7 @@ def install_cpp_tools(repo, target, report):
 		destination = os.path.join(target, relative)
 		if is_tree:
 			mirror(source, destination, set(), report)
-		elif not same(source, destination):
+		elif not same(source, destination, report.get("content", False)):
 			os.makedirs(os.path.dirname(destination), exist_ok=True)
 			replace_file(source, destination, report)
 	for name, folder in (("clangd", "plugins/cpp/clangd"), ("CodeLLDB", "plugins/cpp/codelldb")):
@@ -269,24 +296,49 @@ def checkout_state(repo):
 		return "", False
 
 
-def install_record(repo, bin_root, head, dirty, now_ms):
+def install_record(repo, bin_root, head, dirty, now_ms, complete=True):
 	"""install.json: the checkout an install came from (`source`, forward slashes, so an installed IED finds it), its
-	commit and whether it had uncommitted changes, when, and the build folder it was copied from."""
-	return {"source": os.path.abspath(repo).replace("\\", "/"), "commit": head, "dirty": dirty, "installedMs": now_ms, "bin": os.path.abspath(bin_root).replace("\\", "/")}
+	commit and whether it had uncommitted changes, when, the build folder it was copied from, and whether the install
+	finished (`complete`: false while one runs, so the next one knows when one stopped halfway)."""
+	return {"source": os.path.abspath(repo).replace("\\", "/"), "commit": head, "dirty": dirty, "installedMs": now_ms, "bin": os.path.abspath(bin_root).replace("\\", "/"), "complete": complete}
 
 
 def write_record(target, record):
-	"""Written last and whole (renamed into place), so an install.json says the install is complete."""
+	"""Written whole and flushed, then renamed into place, so install.json is never half written."""
 	temporary = os.path.join(target, "install.json.tmp")
 	with open(temporary, "w", encoding="utf-8") as f:
 		json.dump(record, f, indent="\t")
 		f.write("\n")
+		f.flush()
+		os.fsync(f.fileno())
 	os.replace(temporary, os.path.join(target, "install.json"))
 
 
-def install(bin_root, target):
-	report = {"copied": 0, "removed": 0, "in_use": [], "missing": []}
+def read_record(target):
+	"""The install's install.json, or None when it is missing or unreadable (a crash can leave it zero-filled)."""
+	try:
+		with open(os.path.join(target, "install.json"), encoding="utf-8") as f:
+			record = json.load(f)
+	except (OSError, ValueError):
+		return None
+	return record if isinstance(record, dict) else None
+
+
+def finished(record):
+	"""Whether the install that wrote `record` finished - every copy flushed, then `complete` written last. One that did
+	not (a crash, a kill), or a record from before installs said so, may have left copies a crash zero-filled with their
+	size and time intact, which only their content tells apart."""
+	return bool(record) and record.get("complete") is True
+
+
+def install(bin_root, target, verify=False):
+	"""Installs the build at `bin_root` into `target`. Files are compared by size and time, or byte for byte when asked
+	(`verify`) or when the last install did not finish (`report["content"]` says which)."""
 	os.makedirs(target, exist_ok=True)
+	unfinished = bool(os.listdir(target)) and not finished(read_record(target))
+	report = {"copied": 0, "removed": 0, "in_use": [], "missing": [], "content": verify or unfinished, "unfinished": unfinished}
+	head, dirty = checkout_state(REPO)
+	write_record(target, install_record(REPO, bin_root, head, dirty, int(time.time() * 1000), complete=False))
 	remove_old(target)
 	for program, files in PROGRAMS.items():
 		for name in files:
@@ -310,7 +362,7 @@ def install(bin_root, target):
 			report["missing"].append(tree)
 	install_cpp_tools(REPO, target, report)
 	install_gpu_native(bin_root, target, report)
-	head, dirty = checkout_state(REPO)
+	flush_all(report.get("written", []))
 	write_record(target, install_record(REPO, bin_root, head, dirty, int(time.time() * 1000)))
 	return report
 
@@ -446,13 +498,16 @@ def main(argv):
 	parser.add_argument("--no-register", action="store_true", help="do not put IED in the Start menu")
 	parser.add_argument("--no-path", action="store_true", help="do not put the install folder and its bin on the user's PATH")
 	parser.add_argument("--uninstall", action="store_true", help="take IED out of the Start menu, the file types and the PATH, and remove the folder")
+	parser.add_argument("--verify", action="store_true", help="compare every installed file with the build byte for byte, not by size and time (done by itself after an install that did not finish)")
 	args = parser.parse_args(argv)
 	target = os.path.abspath(args.to or default_target())
 	if args.uninstall:
 		return uninstall(target)
 	if not args.bin:
 		parser.error("--bin is needed to install")
-	report = install(args.bin, target)
+	report = install(args.bin, target, args.verify)
+	if report["unfinished"] and not args.verify:
+		print("install-ied: the last install did not say it finished (install.json missing, unreadable, incomplete or older), so every file was compared byte for byte")
 	print("install-ied: %s - %d files copied, %d removed" % (target, report["copied"], report["removed"]))
 	if report["missing"]:
 		print("install-ied: without %s: web search and Settings > Languages say what is missing (run setup.bat, then install again)" % ", ".join(report["missing"]))

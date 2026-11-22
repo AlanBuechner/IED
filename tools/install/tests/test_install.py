@@ -1,7 +1,8 @@
 """The installer (tools/install/install_ied.py): a mirror copies what changed, leaves out what it skips and removes what
 is gone; a program in use is renamed aside and replaced, and the next install removes the old copy; a program's PDB
 comes and goes with the build; the PATH gains the folder and its bin once and loses only them; the install carries
-Nuke; an uninstall removes the folder whole or, while a program in it runs, not at all."""
+Nuke; an uninstall removes the folder whole or, while a program in it runs, not at all; every copy is flushed before
+install.json says the install is complete, and after one that did not say so every file is compared by content."""
 
 import json
 import os
@@ -11,6 +12,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -55,6 +57,32 @@ class MirrorTests(unittest.TestCase):
 			self.assertEqual("main, changed", f.read())
 		self.assertFalse(os.path.exists(os.path.join(self.target, "index.html")))
 		self.assertFalse(os.path.exists(os.path.join(self.target, "src", "stale")), "an emptied folder goes too")
+
+	def test_a_copy_a_crash_zero_filled_is_found_by_its_content(self):
+		"""2026-11-22: a crash minutes after an install left its copies their size and time, full of zeros."""
+		source = os.path.join(self.source, "src", "shell.js")
+		write(source, "export const shell = 1;")
+		install_ied.mirror(self.source, self.target, set(), report())
+		copy = os.path.join(self.target, "src", "shell.js")
+		with open(copy, "r+b") as f:
+			f.write(b"\0" * os.path.getsize(source))
+		os.utime(copy, ns=(os.stat(source).st_atime_ns, os.stat(source).st_mtime_ns))
+		by_time = report()
+		install_ied.mirror(self.source, self.target, set(), by_time)
+		self.assertEqual(0, by_time["copied"], "size and time cannot tell")
+		by_content = dict(report(), content=True)
+		install_ied.mirror(self.source, self.target, set(), by_content)
+		self.assertEqual(1, by_content["copied"])
+		with open(copy, encoding="utf-8") as f:
+			self.assertEqual("export const shell = 1;", f.read())
+
+	def test_each_copy_is_kept_for_the_flush(self):
+		write(os.path.join(self.source, "a.js"), "a")
+		write(os.path.join(self.source, "b", "c.js"), "c")
+		result = report()
+		install_ied.mirror(self.source, self.target, set(), result)
+		self.assertEqual(sorted([os.path.join(self.target, "a.js"), os.path.join(self.target, "b", "c.js")]), sorted(result["written"]))
+		install_ied.flush_all(result["written"])
 
 	def test_a_file_renamed_in_case_or_moved_keeps_its_content(self):
 		write(os.path.join(self.target, "code", "activate.cf"), "same")
@@ -167,7 +195,8 @@ class RecordTests(unittest.TestCase):
 		root = tempfile.mkdtemp(prefix="ied-install-")
 		self.addCleanup(shutil.rmtree, root, True)
 		record = install_ied.install_record(os.path.join(root, "IED"), os.path.join(root, "IED", "build", "bin", "Dist-windows-x64"), "a" * 40, True, 1792630000123)
-		self.assertEqual({"source", "commit", "dirty", "installedMs", "bin"}, set(record))
+		self.assertEqual({"source", "commit", "dirty", "installedMs", "bin", "complete"}, set(record))
+		self.assertTrue(record["complete"])
 		self.assertEqual((root.replace("\\", "/") + "/IED", "a" * 40, True, 1792630000123), (record["source"], record["commit"], record["dirty"], record["installedMs"]))
 		self.assertNotIn("\\", record["bin"], "forward slashes")
 		install_ied.write_record(root, record)
@@ -175,10 +204,75 @@ class RecordTests(unittest.TestCase):
 			self.assertEqual(record, json.load(f))
 		self.assertFalse(os.path.exists(os.path.join(root, "install.json.tmp")), "renamed into place")
 
+	def test_only_a_record_that_says_complete_is_a_finished_install(self):
+		root = tempfile.mkdtemp(prefix="ied-install-")
+		self.addCleanup(shutil.rmtree, root, True)
+		self.assertIsNone(install_ied.read_record(root), "no install.json")
+		self.assertFalse(install_ied.finished(None))
+		with open(os.path.join(root, "install.json"), "wb") as f:
+			f.write(b"\0" * 230)
+		self.assertIsNone(install_ied.read_record(root), "zero-filled by a crash: unreadable")
+		for record, done in (({"source": "C:/IED"}, False), ({"complete": False}, False), ({"complete": True}, True), ({"complete": "yes"}, False)):
+			install_ied.write_record(root, record)
+			self.assertEqual(done, install_ied.finished(install_ied.read_record(root)), record)
+
 	def test_the_checkout_state(self):
 		head, dirty = install_ied.checkout_state(install_ied.REPO)
 		self.assertRegex(head, r"^[0-9a-f]{40}$", "this checkout's full commit")
 		self.assertIsInstance(dirty, bool)
+
+
+class UnfinishedInstallTests(unittest.TestCase):
+	"""install(): install.json says `complete: false` while it runs and `complete: true` last, and an install that finds
+	it otherwise compares every file by content (the trees, services and tools stubbed: only the programs are copied)."""
+
+	def setUp(self):
+		self.root = tempfile.mkdtemp(prefix="ied-install-")
+		self.addCleanup(shutil.rmtree, self.root, True)
+		self.bin = os.path.join(self.root, "bin")
+		self.target = os.path.join(self.root, "IED")
+		for program, files in install_ied.PROGRAMS.items():
+			for name in files:
+				write(os.path.join(self.bin, program, name), name)
+		self.during = []
+		for patch in (
+			mock.patch.multiple(install_ied, TREES=(), SERVICES=()),
+			mock.patch.object(install_ied, "ensure_services", lambda repo: True),
+			mock.patch.object(install_ied, "install_cpp_tools", lambda repo, target, report: None),
+			mock.patch.object(install_ied, "install_gpu_native", lambda bin_root, target, report: None),
+			mock.patch.object(install_ied, "checkout_state", lambda repo: ("b" * 40, False)),
+			mock.patch.object(install_ied, "install_symbols", lambda bin_root, target, report: self.during.append(install_ied.read_record(target))),
+		):
+			patch.start()
+			self.addCleanup(patch.stop)
+
+	def test_the_record_says_complete_only_last(self):
+		flushed = []
+		with mock.patch.object(install_ied, "flush", lambda path: flushed.append((path, install_ied.read_record(self.target)["complete"]))):
+			first = install_ied.install(self.bin, self.target)
+		programs = sorted(os.path.join(self.target, name) for files in install_ied.PROGRAMS.values() for name in files)
+		self.assertEqual(programs, sorted(path for path, _ in flushed), "every copy flushed")
+		self.assertEqual({False}, {complete for _, complete in flushed}, "before install.json says complete")
+		self.assertEqual((False, False), (self.during[-1]["complete"], first["unfinished"]), "under way while it copies; a new folder was no unfinished install")
+		self.assertTrue(install_ied.finished(install_ied.read_record(self.target)))
+		again = install_ied.install(self.bin, self.target)
+		self.assertEqual((False, False, 0), (again["content"], again["unfinished"], again["copied"]), "after a finished install: by size and time")
+		self.assertTrue(install_ied.install(self.bin, self.target, verify=True)["content"], "--verify")
+
+	def test_after_an_unfinished_install_every_file_is_compared_by_content(self):
+		install_ied.install(self.bin, self.target)
+		program = os.path.join(self.target, "ied.exe")
+		source = os.path.join(self.bin, "ied", "ied.exe")
+		with open(program, "r+b") as f:
+			f.write(b"\0" * os.path.getsize(source))
+		os.utime(program, ns=(os.stat(source).st_atime_ns, os.stat(source).st_mtime_ns))
+		with open(os.path.join(self.target, "install.json"), "r+b") as f:
+			f.write(b"\0" * os.path.getsize(os.path.join(self.target, "install.json")))
+		repaired = install_ied.install(self.bin, self.target)
+		self.assertEqual((True, True, 1), (repaired["unfinished"], repaired["content"], repaired["copied"]), "the zeroed program found and copied again")
+		with open(program, encoding="utf-8") as f:
+			self.assertEqual("ied.exe", f.read())
+		self.assertTrue(install_ied.finished(install_ied.read_record(self.target)))
 
 
 class PathTests(unittest.TestCase):
