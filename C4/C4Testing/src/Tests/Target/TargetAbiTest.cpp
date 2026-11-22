@@ -1,11 +1,17 @@
 #include "TargetAbiTest.h"
 #include "Backend/CodeGen/PeTables.h"
+#include "Backend/ProgramBackend.h"
+#include "Compiler/CompilerInstance.h"
 #include "Compiler/CpuTarget.h"
 #include "Compiler/Toolchain.h"
+#include "Model/ProgramModel.h"
 #include "Target/TargetAbi.h"
+#include <llvm/IR/InstIterator.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -33,6 +39,20 @@ namespace Testing
 			const std::vector<llvm::Type*> fields = { llvm::Type::getInt32Ty(ctx) };
 			auto* type = llvm::StructType::get(ctx, fields);
 			return PeTables::Private(module, "table", llvm::ConstantStruct::get(type, { field }));
+		}
+
+		// `source`'s module lowered for `system`, or null.
+		std::unique_ptr<llvm::Module> Lowered(const char* source, TargetSystem system, llvm::LLVMContext& context)
+		{
+			CompilerInstance compiler;
+			compiler.RegisterInMemory("t.cf", source);
+			compiler.CompileAll();
+			compiler.AnalyzeProgram();
+			ProgramModel& model = compiler.GetProgramModelForLowering();
+			model.SetTarget(CpuTarget().On(system));
+			ProgramBackend driver(context, system);
+			std::string error;
+			return driver.Lower(model, "main", &error) ? driver.TakeModule() : nullptr;
 		}
 	}
 
@@ -169,5 +189,31 @@ namespace Testing
 		TEST_ASSERT(std::filesystem::is_regular_file(bin / ("clang" + extension)));
 		TEST_ASSERT(std::filesystem::is_regular_file(bin / ("ld.lld" + extension)));
 		if (HostSystem() == TargetSystem::Windows) TEST_ASSERT(std::filesystem::is_regular_file(bin / "lld-link.exe"));
+	}
+
+	// System V passes a 20-byte aggregate in memory: `byval` on the C function and at its call, where alias analysis reads
+	// it (without, an optimized call was taken for one that reads none of the caller's slots and the copy was never filled).
+	void TargetAbiTest::Bug499ACallPassesOnTheStackAsItsCalleeSays()
+	{
+		llvm::LLVMContext context;
+		const std::unique_ptr<llvm::Module> module = Lowered(R"(
+			struct S20 { public int32 a; public int32 b; public int32 c; public int32 d; public int32 e; }
+			[link("SumS20")] int32 SumS20(S20 v) noexcept;
+			int32 main() { S20 s; s.a = 1; s.e = 5; return SumS20(s); }
+		)", TargetSystem::Linux, context);
+		TEST_ASSERT(module != nullptr);
+		if (!module) return;
+		const llvm::Function* callee = module->getFunction("SumS20");
+		TEST_ASSERT(callee && callee->getParamByValType(0) != nullptr);
+		size_t calls = 0;
+		for (const llvm::Function& function : *module)
+			for (const llvm::Instruction& instruction : llvm::instructions(function))
+				if (const auto* call = llvm::dyn_cast<llvm::CallBase>(&instruction); call && call->getCalledFunction() == callee)
+				{
+					++calls;
+					TEST_ASSERT(call->getAttributes().getParamByValType(0) == callee->getParamByValType(0));
+					TEST_ASSERT(call->getAttributes().getParamAlignment(0) == callee->getParamAlign(0));
+				}
+		TEST_ASSERT(calls == 1);
 	}
 } // namespace Testing

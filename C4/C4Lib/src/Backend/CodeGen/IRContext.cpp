@@ -4,6 +4,25 @@
 
 namespace Scripting
 {
+	namespace
+	{
+		// A callee taking an aggregate on the stack (ModuleContext::PassOnStack) says `byval` at its calls too (BUG-499):
+		// alias analysis reads a call's own attributes, and takes a tail call without one for a call that reads no slot of
+		// the caller's, so the stores that fill the copy were dropped.
+		void CopyStackArguments(llvm::CallBase& call, const llvm::Value* callee)
+		{
+			const auto* fn = llvm::dyn_cast<llvm::Function>(callee);
+			if (!fn) return;
+			for (unsigned i = 0; i < fn->arg_size() && i < call.arg_size(); ++i)
+			{
+				llvm::Type* storage = fn->getParamByValType(i);
+				if (!storage) continue;
+				call.addParamAttr(i, llvm::Attribute::getWithByValType(call.getContext(), storage));
+				if (const llvm::MaybeAlign align = fn->getParamAlign(i)) call.addParamAttr(i, llvm::Attribute::getWithAlignment(call.getContext(), *align));
+			}
+		}
+	}
+
 	IRContext::IRContext(ModuleContext& mctx, const HIRFunction& hir) : m_MCtx(mctx), m_Hir(hir) {}
 
 	void IRContext::StartAt(llvm::BasicBlock& entry)
@@ -105,9 +124,15 @@ namespace Scripting
 		if (llvm::FuncletPadInst* funclet = CurrentFunclet())
 			bundles.emplace_back("funclet", std::vector<llvm::Value*>{ funclet });
 		llvm::BasicBlock* unwind = mayThrow ? UnwindTarget() : nullptr;
-		if (!unwind) return m_B->CreateCall(fty, callee, args, bundles);
+		if (!unwind)
+		{
+			llvm::CallBase* call = m_B->CreateCall(fty, callee, args, bundles);
+			CopyStackArguments(*call, callee);
+			return call;
+		}
 		llvm::BasicBlock* normal = llvm::BasicBlock::Create(m_MCtx.context(), "invoke.cont", m_B->GetInsertBlock()->getParent());
 		llvm::CallBase* invoke = m_B->CreateInvoke(fty, callee, normal, unwind, args, bundles);
+		CopyStackArguments(*invoke, callee);
 		m_B->SetInsertPoint(normal);
 		return invoke;
 	}

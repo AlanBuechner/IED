@@ -35,5 +35,7 @@ namespace Testing
 		void EachTargetBuildsItsOwnRuntimeFiles();
 		TEST_FUNC(Target.Abi)
 		void TheInstallLinksEveryTarget();
+		TEST_FUNC(Target.Abi)
+		void Bug499ACallPassesOnTheStackAsItsCalleeSays();
 	};
 } // namespace Testing
