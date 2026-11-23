@@ -9,9 +9,10 @@ namespace C4Compiler
 	namespace
 	{
 		constexpr uint64 kFunctionsPerPartition = 24;
-		// An edit reassembles the partitions it touches: 128 keeps a large program's near 10k instructions each (64 left
-		// the IED server's at 32k, 0.8 s more per edit at -O3), for about 0.15 s more on a build that changed nothing.
-		constexpr uint64 kMaxPartitions = 128;
+		// An edit reassembles the partitions it touches, so their size is most of an -O3 edit (docs/compiler/07): 256 cut
+		// the IED server's statement edit from 3.1 to 2.4 s and Claymore's editor's from 4.7 to 4.5 s, for 0.1 / 0.4 s more
+		// on a build that changed nothing (which Nuke does not run) and about 300 MB more at the peak.
+		constexpr uint64 kMaxPartitions = 256;
 		// A file's functions spread over one partition per this many of them, rounded down to a power of two, so its
 		// share changes only when the file doubles or halves.
 		constexpr uint64 kFunctionsPerFileShare = 48;

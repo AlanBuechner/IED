@@ -86,10 +86,11 @@ A function's partition is decided before its code exists, from its record: the f
 instance's record names its template's), over that file's share of partitions 1 to n-1 by name, one partition per 48
 functions the file defines rounded down to a power of two; a function the compiler wrote by its name. A global goes
 by the file that declares it. How many partitions: `--partitions` (up to 256), else one per 24 functions the program
-defines, rounded down to a power of two, 1 to 128, so the count changes only when the program doubles or halves. An
-edit reassembles the partitions it touches, so their size is most of an edit's code generation: 128 keeps the IED
-server's near 10k instructions each (64 left them at 32k, 0.8 s more per edit at `-O3`), for about 0.15 s more on a
-build that changed nothing and 100 MB more at the peak; 256 saves no more and costs 300 MB more.
+defines, rounded down to a power of two, 1 to 256, so the count changes only when the program doubles or halves. An
+edit reassembles the partitions it touches, so their size is most of an edit's code generation: at `-O3` 256 cut the
+IED server's statement edit from 3.1 to 2.4 s and Claymore's editor's from 4.7 to 4.5 s (128 had kept the IED server's
+near 10k instructions each when it was smaller; 64 left them at 32k), for 0.1 / 0.4 s more on a build that changed
+nothing and about 300 MB more at the peak ([07](07-incremental-builds.md)).
 
 ## Symbols
 

@@ -50,8 +50,13 @@ partitions' finish 0.03 / 0.08. `optimize+codegen` after an edit is writing ever
 | `--partitions` | cold | nothing changed | a statement | a header constant |
 |---|---|---|---|---|
 | 32 | 15.3 | 1.43 | 4.11 | 5.47 |
-| 128 (today's default, `kMaxPartitions`) | 17.9 | 1.57 | 3.00 | 3.04 |
-| 256 (the `--partitions` limit) | 15.1 | 1.65 | 2.39 | 2.53 |
+| 128 (the default until stage 1) | 17.9 / 15.3 | 1.57 / 1.56 | 3.00 / 3.14 | 3.04 / 3.20 |
+| 256 (the `--partitions` limit; the default since stage 1) | 15.1 | 1.65 | 2.39 | 2.53 |
+| Claymore editor, 128 / 256 | 28.8 / 27.4 | 3.22 / 3.62 | 4.67 / 4.50 | 4.71 / 4.55 |
+
+On Claymore's editor 256 partitions save 0.4 s of the edited partition's optimizer but cost 0.2 s more in `lower`
+(emitting, the reflection description and the finish are per partition) and 0.04 s more hashing; a build that changed
+nothing, which Nuke does not run, costs 0.4 s more.
 
 So after an edit, at `-O3` the time is the edited partition's optimizer (about 1.1 s at 128), the front end and lowering
 (1.1 s on the IED server, 2.4 s on Claymore's editor) and the link (0.3-0.5 s); at `-O0` it is the front end and
@@ -61,7 +66,7 @@ lowering and the link. A build that changed nothing still pays everything before
 
 | Option | What it saves (IED server, a statement edit at `-O3`: 3.0 s) | Effort | Risk |
 |---|---|---|---|
-| 1. Smaller partitions in an incremental build | measured: 0.6 s at 256; more partitions would save more of the edited partition's optimizer | a constant and the `--partitions` limit | none for correctness (placement is by name); +0.1 s and about 300 MB for a build that changed nothing |
+| 1. Smaller partitions in an incremental build | measured at 256: 0.7 s on the IED server, 0.2 s on Claymore's editor, whose per-partition work in `lower` eats the rest | a constant and the `--partitions` limit | none for correctness (placement is by name); +0.1 s and about 300 MB for a build that changed nothing |
 | 2. A build server Nuke keeps alive | estimated: front end 0.42 -> 0.05, lowering 0.64 -> about 0.1, bitcode hashing 0.2 -> 0, the process 0.2 -> 0: about 1.3 s, leaving the edited partition's optimizer and the link | large | exact invalidation of the model and of lowered trees (below) |
 | 3. Disk caches (parses, the model, HIR) | the front end is 0.42 s here and 1.1 s on Claymore's editor; reading a serialized model of 60k lines plus Bedrock is estimated at a good part of building it | large: every model and HIR node serializable | the same invalidation as 2, plus versioning |
 | 3b. A disk cache of each partition's bitcode keyed by its input (its lowered trees, what they read of the model, the target) | 0.13 (emit) + 0.2 (bitcode) + part of imports: about 0.4 s, without a server | medium | the key must cover everything emission reads from the model: a missed input is a miscompile |
@@ -123,8 +128,9 @@ reused body's warnings are reported again, as a cold build reports them.
 
 ## Stages
 
-1. Incremental builds get 256 partitions by default (`kMaxPartitions`), and `--partitions` goes to 512 to measure
-   further; measure the IED server and Claymore's editor, cold, nothing changed and an edit, with memory.
+1. (Done, R1 stage 1) Incremental builds of a large program get 256 partitions (`kMaxPartitions`). More would need
+   the per-partition work in `lower` (emit, reflection, finish) to shrink first: Claymore's editor already pays
+   nearly what it saves.
 2. The build server: 2a body-only edits, then 2b declaration edits, behind a flag until every invalidation test above
    gives a cold build's bytes; the LSP's parses join it (B76).
 3. The link (`/DEBUG:GHASH`, or fewer, larger debug sections) if option 4's measurement says so.
