@@ -36,7 +36,7 @@
 		"toolCalls": [
 			{
 				"name": "git_status",
-				"description": "Each repository's branch and how it stands against its upstream (ahead, behind), a merge or rebase in progress, and its changes: staged, not staged, untracked and conflicted files. Every repository of the workspace unless `repo` names one (\".\" the workspace's own); paths are the workspace's, as fs_read takes them.",
+				"description": "Each repository's branch and how it stands against its upstream (ahead, behind), a merge or rebase in progress, and its changes: staged, not staged, untracked and conflicted files. Every repository of the workspace unless `repo` names one (\".\" the workspace's own); paths are the workspace's, as fs_read takes them. Only repositories in the workspace's folder (or holding it) are seen: a Nuke package's develop clone elsewhere (its projects linked as @Name) is not - run git with shell_run in its folder.",
 				"class": "read",
 				"group": "git",
 				"parallelSafe": true,
