@@ -14,6 +14,7 @@ and [../tools/05-test-suites.md](../tools/05-test-suites.md).
 | [04-codegen-and-abi.md](04-codegen-and-abi.md) | LLVM emission design, Windows x64 ABI, vtables, EH funclets, GC emission, test harness, entry point, LLVM traps |
 | [05-partitioned-emission.md](05-partitioned-emission.md) | How an incremental build emits the program into its partitions on all threads (D-81): the coordinator, placement, symbols across partitions, imports, a script host |
 | [06-mir.md](06-mir.md) | MIR, each function's control-flow graph (R5): its shape, how it is built from HIR, the flow checks and last-use moves on it, its emission and the exception scheme of each target |
+| [07-incremental-builds.md](07-incremental-builds.md) | Where an incremental build's time goes after an edit (measured), the options (smaller partitions, a build server, disk caches, the link) and exact invalidation (R1) |
 
 ## Architecture principles (non-negotiable)
 
