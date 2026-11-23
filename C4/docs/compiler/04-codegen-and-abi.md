@@ -479,8 +479,14 @@ frame keeps nothing alive. The runtime's side is [runtime/01 "Stacks"](../runtim
   +10-11% outliers aside); the GC benchmark's frames +22-27% in both modes with pauses within -2% to +6%. Of that, the
   `nobuiltin` C library calls (`KeepLibraryCallsAsWritten`: the optimizer no longer expands `memcmp`) cost the string
   keys: without them (Windows makes valid IR either way) map_text_find is +9-10%, json_read -0% to +2%, map_text_insert
-  -3% to +3%. Not done: passing a C library function raw pointers instead (each argument cast at the call and the cast
-  made again before each use, so the managed pointer stays live) would keep the optimizer's library knowledge. Split by
+  -3% to +3%. Tried and not landed (2026-11-23, patch `.ied/local/v16/raw-library-pointers.patch`): passing a C library
+  function raw pointers instead (its declaration's pointer parameters raw, each managed argument cast at the call, the
+  cast made again before each use) keeps `memcmp`'s builtin attributes and valid IR, yet costs nearly as much: against
+  the same compiler without the flag (21 alternating runs, both orders) map_text_find +36% (nobuiltin +46%, none +4%),
+  map_text_insert +6% (+20%, -4%), json_read +16% (+15%, +3%), the map_int kernels unchanged; why the cast costs that
+  much is not found (a suspect: RS4GC treating a library call as a GC leaf). The cheaper next step: make `nobuiltin` a
+  target question - LLVM rewrites `memcmp == 0` into `bcmp` (declared with raw pointers, invalid IR here) only where
+  `bcmp` exists, Linux; Windows has none, so it could drop `nobuiltin` and get the 'none' column. Split by
   part (first measurement, before `nobuiltin`): the managed address space alone costs up to +28% (LLVM treats null as
   defined outside address space 0, so null folds are lost), non-integral up to +23% more in string-keyed maps, the statepoints the rest (a managed value live across a
   call is stored before and loaded after it; the GC benchmark's allocation loops). Values in up to 16 callee-saved
