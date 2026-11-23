@@ -61,6 +61,11 @@ developer mode is enabled", and the same for the other docs a plugin carries (th
   `fs_list({"path": "plugins:/"})` lists the plugins (`plugins:/<id>/  <name> (builtin|app|project)`). Paths in their
   results carry the alias, so the model passes them back as they are; the same now holds in `ied:/`. The permission
   subject names the plugin: `fs.read(plugins:/c4/docs/...)`.
+- **`@<project>` names a project the solution links outside its folder** (`docs/03` "Linked projects" - what a Nuke
+  package is): `@InputLayers/src/InputLayers/LayerStack.ch`. `fs_read`, `fs_edit`, `fs_write`, `fs_list`, `fs_glob` (its
+  `root`) and `search_text` (its `path`) all take it, and what those last three find is shown under the same path, so it
+  reads back. A link is only followed in a trusted workspace: an untrusted one's `@x` paths are plain names in its folder
+  (`Workspace::At`), and the tools say so rather than reaching into another checkout.
 - **Read-only.** A write, an edit or a command there (`fs_write`, `fs_edit`, `shell_run` with `cwd: "plugins:/..."`,
   any tool not of class read) is refused - "plugins:/c4/ is read-only: a plugin's files (its skills, docs and manifest)
   change only through a root that holds its folder (...), which developer mode gives when IED runs from its source" - and

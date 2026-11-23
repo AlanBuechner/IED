@@ -65,6 +65,62 @@ class FileToolTests {
 		assert_true(Ai::NearestFoldersHint(root, Core::StringView("Nowhere"), Core::StringView("")).View().Contains(Core::StringView("(the root) holds the folders: C4/")), "up to the root");
 	}
 
+	[test("a_linked_projects_files_are_named_by_its_link")]
+	public static void TestLinkedProjectPaths() {
+		Core::StringBuilder folder;
+		folder.Append("ied-link-");
+		folder.AppendInt(Platform::UnixTimeNs());
+		FS::Path root = FS::TempDirectory() / folder.View();
+		FS::MakeDirectories((root / "Game/src").CStr());
+		FS::MakeDirectories((root / "Claymore/Plugins/InputLayers/src/InputLayers").CStr());
+		FS::WriteFileAtomically((root / "Claymore/Plugins/InputLayers/src/InputLayers/LayerStack.ch").CStr(), (const void*)"x", 1);
+
+		IED::Workspace ws;
+		ws.m_Root = Core::String((root / "Game").View());
+		ws.m_Trusted = true;
+		IED::Project inside;
+		inside.m_Name = Core::String("Game");
+		inside.m_Folder = Core::String("src");
+		ws.m_Projects.Push(inside);
+		IED::Project linked;
+		linked.m_Name = Core::String("InputLayers");
+		linked.m_Link = Core::String("@InputLayers");
+		linked.m_LinkRoot = Core::String((root / "Claymore/Plugins/InputLayers").View());
+		ws.m_Projects.Push(linked);
+
+		Core::String onDisk;
+		Core::String shown;
+		assert_true(Ai::LinkTargetOf(ws, Core::StringView("@InputLayers/src/InputLayers"), onDisk, shown), "a folder of a linked project");
+		assert_se(Core::String((root / "Claymore/Plugins/InputLayers/src/InputLayers").View()).CStr(), onDisk.CStr(), "where it is on disk");
+		assert_se("@InputLayers/src/InputLayers/", shown.CStr(), "shown and read back by the link's name");
+		assert_true(Ai::LinkTargetOf(ws, Core::StringView("@InputLayers"), onDisk, shown) && shown == "@InputLayers/", "its root too");
+		assert_true(Ai::LinkTargetOf(ws, Core::StringView("@InputLayers/src/InputLayers/LayerStack.ch"), onDisk, shown)
+			&& shown == "@InputLayers/src/InputLayers/LayerStack.ch", "and a file, by its own path");
+		assert_true(!Ai::LinkTargetOf(ws, Core::StringView("@InputLayers/src/Nope"), onDisk, shown), "what the link does not hold is no link");
+		assert_true(!Ai::LinkTargetOf(ws, Core::StringView("src"), onDisk, shown) && !Ai::LinkTargetOf(ws, Core::StringView(""), onDisk, shown), "a folder of the workspace and the root are its own");
+		assert_true(!Ai::LinkTargetOf(ws, Core::StringView("@Other/src"), onDisk, shown), "no project is linked by that name");
+
+		ws.m_Trusted = false;
+		assert_true(!Ai::LinkTargetOf(ws, Core::StringView("@InputLayers/src"), onDisk, shown), "an untrusted solution follows no link: its @x paths are plain names in its folder");
+		ws.m_Trusted = true;
+
+		const Core::String hint = Ai::LinkHint(ws, Core::StringView("@InputLayer/src"));
+		assert_true(hint.View().Contains(Core::StringView("@InputLayers")), "one named like it, which is what the path meant");
+		assert_true(Ai::LinkHint(ws, Core::StringView("@Physics")).View().Contains(Core::StringView("links: @InputLayers")), "another link: the ones there are");
+
+		// A path whose link the solution has but which holds nothing there: where to look inside that link, not the workspace.
+		const Core::String missed = Ai::MissingPathHint(ws, Core::StringView("@InputLayers/src/Nohere"), FS::Path((root / "Game").View()), Core::StringView(""));
+		assert_true(missed.View().Contains(Core::StringView("@InputLayers/src holds the folders: InputLayers/")), missed.CStr());
+		assert_true(!missed.View().Contains(Core::StringView("(the root) holds")), "not the workspace's own folders");
+		assert_true(Ai::MissingPathHint(ws, Core::StringView("nope"), FS::Path((root / "Game").View()), Core::StringView("")).View().Contains(Core::StringView("(the root) holds the folders: src/")), "a folder of the workspace says what its parent holds");
+		assert_true(!Ai::MissingPathHint(ws, Core::StringView("nope"), FS::Path((root / "Game").View()), Core::StringView("")).View().Contains(Core::StringView("the solution links")), "and names no links, for it asked for none");
+		IED::Workspace plain;
+		plain.m_Root = Core::String((root / "Game").View());
+		plain.m_Trusted = true;
+		assert_true(Ai::LinkHint(plain, Core::StringView("@InputLayers")).IsEmpty(), "a workspace that links none says nothing of links");
+		FS::RemoveAll(root.CStr());
+	}
+
 	[test("a_missing_folder_names_where_one_like_it_went")]
 	public static void TestMovedFolder() {
 		Core::StringBuilder folder;

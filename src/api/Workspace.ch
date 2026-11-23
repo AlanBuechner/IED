@@ -11,6 +11,8 @@ namespace IED
 	{
 		public Core::String m_Name;
 		public Core::String m_Folder;      // its code root, relative to the workspace's root ("" for the root itself)
+		public Core::String m_Link;        // its "@Name", for a project outside the folder (docs/03 "Linked projects"): what names its files in a tool's path; empty when the folder holds it
+		public Core::String m_LinkRoot;   // that "@Name" as a folder on disk; empty when the workspace's folder holds the project
 		public Core::String m_Kind;        // "executable", "library", ...
 		public Core::String m_Language;    // its project file's `language`; empty when it names none
 		public Core::String m_File;        // its project file, relative to the workspace's root when inside it

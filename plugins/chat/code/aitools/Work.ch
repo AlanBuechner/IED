@@ -27,11 +27,15 @@ namespace Ai
 	bool InExcludedFolder(Core::StringView folder);
 	// Where search_text looks: m_File one file, read as edited and searched whatever ignore files and the skipped folders
 	// say; else m_Alone a skipped folder searched whole on the disk ("" for the workspace as edited, which skips build
-	// output and ignored files), and the glob its files must match (relative to m_Alone when it is set).
+	// output and ignored files), or m_Disk a folder of its own on disk (a project the solution links outside its folder) with
+	// the prefix its files are shown by, which is how it is read back; and the glob its files must match (relative to
+	// m_Alone or m_Disk when either is set).
 	struct SearchScope
 	{
 		public Core::String m_File;
 		public Core::String m_Alone;
+		public Core::String m_Disk;
+		public Core::String m_Shown;
 		public Core::String m_Glob;
 	}
 	// The scope of a search whose `path` is a folder - or one file, when `isFile` - and whose `glob` (under the folder) is

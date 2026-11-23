@@ -25,6 +25,24 @@ namespace Ai
 	// A full path inside the workspace as its workspace path: under its local state (kept outside its folder) as
 	// ".ied/local/...", under its root relative to it; any other path as given.
 	Core::String WorkspacePathOf(const IED::Workspace& ws, Core::StringView path);
+	// A tool path that names a project the solution links outside its folder (docs/03 "Linked projects" - what a Nuke
+	// package is): "@InputLayers/src" is that project's src folder. `onDisk` that folder or file, and `shown` its workspace
+	// path - with a trailing "/" when it is a folder, so a tool joins what it finds under it and the result reads back as it
+	// was given. False when the path starts with no link the workspace's projects have, that link holds nothing there, or the
+	// workspace is untrusted (whose "@x" paths are plain names in its folder, so `Workspace::At` reaches nothing outside it).
+	// fs_read and fs_edit take these paths through the server; the tools that walk a folder on disk - fs_list, fs_glob,
+	// search_text - go through this instead.
+	bool LinkTargetOf(const IED::Workspace& ws, Core::StringView path, Core::String& onDisk, Core::String& shown);
+	// What a tool's `path` that names no linked project says about it: the links it could have meant. "" when the solution
+	// links none.
+	Core::String LinkHint(const IED::Workspace& ws, Core::StringView path);
+	// For an "@Name/..." path whose link the solution has but which holds nothing there: NearestFoldersHint and
+	// MovedFoldersHint inside that link, its folders named by the path that reaches them ("@InputLayers/src holds the
+	// folders: InputLayers/ tests/"). "" when no link begins `path` (the hints of the workspace's own folder say that).
+	Core::String LinkMissHint(const IED::Workspace& ws, Core::StringView path);
+	// What every tool says for a path that names no folder or file: where it looked (the linked project's folders when the
+	// path is one's, the workspace's own otherwise) and the links it could have meant.
+	Core::String MissingPathHint(const IED::Workspace& ws, Core::StringView path, const FS::Path& root, Core::StringView shown);
 	// A call's path argument `name` as a workspace path: WorkspacePathOf, then ToolPath (bad_request when it is
 	// neither inside the workspace nor workspace-relative).
 	Core::String WorkspaceArgument(const ToolInvocation& call, const char* name);

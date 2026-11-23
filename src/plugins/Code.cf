@@ -752,6 +752,8 @@ namespace Ied
 			project.m_Name = model->m_Name;
 			Core::String folder;
 			if (RelativeTo(ws->m_Root.View(), model->m_Root.View(), folder)) project.m_Folder = folder;
+			project.m_Link = model->m_Link;
+			if (!model->m_Link.IsEmpty()) project.m_LinkRoot = Core::String(model->m_Root.View());
 			project.m_Kind = model->m_Kind;
 			project.m_Language = Core::String(model->m_Data.Member("language").AsView());
 			if (!RelativeTo(ws->m_Root.View(), model->m_File.View(), project.m_File)) project.m_File = Core::String(model->m_File.View());

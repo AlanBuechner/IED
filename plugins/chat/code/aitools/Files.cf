@@ -261,6 +261,89 @@ namespace Ai
 		return Core::String(path);
 	}
 
+	bool LinkTargetOf(const IED::Workspace& ws, Core::StringView path, Core::String& onDisk, Core::String& shown) {
+		onDisk = Core::String();
+		shown = Core::String();
+		// An untrusted solution's "@x" paths are plain paths in its folder (Workspace::At follows no link there), and
+		// fs_read would refuse the file, so no tool takes them as links either.
+		if (!ws.m_Trusted || path.IsEmpty() || path.ByteAt(0) != '@') return false;
+		const int64 slash = path.IndexOf('/', 0);
+		const Core::StringView link = slash < 0 ? path : path.Substring(0, slash);
+		for (const IED::Project& each : ws.m_Projects) {
+			if (each.m_Link.IsEmpty() || each.m_Link.View() != link || each.m_LinkRoot.IsEmpty()) continue;
+			const Core::String rest = slash < 0 ? Core::String() : Core::String(path.Substring(slash + 1, path.ByteLength() - slash - 1));
+			const FS::Path file = FS::Path(each.m_LinkRoot.View()) / rest.View();
+			if (!FS::IsDirectory(file.CStr()) && !FS::FileExists(file.CStr())) return false;
+			onDisk = Core::String(file.View());
+			shown = Core::String(each.m_Link.View());
+			if (!rest.IsEmpty()) shown = (shown + "/") + rest.View();
+			if (FS::IsDirectory(file.CStr())) shown += "/";
+			return true;
+		}
+		return false;
+	}
+
+	const int64 c_LinkNamesShown = 12;   // how many of a solution's linked projects a hint names
+
+	// "@InputLayers" from "@InputLayers/src/..."; "" when the path begins with no link's name.
+	static Core::String LinkOf(Core::StringView path) {
+		if (path.IsEmpty() || path.ByteAt(0) != '@') return Core::String();
+		const int64 slash = path.IndexOf('/', 0);
+		return Core::String(slash < 0 ? path : path.Substring(0, slash));
+	}
+
+	// For a path that names no linked project: which ones the solution does link, the ones named like it first. "" when it
+	// links none at all (then "@..." is no one's name and the plain hint says what is there).
+	Core::String LinkHint(const IED::Workspace& ws, Core::StringView path) {
+		const Core::String wanted = LinkOf(path);
+		if (wanted.IsEmpty()) return Core::String();   // a path that never meant a link hears nothing of them
+		const Core::String wantedLower = wanted.ToLower();
+		// "@InputLayers" -> "inputlayers": what a link's name would have to hold to be the one the path meant.
+		const Core::StringView stem = wantedLower.ByteLength() >= 5 ? wantedLower.View().Substring(1, wantedLower.ByteLength() - 1) : Core::StringView();
+		Core::Array<Core::String> links;
+		Core::Array<Core::String> alike;
+		for (const IED::Project& each : ws.m_Projects) {
+			if (each.m_Link.IsEmpty()) continue;
+			if (!stem.IsEmpty() && each.m_Link.View() != wanted.View() && each.m_Name.ToLower().View().Contains(stem)) alike.Push(each.m_Link);
+			else links.Push(each.m_Link);
+		}
+		if (links.IsEmpty() && alike.IsEmpty()) return Core::String();
+		Core::StringBuilder out;
+		if (!alike.IsEmpty()) {
+			out.Append("; named like ");
+			out.Append(wanted.View());
+			out.Append(":");
+			for (const Core::String& link : alike) { out.Append(" "); out.Append(link.View()); }
+		}
+		out.Append("; the solution links:");
+		for (int64 i = 0; i < links.Count() && i < c_LinkNamesShown; ++i) { out.Append(" "); out.Append(links[i].View()); }
+		if (links.Count() > c_LinkNamesShown) out.Append(" ...");
+		return out.ToString();
+	}
+
+	Core::String LinkMissHint(const IED::Workspace& ws, Core::StringView path) {
+		const Core::String link = LinkOf(path);
+		if (link.IsEmpty()) return Core::String();
+		for (const IED::Project& each : ws.m_Projects) {
+			if (each.m_Link != link || each.m_LinkRoot.IsEmpty()) continue;
+			const int64 slash = path.IndexOf('/', 0);
+			const Core::String inside = Core::String(path.Substring(slash + 1, path.ByteLength() - slash - 1));
+			const Core::String shown = (each.m_Link + "/");
+			return NearestFoldersHint(FS::Path(each.m_LinkRoot.View()), inside.View(), shown.View())
+				+ MovedFoldersHint(FS::Path(each.m_LinkRoot.View()), inside.View(), shown.View());
+		}
+		return Core::String();
+	}
+
+	// What every tool says for a path it found no folder or file at: what is where it looked - the linked project's folders
+	// when the path is one's, the workspace's own otherwise - and, when the path began with no link the solution has, which
+	// links it could have meant. A path whose link is right says nothing more: the folders named inside it are the answer.
+	Core::String MissingPathHint(const IED::Workspace& ws, Core::StringView path, const FS::Path& root, Core::StringView shown) {
+		const Core::String inLink = LinkMissHint(ws, path);
+		if (!inLink.IsEmpty()) return inLink;
+		return NearestFoldersHint(root, path, shown) + MovedFoldersHint(root, path, shown) + LinkHint(ws, path).View();
+	}
+
 	Core::String WorkspaceArgument(const ToolInvocation& call, const char* name) { return ToolPath(WorkspacePathOf(call.m_Ws, call.m_Args.Member(name).AsView()).View()); }
 
 	static Core::String PathArgument(const ToolInvocation& call, const char* name) { return WorkspaceArgument(call, name); }
@@ -656,12 +739,28 @@ namespace Ai
 	static ToolOutcome ListRun(const ToolInvocation& call) {
 		Core::String path = PathArgument(call, "path");
 		const int64 depth = call.m_Args.Member("depth").IsValid() ? call.m_Args.Member("depth").AsInt() : 2;
+		const int64 levels = depth < 1 ? 1 : depth > 6 ? 6 : depth;
 		FS::Path root = FS::Path(call.m_Ws.m_Root.View());
-		if (!FS::IsDirectory((root / path.View()).CStr()))
-			return ToolError(((((Core::String("fs_list: no folder ") + path.View()) + NearestFoldersHint(root, path.View(), call.m_Shown.View()).View()) + MovedFoldersHint(root, path.View(), call.m_Shown.View()).View()) + "; fs_glob finds files by name").View());
+		// A project the solution links outside its folder (a Nuke package): listed where it is, its paths shown as the link
+		// names them, which is how they read back.
+		Core::String onDisk;
+		Core::String shown;
+		if (!FS::IsDirectory((root / path.View()).CStr())) {
+			if (!LinkTargetOf(call.m_Ws, path.View(), onDisk, shown))
+				return ToolError((((Core::String("fs_list: no folder ") + path.View()) + MissingPathHint(call.m_Ws, path.View(), root, call.m_Shown.View()).View()) + "; fs_glob finds files by name").View());
+			Core::StringBuilder linked;
+			int64 entries = 0;
+			const Core::String linkShown = call.m_Shown + shown.View();   // a folder's shown ends in "/", so its entries follow it
+			ListFolder(FS::Path(onDisk.View()), Core::StringView(), linkShown.View(), levels, c_ListMostEntries, linked, entries);
+			if (entries >= c_ListMostEntries) linked.Append("[stopped at 400 entries; list a subfolder or use fs_glob]\n");
+			Core::StringBuilder preview;
+			preview.AppendInt(entries);
+			preview.Append(" entries");
+			return ToolResult(linked.View(), preview.View());
+		}
 		Core::StringBuilder out;
 		int64 count = 0;
-		ListFolder(FS::Path(call.m_Ws.m_Root.View()), path.View(), call.m_Shown.View(), depth < 1 ? 1 : depth > 6 ? 6 : depth, c_ListMostEntries, out, count);
+		ListFolder(FS::Path(call.m_Ws.m_Root.View()), path.View(), call.m_Shown.View(), levels, c_ListMostEntries, out, count);
 		if (count >= c_ListMostEntries) out.Append("[stopped at 400 entries; list a subfolder or use fs_glob]\n");
 		Core::StringBuilder preview;
 		preview.AppendInt(count);
@@ -702,11 +801,21 @@ namespace Ai
 		Core::String hint = GlobRootHint(call.m_Args.Member("pattern").AsView());
 		if (!hint.IsEmpty()) return ToolError(hint.View());
 		Core::String root = ToolPath(call.m_Args.Member("root").AsView());
-		Core::Array<Core::String> found = IED::ExpandGlob((FS::Path(call.m_Ws.m_Root.View()) / root.View()).View(), call.m_Args.Member("pattern").AsView());
+		const FS::Path underRoot = FS::Path(call.m_Ws.m_Root.View()) / root.View();
+		// A project the solution links outside its folder (a Nuke package): globbed where it is, its files shown as the link
+		// names them, which is how they read back.
+		Core::String onDisk;
+		Core::String shown;
+		const bool underWorkspace = FS::IsDirectory(underRoot.CStr());
+		const bool linked = !underWorkspace && LinkTargetOf(call.m_Ws, root.View(), onDisk, shown);
+		if (!underWorkspace && !linked && !root.IsEmpty())
+			return ToolError(((Core::String("fs_glob: no folder ") + root.View()) + MissingPathHint(call.m_Ws, root.View(), FS::Path(call.m_Ws.m_Root.View()), call.m_Shown.View()).View()).View());
+		const Core::String rootShown = call.m_Shown + shown.View();
+		Core::Array<Core::String> found = IED::ExpandGlob(linked ? onDisk.View() : Core::String(underRoot.View()).View(), call.m_Args.Member("pattern").AsView());
 		Core::StringBuilder out;
 		for (int64 i = 0; i < found.Count() && i < c_GlobMostPaths; ++i) {
-			out.Append(call.m_Shown.View());
-			if (!root.IsEmpty()) {
+			out.Append(linked ? rootShown.View() : call.m_Shown.View());
+			if (!linked && !root.IsEmpty()) {
 				out.Append(root.View());
 				out.Append("/");
 			}
@@ -734,7 +843,7 @@ namespace Ai
 
 	void AddFileTools(ToolRegistry& registry) {
 		ToolSpec* read = Spec("fs_read", "Read a text file with line numbers - a workspace file, or by its absolute path a file outside it that the code tools named (any other file outside the workspace: shell_run with type, or cat). Up to 400 lines per call; use offset to read on. A path that misses reads the one file of its name outside build output, and says so. For one function or type, code_read_symbol reads just it. Example: fs_read({\"path\": \"src/game/player.txt\", \"offset\": 120, \"limit\": 80})",
-			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"workspace-relative path; plugins:/<plugin id>/<path> for a plugin's files (read-only)\"}, \"offset\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"first line, 1-based\"}, \"limit\": {\"type\": \"integer\", \"minimum\": 1}}, \"required\": [\"path\"], \"additionalProperties\": false}",
+			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"workspace-relative path; @Name/... for a file of a project the solution links outside its folder (a Nuke package); plugins:/<plugin id>/<path> for a plugin's files (read-only)\"}, \"offset\": {\"type\": \"integer\", \"minimum\": 1, \"description\": \"first line, 1-based\"}, \"limit\": {\"type\": \"integer\", \"minimum\": 1}}, \"required\": [\"path\"], \"additionalProperties\": false}",
 			ToolClass::Read, true);
 		read->m_Plan = ReadPlan;
 		read->m_Run = ReadRun;
@@ -747,20 +856,20 @@ namespace Ai
 		write->m_Run = WriteRun;
 		registry.Add(write);
 		ToolSpec* edit = Spec("fs_edit", "Replace exact text in a file: each edit's old text must occur once (or set replace_all; an old found nowhere but in one place indented by whole tabs more or less, or whose later lines are indented otherwise, or spaced otherwise within its lines - the file was formatted since - is replaced there, new shifted as its first line); all edits apply or none, but for an edit whose new is its old, which is left out (and said) when others change something. Copy old exactly from fs_read, without the line numbers; for a long block, clipboard_copy its lines and write old as {{clip:<name>}}. Example: fs_edit({\"path\": \"src/config.txt\", \"edits\": [{\"old\": \"count = 0\", \"new\": \"count = 1\"}]})",
-			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"workspace-relative (no ..); plugins:/ or ied:/ for those roots; a file elsewhere on disk (another checkout, a git worktree) is edited with shell_run\"}, \"edits\": {\"type\": \"array\", \"minItems\": 1, \"items\": {\"type\": \"object\", \"properties\": {\"old\": {\"type\": \"string\"}, \"new\": {\"type\": \"string\"}, \"replace_all\": {\"type\": \"boolean\"}}, \"required\": [\"old\", \"new\"], \"additionalProperties\": false}}}, \"required\": [\"path\", \"edits\"], \"additionalProperties\": false}",
+			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"workspace-relative (no ..); @Name/... for a linked project's file (a Nuke package), plugins:/ or ied:/ for those roots; a file elsewhere on disk (another checkout, a git worktree) is edited with shell_run\"}, \"edits\": {\"type\": \"array\", \"minItems\": 1, \"items\": {\"type\": \"object\", \"properties\": {\"old\": {\"type\": \"string\"}, \"new\": {\"type\": \"string\"}, \"replace_all\": {\"type\": \"boolean\"}}, \"required\": [\"old\", \"new\"], \"additionalProperties\": false}}}, \"required\": [\"path\", \"edits\"], \"additionalProperties\": false}",
 			ToolClass::Write, false);
 		edit->m_Plan = EditPlan;
 		edit->m_Run = EditRun;
 		registry.Add(edit);
 		ToolSpec* list = Spec("fs_list", "List a folder's files and folders (folders end in /), skipping build output and .git. A folder that is not there is an error naming the folders its nearest parent holds: to ask whether files are there, fs_glob them (none found is an answer, not an error). Example: fs_list({\"path\": \"src\", \"depth\": 2})",
-			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"workspace-relative folder (no ..); empty for the root; plugins:/ for the plugins' folders; a folder outside the workspace is listed with shell_run (dir)\"}, \"depth\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 6}}, \"required\": [\"path\"], \"additionalProperties\": false}",
+			"{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"workspace-relative folder (no ..); empty for the root; @Name/ for a project the solution links outside its folder (a Nuke package); plugins:/ for the plugins' folders; a folder outside the workspace is listed with shell_run (dir)\"}, \"depth\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 6}}, \"required\": [\"path\"], \"additionalProperties\": false}",
 			ToolClass::Read, true);
 		list->m_Plan = ListPlan;
 		list->m_Run = ListRun;
 		list->m_FolderRoots = true;
 		registry.Add(list);
 		ToolSpec* glob = Spec("fs_glob", "Find files by a glob over their workspace-relative paths ('*' within a folder, '**' across folders, {a,b} either, [ch] one character of). Example: fs_glob({\"pattern\": \"**/*Log*\"})",
-			"{\"type\": \"object\", \"properties\": {\"pattern\": {\"type\": \"string\"}, \"root\": {\"type\": \"string\", \"description\": \"a folder to search under; a root's alias (plugins:/<plugin id>/, ied:/) goes here, never in pattern\"}}, \"required\": [\"pattern\"], \"additionalProperties\": false}",
+			"{\"type\": \"object\", \"properties\": {\"pattern\": {\"type\": \"string\"}, \"root\": {\"type\": \"string\", \"description\": \"a folder to search under; a root's alias (plugins:/<plugin id>/, ied:/) or a linked project (@Name, a Nuke package) goes here, never in pattern\"}}, \"required\": [\"pattern\"], \"additionalProperties\": false}",
 			ToolClass::Read, true);
 		glob->m_Plan = GlobPlan;
 		glob->m_Run = GlobRun;
