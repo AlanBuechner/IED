@@ -227,10 +227,15 @@ class ClangdCodeToolTests(CodeToolCase):
 		write(os.path.join(self.repo, "src", "game.cpp"), GAME_CPP)
 		commands = [{"directory": self.repo, "file": os.path.join(self.repo, "src", name), "arguments": ["clang++", "-std=c++17", "-c", os.path.join("src", name)]} for name in ("ring.cpp", "game.cpp")]
 		write(os.path.join(self.repo, "compile_commands.json"), json.dumps(commands))
-
-	async def asyncSetUp(self):
-		await super().asyncSetUp()
-		await self.client.request("settings.set", {"tier": "app", "key": "cpp.clangd.path", "value": CLANGD})
+		# In the settings before the server starts again: set after it, the plugin could look for clangd first (under load it
+		# did), find none on its default paths, and the first search answered from that.
+		settings_path = os.path.join(self.data, "app", "settings.json")
+		settings = {}
+		if os.path.exists(settings_path):
+			with open(settings_path, encoding="utf-8") as f:
+				settings = json.load(f)
+		settings["cpp.clangd.path"] = CLANGD
+		write(settings_path, json.dumps(settings))
 
 	async def server_log(self):
 		await self.client.sub(["out:w1:ied"])
