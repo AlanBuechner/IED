@@ -15,6 +15,7 @@ import io
 STORE = toolchains.ToolchainStore(toolchains.default_store_root())
 REPOSITORY = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SAMPLE = os.path.join(REPOSITORY, "plugins", "c4", "samples", "c4-outline")
+QUERY_SAMPLE = os.path.join(REPOSITORY, "plugins", "c4", "samples", "c4-query")
 CLANG = os.path.join(REPOSITORY, "vendor", "llvm", "bin", "clang.exe")
 
 
@@ -106,6 +107,19 @@ class RealToolchainTests(unittest.TestCase):
 		self.assertEqual(code, 0, out)
 		self.assertIn("c4-outline: 2 tool(s), 3 fixture(s), 0 problem(s)", out)
 		self.assertTrue(os.path.isfile(os.path.join(folder, "build", "bin", "Development-windows-x64", "c4-outline", "C4Api.dll")), "the DLL beside the tool")
+
+	@unittest.skipUnless(TOOLCHAIN and os.path.isfile(CLANG) and "c4a_program_open" in read(os.path.join(TOOLCHAIN.dir, "C4Api", "C4Api.h")),
+		"needs a toolchain that ships C4Api version 2 and the checkout's LLVM release")
+	def test_a_tool_queries_a_program_through_c4_api_version_2(self):
+		"""The c4 plugin's sample plugins/c4/samples/c4-query: a C++ program that opens a small multi-file program through the
+		toolchain's C4Api and asks for its diagnostics, what a name resolves to, types, references and members."""
+		folder = os.path.join(self.root, "c4-query")
+		shutil.copytree(QUERY_SAMPLE, folder, ignore=shutil.ignore_patterns("build"))
+		manifest = os.path.join(folder, "nuke.toml")
+		write_files(folder, {"nuke.toml": read(manifest).replace('toolchain = "dev"', f'toolchain = "{TOOLCHAIN.version}"')})
+		code, out = self.nuke("test", cwd=folder)
+		self.assertEqual(code, 0, out)
+		self.assertIn("c4-query: 11 case(s), 0 problem(s)", out)
 
 
 if __name__ == "__main__":

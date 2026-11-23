@@ -1,0 +1,9 @@
+include "ring.ch"
+
+int32 main()
+{
+	Game::Ring ring;
+	ring.Push(3);
+	int32 total = ring.count;
+	return total;
+}

@@ -21,6 +21,7 @@
 #include "Server/SemanticResolver.h"
 #include "SourceManager/Source.h"
 #include <algorithm>
+#include <filesystem>
 #include <list>
 #include <mutex>
 #include <set>
@@ -285,12 +286,13 @@ namespace
 		CompilationSession& session = program.session;
 		if (options.root)
 		{
-			program.root = Slashed(options.root);
+			program.root = Slashed(std::filesystem::absolute(options.root).lexically_normal().string()); // the session's files are absolute
 			session.SetRootFolder(program.root);
 		}
 		if (options.library_folder) session.SetLibraryFolder(options.library_folder);
 		if (options.projects_file) session.SetProjectsFile(options.projects_file);
-		std::vector<std::string> includes;
+		std::vector<std::string> includes; // a build registers every source under an -I folder: the root's files are the program
+		if (!program.root.empty() && !options.projects_file) includes.push_back(program.root);
 		for (uint32_t i = 0; i < options.include_path_count; ++i)
 			if (options.include_paths && options.include_paths[i]) includes.push_back(options.include_paths[i]);
 		session.SetIncludePaths(includes);

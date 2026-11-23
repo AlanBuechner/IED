@@ -1,0 +1,18 @@
+# c4-query against the fixture programs (check_query.py): each query's output and exit code, and C4Api.dll beside the tool.
+[project]
+name = "query-check"
+kind = "custom"
+description = "c4-query against the fixture programs"
+depends = ["c4-query"]
+
+[[project.steps]]
+name = "build-tool"
+phase = "pre-test"
+description = "build the tool first: nuke test builds no custom project's dependencies"
+run = ["${python}", "${nuke}", "build", "c4-query", "${config}"]
+
+[[project.steps]]
+name = "queries"
+phase = "test"
+description = "every query against tests/fixtures"
+run = ["${python}", "-I", "check_query.py", "${bin.root}/c4-query/c4-query.exe"]
