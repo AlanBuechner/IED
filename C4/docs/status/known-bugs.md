@@ -43,7 +43,6 @@ Next ID: **BUG-501**
 
 | ID | Title | Area | Severity |
 |---|---|---|---|
-| BUG-421 | C4LSP puts a dependency's declarations in the root project of a multi-project program | Tools | Low |
 | BUG-441 | `threading.thread.sleep_is_precise` fails in the gates while the machine is busy: sleeps land on the 15.6 ms tick | Runtime | Medium |
 | BUG-497 | The IED master on Linux aborted in `malloc` (heap corruption) relaying WebSocket frames after half an hour of a chat | Runtime | High |
 
@@ -116,38 +115,3 @@ Next ID: **BUG-501**
   GLIBC_TUNABLES=glibc.malloc.check=3 MALLOC_PERTURB_=165` in the desktop app's environment - so the damage stops
   nearer its cause, or under ASan / Valgrind. The crash also left the workspace's server running unreachable, which
   kept the folder from opening again: that part was IED's and is fixed (`--master-pid`, `src/Main.cf` `WatchMaster`).
-
-## Tools
-
-### BUG-421 C4LSP puts a dependency's declarations in the root project of a multi-project program
-- **Area:** Tools
-- **Severity:** Low
-- **Status:** Open
-- **Found:** 2026-10-28
-- **Symptom:** In the Claymore workspace the editor shows, on `Packages/Renderer/RHI/src/Rhi/Frame/Renderer.ch` and
-  `Commands/CommandList.ch`, `unresolved type for field 'm_Log' in 'RendererDesc': 'Log' is declared in project
-  'ClaymoreClient', and project 'Rhi' does not depend on 'ClaymoreClient'` (and `type not found: Logger` in
-  `Frame/ShaderWatcher.ch`), while C4.exe compiles the same files with the same build description
-  (`build/int/Development-windows-x64/ClaymoreClient/projects.toml`, where `Log` is a project of its own that `Rhi`
-  depends on) without an error. `Windowing::` names in the same files resolve. Another symptom, seen 2026-10-28 in the
-  same workspace: every file of `Packages/Renderer/Render` and the files using `Render::` in `ClaymoreEngine` show
-  `redefinition of namespace 'Render': it is already a function (RhiD3D12/Native.ch:16133)` (a function of the SDK
-  headers RhiD3D12's `Native.ch` includes `extern "c++"`; Render does not depend on RhiD3D12) and then `not a
-  namespace path: Render`, while `nuke test` builds the same programs clean.
-- **Repro:** open Claymore (the package `Packages/Log` was added after the session's language server started) and
-  read the problems of `Packages/Renderer/RHI/src/Rhi/Frame/Renderer.ch`; not yet reduced to a small workspace.
-- **Where:** C4LSPLib `CompilationSession` (which program serves a file shared by several, `RegisterProjects`),
-  `ProgramModel::OutOfProjectReach`.
-- **Notes:** reduce it first: a two-program workspace whose shared module depends on a module added later. A third
-  symptom (2026-10-29, same workspace): after `Procedural = { source = ... }` was added to `ClaymoreEngine`'s
-  `[dependencies]`, `Scene/Pipeline/TerrainRenderer.ch` showed `include not found: 'Procedural/Terrain/Heightfield.ch'`
-  for hours of builds that compiled it clean, though `.ied/local/lsp-options/ClaymoreEngine.json` (the programs the
-  server is told through `initializationOptionsFiles`) was rewritten during them; it cleared when IED restarted. So
-  either the pool's `SendOptionsFilesIfChanged` did not fire for that rewrite, or C4LSP took the new programs without
-  re-resolving the includes of files it had analyzed: check `LspProgramsTest`'s configuration-change case with a
-  dependency added to a program that already holds the file.
-  2026-11-21 (chat J): that reduction is `Lsp.Programs TestAProjectAddedToAProgramIsReadAgain` and it passes on today's
-  server (a reused program re-reads a projects.toml whose size or time changed, `Program::Refresh`, and its next
-  analysis resolves the new project's include). Not reproduced in small: the two Claymore symptoms are still to be
-  checked in Claymore itself (it does not build on the tree's Bedrock since 2f462091 - `Core::ResizeElementBytes` takes
-  7 arguments, `Scene/LooseValue.cf` passes 6).
