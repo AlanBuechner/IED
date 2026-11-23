@@ -7,7 +7,7 @@ toolchain: a tool built against a workspace's toolchain reads the C4 of that too
 
 | Piece | Where | Status |
 |---|---|---|
-| `C4Api.dll`, `C4Api.lib` (its import library), `C4Api.h` | `<toolchain>/C4Api/` (`C4/C4Api` in the IED repository) | **Implemented**: API version 1 (a source's declarations and syntax diagnostics) and version 2 (a whole program: diagnostics, names, types, references, members) |
+| `C4Api.dll`, `C4Api.lib` (its import library), `C4Api.h` | `<toolchain>/C4Api/` (`C4/C4Api` in the IED repository) | **Implemented**: API version 1 (a source's declarations and syntax diagnostics), version 2 (a whole program: diagnostics, names, types, references, members) and version 3 (a type's inherited members; opening without lowering the bodies) |
 | A Nuke project depending on it: `depends = ["C4Api"]` | the c4 package's library (`plugins/c4/libraries/C4Api` in the IED repository) | **Implemented** |
 | A sample tool: `c4-outline` | `plugins/c4/samples/c4-outline` in the IED repository | **Implemented**, tested by Nuke's integration tests |
 | A sample of version 2: `c4-query` | `plugins/c4/samples/c4-query` in the IED repository | **Implemented**, tested by Nuke's integration tests |
@@ -70,12 +70,20 @@ boundary, and strings stay valid until the program (or the result handle that ga
 | `c4a_program_members_of(program, "Game::Ring")`, `c4a_program_members_at(program, file, at)` | a `c4a_members*`: the fields and methods the object type declares (not its bases'), each with kind, name, signature (the declaration without its name), access, static, and where it is declared; null when there is no such object type. `c4a_members_count`, `c4a_members_at`, `c4a_members_destroy` |
 | `c4a_program_destroy(program)` | frees the program, its strings and its analysis |
 
+**Version 3** only adds (a version 2 struct never grows, so a tool built against version 2 keeps working with a version 3 DLL; a tool using these checks `c4a_api_version() >= 3`):
+
+| Function | Does |
+|---|---|
+| `c4a_program_open_with(&options)` | `c4a_program_open` with `c4a_program_open_options { program, flags }`: `flags` `C4A_OPEN_DECLARATIONS_ONLY` skips the lowering of the bodies (no body diagnostics, `c4a_program_bodies_lowered` is 0; names, types, references and members are answered as before). A tool that reads only declarations does not pay for the lowering. Never null |
+| `c4a_program_members_with_bases_of(program, name)`, `c4a_program_members_with_bases_at(program, file, at)` | the members of `c4a_program_members_of` / `_at`, then those of the type's bases, nearest base first and each base once (a base member a derived type overrides or redeclares is left out), as C4LSP's `code_members` does with `inherited` |
+| `c4a_members_inherited_from(members, i)` | the qualified name of the base member `i` comes from (`Game::Shape`); null for a member the type declares itself |
+
 A program serializes its own queries (one mutex), and separate programs run on separate threads. Opening costs what
 C4LSP's first analysis costs - the whole front end and the lowering - so a tool opens once and queries many times.
 Version 2 does not yet update a program in place: a changed file is a new `c4a_program_open` (the incremental front end,
 R1, will make that cheap without changing this interface).
 
-Tests: C4Testing `Api.Program` (each function, against a three-file in-memory program, through the DLL as a tool calls it);
+Tests: C4Testing `Api.Program` (each function, against small in-memory programs, through the DLL as a tool calls it - inherited members and the declarations-only open included);
 the sample `c4-query` runs the same queries from a C program against fixtures on disk (Nuke's integration tests).
 
 ## 3. Using it from a Nuke project

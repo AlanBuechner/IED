@@ -5,7 +5,7 @@
 
 namespace Testing
 {
-	// C4Api version 2 (docs/tools/06-c4-api.md section 3): a program opened, analyzed and queried through the C interface,
+	// C4Api versions 2 and 3 (docs/tools/06-c4-api.md section 2b): a program opened, analyzed and queried through the C interface,
 	// against a small program of three files.
 	CLASS(GROUP = Testing) ProgramApiTest : public Test
 	{
@@ -38,5 +38,11 @@ namespace Testing
 
 		TEST_FUNC(Api.Program)
 		void ANullProgramOrArgumentAnswersNothing();
+
+		TEST_FUNC(Api.Program)
+		void MembersWithBasesNameTheBaseTheyComeFrom();
+
+		TEST_FUNC(Api.Program)
+		void ADeclarationsOnlyProgramSkipsTheBodies();
 	};
 }

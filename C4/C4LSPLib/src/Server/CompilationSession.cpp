@@ -282,6 +282,8 @@ namespace C4LSP::Server
 	{
 		m_LoweringErrors.Clear();
 		m_LoweredBodies = false;
+		if (!m_LowerBodies)
+			return;
 		if (!m_Compiler->GetProgramModel().IsValid())
 			return; // a broken front end already reports its own errors; C4.exe never lowers then either
 

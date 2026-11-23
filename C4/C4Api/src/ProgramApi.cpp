@@ -1,5 +1,5 @@
-// The C API's version 2 (docs/tools/06-c4-api.md section 3): a whole program, analyzed and queried through the language
-// server's own session, resolver and features, so the answers are the ones the editor gets.
+// The C API's versions 2 and 3 (docs/tools/06-c4-api.md section 2b): a whole program, analyzed and queried through the
+// language server's own session, resolver and features, so the answers are the ones the editor gets.
 
 #include "Core/Logging/Log.h"
 #include "C4Api.h"
@@ -21,6 +21,7 @@
 #include "Server/SemanticResolver.h"
 #include "SourceManager/Source.h"
 #include <algorithm>
+#include <cstring>
 #include <filesystem>
 #include <list>
 #include <mutex>
@@ -58,6 +59,7 @@ namespace
 		std::string access;
 		bool isStatic = false;
 		Place declared;
+		std::string inheritedFrom; // the base's qualified name; empty for a member the type declares itself
 	};
 }
 
@@ -270,18 +272,60 @@ namespace
 		return member;
 	}
 
-	c4a_members* MembersOfObject(CompilationSession& session, const C4Compiler::ObjectType& object)
+	std::string NameOfObject(CompilationSession& session, const C4Compiler::ObjectType& object)
 	{
-		c4a_members* members = new c4a_members();
+		return object.GetDeclNode() ? QualifiedNameOf(session, *object.GetDeclNode()) : std::string(object.GetName().c_str());
+	}
+
+	// A signature without the words that say how a method is overridden: an override and the method it overrides compare equal.
+	std::string WithoutVirtualWords(std::string signature)
+	{
+		for (const char* word : { "virtual ", "override ", "final ", "abstract " })
+			if (signature.rfind(word, 0) == 0) return WithoutVirtualWords(signature.substr(std::strlen(word)));
+		return signature;
+	}
+
+	// The members `object` declares itself, each marked with `inheritedFrom` (empty for the queried type's own).
+	void AddDeclaredMembers(CompilationSession& session, const C4Compiler::ObjectType& object, const std::string& inheritedFrom, c4a_members& members)
+	{
+		auto add = [&](MemberEntry member)
+		{
+			if (!inheritedFrom.empty() && std::any_of(members.items.begin(), members.items.end(), [&](const MemberEntry& have) { return have.name == member.name && have.kind == member.kind && WithoutVirtualWords(have.signature) == WithoutVirtualWords(member.signature); }))
+				return; // an override or a redeclaration: the derived type's member is the one
+			member.inheritedFrom = inheritedFrom;
+			members.items.push_back(std::move(member));
+		};
 		for (const auto& field : object.GetFields())
 			if (!field.m_IsPackedStorage)
-				members->items.push_back(MemberOf(session, field.mName.c_str(), C4A_VARIABLE, field.m_IsStatic, field.m_Access, field.m_DeclaringNode));
+				add(MemberOf(session, field.mName.c_str(), C4A_VARIABLE, field.m_IsStatic, field.m_Access, field.m_DeclaringNode));
 		for (const auto& method : object.GetMethods())
-			members->items.push_back(MemberOf(session, method.mName.c_str(), C4A_FUNCTION, method.m_IsStatic, method.m_Access, method.m_DeclaringNode));
+			add(MemberOf(session, method.mName.c_str(), C4A_FUNCTION, method.m_IsStatic, method.m_Access, method.m_DeclaringNode));
+	}
+
+	// `object`'s bases, nearest first, each once, with the members each declares.
+	void AddBaseMembers(CompilationSession& session, const C4Compiler::ObjectType& object, std::set<const C4Compiler::ObjectType*>& seen, c4a_members& members)
+	{
+		for (const C4Compiler::ObjectType* base : object.GetBaseTypes())
+		{
+			if (!base || !seen.insert(base).second) continue;
+			AddDeclaredMembers(session, *base, NameOfObject(session, *base), members);
+			AddBaseMembers(session, *base, seen, members);
+		}
+	}
+
+	c4a_members* MembersOfObject(CompilationSession& session, const C4Compiler::ObjectType& object, bool withBases)
+	{
+		c4a_members* members = new c4a_members();
+		AddDeclaredMembers(session, object, std::string(), *members);
+		if (withBases)
+		{
+			std::set<const C4Compiler::ObjectType*> seen = { &object };
+			AddBaseMembers(session, object, seen, *members);
+		}
 		return members;
 	}
 
-	void Analyze(c4a_program& program, const c4a_program_options& options)
+	void Analyze(c4a_program& program, const c4a_program_options& options, uint32_t flags)
 	{
 		CompilationSession& session = program.session;
 		if (options.root)
@@ -300,6 +344,7 @@ namespace
 		for (uint32_t i = 0; i < options.source_count; ++i)
 			if (options.sources && options.sources[i].name && options.sources[i].text)
 				session.RegisterInMemorySource(options.sources[i].name, std::string(options.sources[i].text, static_cast<size_t>(options.sources[i].length)));
+		session.SetLowerBodies(!(flags & C4A_OPEN_DECLARATIONS_ONLY));
 		session.Recompile();
 		program.error = session.GetSetupProblem();
 		CollectDiagnostics(program);
@@ -326,6 +371,16 @@ namespace
 
 extern "C"
 {
+	static c4a_members* MembersAt(c4a_program* program, const char* file, c4a_position at, bool withBases)
+	{
+		if (!program) return nullptr;
+		std::lock_guard<std::mutex> guard(program->lock);
+		Spot spot;
+		if (!LocateAt(*program, file, at, spot)) return nullptr;
+		const C4Compiler::ObjectType* object = ObjectAt(program->session, spot);
+		return object ? MembersOfObject(program->session, *object, withBases) : nullptr;
+	}
+
 	c4a_program* c4a_program_open(const c4a_program_options* options)
 	{
 		c4a_program* program = new c4a_program();
@@ -334,7 +389,15 @@ extern "C"
 			program->error = "no options";
 			return program;
 		}
-		Analyze(*program, *options);
+		Analyze(*program, *options, 0);
+		return program;
+	}
+
+	c4a_program* c4a_program_open_with(const c4a_program_open_options* options)
+	{
+		if (!options) return c4a_program_open(nullptr);
+		c4a_program* program = new c4a_program();
+		Analyze(*program, options->program, options->flags);
 		return program;
 	}
 
@@ -421,17 +484,31 @@ extern "C"
 		if (!program || !qualified_name) return nullptr;
 		std::lock_guard<std::mutex> guard(program->lock);
 		const C4Compiler::ObjectType* object = ObjectNamed(program->session, qualified_name);
-		return object ? MembersOfObject(program->session, *object) : nullptr;
+		return object ? MembersOfObject(program->session, *object, false) : nullptr;
 	}
 
 	c4a_members* c4a_program_members_at(c4a_program* program, const char* file, c4a_position at)
 	{
-		if (!program) return nullptr;
+		return MembersAt(program, file, at, false);
+	}
+
+	c4a_members* c4a_program_members_with_bases_of(c4a_program* program, const char* qualified_name)
+	{
+		if (!program || !qualified_name) return nullptr;
 		std::lock_guard<std::mutex> guard(program->lock);
-		Spot spot;
-		if (!LocateAt(*program, file, at, spot)) return nullptr;
-		const C4Compiler::ObjectType* object = ObjectAt(program->session, spot);
-		return object ? MembersOfObject(program->session, *object) : nullptr;
+		const C4Compiler::ObjectType* object = ObjectNamed(program->session, qualified_name);
+		return object ? MembersOfObject(program->session, *object, true) : nullptr;
+	}
+
+	c4a_members* c4a_program_members_with_bases_at(c4a_program* program, const char* file, c4a_position at)
+	{
+		return MembersAt(program, file, at, true);
+	}
+
+	const char* c4a_members_inherited_from(const c4a_members* members, uint32_t index)
+	{
+		if (!members || index >= members->items.size() || members->items[index].inheritedFrom.empty()) return nullptr;
+		return members->items[index].inheritedFrom.c_str();
 	}
 
 	uint32_t c4a_members_count(const c4a_members* members) { return members ? static_cast<uint32_t>(members->items.size()) : 0; }

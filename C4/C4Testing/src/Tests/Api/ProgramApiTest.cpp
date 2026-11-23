@@ -33,15 +33,16 @@ namespace Testing
 		class Program
 		{
 		public:
-			explicit Program(const std::vector<std::pair<std::string, std::string>>& files)
-			{
+			explicit Program(const std::vector<std::pair<std::string, std::string>>& files, uint32_t flags = 0)
+		{
 				std::vector<c4a_source> sources;
 				for (const auto& file : files)
 					sources.push_back({ file.first.c_str(), file.second.c_str(), file.second.size() });
-				c4a_program_options options = {};
-				options.sources = sources.data();
-				options.source_count = static_cast<uint32_t>(sources.size());
-				m_Program = c4a_program_open(&options);
+				c4a_program_open_options options = {};
+				options.program.sources = sources.data();
+				options.program.source_count = static_cast<uint32_t>(sources.size());
+				options.flags = flags;
+				m_Program = c4a_program_open_with(&options);
 			}
 			~Program() { c4a_program_destroy(m_Program); }
 			Program(const Program&) = delete;
@@ -51,6 +52,21 @@ namespace Testing
 		private:
 			c4a_program* m_Program = nullptr;
 		};
+
+		const std::string kShapes =
+			"namespace Game\n"
+			"{\n"
+			"\tclass Shape\n"
+			"\t{\n"
+			"\t\tpublic int32 id;\n"
+			"\t\tpublic virtual int32 Sides() const { return 0; }\n"
+			"\t}\n"
+			"\tclass Square : Shape\n"
+			"\t{\n"
+			"\t\tpublic int32 side;\n"
+			"\t\tpublic override int32 Sides() const { return 4; }\n"
+			"\t}\n"
+			"}\n";
 
 		Program Ring() { return Program({ { "ring.ch", kRing }, { "main.cf", kMain } }); }
 
@@ -247,6 +263,69 @@ namespace Testing
 		c4a_symbol none;
 		TEST_ASSERT(!c4a_program_resolve(empty.get(), nullptr, { 1, 1 }, &none));
 		TEST_ASSERT(c4a_program_open(nullptr) != nullptr);
+		TEST_PASSED();
+	}
+
+	void ProgramApiTest::MembersWithBasesNameTheBaseTheyComeFrom()
+	{
+		Program program({ { "shapes.ch", kShapes } });
+		TEST_ASSERT_EQ(c4a_program_diagnostic_count(program.get()), 0u);
+		c4a_members* own = c4a_program_members_of(program.get(), "Game::Square");
+		TEST_ASSERT(own != nullptr);
+		TEST_ASSERT_EQ(c4a_members_count(own), 2u); // side and Sides: its own only
+		c4a_members_destroy(own);
+
+		c4a_members* all = c4a_program_members_with_bases_of(program.get(), "Game::Square");
+		TEST_ASSERT(all != nullptr);
+		bool sawSide = false, sawId = false;
+		uint32_t sides = 0;
+		for (uint32_t i = 0; i < c4a_members_count(all); ++i)
+		{
+			c4a_member member;
+			TEST_ASSERT(c4a_members_at(all, i, &member));
+			const char* from = c4a_members_inherited_from(all, i);
+			if (Same(member.name, "side")) sawSide = from == nullptr;
+			if (Same(member.name, "id")) sawId = Same(from, "Game::Shape") && Same(member.declared.file, "shapes.ch");
+			if (Same(member.name, "Sides")) { ++sides; TEST_ASSERT(from == nullptr); } // the override hides the base's
+		}
+		TEST_ASSERT(sawSide && sawId);
+		TEST_ASSERT_EQ(sides, 1u);
+		TEST_ASSERT(c4a_members_inherited_from(all, c4a_members_count(all)) == nullptr);
+		c4a_members_destroy(all);
+
+		c4a_members* ofBase = c4a_program_members_with_bases_of(program.get(), "Game::Shape");
+		TEST_ASSERT(ofBase != nullptr);
+		TEST_ASSERT_EQ(c4a_members_count(ofBase), 2u); // a type without bases lists its own
+		c4a_members_destroy(ofBase);
+
+		TEST_ASSERT(c4a_program_members_with_bases_of(program.get(), "Game::Missing") == nullptr);
+		TEST_ASSERT(c4a_program_members_with_bases_of(nullptr, "Game::Square") == nullptr);
+		TEST_ASSERT(c4a_members_inherited_from(nullptr, 0) == nullptr);
+		TEST_PASSED();
+	}
+
+	void ProgramApiTest::ADeclarationsOnlyProgramSkipsTheBodies()
+	{
+		const std::string broken = "int32 Add(int32 a, int32 b)\n{\n\treturn a + nothing;\n}\n";
+		Program lowered({ { "add.cf", broken } });
+		TEST_ASSERT_EQ(c4a_program_bodies_lowered(lowered.get()), 1);
+		TEST_ASSERT(c4a_program_diagnostic_count(lowered.get()) >= 1u); // the body's error
+
+		Program declarations({ { "add.cf", broken } }, C4A_OPEN_DECLARATIONS_ONLY);
+		TEST_ASSERT_EQ(c4a_program_bodies_lowered(declarations.get()), 0);
+		TEST_ASSERT_EQ(c4a_program_diagnostic_count(declarations.get()), 0u);
+		c4a_symbol add;
+		TEST_ASSERT(c4a_program_resolve(declarations.get(), "add.cf", { 1, 7 }, &add)); // the declarations are all there
+		TEST_ASSERT(Same(add.name, "Add"));
+
+		Program ring({ { "ring.ch", kRing }, { "main.cf", kMain } }, C4A_OPEN_DECLARATIONS_ONLY);
+		c4a_members* members = c4a_program_members_of(ring.get(), "Game::Ring");
+		TEST_ASSERT(members != nullptr);
+		TEST_ASSERT_EQ(c4a_members_count(members), 3u);
+		c4a_members_destroy(members);
+		c4a_program* none = c4a_program_open_with(nullptr);
+		TEST_ASSERT(none != nullptr);
+		c4a_program_destroy(none);
 		TEST_PASSED();
 	}
 }

@@ -17,7 +17,7 @@
 
 // The API this header declares; c4a_api_version() is the one the DLL implements, and a DLL implements every version
 // before its own.
-#define C4A_API_VERSION 2
+#define C4A_API_VERSION 3
 
 #ifdef __cplusplus
 extern "C" {
@@ -192,6 +192,32 @@ C4API c4a_members* c4a_program_members_at(c4a_program* program, const char* file
 C4API uint32_t c4a_members_count(const c4a_members* members);
 C4API int32_t c4a_members_at(const c4a_members* members, uint32_t index, c4a_member* out);
 C4API void c4a_members_destroy(c4a_members* members);
+
+// ---- Version 3 -----------------------------------------------------------------------------------------------------------
+// Everything above is unchanged; these only add. Structs of version 2 do not grow (a tool built against version 2 would
+// not have room for the new fields), so the new options and answers have their own.
+
+typedef enum c4a_open_flags
+{
+	C4A_OPEN_DECLARATIONS_ONLY = 1  // skip the lowering of the bodies: no body diagnostics (c4a_program_bodies_lowered is 0), and what a tool
+	                                // that reads only declarations, names and types does not pay for
+} c4a_open_flags;
+
+typedef struct c4a_program_open_options
+{
+	c4a_program_options program;
+	uint32_t flags;                 // c4a_open_flags, or'ed
+} c4a_program_open_options;
+
+// c4a_program_open with flags. Never null.
+C4API c4a_program* c4a_program_open_with(const c4a_program_open_options* options);
+
+// The members of c4a_program_members_of / _at, then those of the type's bases (nearest base first, each base once; one a
+// derived type overrides or redeclares is left out). c4a_members_inherited_from names the base a member comes from
+// ("Game::Base"), null for a member the type declares itself.
+C4API c4a_members* c4a_program_members_with_bases_of(c4a_program* program, const char* qualified_name);
+C4API c4a_members* c4a_program_members_with_bases_at(c4a_program* program, const char* file, c4a_position at);
+C4API const char* c4a_members_inherited_from(const c4a_members* members, uint32_t index);
 
 #ifdef __cplusplus
 }

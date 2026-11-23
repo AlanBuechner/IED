@@ -93,6 +93,8 @@ namespace C4LSP::Server
 		const Core::Vector<C4Compiler::CompilationError>& GetLoweringDiagnostics() const { return m_LoweringErrors; }
 		// Whether the last compile lowered the bodies: its front end found no error (C4.exe lowers only then).
 		bool LoweredBodies() const { return m_LoweredBodies; }
+		// A client that needs only declarations (the C API's tools) skips the lowering: no body diagnostics, no lowering cost.
+		void SetLowerBodies(bool lower) { m_LowerBodies = lower; }
 		// When this compile stopped short of the bodies for an error in the front end: the body diagnostics `earlier` had for
 		// each file this one compiled the same text of and found no front-end error in. A file being edited elsewhere, broken
 		// for a moment, does not make every other file's body errors look fixed (BUG-450).
@@ -197,6 +199,7 @@ namespace C4LSP::Server
 		std::vector<DiskFile> m_DiskFiles;                     // the files the last compile read from disk (RecordDiskFiles)
 		Timings m_Timings;
 		bool m_LoweredBodies = false;
+		bool m_LowerBodies = true; // see SetLowerBodies
 		bool m_Compiled = false;
 		bool m_ScriptHostBuild = false;                        // see SetScriptHostBuild
 		ScriptScope m_Script;
