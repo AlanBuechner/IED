@@ -1,6 +1,7 @@
 #include "CompilationUnit.h"
 #include "Parser/ParserState.h"
 #include "Compiler/CompilerInstance.h"
+#include "Compiler/DeclarationFingerprint.h"
 #include "Core/StringFormat.h"
 
 namespace C4Compiler
@@ -33,6 +34,11 @@ namespace C4Compiler
 				AskAgain(include);
 			m_MessageQueue->SendMessage(m_SourceId, MessageType::FinishedParsing, "");
 		});
+	}
+
+	uint64 CompilationUnit::Fingerprint() const
+	{
+		return m_Source ? DeclarationFingerprint(*m_Source, m_SourceId, m_Macros.Get(), m_OriginalChildren) : 0;
 	}
 
 	void CompilationUnit::AskAgain(const IncludeAsked& include)

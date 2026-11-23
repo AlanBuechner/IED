@@ -28,6 +28,8 @@ namespace C4Compiler
 		void Join() { m_ProcessingThread.join(); }
 		/// This unit's parse, for the next compile of the program to take (Compiler/PriorParses); the unit has parsed.
 		PriorParse ToPriorParse() const;
+		/// Its declaration fingerprint (Compiler/DeclarationFingerprint, docs/compiler/07); the unit has parsed.
+		uint64 Fingerprint() const;
 		bool IsWorking() { return m_ProcessingThread.joinable(); }
 
 		ErrorTracker& GetErrorTracker() { return m_ErrorTracker; }
