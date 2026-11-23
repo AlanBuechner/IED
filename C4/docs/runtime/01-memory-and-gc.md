@@ -143,7 +143,11 @@ expression or a signal frame ends the walk). Where the walk ends the rest of the
   read again from its own.
 - The precision is the C4 frames': a runtime or C frame is still read whole, so an address an earlier call left in
   stack memory such a frame reuses can still keep an object (IsolatedTest `MemoryGC/StackMaps` collects below 256
-  C4 frames for that reason: 20 of 20 dead targets go with the flag, 18 of 20 without).
+  C4 frames for that reason: 20 of 20 dead targets go with the flag, 18 of 20 without). An explicit collection
+  (`c4_gc_collect`, `GC::Collect`) zeroes 8 KiB of stack below its caller first, where its own frames will lie: before that,
+  an interior pointer an allocation had left there (BUG-502, about one run in thirty) sat in a shadow-space or spill slot of
+  `gc_os_scan_stack`'s frame and kept one target alive. A collection an allocation starts has no such cleaning: it reads
+  whatever its frames cover, as a conservative collector does.
 
 ---
 

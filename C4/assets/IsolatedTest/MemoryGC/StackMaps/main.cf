@@ -1,6 +1,9 @@
 // R16 phase 3 (-fstack-maps): a C4 frame is read by its stack map, not whole, so an address left in a slot of it that
 // is dead - a local no longer read, a register a callee saved - keeps nothing alive, and what the frame still reads stays.
 // Without stack maps the same program keeps some of the dead targets (18 of 20 go, at -O0 and -O2, when it was written).
+// BUG-502: the collector's own frames are read whole, and what an allocation left in the memory they occupy (an interior
+// pointer to the seventh target, in about one run of thirty) kept a target alive: an explicit collection zeroes that
+// memory first. Every round is a fresh chance for such a stale word, so the rounds repeat.
 include "Memory/gc.ch"
 
 int32 g_finalized = 0;
@@ -42,12 +45,19 @@ int32 Dead(int32 count, Target* kept) {
 
 int32 main() {
 	const int32 count = 20;
-	Target* kept = new Target;
-	kept->value = 7;
-	const int32 value = Dead(count, kept);
-	printf("finalized %d of %d dead targets\n", g_finalized, count);
-	if (value != 7) return 1;           // a live pointer's target was collected
-	if (g_finalized != count) return 2; // a dead slot kept one alive
+	const int32 rounds = 40;
+	for (int32 round = 0; round < rounds; round++) {
+		Target* kept = new Target;
+		kept->value = 7;
+		const int32 value = Dead(count, kept);
+		if (value != 7) return 1;                    // a live pointer's target was collected
+		const int32 expected = (round + 1) * count + round; // earlier rounds' `kept` are dead by now, this one's is not
+		if (g_finalized != expected) {                      // a dead slot kept one alive
+			printf("round %d: finalized %d of %d dead targets\n", round, g_finalized, expected);
+			return 2;
+		}
+	}
+	printf("finalized %d targets in %d rounds\n", g_finalized, rounds);
 	printf("STACK MAPS OK\n");
 	return 0;
 }

@@ -413,8 +413,20 @@ static void settle_cycle(GCState* gc, GCThread* self)
 	if (gc->concurrent.thread != self) gc_concurrent_finish_now(gc);
 }
 
+// Stack memory below the caller still holds what earlier, deeper calls left in it (an allocation's interior pointers, say), and
+// the collector's own frames, read whole, are laid over it: their padding and spill slots would keep dead objects alive. An
+// explicit collection zeroes the memory its own frames will occupy first.
+enum { kCollectorStackBytes = 8192 };
+
+static __attribute__((noinline)) void clear_stack_below(void)
+{
+	volatile uint64_t pad[kCollectorStackBytes / sizeof(uint64_t)];
+	for (size_t i = 0; i < sizeof(pad) / sizeof(pad[0]); ++i) pad[i] = 0;
+}
+
 void c4_gc_collect(void)
 {
+	clear_stack_below();
 	GCThread* self = this_thread();
 	GCState* gc = ready_collector();
 	for (;;)
