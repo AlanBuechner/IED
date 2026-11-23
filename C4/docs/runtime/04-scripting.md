@@ -234,8 +234,10 @@ what it set aside once nothing has it open (`UpdateFile`, C4Testing `Compiler.Fi
 `Host::Compile` runs in `C4Script.dll`, on the calling thread, with a fresh compiler instance:
 
 1. **Register.** The interface's files first, in their recorded order and under their recorded unit ids (so every
-   name that depends on registration order comes out as it did in the host), each marked as an interface unit;
-   then the script's files, as the script's project. A script file may come from disk or from memory.
+   name that depends on registration order comes out as it did in the host), each marked as an interface unit - a
+   file of a source folder at its path in that folder, a library file in the library's, a binding unit in a place of its
+   own by its unit id (two projects binding a header of one name, `native/Win32.h`, are two units of one name: BUG-500),
+   reached through its includer's bindings alone, as in the host; then the script's files, as the script's project. A script file may come from disk or from memory.
 2. **Preprocess.** Interface files are not preprocessed again (their text is already expanded); each provides the
    macros it exports, and one that exports none is not read at all (`ExpandScriptMacros`). Script files are preprocessed as in a build, inheriting the macros of the headers they
    include. A script file with an `extern "c"` / `extern "c++"` directive is an error (section 2).

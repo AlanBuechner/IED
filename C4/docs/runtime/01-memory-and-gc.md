@@ -117,7 +117,10 @@ collection cycle, pacing), `GCApi.c` (the exported functions; the only file with
 ### Stacks
 
 By default every registered thread's stack and registers are read whole: an object stays alive while a stale copy of
-its address sits in a dead slot or a register. A program built with `-fstack-maps` (R16 phase 3, off by default for its
+its address sits in a dead slot or a register. The collector's own concurrent thread is not read while it waits for its
+next cycle (`GCThread::idle`, BUG-501): it holds nothing of the program's then, and its waiting frames reuse stack memory
+its last cycle wrote - the objects it marked and swept, a finalizer's locals - which kept dead objects alive through a
+collection the program asked for (IsolatedTest `MemoryGC/CollectorThreadKeepsNothing`: 16 of 16 dropped targets before). A program built with `-fstack-maps` (R16 phase 3, off by default for its
 run-time cost, measured in [compiler/04 "Stack maps"](../compiler/04-codegen-and-abi.md#stack-maps)) carries LLVM's stack
 map of its C4 code and links the runtime built with `C4_STACK_MAPS` (`GC/GCStackMaps.{h,c}`, `GC/GCStackWalkWin32.c`,
 `GC/GCStackWalkPosix.c`; only that runtime has them). At its first collection the runtime reads the image's maps (PE:

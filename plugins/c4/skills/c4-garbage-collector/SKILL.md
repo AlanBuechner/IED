@@ -35,7 +35,8 @@ rescans everything each collection). The C API is `C4Runtime/GCRuntimeC.h`; the 
 that may hold a pointer), the calling thread's registers and stack (conservative), registered scan regions,
 root enumerators, pinned objects and objects waiting for their finalizer. A conservative collector can keep
 an object alive while a stale copy of its address sits in a register or dead stack slot - tests that assert
-"was collected" must allow a few survivors.
+"was collected" must allow a few survivors. The collector's own concurrent thread is not read while it waits for its
+next cycle (BUG-501): what its last cycle left in its frames keeps nothing alive.
 
 ## Everyday builtins (no include)
 `raw_alloc(size)` / `raw_free(ptr)`; `buffer_resize` / `buffer_free` (a buffer that grows in place past 1 MiB;

@@ -45,6 +45,8 @@ namespace Testing
 		TEST_FUNC(Script.Compiler)
 		void ImportingCOrCppIsAnError();
 		TEST_FUNC(Script.Compiler)
+		void TwoHostBindingsOfOneNameAreTwoUnits();
+		TEST_FUNC(Script.Compiler)
 		void AnIncludeOffTheAllowListIsAnError();
 		TEST_FUNC(Script.Compiler)
 		void DefiningAHostFunctionIsAnError();

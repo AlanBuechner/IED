@@ -427,6 +427,35 @@ namespace Testing
 		TEST_PASSED();
 	}
 
+	// BUG-500: two projects binding a header of one name (`native/Win32.h`) give the host two binding units named
+	// `Win32.h.c4bind`; a script compile registers each in a place of its own, and reads each through its includer.
+	void ScriptCompilerTest::TwoHostBindingsOfOneNameAreTwoUnits()
+	{
+		TestHost host = MakeTestHost({ { "bound_a.ch", "namespace A { int32 First(); }\n" }, { "bound_b.ch", "namespace B { int32 Second(); }\n" },
+			{ "main.cf", "int32 main() { return 0; }\n" } });
+		TEST_ASSERT(host.index != nullptr);
+		std::vector<InterfaceFile>& files = host.interface.files;
+		auto bind = [&](const char* includer, const char* text) {
+			InterfaceFile binding;
+			binding.unitId = files.back().unitId + 1;
+			binding.project = host.interface.rootProject;
+			binding.path = "Win32.h.c4bind";
+			binding.binding = true;
+			binding.text = text;
+			for (InterfaceFile& file : files)
+				if (file.path == includer) file.bindings.push_back(binding.unitId);
+			files.push_back(std::move(binding));
+		};
+		bind("bound_a.ch", "struct BoundA { int32 x; }\n");
+		bind("bound_b.ch", "struct BoundB { int64 y; int64 z; }\n");
+		host.index = std::make_unique<HostIndex>(host.interface);
+		CompiledScript script = CompileTestScript(host,
+			"include \"bound_a.ch\"\ninclude \"bound_b.ch\"\nint64 Sizes() { return sizeof(BoundA) * 100 + sizeof(BoundB); }\n");
+		TEST_ASSERT(Compiled(script));
+		TEST_ASSERT(!Has(script.diagnostics, "damaged interface"));
+		TEST_PASSED();
+	}
+
 	void ScriptCompilerTest::AnIncludeOffTheAllowListIsAnError()
 	{
 		CompiledScript script = CompileTestScript(Host(), "include \"game.ch\"\nint32 One() { return 1; }\n", false, { "engine/" });

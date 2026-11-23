@@ -15,9 +15,14 @@ namespace C4Compiler
 		std::string LibraryPath() { return std::string(kInterfaceRoot) + "/lib"; }
 		std::string TextFolder() { return std::string(kInterfaceRoot) + "/script"; }
 
+		// A binding unit is a file of the host's object folder, named for its header: two projects binding a `native/Win32.h` each
+		// are two units of one name (BUG-500), so each has a place of its own, by its unit id.
+		std::string BindingPath(const InterfaceFile& file) { return std::string(kInterfaceRoot) + "/bind/" + std::to_string(file.unitId) + "/" + file.path; }
+
 		std::string InterfacePath(const InterfaceFile& file)
 		{
 			if (file.library) return LibraryPath() + "/" + file.path;
+			if (file.binding) return BindingPath(file);
 			if (file.folder >= 0) return FolderPath(static_cast<uint32>(file.folder)) + "/" + file.path;
 			return std::string(kInterfaceRoot) + "/text/" + file.path; // a host source the host was given as text
 		}
@@ -114,7 +119,8 @@ namespace C4Compiler
 					return Fail(error, "the interface's file '" + file.path + "' is unit " + std::to_string(file.unitId) + " of its host but registered as " +
 						std::to_string(id) + " (a damaged interface)");
 				if (file.prelude) prelude = id;
-				if (file.folder < 0 && !file.library) sources.GetInfo(id).byName = true; // given as text: found by its name, as in the host
+				// Given as text: found by its name, as in the host; a binding only by its includer's bindings, as there.
+				if (file.folder < 0 && !file.library && !file.binding) sources.GetInfo(id).byName = true;
 				sources.GetInfo(id).binding = file.binding;
 				sources.GetInfo(id).bindings = file.bindings;
 				if (!file.macros.empty()) units.interfaceMacros[id] = TableOf(file.macros);

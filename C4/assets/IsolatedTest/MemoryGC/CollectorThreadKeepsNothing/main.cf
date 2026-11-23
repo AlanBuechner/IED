@@ -1,0 +1,96 @@
+// BUG-501: a collection the program asks for reads the stack and registers of every C4 thread, the collector's own
+// concurrent thread too; parked between cycles, that thread's frames held what its last cycle left there (objects it
+// marked or swept, what a finalizer it ran handled) and kept them alive though nothing reached them - four dead keys of a
+// weak table in Claymore's LuaJIT tests, one run in twenty. Here a finalizer, which the collector's thread runs after a
+// concurrent cycle just before it parks, leaves a target's address all over that thread's stack; dropped, the target must go.
+include "bedrock.ch"
+
+const uint64 kMiB = 1048576;
+const int32 kRounds = 16;
+const int32 kCopies = 256;
+
+struct Chunk { public int64[128] words; }   // 1 KiB, pointer-free
+
+Threading::Atomic<int64> g_finalized;
+Threading::Atomic<int64> g_smears;
+Target* g_target = nullptr;
+
+struct Target {
+	public int64 value;
+	[operator("delete")] void Finalize() { g_finalized.FetchAdd(1); }
+}
+
+// The target's address over the stack below the caller, frame after frame.
+int64 Smear(Target* target, int32 depth) {
+	Target*[256] copies;
+	for (int32 i = 0; i < kCopies; i++) copies[i] = target;
+	GC::IsReachable((void*)&copies);
+	if (depth == 0) return 0;
+	return Smear(target, depth - 1) + 1;
+}
+
+// Ended by a concurrent cycle, it is finalized on the collector's thread.
+struct Smearer {
+	public int64 id;
+	[operator("delete")] void Finalize() {
+		if (g_target == nullptr) return;
+		Smear(g_target, 8);
+		g_smears.FetchAdd(1);
+	}
+}
+
+int64 Scrub(int32 depth) {
+	int64[128] junk;
+	for (int32 i = 0; i < 128; i++) junk[i] = depth;
+	GC::IsReachable((void*)&junk);
+	if (depth == 0) return junk[1];
+	return Scrub(depth - 1) + junk[2];
+}
+
+void Churn(uint64 bytes) {
+	for (uint64 done = 0; done < bytes; done += sizeof(Chunk)) {
+		Chunk* c = new Chunk;
+		c->words[0] = (int64)done;
+	}
+}
+
+void MakeTarget(int64 value) {
+	Target* target = new Target;
+	target->value = value;
+	g_target = target;
+}
+
+void DropSmearer(int64 id) {
+	Smearer* smearer = new Smearer;
+	smearer->id = id;
+}
+
+// A concurrent cycle ends the smearer and its thread runs the finalizer, then parks until the next cycle.
+bool SmearByACycle(int64 round) {
+	const int64 before = g_smears.Load();
+	DropSmearer(round);
+	Scrub(8);
+	for (int32 i = 0; i < 512 && g_smears.Load() == before; i++) Churn(kMiB);
+	Threading::Thread::Sleep(100000000);   // 100 ms: its thread parks
+	return g_smears.Load() != before;
+}
+
+int32 main() {
+	GC::SetConcurrent(0);   // every automatic collection is a concurrent cycle
+	GC::SetPercent(10);
+	int32 kept = 0;
+	for (int32 round = 0; round < kRounds; round++) {
+		MakeTarget(round);
+		if (!SmearByACycle(round)) return 2;   // no concurrent cycle finalized the smearer
+		const int64 before = g_finalized.Load();
+		g_target = nullptr;
+		Scrub(8);
+		GC::Collect();
+		GC::Collect();
+		if (g_finalized.Load() == before) kept++;
+	}
+	printf("%d of %d dropped targets kept alive\n", kept, kRounds);
+	if (kept > 1) return 1;   // a stale word of this thread's may keep one
+	printf("COLLECTOR THREAD OK\n");
+	return 0;
+}

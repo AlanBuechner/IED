@@ -270,7 +270,9 @@ void gc_concurrent_serve(GCState* gc, GCThread* self)
 {
 	GCConcurrent* c = &gc->concurrent;
 	c->thread = self;
+	__atomic_store_n(&self->idle, 1, __ATOMIC_RELEASE);
 	while (__atomic_load_n(&c->state, __ATOMIC_ACQUIRE) != GC_CYCLE_ASKED) gc_os_park(&c->state, GC_CYCLE_IDLE);
+	__atomic_store_n(&self->idle, 0, __ATOMIC_RELEASE);
 	CycleTrace trace = { 0 };
 	trace.startNs = gc_os_now_ns();
 	gc->cycleStops.count = 0; // the program reads only lastStops, under the lock
