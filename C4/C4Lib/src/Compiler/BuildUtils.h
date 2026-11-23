@@ -50,6 +50,7 @@ namespace C4Compiler
 	bool noWarnings = false;       // -w: warnings are not reported
 	Core::String intermediateDir;  // --int-dir: where the intermediates (.obj, .ll, .bc) go; empty: next to the output
 	Core::Vector<Core::String> linkArguments; // -l<lib> / -L<dir>, passed to the link as written
+	bool serve = false;            // --serve: stay alive and build again on each request (docs/compiler/07 stage 2a)
 	bool printVersion = false;     // --version
 	bool printHelp = false;        // -h
 	Core::String error;            // what the command line got wrong; empty when it parsed

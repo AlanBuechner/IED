@@ -123,7 +123,7 @@ function Test-HelpListsEveryOption {
     $help = (Invoke-Compiler $compiler @("-h")).output
     $failures = @()
     foreach ($flag in @("-o ", "-I ", "-D ", "-O ", "--threads", "--partitions", "--incremental", "-march=", "-m ", "--int-dir", "-l ", "-L ", "-c ", "-bc", "-S", "-test", "-test-json", "-reflect-tag",
-        "--script-host", "-gc-stats", "-Werror", "-w ", "-export-macros", "-ftime", "--pretty-print", "-v ", "--version", "-h")) {
+        "--script-host", "-gc-stats", "-Werror", "-w ", "-export-macros", "-ftime", "--pretty-print", "-v ", "--serve", "--version", "-h")) {
         if (-not $help.Contains($flag)) { $failures += "-h does not list '$($flag.Trim())'" }
     }
     return $failures
@@ -829,6 +829,55 @@ int32 main()
 # The object cache (roadmap 5.3): a rebuild of unchanged code reuses every object, an edit to one function
 # reassembles only the partitions it touched and the program shows the edit, another -O level reuses nothing, the
 # folder keeps only the latest build's objects, and -c writes no cache.
+# --serve (docs/compiler/07 stage 2a): each 'build' line builds again in the same process, the unchanged files taking
+# the parses of the build before; every build writes what a cold build of the same sources writes, byte for byte.
+function Test-ServeFlag {
+    $program = @'
+include "bedrock.ch"
+int32 Scaled(int32 v) { return v * FACTOR; }
+int32 main()
+{
+	Core::String label = Core::String("serve");
+	return label == "serve" ? Scaled(3) : 100;
+}
+'@
+    $dir = New-Sources "serve" @{ "src/main.cf" = "" }
+    $src = Join-Path $dir "src"
+    $main = Join-Path $src "main.cf"
+    $ir = Join-Path $dir "out/app.ll"
+    $flags = @($src, "-o", (Join-Path $dir "out/app.exe"), "-S")
+    $cold = @{}
+    foreach ($factor in @("2", "5")) {
+        Set-Content -Path $main -Value ($program -replace "FACTOR", $factor) -Encoding ascii
+        $r = Invoke-Compiler $compiler $flags
+        if ($r.exit -ne 0) { return @("the cold build ($factor) failed: $($r.output)") }
+        $cold[$factor] = [System.IO.File]::ReadAllText($ir)
+    }
+    $info = New-Object System.Diagnostics.ProcessStartInfo $compiler
+    $info.Arguments = (($flags + "--serve") | ForEach-Object { '"' + $_ + '"' }) -join " "
+    $info.UseShellExecute = $false
+    $info.RedirectStandardInput = $true
+    $info.RedirectStandardOutput = $true
+    $server = [System.Diagnostics.Process]::Start($info)
+    $answer = { param([string]$pattern) while ($true) { $line = $server.StandardOutput.ReadLine()
+        if ($null -eq $line) { return "(the server ended)" }
+        if ($line -match $pattern) { return $line } } }
+    $failures = @()
+    foreach ($factor in @("2", "5", "5", "2")) {
+        Set-Content -Path $main -Value ($program -replace "FACTOR", $factor) -Encoding ascii
+        $server.StandardInput.WriteLine("build")
+        $done = & $answer '^done '
+        if ($done -ne "done 0") { $failures += "the served build ($factor) answered '$done'"; break }
+        if ([System.IO.File]::ReadAllText($ir) -ne $cold[$factor]) { $failures += "the served build ($factor) wrote other IR than a cold build" }
+    }
+    $server.StandardInput.WriteLine("frob")
+    if ((& $answer '^error: ') -notmatch "unknown request 'frob'") { $failures += "an unknown request got no error" }
+    $server.StandardInput.WriteLine("quit")
+    if (-not $server.WaitForExit(30000)) { $server.Kill(); $failures += "the server did not end on 'quit'" }
+    elseif ($server.ExitCode -ne 0) { $failures += "the server exited $($server.ExitCode)" }
+    return $failures
+}
+
 function Test-ObjectCache {
     $program = @'
 include "bedrock.ch"
@@ -1020,7 +1069,7 @@ function Test-LoweringThreads {
 $checks = @("Test-ShippedBedrockMirrorsSource", "Test-DefineFlag", "Test-VersionFlag", "Test-UsageErrors", "Test-HelpListsEveryOption",
     "Test-OutputFlags", "Test-GcStatsFlag", "Test-TimePhasesFlag", "Test-ScriptHostFlag", "Test-FailedRelinkKeepsTheProgramsFiles", "Test-IncludeProject", "Test-LinkFlags", "Test-InstallOutsideRepository",
     "Test-HomeVariable", "Test-NukeToolchainProject", "Test-ToolchainRefreshWhileRunning", "Test-ProjectDefines", "Test-ProjectTests", "Test-ProjectBoundaries", "Test-ProjectInterop", "Test-ProjectsShareABoundHeader", "Test-ABindingDoesNotHideABuiltin", "Test-DebugInfoFlag", "Test-SourceLines", "Test-DeepFolder",
-    "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ObjectCache", "Test-IncrementalBuild", "Test-LinkStamp", "Test-StandardInput",
+    "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ServeFlag", "Test-ObjectCache", "Test-IncrementalBuild", "Test-LinkStamp", "Test-StandardInput",
     "Test-LoweringThreads")
 $passed = 0
 $failed = 0

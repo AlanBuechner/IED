@@ -120,6 +120,8 @@ namespace C4Compiler
 				{ { "-ftime", "--time-phases" }, nullptr, "Print how long each phase took", [](CompileOptions& o, const std::string&) { o.timePhases = true; } },
 				{ { "--pretty-print" }, nullptr, "Print the parsed syntax trees", [](CompileOptions& o, const std::string&) { o.prettyPrint = true; } },
 				{ { "-v" }, nullptr, "Print the tool command lines (clang, CBind, link)", [](CompileOptions& o, const std::string&) { o.verbose = true; } },
+				{ { "--serve" }, nullptr, "Stay alive: each 'build' line on stdin builds again (reusing the parses of unchanged files), answered by 'done <exit code>'; 'quit' or the end of stdin ends it",
+					[](CompileOptions& o, const std::string&) { o.serve = true; } },
 				{ { "--version" }, nullptr, "Print the compiler version", [](CompileOptions& o, const std::string&) { o.printVersion = true; } },
 				{ { "-h", "--help" }, nullptr, "Print this help", [](CompileOptions& o, const std::string&) { o.printHelp = true; } },
 			};

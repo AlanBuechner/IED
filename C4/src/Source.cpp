@@ -8,6 +8,7 @@
 #include "Compiler/CompilationResult.h"
 #include "Compiler/DiagnosticReporter.h"
 #include "Compiler/CompilerInstance.h"
+#include "Compiler/PriorParses.h"
 #include "Compiler/Toolchain.h"
 #include "ProgramOutput.h"
 #include "Macro/PredefinedMacros.h"
@@ -20,6 +21,7 @@
 #include "Backend/ProgramBackend.h"
 #include "Backend/Reflection/RegistrationEmitter.h"
 #include <algorithm>
+#include <memory>
 #include <optional>
 #include <unordered_map>
 
@@ -61,7 +63,15 @@ namespace
 	class CompilerDriver
 	{
 	public:
-		explicit CompilerDriver(const C4Compiler::CompileOptions& options) : m_Options(options) {}
+		// `prior`: the parses of the build before (--serve), which a file of the same text takes instead of parsing again.
+		CompilerDriver(const C4Compiler::CompileOptions& options, std::shared_ptr<const C4Compiler::PriorParses> prior)
+			: m_Options(options)
+		{
+			m_Compiler.UsePriorParses(std::move(prior));
+		}
+
+		// This build's parses, for the next build to take.
+		std::shared_ptr<const C4Compiler::PriorParses> Parses() const { return m_Compiler.Parses(); }
 
 		int Run()
 		{
@@ -172,12 +182,11 @@ namespace
 			if (!located) m_Result.AddBackendError(Core::String(backendError.c_str()));
 		}
 
-		// The context and the driver (the lowered HIR, the module) are never freed: the process ends with the build, and
-		// freeing them object by object takes a second on a large program (clang's -disable-free does the same).
 		bool RunBackend()
 		{
-			llvm::LLVMContext& ctx = *new llvm::LLVMContext;
-			C4Compiler::ProgramBackend& driver = *new C4Compiler::ProgramBackend(ctx, m_Options.target.System());
+			m_Context = std::make_unique<llvm::LLVMContext>();
+			m_Backend = std::make_unique<C4Compiler::ProgramBackend>(*m_Context, m_Options.target.System());
+			C4Compiler::ProgramBackend& driver = *m_Backend;
 
 			// The entry point the generated main calls: a -test run drives the test harness (the compiler
 			// emits a synthetic main that runs every [test] function), otherwise the user's main.
@@ -459,7 +468,12 @@ namespace
 		C4Compiler::CompilationResult m_Result;
 		C4Compiler::InteropPass::Result m_Interop;
 		std::string m_LibraryFolder; // the default library (Bedrock) next to C4.exe, expanded with the inputs
-		std::unordered_map<std::string, C4Compiler::MacroTable> m_ExportedMacros; // by absolute path: what each file exports
+		std::unordered_map<std::string, C4Compiler::MacroTable> m_ExportedMacros;
+		// The backend's context and driver (the lowered HIR, the modules), freed with the driver: a one-shot build never
+		// frees its driver (main), since freeing them object by object takes a second on a large program (clang's
+		// -disable-free does the same); a server frees each between two requests. The driver goes before its context.
+		std::unique_ptr<llvm::LLVMContext> m_Context;
+		std::unique_ptr<C4Compiler::ProgramBackend> m_Backend; // by absolute path: what each file exports
 	};
 }
 
@@ -538,6 +552,39 @@ static void EndProcess(int code)
 // The exit code of a command line C4.exe cannot run: bad options or no input.
 constexpr int kUsageError = 2;
 
+// A request line of --serve, without the carriage return and spaces a Windows pipe may leave after it.
+static std::string_view RequestOf(const std::string& line)
+{
+	std::string_view request = line;
+	while (!request.empty() && (request.back() == '\r' || request.back() == ' ' || request.back() == '\t')) request.remove_suffix(1);
+	return request;
+}
+
+// --serve (docs/compiler/07 stage 2a): a build per 'build' line on stdin, each answered by 'done <exit code>' after its
+// diagnostics. Each is a cold build that takes the parses of the one before: a file whose text did not change is not
+// parsed again. A build's driver is freed once it has answered, while the client waits for its next edit.
+static int Serve(const C4Compiler::CompileOptions& opts)
+{
+	std::shared_ptr<const C4Compiler::PriorParses> parses;
+	std::string line;
+	while (std::getline(std::cin, line))
+	{
+		const std::string_view request = RequestOf(line);
+		if (request == "quit") break;
+		if (request != "build" && !request.starts_with("build "))
+		{
+			std::cout << "error: unknown request '" << request << "': give 'build' or 'quit'" << std::endl;
+			continue;
+		}
+		auto driver = std::make_unique<CompilerDriver>(opts, std::move(parses));
+		const int code = driver->Run();
+		std::cerr.flush();
+		std::cout << "done " << code << std::endl;
+		parses = driver->Parses();
+	}
+	return 0;
+}
+
 int main(int argc, char** argv)
 {
 	InstallCrashReport(argv[0]);
@@ -568,7 +615,8 @@ int main(int argc, char** argv)
 		std::cerr << "error: no input: give the folders or files to compile (C4.exe -h lists the options)" << std::endl;
 		return kUsageError;
 	}
-	const int code = (new CompilerDriver(opts))->Run(); // the program and its model go with the process, as the backend's do
+	const int code = opts.serve ? Serve(opts)
+		: (new CompilerDriver(opts, nullptr))->Run(); // the program, its model and its backend go with the process
 	// Everything is written: the process ends without its libraries' shutdown, which hands each of the allocator's
 	// spans back one by one (a tenth of a build that changed nothing) for memory the system takes back whole.
 	std::cout.flush();
