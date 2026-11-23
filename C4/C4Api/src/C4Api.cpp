@@ -3,8 +3,8 @@
 #define IMPLEMENT_LOGGER // the DLL's own copy of Core's loggers, which C4Lib logs through
 #include "Core/Logging/Log.h"
 #include "C4Api.h"
+#include "ApiSupport.h"
 #include "Compiler/Version.h"
-#include "Macro/PredefinedMacros.h"
 #include "Outline/SourceOutline.h"
 #include <fstream>
 #include <iterator>
@@ -31,14 +31,7 @@ namespace
 
 	std::map<std::string, std::string> DefinesOf(const c4a_parse_options& options)
 	{
-		std::map<std::string, std::string> defines;
-		for (uint32_t i = 0; i < options.define_count; ++i)
-			if (options.defines && options.defines[i])
-			{
-				const C4Compiler::MacroDefine define = C4Compiler::ParseMacroDefine(options.defines[i]);
-				defines[define.name] = define.value;
-			}
-		return defines;
+		return C4Api::DefineMap(options.defines, options.define_count);
 	}
 
 	bool ReadFile(const char* path, std::string& text)

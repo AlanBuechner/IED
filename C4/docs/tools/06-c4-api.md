@@ -7,10 +7,10 @@ toolchain: a tool built against a workspace's toolchain reads the C4 of that too
 
 | Piece | Where | Status |
 |---|---|---|
-| `C4Api.dll`, `C4Api.lib` (its import library), `C4Api.h` | `<toolchain>/C4Api/` (`C4/C4Api` in the IED repository) | **Implemented**: API version 1, a source's declarations and syntax diagnostics |
+| `C4Api.dll`, `C4Api.lib` (its import library), `C4Api.h` | `<toolchain>/C4Api/` (`C4/C4Api` in the IED repository) | **Implemented**: API version 1 (a source's declarations and syntax diagnostics) and version 2 (a whole program: diagnostics, names, types, references, members) |
 | A Nuke project depending on it: `depends = ["C4Api"]` | the c4 package's library (`plugins/c4/libraries/C4Api` in the IED repository) | **Implemented** |
 | A sample tool: `c4-outline` | `plugins/c4/samples/c4-outline` in the IED repository | **Implemented**, tested by Nuke's integration tests |
-| Name resolution, types, the program model of a whole project | | **Planned**: API versions after 1 |
+| A sample of version 2: `c4-query` | `plugins/c4/samples/c4-query` in the IED repository | **Implemented**, tested by Nuke's integration tests |
 
 ---
 
@@ -44,6 +44,39 @@ compiler and the parts of LLVM it needs inside it and exposes plain functions an
 
 Strings are UTF-8 and owned by the DLL; one stays valid until the parse it came from is destroyed. The functions keep
 no state between calls, so separate parses may run on separate threads.
+
+## 2b. The API (version 2): a whole program
+
+**Implemented.** `C4A_API_VERSION` is 2; a version 2 DLL implements every function of version 1 unchanged. Version 2 opens a
+program and answers what C4.exe and the language server know of it. It is the language server's own `CompilationSession`
+(the front end and the model, then - when the front end finds no error, as C4.exe does - the lowering of the bodies for
+their diagnostics), its `SemanticResolver` (which drives the model's query verbs, so there is no second resolver) and its
+features (`Definition`, `References`, `DeclarationText`, `TypeText`), so an answer is the one the editor shows.
+
+Files are named as the program names them: a path (a relative one is read from `root`) or the name of an in-memory source.
+Positions are 1-based lines and 1-based byte columns, as in version 1. A query that finds nothing answers 0 or null; a
+program that could not be analyzed says why in `c4a_program_error`. The C structs are plain, no C++ type crosses the
+boundary, and strings stay valid until the program (or the result handle that gave them) is destroyed.
+
+| Function | Does |
+|---|---|
+| `c4a_program_open(&options)` | opens and analyzes a program: `root` (its C4 files), or `projects_file` (a Nuke projects description, as C4.exe's `--projects`), `library_folder` (the C4 install's default library, Bedrock's folder), `include_paths`, `defines` (`NAME` or `NAME=VALUE`), and in-memory `sources` (name, text, length) on top. Never null |
+| `c4a_program_error(program)` | why it could not be analyzed (an unreadable projects file, ...); null when it was. Errors in the sources are diagnostics |
+| `c4a_program_bodies_lowered(program)` | 1 when the bodies were lowered (the front end found no error), so the diagnostics include the bodies' |
+| `c4a_program_diagnostic_count`, `c4a_program_diagnostic_at(program, i, &out)` | every diagnostic of the program, each once: severity, file, 1-based place, message |
+| `c4a_program_resolve(program, file, at, &symbol)` | what the name at `at` resolves to - a reference's declaration, or the declaration whose own name is there: kind, qualified name (`Game::Ring::Push`), the declaration as written, the type (of a variable or parameter, or the type a type name denotes), and where its name is declared (file and place, in whichever file that is). 0 when nothing is named there |
+| `c4a_program_type_at(program, file, at)` | the type of the expression or declaration at `at` (`int32`, `Game::Ring`); null when it has none |
+| `c4a_program_references(program, file, at, include_declaration)` | a `c4a_locations*`: every use of the declaration at `at` across the program's files, with `include_declaration` its own names first; null when `at` names nothing. `c4a_locations_count`, `c4a_locations_at`, `c4a_locations_destroy` |
+| `c4a_program_members_of(program, "Game::Ring")`, `c4a_program_members_at(program, file, at)` | a `c4a_members*`: the fields and methods the object type declares (not its bases'), each with kind, name, signature (the declaration without its name), access, static, and where it is declared; null when there is no such object type. `c4a_members_count`, `c4a_members_at`, `c4a_members_destroy` |
+| `c4a_program_destroy(program)` | frees the program, its strings and its analysis |
+
+A program serializes its own queries (one mutex), and separate programs run on separate threads. Opening costs what
+C4LSP's first analysis costs - the whole front end and the lowering - so a tool opens once and queries many times.
+Version 2 does not yet update a program in place: a changed file is a new `c4a_program_open` (the incremental front end,
+R1, will make that cheap without changing this interface).
+
+Tests: C4Testing `Api.Program` (each function, against a three-file in-memory program, through the DLL as a tool calls it);
+the sample `c4-query` runs the same queries from a C program against fixtures on disk (Nuke's integration tests).
 
 ## 3. Using it from a Nuke project
 

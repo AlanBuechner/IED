@@ -7,13 +7,17 @@ kind = "executable"
 language = "cpp"
 group = "C4"
 description = "The C4 compiler, language server and debug adapter unit tests"
-depends = ["Core", "UnitTesting", "C4Lib", "ObjectDescription", "C4Protocol", "C4LSPLib", "C4DAPLib", "C4"]
-includes = ["${cpp.llvm}/include"]
+depends = ["Core", "UnitTesting", "C4Lib", "ObjectDescription", "C4Protocol", "C4LSPLib", "C4DAPLib", "C4Api", "C4"]
+includes = ["${cpp.llvm}/include", "../C4Api/src"]
 defines = { NOMINMAX = "", WIN32_LEAN_AND_MEAN = "" }
 tests = true
 
+# C4Api's import library: the API tests call the DLL a tool would ship (a second copy of the compiler, as a tool has).
 [project.system.windows]
-links = ["ntdll.lib", "dbghelp.lib", "shell32.lib"]
+links = ["ntdll.lib", "dbghelp.lib", "shell32.lib", "${bin.root}/C4Api/C4Api.lib"]
+
+[[project.copy]]
+from = "${bin.root}/C4Api/C4Api.dll"
 
 [project.driver]
 reflection = true

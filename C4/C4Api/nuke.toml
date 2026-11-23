@@ -9,7 +9,7 @@ kind = "library"
 language = "cpp"
 group = "C4"
 description = "The C4 compiler's C API: C4Api.dll over C4Lib"
-depends = ["C4Lib", "Core", "Reflection", "ObjectDescription", "Profiling"]
+depends = ["C4Lib", "C4LSPLib", "C4Protocol", "Core", "Reflection", "ObjectDescription", "Profiling"]
 defines = { NOMINMAX = "", WIN32_LEAN_AND_MEAN = "", C4API_EXPORTS = "" }
 
 # C4Lib's links come with it; LTO.lib would import LTO.dll, which a tool should not need beside it. ntdll: LLVMSupport.
