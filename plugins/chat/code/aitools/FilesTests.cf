@@ -83,6 +83,24 @@ class FileToolTests {
 		assert_true(Ai::MovedFoldersHint(root, Core::StringView("softbody"), Core::StringView("ied:/")).View().Contains(Core::StringView(" ied:/Claymore/Plugins/SoftBodyPhysics/")), "any case, with the root's alias");
 	}
 
+	[test("a_missing_folder_names_one_holding_its_stem_under_its_parent_first")]
+	public static void TestFolderByStem() {
+		Core::StringBuilder folder;
+		folder.Append("ied-stem-");
+		folder.AppendInt(Platform::UnixTimeNs());
+		FS::Path root = FS::TempDirectory() / folder.View();
+		FS::MakeDirectories((root / "C4/C4Testing/src").CStr());
+		FS::MakeDirectories((root / "a/tests").CStr());
+		FS::MakeDirectories((root / "b/tests").CStr());
+		FS::MakeDirectories((root / "c/tests").CStr());
+		FS::MakeDirectories((root / "d/tests").CStr());
+		Core::String said = Ai::MovedFoldersHint(root, Core::StringView("C4/tests"), Core::StringView(""));
+		assert_true(said.View().Contains(Core::StringView("elsewhere: C4/C4Testing/")), said.CStr());
+		assert_true(said.View().Contains(Core::StringView(" a/tests/")), "then the root's");
+		assert_true(Ai::MovedFoldersHint(root, Core::StringView("C4/src"), Core::StringView("")).View().Contains(Core::StringView(" C4/C4Testing/src/")), "a short name only by its start");
+		assert_true(!Ai::MovedFoldersHint(root, Core::StringView("C4/es"), Core::StringView("")).View().Contains(Core::StringView("tests")), "a short stem inside a name is no match");
+	}
+
 	[test("glob_root_hint")]
 	public static void TestGlobRootHint() {
 		assert_true(Ai::GlobRootHint(Core::StringView("src/**/*.cf")).IsEmpty(), "a pattern of the workspace's paths is no mistake");

@@ -556,14 +556,20 @@ namespace Ai
 
 	static const int64 c_MissedFolderSiblings = 24;
 
-	// For a folder that is not there: the folders of its nearest parent that is, which the path most likely meant one of.
-	Core::String NearestFoldersHint(const FS::Path& root, Core::StringView path, Core::StringView shown) {
+	// The nearest folder of `path` that is there, "" for the root.
+	static Core::String NearestFolderOf(const FS::Path& root, Core::StringView path) {
 		Core::String parent = Core::String(path);
 		while (!parent.IsEmpty() && !FS::IsDirectory((root / parent.View()).CStr())) {
 			int64 slash = parent.ByteLength() - 1;
 			while (slash >= 0 && parent.View().ByteAt(slash) != '/') slash -= 1;
 			parent = slash < 0 ? Core::String() : Core::String(parent.View().Substring(0, slash));
 		}
+		return parent;
+	}
+
+	// For a folder that is not there: the folders of its nearest parent that is, which the path most likely meant one of.
+	Core::String NearestFoldersHint(const FS::Path& root, Core::StringView path, Core::StringView shown) {
+		Core::String parent = NearestFolderOf(root, path);
 		Core::StringBuilder out;
 		out.Append("; ");
 		out.Append(shown);
@@ -591,17 +597,20 @@ namespace Ai
 	static const int64 c_MovedFoldersShown = 4;
 	static const int64 c_MovedFoldersWalked = 20000;   // folders looked through at most: a large workspace answers in milliseconds still
 
-	// For a folder that is not there, the folders elsewhere named as its last part begins: where it was moved or renamed to
-	// ("Packages/Physics/SoftBody" moved to "Claymore/Plugins/SoftBodyPhysics"). "" when none.
-	Core::String MovedFoldersHint(const FS::Path& root, Core::StringView path, Core::StringView shown) {
-		int64 start = path.ByteLength();
-		while (start > 0 && path.ByteAt(start - 1) != '/' && path.ByteAt(start - 1) != '\\') start -= 1;
-		Core::StringView last = path.Substring(start, path.ByteLength() - start);
-		if (last.IsEmpty()) return Core::String();
-		Core::String wanted = last.ToLower();
-		Core::Array<Core::String> found;
+	static const int64 c_FolderStemLeast = 4;   // a shorter stem is in too many names to point anywhere
+
+	// Whether a folder's name is like the missing one's (both lowercase): it begins with it, or holds its stem - a plural's
+	// "s" dropped - once that is long enough ("tests" finds C4Testing).
+	static bool NamedLike(Core::StringView name, Core::StringView wanted) {
+		if (name.StartsWith(wanted)) return true;
+		Core::StringView stem = wanted.EndsWith(Core::StringView("s")) ? wanted.Substring(0, wanted.ByteLength() - 1) : wanted;
+		return stem.ByteLength() >= c_FolderStemLeast && name.Contains(stem);
+	}
+
+	// Adds the folders under `start` named like `wanted`, nearest first, that `found` does not hold yet.
+	static void FindFoldersLike(const FS::Path& root, Core::StringView start, Core::StringView wanted, Core::Array<Core::String>& found) {
 		Core::Array<Core::String> waiting;
-		waiting.Push(Core::String());
+		waiting.Push(Core::String(start));
 		int64 walked = 0;
 		for (int64 next = 0; next < waiting.Count() && found.Count() < c_MovedFoldersShown && walked < c_MovedFoldersWalked; next += 1) {
 			Core::String folder = waiting[next];
@@ -612,9 +621,24 @@ namespace Ai
 				if (Excluded(child.View())) continue;
 				walked += 1;
 				waiting.Push(child);
-				if (found.Count() < c_MovedFoldersShown && entry.name.View().ToLower().View().StartsWith(wanted.View())) found.Push(child);
+				if (found.Count() < c_MovedFoldersShown && NamedLike(entry.name.View().ToLower().View(), wanted) && !found.Contains(child)) found.Push(child);
 			}
 		}
+	}
+
+	// For a folder that is not there, the folders named like its last part - under its nearest parent that is first, then
+	// anywhere: where it was moved or renamed to ("Packages/Physics/SoftBody" moved to "Claymore/Plugins/SoftBodyPhysics").
+	// "" when none.
+	Core::String MovedFoldersHint(const FS::Path& root, Core::StringView path, Core::StringView shown) {
+		int64 start = path.ByteLength();
+		while (start > 0 && path.ByteAt(start - 1) != '/' && path.ByteAt(start - 1) != '\\') start -= 1;
+		Core::StringView last = path.Substring(start, path.ByteLength() - start);
+		if (last.IsEmpty()) return Core::String();
+		Core::String wanted = last.ToLower();
+		Core::Array<Core::String> found;
+		Core::String parent = NearestFolderOf(root, path.Substring(0, start > 0 ? start - 1 : 0));
+		if (!parent.IsEmpty()) FindFoldersLike(root, parent.View(), wanted.View(), found);
+		FindFoldersLike(root, Core::StringView(""), wanted.View(), found);
 		if (found.IsEmpty()) return Core::String();
 		Core::StringBuilder out;
 		out.Append("; folders named like ");

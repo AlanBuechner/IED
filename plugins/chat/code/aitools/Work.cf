@@ -393,6 +393,40 @@ namespace Ai
 		return FS::FileExists(fromCwd.CStr()) ? Core::String(fromCwd.View()) : Core::String(program);
 	}
 
+	static const int64 c_BuiltProgramDepth = 4;   // build/bin/<configuration>/<project>/<program>
+	static const int64 c_BuiltProgramsShown = 4;
+
+	// Where the builds put a program of this file name: build/bin under the path's own project (before its build/bin), else the
+	// root's - workspace-relative paths, "" when none - so a path that guessed the folder is answered with the real one.
+	Core::String BuiltProgramsNamed(Core::StringView root, Core::StringView program) {
+		Core::String given = IED::NormalizePath(program);
+		int64 nameStart = given.ByteLength();
+		while (nameStart > 0 && given.View().ByteAt(nameStart - 1) != '/') nameStart -= 1;
+		Core::String wanted = given.View().Substring(nameStart, given.ByteLength() - nameStart).ToLower();
+		const int64 bin = given.View().IndexOf(Core::StringView("build/bin"), 0);
+		Core::String start = Core::String("build/bin");
+		if (bin > 0) start = Core::String(given.View().Substring(0, bin)) + "build/bin";
+		Core::Array<Core::String> found;
+		Core::Array<Core::String> level;
+		level.Push(start);
+		for (int64 depth = 0; depth < c_BuiltProgramDepth && !level.IsEmpty(); ++depth) {
+			Core::Array<Core::String> next;
+			for (const Core::String& folder : level)
+				for (FS::DirectoryEntry& entry : FS::Directory((FS::Path(root) / folder.View()).CStr())) {
+					Core::String child = (folder + "/") + entry.name.View();
+					if (entry.kind == FS::EntryKind::Directory) next.Push(child);
+					else if (entry.name.View().ToLower().View() == wanted.View() && found.Count() < c_BuiltProgramsShown) found.Push(child);
+				}
+			level = next;
+		}
+		Core::StringBuilder out;
+		for (int64 i = 0; i < found.Count(); ++i) {
+			if (i > 0) out.Append(", ");
+			out.Append(found[i].View());
+		}
+		return out.ToString();
+	}
+
 	static Core::String ProgramPath(const ToolInvocation& call) {
 		return ProgramFile(call.m_Ws.m_Root.View(), call.m_Args.Member("cwd").AsView(), call.m_Args.Member("program").AsView());
 	}
@@ -499,9 +533,12 @@ namespace Ai
 		info.errors = Process::Redirect::Pipe;
 		Process::Child child = Process::Child::Start(info);
 		if (!child.IsOpen()) {
-			// A path that names no file now: often a build replacing the program (another chat's), worth saying plainly.
+			// A path that names no file: a guessed folder (answered with where the builds put that program), else a build replacing it.
 			bool path = info.program.View().Contains(Core::StringView("/")) || info.program.View().Contains(Core::StringView("\\"));
-			if (path && !FS::FileExists(info.program.CStr()))
+			Core::String built = path ? BuiltProgramsNamed(call.m_Ws.m_Root.View(), call.m_Args.Member("program").AsView()) : Core::String();
+			if (path && !FS::FileExists(info.program.CStr()) && !built.IsEmpty())
+				problem = Core::String("program_run: ") + call.m_Args.Member("program").AsView() + " is not there; the builds put a program of that name at " + built.View() + " (name one of those)";
+			else if (path && !FS::FileExists(info.program.CStr()))
 				problem = Core::String("program_run: ") + info.program.View() + " does not exist now (a build may be replacing it: build it, or wait and run it again)";
 			else
 				problem = Core::String("program_run: ") + info.program.View() + " did not start: " + child.Error() + "; a program of the workspace is named by its path (build/bin/...) or its file name in cwd, another by its name on PATH";
