@@ -107,6 +107,10 @@ namespace Boards
 
 	void BoardService::Stop() {
 		m_Stopping = true;
+		SaveAll();
+	}
+
+	void BoardService::SaveAll() {
 		Core::Array<OpenBoard*> all;
 		{
 			Threading::LockGuard guard(m_Lock);

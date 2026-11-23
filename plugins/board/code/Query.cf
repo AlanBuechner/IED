@@ -655,6 +655,7 @@ namespace Boards
 				// Who the change is by: the AI, unless the caller says the owner (the evaluation harness drawing a sketch).
 				Core::StringView by = call.Member("by").AsView() == "owner" ? Core::StringView("owner") : Core::StringView("ai");
 				ToolAnswer answer = service->RunTool(ws, call.Member("tool").AsView(), call.Member("args"), by);
+				service->SaveAll();
 				JsonOut json;
 				json.BeginObject();
 				json.StrField("text", answer.m_Text.View());

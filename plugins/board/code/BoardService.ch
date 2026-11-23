@@ -109,6 +109,8 @@ namespace Boards
 
 		// Saves the boards whose last change is old enough; a board now.
 		public void SaveDue();
+	// Every board with an unsaved change, now: a tool's answer comes after its change is on disk.
+		public void SaveAll();
 		public void Save(OpenBoard* open);
 		// Save with m_SaveLock held.
 		public void SaveHeld(OpenBoard* open);

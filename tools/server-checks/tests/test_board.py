@@ -108,6 +108,16 @@ class BoardTests(ServerTestCase):
 		reloaded = (await self.client.wait_for(opened["topic"], lambda f: f.get("kind") == "reloaded", timeout=WAIT))[-1]["data"]
 		self.assertEqual("changed outside", reloaded["elements"][0]["text"])
 
+	async def test_a_tool_answers_after_its_change_is_on_disk(self):
+		await self.open_board("design/durable")
+		path = os.path.join(self.ws, "design", "durable.iedboard")
+		await self.query("edit", {"board": "design/durable.iedboard", "ops": [{"op": "add", "type": "note", "x": 1, "y": 1, "text": "saved at once"}]})
+		with open(path, encoding="utf-8") as f:
+			self.assertIn("saved at once", f.read(), "the file holds the change when the call returns")
+		await self.query("plan", {"board": "design/durable.iedboard", "action": "write", "text": "plan kept at once"})
+		with open(path, encoding="utf-8") as f:
+			self.assertIn("plan kept at once", f.read(), "a plan too")
+
 	async def test_an_uploaded_image_is_kept_beside_the_board(self):
 		opened, _ = await self.open_board("design/pics")
 		request = urllib.request.Request("http://%s:%d/w/w1/api/upload" % (self.server.host, self.server.port), data=png(40, 20), method="PUT", headers={"Cookie": self.cookie, "Content-Type": "image/png", "Host": "%s:%d" % (self.server.host, self.server.port), "Origin": "http://%s:%d" % (self.server.host, self.server.port)})
