@@ -7,6 +7,7 @@ again -, the shared week paces Fable too, a pinned model wins over the default c
 to ai.models once each, the old model groups move into ai.agents and ai.defaultModel, and Claude runs on the
 subscription only - never an API key."""
 
+import asyncio
 import datetime
 import importlib.util
 import json
@@ -386,8 +387,14 @@ class ClaudeUsageTests(ClaudeCase):
 		self.assertEqual("finished", (await self.turn(chat_id))["stop"])
 		frames = await self.client.wait_for("aiusage", lambda f: f.get("kind") == "usage.changed" and f["data"]["claude"]["usage"]["status"] == "allowed_warning", timeout=10)
 		self.assertTrue(frames)
-		final = await self.client.request("ai.usage", {})
-		self.assertAlmostEqual(30, {w["id"]: w for w in final["claude"]["usage"]["windows"]}["five_hour"]["utilization"], msg="the session's own get_usage after the turn")
+		deadline = time.time() + 10   # the session's own get_usage lands after the turn's end, and after the rate-limit event's frame
+		windows = {}
+		while "five_hour" not in windows and time.time() < deadline:
+			final = await self.client.request("ai.usage", {})
+			windows = {w["id"]: w for w in final["claude"]["usage"]["windows"]}
+			if "five_hour" not in windows:
+				await asyncio.sleep(0.1)
+		self.assertAlmostEqual(30, windows["five_hour"]["utilization"], msg="the session's own get_usage after the turn")
 
 	async def test_the_clis_own_model_fallback_is_a_routing_note(self):
 		await self.use_claude()
