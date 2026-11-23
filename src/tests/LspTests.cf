@@ -32,9 +32,10 @@ static Core::String Rewritten(const char* json, const Ied::Rewrite& rewrite) {
 
 [test("server.lsp")]
 class LspTests {
-	// A workspace-symbol search waits for a new server's index: clangd begins it only once a file is open on it, which
-	// can be seconds after it started (the conformance check's first search found 0 symbols).
-	[test("index_grace_counts_from_the_first_open_document")]
+	// A workspace-symbol search waits for a new server's index: clangd begins it only once a file is open on it and it has
+	// read its compile database, which on a loaded machine is seconds after the file opened (the conformance check's first
+	// search found 0 symbols). The server's first diagnostics say it has taken the file in.
+	[test("index_may_begin_until_the_first_file_is_taken_in")]
 	public static void TestIndexGrace() {
 		const int64 ms = 1000000;
 		Ied::LanguageServer* language = new Ied::LanguageServer();
@@ -45,10 +46,12 @@ class LspTests {
 		assert_true(Ied::IndexMayBegin(language, 1000 * ms + grace * ms - 1), "a new server with nothing open yet");
 		assert_true(!Ied::IndexMayBegin(language, 1000 * ms + grace * ms), "nothing begun long after it started");
 		language->m_FirstOpenedNs = 4000 * ms;
-		assert_true(Ied::IndexMayBegin(language, 4000 * ms + grace * ms - 1), "its file opened late: the grace runs from there");
-		assert_true(!Ied::IndexMayBegin(language, 4000 * ms + grace * ms), "and ends");
-		language->m_Profile->m_IndexGraceMs = 10000;
-		assert_true(Ied::IndexMayBegin(language, 4000 * ms + 9999 * ms), "a profile that indexes slowly asks for more (clangd's)");
+		assert_true(Ied::IndexMayBegin(language, 4000 * ms + grace * ms), "its file is open but not yet taken in: it may begin, however long a loaded machine takes");
+		assert_true(Ied::IndexMayBegin(language, 4000 * ms + Ied::c_LspIndexWaitMs * ms - 1), "up to the bound of a search's wait");
+		assert_true(!Ied::IndexMayBegin(language, 4000 * ms + Ied::c_LspIndexWaitMs * ms), "after which a server that answers nothing is not waited for again");
+		language->m_FirstPublishedNs = 9000 * ms;
+		assert_true(Ied::IndexMayBegin(language, 9000 * ms + grace * ms - 1), "its first diagnostics: a begin that races them is still waited for");
+		assert_true(!Ied::IndexMayBegin(language, 9000 * ms + grace * ms), "and then none is expected");
 		language->m_Progressed = true;
 		assert_true(!Ied::IndexMayBegin(language, 4001 * ms), "once it reported work, its progress says when it is done");
 		Serialization::DomDoc* doc = new Serialization::DomDoc();

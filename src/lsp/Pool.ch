@@ -15,6 +15,7 @@ namespace Ied
 	const int64 c_LspTransientMost = 16;      // files open on one server for plugin code alone
 	const int64 c_LspIndexWaitMs = 30000;     // how long workspace symbols wait for the servers' indexes
 	const int64 c_LspIndexSliceNs = 50000000;
+	const int64 c_LspIndexReportMs = 1000;    // a wait for an index shorter than this is not worth a line in the server's log
 	const int64 c_LspSweepNs = 1000000000;    // how often idle and rebuilt servers are looked for (lsp.idleStopMinutes)
 	const char* c_LspIdleSetting = "lsp.idleStopMinutes";
 
@@ -26,9 +27,11 @@ namespace Ied
 		public bool m_HadDiagnostics;
 	}
 
-	// Whether `language` may still be about to begin its index: it has reported no work since it started, and its first
-	// document opened (or, with none open, it started) less than its profile's indexGraceMs ago. An index begins only once
-	// the server has a file - clangd learns its compile database from the first one - so the grace counts from there.
+	// Whether `language` may still be about to begin its index: it has reported no work since it started, and it has not yet
+	// taken in its first file. An index begins only once the server has a file - clangd learns its compile database from the
+	// first one, before it answers it - so the server's first diagnostics are the sign that it has begun if it will (the
+	// profile's indexGraceMs after them is for a begin that races them): until then it may, as long as c_LspIndexWaitMs
+	// from the file opening (a loaded machine takes seconds to answer one); with no file open, indexGraceMs from its start.
 	bool IndexMayBegin(const LanguageServer* language, int64 nowNs);
 
 	// The not_found error for a file no language server serves, saying how to read it instead (a shader, a config file).
@@ -171,8 +174,10 @@ namespace Ied
 		// the result for clients.
 		private Core::String Asked(Call& call, LanguageServer* language, Core::StringView clientUri, Core::StringView serverUri, Core::StringView method, Core::StringView params);
 		// Waits, the lock released, while one of `servers` reports work in progress (an index being built), and while one
-		// started less than kLspIndexGraceMs ago has not begun any; at most `ms`.
+		// may still begin any (IndexMayBegin); at most `ms`. A wait of c_LspIndexReportMs or more, and a wait that gives up,
+		// is said in the servers' log.
 		private void AwaitIndexes(Call& call, const Core::Array<LanguageServer*>& servers, int64 ms);
+		private void ReportIndexWait(const Core::Array<LanguageServer*>& servers, int64 waitedMs, bool timedOut);
 		private void Diagnostics(LanguageServer* language, const Serialization::DomNode& params);
 		private void ClearDiagnostics(LanguageServer* language);
 		// Every source's diagnostics of a path, gone (its file is not there any more).

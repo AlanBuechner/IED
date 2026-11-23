@@ -736,6 +736,7 @@ namespace Ied
 
 	void LspPool::Diagnostics(LanguageServer* language, const Serialization::DomNode& params) {
 		Workspace* ws = language->m_Ws;
+		if (language->m_FirstPublishedNs == 0) language->m_FirstPublishedNs = clock_now_ns();
 		Core::String absolute;
 		Core::String path;
 		if (!PathOfFileUri(params.Member("uri").AsView(), absolute) || !ws->PathOf(FS::Path(absolute.View()), path)) return;
@@ -1021,12 +1022,15 @@ namespace Ied
 
 	bool IndexMayBegin(const LanguageServer* language, int64 nowNs) {
 		if (language->m_Progressed) return false;
-		const int64 from = language->m_FirstOpenedNs > language->m_StartedNs ? language->m_FirstOpenedNs : language->m_StartedNs;
-		return nowNs - from < language->m_Profile->m_IndexGraceMs * 1000000;
+		const int64 graceNs = language->m_Profile->m_IndexGraceMs * 1000000;
+		if (language->m_FirstOpenedNs == 0) return nowNs - language->m_StartedNs < graceNs;
+		if (language->m_FirstPublishedNs == 0) return nowNs - language->m_FirstOpenedNs < c_LspIndexWaitMs * 1000000;
+		return nowNs - language->m_FirstPublishedNs < graceNs;
 	}
 
 	void LspPool::AwaitIndexes(Call& call, const Core::Array<LanguageServer*>& servers, int64 ms) {
-		const int64 deadline = clock_now_ns() + ms * 1000000;
+		const int64 began = clock_now_ns();
+		const int64 deadline = began + ms * 1000000;
 		for (;;) {
 			bool busy = false;
 			for (LanguageServer* language : servers) {
@@ -1034,8 +1038,24 @@ namespace Ied
 				language->m_UsedNs = clock_now_ns();   // waited for: not idle
 				busy = busy || language->m_Progress.Count() > 0 || IndexMayBegin(language, clock_now_ns());
 			}
-			if (!busy || call.m_Cancel->IsCancelled() || clock_now_ns() >= deadline) return;
+			const bool timedOut = busy && clock_now_ns() >= deadline;
+			if (!busy || call.m_Cancel->IsCancelled() || timedOut) {
+				ReportIndexWait(servers, (clock_now_ns() - began) / 1000000, timedOut);
+				return;
+			}
 			call.m_Cancel->m_Wake.WaitFor(m_Server->m_Lock, c_LspIndexSliceNs);
+		}
+	}
+
+	void LspPool::ReportIndexWait(const Core::Array<LanguageServer*>& servers, int64 waitedMs, bool timedOut) {
+		if (waitedMs < c_LspIndexReportMs && !timedOut) return;
+		for (LanguageServer* language : servers) {
+			if (language->m_State != LspState::Running) continue;
+			Core::StringBuilder text;
+			text.Append("workspace symbols waited ");
+			text.AppendInt(waitedMs);
+			text.Append(timedOut ? " ms for the index and gave up: it is not done, so the answer may be incomplete" : " ms for the index");
+			Log(language, text.View());
 		}
 	}
 

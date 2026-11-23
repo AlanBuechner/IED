@@ -716,7 +716,7 @@
 					"description": "For servers without */refresh requests."
 				},
 				"codeActionsNeedClientFilter": { "type": "boolean", "default": false },
-				"indexGraceMs": { "type": "integer", "minimum": 1, "default": 2000, "description": "How long after its first file opens the server may take to begin indexing ($/progress): a first workspace-symbol search waits that long for it to begin, then for its progress to end (docs/24)." },
+				"indexGraceMs": { "type": "integer", "minimum": 1, "default": 2000, "description": "How long after the server first publishes diagnostics - proof it has taken in its first file - it may still begin indexing ($/progress): a workspace-symbol search waits that long for it to begin, then for its progress to end. Until that first publish a search waits as long as its own bound (30 s) from the file opening (docs/24)." },
 				"formatOnAiWrite": {
 					"oneOf": [ { "type": "boolean" }, { "$ref": "#/$defs/when" } ],
 					"default": false,

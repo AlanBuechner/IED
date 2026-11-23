@@ -72,6 +72,7 @@ namespace Ied
 		public bool m_Progressed;                               // it began some since it last started
 		public int64 m_StartedNs;                               // when it last started
 		public int64 m_FirstOpenedNs;                           // when a document was first opened on it since it started; 0 before
+		public int64 m_FirstPublishedNs;                        // when it first published diagnostics since it started (it has taken in its first file); 0 before
 		public int64 m_UsedNs;                                  // when it was last asked or told something, or a window last showed one of its documents
 		public Core::String m_OptionsFilesSent;                 // its initializationOptionsFiles as it last got them (JSON)
 		public Core::String m_OptionsFileRead;                  // its profile's options with its initializationOptionsFile, as it last started with them (JSON)
