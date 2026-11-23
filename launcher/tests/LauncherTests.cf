@@ -85,6 +85,26 @@ class LauncherTests {
 		assert_se("exception 0xc0000005", Launch::ExitCodeText(3221225477).CStr(), "a crash is its exception");
 	}
 
+	[test("heap_checks")]
+	public static void TestHeapChecks() {
+		Core::Array<Core::String> gc = Launch::GcCheckEnvironment(Core::StringView("/state/ied/logs/heap-checks.log"));
+		assert_true(gc.Count() == 2 && gc[0].View() == "C4_GC_VERIFY_MAPS=/state/ied/logs/heap-checks.log" && gc[1].View() == "C4_GC_POISON=1", "the runtime's checks, its reports in the file");
+		assert_true(Launch::HeapCheckReportFile().View().EndsWith(Core::StringView("heap-checks.log")), "the reports' file is in the logs folder");
+		Core::Array<Core::String> malloc = Launch::MallocCheckEnvironment();
+#if defined(PLATFORM_LINUX)
+		assert_true(malloc.Count() == 3 && malloc[0].View() == "LD_PRELOAD=libc_malloc_debug.so.0" && malloc[1].View() == "GLIBC_TUNABLES=glibc.malloc.check=3" && malloc[2].View() == "MALLOC_PERTURB_=165", "glibc's checks");
+#else
+		assert_true(malloc.Count() == 0, "glibc's checks are Linux's");
+#endif
+		Platform::RemoveEnvironmentVariable(Launch::c_HeapChecksVariable);
+		assert_true(!Launch::HeapChecksRequested(), "asked for by nothing");
+		Platform::SetEnvironmentVariable(Launch::c_HeapChecksVariable, "0");
+		assert_true(!Launch::HeapChecksRequested(), "0 is off");
+		Platform::SetEnvironmentVariable(Launch::c_HeapChecksVariable, "1");
+		assert_true(Launch::HeapChecksRequested(), "1 asks");
+		Platform::RemoveEnvironmentVariable(Launch::c_HeapChecksVariable);
+	}
+
 	[test("log_file")]
 	public static void TestLogFile() {
 		FS::Path folder = FS::TempDirectory() / "ied-launcher-log-test";

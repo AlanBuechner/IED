@@ -111,7 +111,11 @@ Next ID: **BUG-501**
 - **Notes:** what the loads did not have, so where to look next: a Claude chat streaming (the CLI as a child process:
   `Process/` on Linux, its pipes and the `ReapWhenEnded` thread), TLS through the system's OpenSSL (`Net/tcp.cf`: a
   session is freed by `Close`, which no other thread may be in a call on), an hour of real use. Run the owner's IED with
-  the checks on - `C4_GC_VERIFY_MAPS=<file> C4_GC_POISON=1 LD_PRELOAD=libc_malloc_debug.so.0
-  GLIBC_TUNABLES=glibc.malloc.check=3 MALLOC_PERTURB_=165` in the desktop app's environment - so the damage stops
-  nearer its cause, or under ASan / Valgrind. The crash also left the workspace's server running unreachable, which
+  the checks on - `IED_HEAP_CHECKS=1 ied-desktop` (or `ied <folder>`; `ied stop` first): the launcher starts the master
+  with `C4_GC_VERIFY_MAPS=~/.local/state/ied/logs/heap-checks.log C4_GC_POISON=1 LD_PRELOAD=libc_malloc_debug.so.0
+  GLIBC_TUNABLES=glibc.malloc.check=3 MALLOC_PERTURB_=165` and its standard error appended to that file, which its
+  workspace servers inherit (docs/21 "Heap checks") - so the damage stops nearer its cause, or under ASan / Valgrind.
+  Checked in the Linux builder (master and workspace server have the variables, a deliberate map miss and an aborted
+  server's fatal report are in the file); still open until a run with the checks on ends in a report or an abort at the
+  cause (or an hour of real use ends in neither). The crash also left the workspace's server running unreachable, which
   kept the folder from opening again: that part was IED's and is fixed (`--master-pid`, `src/Main.cf` `WatchMaster`).

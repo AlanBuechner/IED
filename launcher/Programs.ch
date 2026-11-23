@@ -10,6 +10,19 @@ namespace Launch
 	// another launcher) won the race.
 	const int32 c_AnotherServerExit = 3;
 
+	// IED_HEAP_CHECKS=1 in the launcher's environment starts the server with the heap checks of BUG-497 (docs/21 "Heap checks").
+	const char* c_HeapChecksVariable = "IED_HEAP_CHECKS";
+
+	// Where the checks' reports go: heap-checks.log in the logs folder.
+	FS::Path HeapCheckReportFile();
+	// The runtime's checks (C4/docs/runtime/01-memory-and-gc.md): C4_GC_VERIFY_MAPS=<reportFile> C4_GC_POISON=1.
+	Core::Array<Core::String> GcCheckEnvironment(Core::StringView reportFile);
+	// glibc's checks, found only on Linux, which a server and every process it starts runs under: LD_PRELOAD=
+	// libc_malloc_debug.so.0 GLIBC_TUNABLES=glibc.malloc.check=3 MALLOC_PERTURB_=165. Empty elsewhere.
+	Core::Array<Core::String> MallocCheckEnvironment();
+	// Whether the launcher was asked for the checks: IED_HEAP_CHECKS is set and not 0.
+	bool HeapChecksRequested();
+
 	// ied-server.exe (ied-server on Linux) beside this program or in a sibling folder (the build layout); empty when
 	// none is.
 	FS::Path ServerProgram();

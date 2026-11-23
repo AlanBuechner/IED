@@ -29,6 +29,58 @@ namespace Launch
 		return FS::Path();
 	}
 
+	FS::Path HeapCheckReportFile() { return LogsFolder() / "heap-checks.log"; }
+
+	Core::Array<Core::String> GcCheckEnvironment(Core::StringView reportFile) {
+		Core::Array<Core::String> variables;
+		variables.Push(Core::String("C4_GC_VERIFY_MAPS=") + reportFile);
+		variables.Push(Core::String("C4_GC_POISON=1"));
+		return variables;
+	}
+
+	Core::Array<Core::String> MallocCheckEnvironment() {
+		Core::Array<Core::String> variables;
+#if defined(PLATFORM_LINUX)
+		variables.Push(Core::String("LD_PRELOAD=libc_malloc_debug.so.0"));
+		variables.Push(Core::String("GLIBC_TUNABLES=glibc.malloc.check=3"));
+		variables.Push(Core::String("MALLOC_PERTURB_=165"));
+#endif
+		return variables;
+	}
+
+	bool HeapChecksRequested() {
+		Core::String value;
+		return Platform::TryGetEnvironmentVariable(c_HeapChecksVariable, value) && !value.IsEmpty() && value.View() != "0";
+	}
+
+#if defined(PLATFORM_LINUX)
+	// The server's standard error appended to the reports' file (C4_GC_VERIFY_MAPS names it): glibc's findings and the
+	// runtime's fatal report go there, and the workspace servers, which inherit it, write there too. The shell becomes the
+	// server (exec), so its process is the one started.
+	static void ErrorsToReports(Process::StartInfo& info) {
+		Core::Array<Core::String> wrapped;
+		wrapped.Push(Core::String("-c"));
+		wrapped.Push(Core::String("exec \"$0\" \"$@\" 2>>\"$C4_GC_VERIFY_MAPS\""));
+		wrapped.Push(info.program);
+		for (const Core::String& argument : info.arguments) wrapped.Push(argument);
+		info.program = Core::String("/bin/sh");
+		info.arguments = wrapped;
+	}
+#endif
+
+	// The environment the server and its workspace servers run in when the checks are asked for (they inherit the master's),
+	// and a line in the reports' file saying who asked and that the reports are appended there.
+	static void AddHeapChecks(Process::StartInfo& info) {
+		FS::Path report = HeapCheckReportFile();
+		for (const Core::String& variable : GcCheckEnvironment(report.View())) info.environment.Push(variable);
+		for (const Core::String& variable : MallocCheckEnvironment()) info.environment.Push(variable);
+		LogFile log;
+		if (log.Open(report.View())) log.Write(Core::StringView("ied-server started with the heap checks (IED_HEAP_CHECKS): the runtime's pointer-map reports are appended below; glibc aborts on a corrupt heap, and its message and the server's fatal report follow"));
+#if defined(PLATFORM_LINUX)
+		ErrorsToReports(info);
+#endif
+	}
+
 	static Process::StartInfo ServerStart(const FS::Path& program, Core::StringView control) {
 		Process::StartInfo info;
 		info.program = Core::String(program.View());
@@ -46,6 +98,7 @@ namespace Launch
 		info.output = Process::Redirect::Null;
 		info.errors = Process::Redirect::Null;
 		info.killOnClose = false;
+		if (HeapChecksRequested()) AddHeapChecks(info);
 		return info;
 	}
 
