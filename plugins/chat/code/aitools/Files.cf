@@ -673,8 +673,34 @@ namespace Ai
 			out.Append("/");
 			count += 1;
 		}
-		if (count == 0) out.Append(" none");
+		if (count == 0) AppendFilesHint(root, parent.View(), path, out);
 		return out.ToString();
+	}
+
+	static const int64 c_MissedFilesShown = 8;
+
+	// A folder with no subfolders: its files are the likeliest meant, those whose name holds the missing name's first part first.
+	static void AppendFilesHint(const FS::Path& root, Core::StringView parent, Core::StringView path, Core::StringBuilder& out) {
+		int64 slash = path.ByteLength() - 1;
+		while (slash >= 0 && path.ByteAt(slash) != '/') slash -= 1;
+		Core::StringView leaf = path.Substring(slash + 1, path.ByteLength() - slash - 1);
+		int64 dot = 0;
+		while (dot < leaf.ByteLength() && leaf.ByteAt(dot) != '.') dot += 1;
+		Core::StringView stem = leaf.Substring(0, dot);
+		int64 shown = 0;
+		out.Append(" none; its files:");
+		for (int64 pass = 0; pass < 2; pass += 1) {
+			FS::Directory listing = FS::Directory((parent.IsEmpty() ? root : root / parent).CStr());
+			for (FS::DirectoryEntry& entry : listing) {
+				if (entry.kind == FS::EntryKind::Directory) continue;
+				const bool close = !stem.IsEmpty() && entry.name.View().Contains(stem);
+				if (close != (pass == 0) || shown >= c_MissedFilesShown) continue;
+				out.Append(" ");
+				out.Append(entry.name.View());
+				shown += 1;
+			}
+		}
+		if (shown == 0) out.Append(" none");
 	}
 
 	static const int64 c_MovedFoldersShown = 4;

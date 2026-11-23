@@ -65,6 +65,20 @@ class FileToolTests {
 		assert_true(Ai::NearestFoldersHint(root, Core::StringView("Nowhere"), Core::StringView("")).View().Contains(Core::StringView("(the root) holds the folders: C4/")), "up to the root");
 	}
 
+	[test("a_missing_file_names_the_files_beside_it")]
+	public static void TestMissingFileNamesSiblings() {
+		Core::StringBuilder folder;
+		folder.Append("ied-files2-");
+		folder.AppendInt(Platform::UnixTimeNs());
+		FS::Path root = FS::TempDirectory() / folder.View();
+		FS::MakeDirectories((root / "Lexer").CStr());
+		FS::WriteFileAtomically((root / "Lexer/Token.h").CStr(), (const void*)"x", 1);
+		FS::WriteFileAtomically((root / "Lexer/Scanner.cpp").CStr(), (const void*)"x", 1);
+		Core::String said = Ai::NearestFoldersHint(root, Core::StringView("Lexer/Token.cpp"), Core::StringView(""));
+		assert_true(said.View().Contains(Core::StringView("Lexer holds the folders: none; its files: Token.h")), said.CStr());
+		assert_true(said.View().Contains(Core::StringView("Scanner.cpp")), said.CStr());
+	}
+
 	[test("a_linked_projects_files_are_named_by_its_link")]
 	public static void TestLinkedProjectPaths() {
 		Core::StringBuilder folder;
