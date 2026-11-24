@@ -101,6 +101,8 @@
 [link("c4_thread_sleep_ns")] void thread_sleep_ns(int64 ns) noexcept;
 [link("c4_thread_set_name")] int32 thread_set_name(const char* name) noexcept;
 [link("c4_thread_pin_to_core")] int32 thread_pin_to_core(int32 core) noexcept;
+[link("c4_thread_claim_core")] int32 thread_claim_core(int32 core) noexcept;
+[link("c4_thread_release_core")] void thread_release_core(int32 core) noexcept;
 [link("c4_thread_name")] int32 thread_name(char* out, int32 cap) noexcept;
 [link("c4_wait_on_address")] bool wait_on_address(void* address, void* expected, uint64 size, int64 timeoutNs) noexcept;
 [link("c4_wake_one")] void wake_one(void* address) noexcept;

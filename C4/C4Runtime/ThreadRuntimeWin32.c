@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <wchar.h>
 
 #pragma comment(lib, "Synchronization.lib")
 
@@ -82,8 +83,12 @@ static uint32_t CountBits(ULONG_PTR bits)
 	return count;
 }
 
-// Each core's logical processors this process may run on, in the system's order (a core with none left out); how many cores.
-static int32_t UsableCores(ULONG_PTR cores[kMostCores])
+// One core: the logical processors of it this process may run on, and all of its own (the lowest of those names the core
+// to other processes, whatever their affinity is).
+typedef struct { ULONG_PTR usable; ULONG_PTR whole; } CoreMasks;
+
+// Each core's masks, in the system's order (a core with no processor of this process's left out); how many cores.
+static int32_t UsableCores(CoreMasks cores[kMostCores])
 {
 	DWORD bytes = 0;
 	GetLogicalProcessorInformation(NULL, &bytes);
@@ -97,7 +102,10 @@ static int32_t UsableCores(ULONG_PTR cores[kMostCores])
 		{
 			if (infos[i].Relationship != RelationProcessorCore) continue;
 			const ULONG_PTR usable = mine ? infos[i].ProcessorMask & mine : infos[i].ProcessorMask;
-			if (usable) cores[found++] = usable;
+			if (!usable) continue;
+			cores[found].usable = usable;
+			cores[found].whole = infos[i].ProcessorMask;
+			found += 1;
 		}
 	}
 	free(infos);
@@ -115,7 +123,7 @@ uint32_t c4_thread_hardware_count(void)
 
 uint32_t c4_thread_core_count(void)
 {
-	ULONG_PTR cores[kMostCores];
+	CoreMasks cores[kMostCores];
 	const int32_t found = UsableCores(cores);
 	return found > 0 ? (uint32_t)found : c4_thread_hardware_count();
 }
@@ -186,10 +194,55 @@ int64_t c4_thread_sleep_fallbacks(void) { return InterlockedCompareExchange64(&s
 int32_t c4_thread_pin_to_core(int32_t core)
 {
 	if (core < 0) return -1;
-	ULONG_PTR cores[kMostCores];
+	CoreMasks cores[kMostCores];
 	if (core >= UsableCores(cores)) return -1;
-	const ULONG_PTR mask = cores[core];
+	const ULONG_PTR mask = cores[core].usable;
 	return SetThreadAffinityMask(GetCurrentThread(), mask & (~mask + 1)) ? 0 : -1;
+}
+
+// A claim on a core is a named mutex nobody waits on: it exists while this process holds a handle to it, and the system closes
+// the handle when the process ends, however it ends. Slot i: the claim on the core whose lowest logical processor is i.
+static HANDLE volatile s_coreClaims[kMostCores];
+
+// The claim slot of core number `core` of those this process may run on; -1 when there is no such core.
+static int32_t ClaimSlot(int32_t core)
+{
+	if (core < 0) return -1;
+	CoreMasks cores[kMostCores];
+	if (core >= UsableCores(cores)) return -1;
+	const ULONG_PTR whole = cores[core].whole;
+	int32_t slot = 0;
+	while (!((whole >> slot) & 1)) slot += 1;
+	return slot;
+}
+
+int32_t c4_thread_claim_core(int32_t core)
+{
+	const int32_t slot = ClaimSlot(core);
+	if (slot < 0 || s_coreClaims[slot]) return -1;
+	wchar_t name[48];
+	swprintf(name, sizeof(name) / sizeof(name[0]), L"Global\\c4-core-%d", (int)slot);
+	HANDLE claim = CreateMutexW(NULL, FALSE, name);
+	if (!claim) return -1; // the name is another user's: the core is claimed
+	if (GetLastError() == ERROR_ALREADY_EXISTS)
+	{
+		CloseHandle(claim);
+		return -1;
+	}
+	if (InterlockedCompareExchangePointer((PVOID volatile*)&s_coreClaims[slot], claim, NULL) != NULL)
+	{
+		CloseHandle(claim);
+		return -1;
+	}
+	return 0;
+}
+
+void c4_thread_release_core(int32_t core)
+{
+	const int32_t slot = ClaimSlot(core);
+	if (slot < 0) return;
+	HANDLE claim = (HANDLE)InterlockedExchangePointer((PVOID volatile*)&s_coreClaims[slot], NULL);
+	if (claim) CloseHandle(claim);
 }
 
 int32_t c4_thread_set_name(const char* name)

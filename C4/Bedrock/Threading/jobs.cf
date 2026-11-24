@@ -16,7 +16,7 @@ namespace Threading
 	{
 		public JobWorkers* workers;
 		public int32 index;          // a frame worker's index, or -1 - n for background worker n
-		public bool pinned;
+		public int32 core;           // the core the worker pins itself to, or -1: it runs wherever the system puts it
 	}
 
 	// ---------------------------------------------------------------------------------------------------------
@@ -144,7 +144,7 @@ namespace Threading
 		WorkerStart* start = (WorkerStart*)state;
 		if (start->index >= 0) {
 			NameWorker("Job Worker", start->index);
-			if (start->pinned) Thread::PinCurrentToCore(start->index + 1);
+			if (start->core >= 0) Thread::PinCurrentToCore(start->core);
 			RunFrameWorker(start->workers, start->index);
 			return;
 		}
@@ -152,11 +152,11 @@ namespace Threading
 		RunBackgroundWorker(start->workers);
 	}
 
-	void StartWorker(JobWorkers* workers, int32 index, bool pinned) {
+	void StartWorker(JobWorkers* workers, int32 index, int32 core) {
 		WorkerStart* start = new WorkerStart;
 		start->workers = workers;
 		start->index = index;
-		start->pinned = pinned;
+		start->core = core;
 		void* thread = thread_start(WorkerMain, (void*)start);
 		if (thread) workers->threads.Push(thread);
 	}
@@ -164,9 +164,19 @@ namespace Threading
 	// ---------------------------------------------------------------------------------------------------------
 	// The system
 
+	// A core no other program has claimed, claimed for this process, or -1 when every core is taken. The first core is tried last:
+	// the submitting thread, which is not pinned, finds it free when the workers took the rest.
+	int32 ClaimFreeCore() {
+		const int32 count = Thread::CoreCount();
+		for (int32 k = 1; k <= count; k++) {
+			const int32 core = k % count;
+			if (Thread::ClaimCore(core)) return core;
+		}
+		return -1;
+	}
+
 	void JobSystem::Start(JobSystemDesc desc) {
 		const int32 spare = (desc.pinToCores ? Thread::CoreCount() : Thread::HardwareCount()) - 1;   // the submitting thread keeps a processor
-		if (desc.pinToCores) Thread::PinCurrentToCore(0);
 		const int32 frameCount = desc.frameWorkers >= 1 ? desc.frameWorkers : (spare >= 1 ? spare : 1);
 		workers = new JobWorkers;
 		workers->backgroundCount = desc.backgroundWorkers >= 0 ? desc.backgroundWorkers : 1;
@@ -177,8 +187,12 @@ namespace Threading
 			queues->normal.Reserve(kWorkerQueueCapacity);
 			workers->frame.Push(queues);
 		}
-		for (int32 i = 0; i < frameCount; i++) StartWorker(workers, i, desc.pinToCores);
-		for (int32 i = 0; i < workers->backgroundCount; i++) StartWorker(workers, -1 - i, false);
+		for (int32 i = 0; i < frameCount; i++) {
+			const int32 core = desc.pinToCores ? ClaimFreeCore() : -1;
+			if (core >= 0) workers->claimedCores.Push(core);
+			StartWorker(workers, i, core);
+		}
+		for (int32 i = 0; i < workers->backgroundCount; i++) StartWorker(workers, -1 - i, -1);
 	}
 
 	void JobSystem::Delete() {
@@ -186,6 +200,7 @@ namespace Threading
 		atomic_store(&workers->stopping, 1, MemoryOrder::SeqCst);
 		workers->WakeEveryone();
 		for (int64 i = 0; i < workers->threads.Count(); i++) thread_join(workers->threads[i]);
+		for (int64 i = 0; i < workers->claimedCores.Count(); i++) Thread::ReleaseCore(workers->claimedCores[i]);
 		for (int64 i = 0; i < workers->frame.Count(); i++) delete workers->frame[i];
 		for (int32 p = 0; p < 3; p++) workers->shared[p].Delete();
 		workers = nullptr;

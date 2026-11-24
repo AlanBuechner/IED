@@ -33,6 +33,12 @@ int64_t c4_thread_sleep_fallbacks(void);
 int32_t c4_thread_set_name(const char* name);
 // The calling thread on one logical processor of core number `core` of those this process may run on: 0, or -1 when there is no such core.
 int32_t c4_thread_pin_to_core(int32_t core);
+// Claims core number `core` (as c4_thread_pin_to_core numbers them) for this process, so no other process of the machine claims it: 0, or -1 when
+// another process or an earlier claim of this one holds it, or there is no such core. The claim lasts until c4_thread_release_core or the process's
+// end, however it ends. It stops no thread from running there: it is how programs that pin threads keep out of each other's cores.
+int32_t c4_thread_claim_core(int32_t core);
+// Gives back a core this process claimed; nothing when it holds none.
+void c4_thread_release_core(int32_t core);
 // The calling thread's name into `out` (capacity `cap`, terminated; "" when it has none): its length, or -1 when it does
 // not fit or the system cannot read it.
 int32_t c4_thread_name(char* out, int32_t cap);

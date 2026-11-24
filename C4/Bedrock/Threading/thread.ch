@@ -39,6 +39,12 @@ namespace Threading
 		// Keeps the calling thread on one logical processor of core number `core` of those this process may run on (CoreCount), so threads pinned to
 		// different cores never share one through its hyperthreads. False when there is no such core: the thread then runs where it did.
 		public static bool PinCurrentToCore(int32 core) { return thread_pin_to_core(core) == 0; }
+		// Claims core number `core` for this process: no other process of the machine claims it until ReleaseCore or this process's end (however it ends).
+		// It stops no thread from running there; it is how programs that pin threads keep out of each other's cores. False when another process or an
+		// earlier claim of this one holds it, or there is no such core.
+		public static bool ClaimCore(int32 core) { return thread_claim_core(core) == 0; }
+		// Gives back a core this process claimed; does nothing when it holds none.
+		public static void ReleaseCore(int32 core) { thread_release_core(core); }
 		// The calling thread's name, "" when it has none.
 		public static Core::String CurrentName();
 

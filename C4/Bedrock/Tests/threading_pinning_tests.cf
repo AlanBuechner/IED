@@ -1,0 +1,111 @@
+// BUG-503: programs that pin their job systems' workers share the machine. A worker claims a core no other program has claimed
+// (Thread::ClaimCore) and runs there, or runs unpinned when every core is taken; the submitting thread is never pinned. Two
+// processes at once, in the second test, are one test run started twice.
+
+include "bedrock.ch"
+
+const char* kPeerVariable = "C4_PINNING_PEER";
+
+Threading::JobSystemDesc PinnedDesc() {
+	Threading::JobSystemDesc desc;
+	desc.pinToCores = true;
+	desc.backgroundWorkers = 0;
+	return desc;
+}
+
+// Claims every core it can; gives back how many. Other programs of the machine may hold some, so a test never counts on one.
+class ClaimedCores {
+	[operator("create")] public void Init() {
+		for (int32 core = 0; core < Threading::Thread::CoreCount(); core += 1) {
+			if (Threading::Thread::ClaimCore(core)) claimed.Push(core);
+		}
+	}
+	[operator("delete")] public void Delete() { Release(); }
+
+	public void Release() {
+		for (int64 i = 0; i < claimed.Count(); i += 1) Threading::Thread::ReleaseCore(claimed[i]);
+		claimed.Clear();
+	}
+
+	public Core::Array<int32> claimed;
+}
+
+int32 RunSomeJobs(Threading::JobSystem& jobs) {
+	Threading::Atomic<int32> ran;
+	Threading::WaitGroup group;
+	for (int32 j = 0; j < 32; j += 1) jobs.Submit([&ran]() -> void { ran.FetchAdd(1); }, Threading::JobPriority::High, &group);
+	jobs.Wait(group);
+	return ran.Load();
+}
+
+[test("threading.pinning")]
+class PinningTests {
+	[test("bug503_a_core_is_claimed_by_one_holder_until_it_is_given_back")]
+	public static void TestClaimOnce() {
+		if (!Threading::Thread::ClaimCore(0)) return;   // another program of the machine holds it: nothing to check here
+		assert_true(!Threading::Thread::ClaimCore(0), "held, it is not claimed again");
+		Threading::Thread::ReleaseCore(0);
+		assert_true(Threading::Thread::ClaimCore(0), "given back, it is free");
+		Threading::Thread::ReleaseCore(0);
+		assert_true(!Threading::Thread::ClaimCore(-1), "there is no core before the first");
+		assert_true(!Threading::Thread::ClaimCore(Threading::Thread::CoreCount()), "nor one past the last");
+	}
+
+	[test("bug503_a_pinned_job_system_pins_only_cores_nobody_claimed")]
+	public static void TestOnlyFreeCores() {
+		ClaimedCores others;
+		{
+			Threading::JobSystem jobs = Threading::JobSystem(PinnedDesc());
+			assert_eq(0, jobs.PinnedWorkerCount(), "every core is taken: no worker is pinned");
+			assert_true(jobs.FrameWorkerCount() >= 1, "yet it has workers");
+			assert_eq((int32)32, RunSomeJobs(jobs), "which run the jobs");
+		}
+		others.Release();
+		{
+			Threading::JobSystem jobs = Threading::JobSystem(PinnedDesc());
+			assert_true(jobs.PinnedWorkerCount() <= jobs.FrameWorkerCount(), "no more pinned workers than workers");
+			assert_eq((int32)32, RunSomeJobs(jobs), "pinned or not, they run the jobs");
+		}
+		Threading::JobSystemDesc unpinned;
+		unpinned.backgroundWorkers = 0;
+		Threading::JobSystem plain = Threading::JobSystem(unpinned);
+		assert_eq(0, plain.PinnedWorkerCount(), "without pinToCores nothing is pinned");
+	}
+
+	[test("bug503_a_job_system_gives_its_cores_back_when_it_ends")]
+	public static void TestCoresGivenBack() {
+		int32 pinned = 0;
+		{
+			Threading::JobSystem first = Threading::JobSystem(PinnedDesc());
+			pinned = first.PinnedWorkerCount();
+		}
+		ClaimedCores afterwards;
+		assert_true((int32)afterwards.claimed.Count() >= pinned, "the cores the ended system pinned are free again");
+	}
+
+	[test("bug503_two_processes_with_pinned_job_systems_never_pin_one_core_twice")]
+	public static void TestTwoProcesses() {
+		Core::String peer;
+		if (Platform::TryGetEnvironmentVariable(kPeerVariable, peer)) {
+			Threading::JobSystem jobs = Threading::JobSystem(PinnedDesc());
+			printf("peer pinned %d;\n", jobs.PinnedWorkerCount());
+			return;
+		}
+		Threading::JobSystem mine = Threading::JobSystem(PinnedDesc());
+		Process::StartInfo info;
+		info.program = Core::String(Platform::ExecutablePath().View());
+		info.arguments.Push(Core::String("--filter"));
+		info.arguments.Push(Core::String("threading.pinning.bug503_two_processes*"));
+		info.environment.Push(Core::String("C4_PINNING_PEER=1"));
+		Process::Output peerRun = Process::Run(info, 60000);
+		assert_eq((int64)0, peerRun.exitCode, "the peer's run passes");
+		int32 theirs = -1;
+		for (int32 count = 0; count <= Threading::Thread::CoreCount(); count += 1) {
+			Core::StringBuilder said;
+			Core::Format(&said, "peer pinned {0};", (int64)count);
+			if (peerRun.output.View().Contains(said.View())) theirs = count;
+		}
+		assert_true(theirs >= 0, "the peer says how many workers it pinned");
+		assert_true(mine.PinnedWorkerCount() + theirs <= Threading::Thread::CoreCount(), "the two never pin one core twice");
+	}
+}

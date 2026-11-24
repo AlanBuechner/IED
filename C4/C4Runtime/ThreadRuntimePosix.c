@@ -9,11 +9,14 @@
 #include <linux/futex.h>
 #include <pthread.h>
 #include <sched.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/syscall.h>
+#include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -113,9 +116,10 @@ static int64_t CoreOf(int cpu)
 	return (ids[0] << 32) | (ids[1] & 0xffffffff);
 }
 
-// Each core's first logical processor this process may run on, in the system's order; how many cores. A system whose
+// Each core's first logical processor this process may run on, in the system's order, and the core's number (the same for
+// every process: it names the core to the others; a processor's own when sysfs says nothing); how many cores. A system whose
 // sysfs says nothing about cores counts each logical processor as a core.
-static int32_t UsableCores(int firstOfCore[kMostProcessors])
+static int32_t UsableCores(int firstOfCore[kMostProcessors], int64_t names[kMostProcessors])
 {
 	cpu_set_t set;
 	if (!ProcessProcessors(&set)) return 0;
@@ -129,7 +133,9 @@ static int32_t UsableCores(int firstOfCore[kMostProcessors])
 		for (int32_t i = 0; i < found && core >= 0; ++i) known |= seen[i] == core;
 		if (known) continue;
 		seen[found] = core;
-		firstOfCore[found++] = cpu;
+		names[found] = core >= 0 ? core : -1 - (int64_t)cpu;
+		firstOfCore[found] = cpu;
+		found += 1;
 	}
 	return found;
 }
@@ -137,7 +143,8 @@ static int32_t UsableCores(int firstOfCore[kMostProcessors])
 uint32_t c4_thread_core_count(void)
 {
 	int cores[kMostProcessors];
-	const int32_t found = UsableCores(cores);
+	int64_t names[kMostProcessors];
+	const int32_t found = UsableCores(cores, names);
 	return found > 0 ? (uint32_t)found : c4_thread_hardware_count();
 }
 
@@ -147,11 +154,80 @@ int32_t c4_thread_pin_to_core(int32_t core)
 {
 	if (core < 0) return -1;
 	int cores[kMostProcessors];
-	if (core >= UsableCores(cores)) return -1;
+	int64_t names[kMostProcessors];
+	if (core >= UsableCores(cores, names)) return -1;
 	cpu_set_t one;
 	CPU_ZERO(&one);
 	CPU_SET(cores[core], &one);
 	return pthread_setaffinity_np(pthread_self(), sizeof(one), &one) == 0 ? 0 : -1;
+}
+
+// A claim on a core is a socket bound to a name of the abstract namespace: the name is taken while this process holds the socket,
+// and the kernel closes it when the process ends, however it ends. Nothing is written to the file system.
+static struct { int64_t name; int fd; int held; } s_coreClaims[kMostProcessors];
+static pthread_mutex_t s_coreClaimsLock = PTHREAD_MUTEX_INITIALIZER;
+
+// The core number `core` of those this process may run on, by the name every process knows it by; 0 when there is none.
+static int CoreName(int32_t core, int64_t* name)
+{
+	if (core < 0) return 0;
+	int cores[kMostProcessors];
+	int64_t names[kMostProcessors];
+	if (core >= UsableCores(cores, names)) return 0;
+	*name = names[core];
+	return 1;
+}
+
+static int BindClaim(int64_t name)
+{
+	const int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+	if (fd < 0) return -1;
+	struct sockaddr_un address;
+	memset(&address, 0, sizeof(address));
+	address.sun_family = AF_UNIX;
+	const int length = snprintf(address.sun_path + 1, sizeof(address.sun_path) - 1, "c4-core-%lld", (long long)name);
+	if (bind(fd, (struct sockaddr*)&address, (socklen_t)(offsetof(struct sockaddr_un, sun_path) + 1 + length)) == 0) return fd;
+	close(fd);
+	return -1;
+}
+
+int32_t c4_thread_claim_core(int32_t core)
+{
+	int64_t name = 0;
+	if (!CoreName(core, &name)) return -1;
+	int32_t result = -1;
+	pthread_mutex_lock(&s_coreClaimsLock);
+	int slot = -1;
+	int held = 0;
+	for (int i = 0; i < kMostProcessors; ++i)
+	{
+		if (s_coreClaims[i].held && s_coreClaims[i].name == name) held = 1;
+		if (!s_coreClaims[i].held && slot < 0) slot = i;
+	}
+	const int fd = held || slot < 0 ? -1 : BindClaim(name);
+	if (fd >= 0)
+	{
+		s_coreClaims[slot].name = name;
+		s_coreClaims[slot].fd = fd;
+		s_coreClaims[slot].held = 1;
+		result = 0;
+	}
+	pthread_mutex_unlock(&s_coreClaimsLock);
+	return result;
+}
+
+void c4_thread_release_core(int32_t core)
+{
+	int64_t name = 0;
+	if (!CoreName(core, &name)) return;
+	pthread_mutex_lock(&s_coreClaimsLock);
+	for (int i = 0; i < kMostProcessors; ++i)
+	{
+		if (!s_coreClaims[i].held || s_coreClaims[i].name != name) continue;
+		close(s_coreClaims[i].fd);
+		s_coreClaims[i].held = 0;
+	}
+	pthread_mutex_unlock(&s_coreClaimsLock);
 }
 
 void c4_thread_yield(void) { sched_yield(); }

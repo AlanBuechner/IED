@@ -99,6 +99,14 @@ class AffinityTests {
 		assert_true(!Threading::Thread::PinCurrentToCore(Threading::Thread::CoreCount()), "no core past them");
 	}
 
+	[test("bug503_a_pinned_job_system_leaves_the_submitting_thread_where_it_runs")]
+	public static void TestSubmitterNotPinned() {
+		uint64 mine = ProcessProcessors();
+		SetThreadAffinityMask(GetCurrentThread(), mine);
+		Threading::JobSystem pinned = Threading::JobSystem(DefaultFrameWorkers(true));
+		assert_eq((int64)mine, (int64)SetThreadAffinityMask(GetCurrentThread(), mine), "the thread that made it may still run on every processor the process may");
+	}
+
 	[test("bug454_a_job_system_starts_workers_for_the_processors_the_process_may_run_on")]
 	public static void TestJobWorkers() {
 		int32 few = CountProcessors(ProcessProcessors()) < kFewProcessors ? CountProcessors(ProcessProcessors()) : kFewProcessors;

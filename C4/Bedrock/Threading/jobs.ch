@@ -20,8 +20,10 @@ namespace Threading
 	{
 		public int32 frameWorkers = -1;        // -1: the processors this process may run on minus one, at least 1
 		public int32 backgroundWorkers = -1;   // -1: one; 0: frame workers run background jobs after frame work
-		// One physical core a thread: the thread making the system on core 0, frame worker i on core i + 1, frameWorkers -1 then being the cores minus one.
-		// For work that spins and shares data, where two workers on one core's hyperthreads run far slower than either alone. Background workers stay free.
+		// One physical core a thread: each frame worker claims a core no other program has claimed (Thread::ClaimCore) and runs on it, frameWorkers -1
+		// then being the cores minus one, which leaves the submitting thread a core. A worker finding every core claimed runs unpinned, so programs that pin
+		// never fight over a core; the submitting thread and the background workers are never pinned (PinnedWorkerCount says how many workers are).
+		// For work that spins and shares data, where two workers on one core's hyperthreads run far slower than either alone.
 		public bool pinToCores = false;
 	}
 
@@ -38,6 +40,7 @@ namespace Threading
 		public Core::Array<FrameQueues*> frame;
 		public JobQueue[3] shared;   // by JobPriority: jobs submitted by any thread that is not a frame worker
 		public Core::Array<void*> threads;
+		public Core::Array<int32> claimedCores;   // the cores the pinned frame workers claimed, given back as the system ends
 		public int32 backgroundCount;
 		public int32 stopping;
 		public int32 frameSignal;    // bumped to wake a parked frame worker
@@ -75,6 +78,8 @@ namespace Threading
 
 		public int32 FrameWorkerCount() const { return workers ? (int32)workers->frame.Count() : 0; }
 		public int32 BackgroundWorkerCount() const { return workers ? workers->backgroundCount : 0; }
+		// The frame workers pinned to a core of their own: all of them with `pinToCores` unless another program holds some cores, none without it.
+		public int32 PinnedWorkerCount() const { return workers ? (int32)workers->claimedCores.Count() : 0; }
 
 		private void Start(JobSystemDesc desc);
 		private bool Enqueue(const Job& job, JobPriority priority);
