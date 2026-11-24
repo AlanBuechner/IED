@@ -20,18 +20,13 @@ namespace C4Compiler
 		constexpr uint64_t c_WordBytes = 8;
 		constexpr uint64_t c_MaskWords = 32;
 
-		bool IsManaged(const llvm::Type* type)
-		{
-			const auto* pointer = llvm::dyn_cast<llvm::PointerType>(type->getScalarType());
-			return pointer && pointer->getAddressSpace() == c_ManagedAddressSpace;
-		}
-
 		// Whether a word of a `type` may hold a managed pointer: a managed pointer's, any of an array of bytes (a union,
 		// storage a copy went through) and any of an integer as wide as an address (a part the optimizer typed so). A
 		// float, a narrower integer or a raw pointer holds none.
 		bool MayHoldAny(const llvm::Type* type)
 		{
-			if (type->isPointerTy() || type->isVectorTy()) return IsManaged(type);
+			if (type->isPointerTy()) return true;
+			if (const auto* vector = llvm::dyn_cast<llvm::VectorType>(type)) return MayHoldAny(vector->getElementType());
 			if (type->isIntegerTy()) return type->getIntegerBitWidth() >= 64;
 			if (const auto* structure = llvm::dyn_cast<llvm::StructType>(type))
 			{

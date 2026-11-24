@@ -44,12 +44,14 @@ maps), **conservative for stacks, registers and raw regions**. The C API is `C4R
   (`gc_register_typed_region`, `buffer_resize_scanned_typed`; a reflected type's `Reflection::Type::GcType()`) is
   read by T's map; Bedrock's containers and serializers register theirs so.
   Still conservative: stacks, registers, untyped scan regions, `c4_alloc` memory - stacks unless the program is built
-  with `-fstack-maps` (R16 phase 3, off by default: it costs run time, up to +50% on Bedrock kernels, +60% on string-keyed
-  map lookups and +22-27% on the GC benchmark's frames). With it each C4 frame waiting in a call is read only where LLVM's stack map says its live
-  pointers and pointer-holding slots are (`Compiler/StackMaps*`: managed pointers in address space 1, statepoints after
-  the optimizer), every other frame (C, runtime, scripts, the innermost one, leaf calls) whole with the callee-saved
-  registers it saved; the walk unwinds without loader locks (`GC/GCStackWalk{Win32,Posix}.c`) and the program links
-  the runtime built with `C4_STACK_MAPS` (`GC/GCStack*` only there). Build and test it with `RunTests.ps1 -StackMaps`.
+  with `-fstack-maps` (R16 phase 3, off by default, at no measurable run-time cost). With it each C4 frame waiting in a
+  call is read only where LLVM's stack map says its live values and pointer-holding slots are (`Compiler/StackMap*`: after
+  the optimizer each call gets a `deopt` bundle naming them, nothing relocated, the IR otherwise unchanged - keep it so:
+  a statepoint operand counts as a use to the register allocator, so a value a loop does not use is named through a slot
+  of its own), every other frame (C, runtime, scripts, the innermost one, calls left without a record) whole with the
+  callee-saved registers it saved; an explicit collection does not read its own frames. The walk unwinds without loader
+  locks (`GC/GCStackWalk{Win32,Posix}.c`) and the program links the runtime built with `C4_STACK_MAPS` (`GC/GCStack*`
+  only there). Build and test it with `RunTests.ps1 -StackMaps` (`run_linux.py --stack-maps`).
 
 ## Roots
 `__c4_gc_roots` (compiler-emitted `{address, size, pointers}` ranges for every global, static member and static
@@ -58,8 +60,9 @@ reads the range whole; thread_locals the same through `__c4_gc_thread_roots`), e
 and stack (conservative; with `-fstack-maps` C4 frames by their stack maps), registered scan regions,
 root enumerators, pinned objects and objects waiting for their finalizer. A conservative collector can keep
 an object alive while a stale copy of its address sits in a register or dead stack slot - tests that assert
-"was collected" must allow a few survivors, or collect below many C4 frames with `-fstack-maps` (the runtime's own
-frames are read whole: give them stack memory no earlier call used, as `MemoryGC/StackMaps` does).
+"was collected" must allow a few survivors, or collect explicitly below many C4 frames with `-fstack-maps` (a runtime
+or C frame other than the collection's own is read whole: give it stack memory no earlier call used, as
+`MemoryGC/StackMaps` does).
 
 ## Everyday builtins (no include)
 `raw_alloc(size)` / `raw_free(ptr)`; `gc_collect()`; `gc_register_region(start, size)` /

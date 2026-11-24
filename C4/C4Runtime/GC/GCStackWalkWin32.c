@@ -170,6 +170,7 @@ static void scan_registers(const CONTEXT* context, uint32_t integers, uint32_t v
 static void walk(CONTEXT* context, Images* images, unsigned first, uintptr_t top, gc_scan_range_fn now, gc_scan_range_fn later, void* ctx)
 {
 	uintptr_t sp = (uintptr_t)context->Rsp;
+	GCArgumentBytes owed = { 0, 0 };
 	for (unsigned frame = first; sp < top; ++frame)
 	{
 		const int innermost = frame == 0;
@@ -181,11 +182,12 @@ static void walk(CONTEXT* context, Images* images, unsigned first, uintptr_t top
 		if (frame >= kMostFrames || !unwind(images, &caller, innermost, &saves) || (uintptr_t)caller.Rsp <= sp || (uintptr_t)caller.Rsp > top)
 			break; // the rest of the stack whole, from this frame on
 		const GCFrameState state = state_of(context);
-		if (!record || !gc_stack_record_scan(record, &state, now, later, ctx))
+		if (record && gc_stack_record_scan(record, &state, now, later, ctx)) gc_arguments_in_mapped(&owed, sp, (uintptr_t)caller.Rsp, &saves, later, ctx);
+		else
 		{
-			const uintptr_t end = (uintptr_t)caller.Rsp + GC_FRAME_ARGUMENT_BYTES < top ? (uintptr_t)caller.Rsp + GC_FRAME_ARGUMENT_BYTES : top;
-			gc_scan_frame_whole(sp, end, &saves, later, ctx);
+			gc_scan_frame_whole(sp, (uintptr_t)caller.Rsp, &saves, later, ctx);
 			scan_registers(context, saves.saved & kKeptIntegers, saves.savedVectors & kKeptVectors, now, ctx);
+			gc_arguments_after_whole(&owed, (uintptr_t)caller.Rsp, top);
 		}
 		*context = caller;
 		sp = (uintptr_t)caller.Rsp;
@@ -206,6 +208,28 @@ void gc_stack_walk(void* registers, uintptr_t top, gc_scan_range_fn now, gc_scan
 	walk(context, &images, 0, top, now, later, ctx);
 }
 
+// `context` stepped out to the frame waiting at `pc`, through the frames below it, unread; false, unchanged, when no frame
+// of the stack is waiting there.
+static int step_to(CONTEXT* context, Images* images, uintptr_t pc, uintptr_t top)
+{
+	CONTEXT at = *context;
+	for (unsigned frame = 0; frame < kMostFrames; ++frame)
+	{
+		if ((uintptr_t)at.Rip == pc)
+		{
+			*context = at;
+			return 1;
+		}
+		CONTEXT caller = at;
+		GCSaveSlots saves;
+		saves.count = 0;
+		saves.saved = saves.savedVectors = 0;
+		if (!unwind(images, &caller, 0, &saves) || (uintptr_t)caller.Rsp <= (uintptr_t)at.Rsp || (uintptr_t)caller.Rsp > top || !caller.Rip) return 0;
+		at = caller;
+	}
+	return 0;
+}
+
 __declspec(noinline) void gc_stack_walk_own(uintptr_t top, gc_scan_range_fn scan, void* ctx)
 {
 	CONTEXT context;
@@ -219,5 +243,6 @@ __declspec(noinline) void gc_stack_walk_own(uintptr_t top, gc_scan_range_fn scan
 	CONTEXT caller = context;
 	// Without unwind data for this frame (never, built as the runtime is) the walk reads it too, its copies included.
 	if (unwind(&images, &caller, 0, &saves) && (uintptr_t)caller.Rsp > (uintptr_t)context.Rsp && (uintptr_t)caller.Rsp < top) context = caller;
+	if (gc_stack_collection_caller()) step_to(&context, &images, gc_stack_collection_caller(), top);
 	walk(&context, &images, 1, top, scan, scan, ctx);
 }

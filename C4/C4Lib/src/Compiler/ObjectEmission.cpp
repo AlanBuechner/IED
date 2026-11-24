@@ -140,15 +140,13 @@ namespace C4Compiler
 			options.UseInitArray = abi.ConstructorsInInitArray();
 			std::unique_ptr<llvm::TargetMachine> machine(target->createTargetMachine(triple, settings.target->Cpu(),
 				settings.target->LlvmFeatures(), options, abi.Relocation(), std::nullopt, CodeGenLevel(settings.optLevel)));
-			if (UsesStackMaps(module)) module.setDataLayout(StackMapsLayout(machine->createDataLayout().getStringRepresentation()));
-			else module.setDataLayout(machine->createDataLayout());
+			module.setDataLayout(machine->createDataLayout());
 			return machine;
 		}
 
 		// The pipeline `clang -O<n>` runs: unrolling and both vectorizers from -O2 on.
 		void RunPipeline(llvm::Module& module, llvm::TargetMachine& machine, int optLevel)
 		{
-			KeepLibraryCallsAsWritten(module);
 			llvm::LoopAnalysisManager loops;
 			llvm::FunctionAnalysisManager functions;
 			llvm::CGSCCAnalysisManager sccs;
@@ -233,7 +231,7 @@ namespace C4Compiler
 			const size_t before = diagnostics.size();
 			if (settings.optimizePartitions && settings.optLevel == 0) LowerAggregateCopies(module);
 			if (settings.optimizePartitions) RunPipeline(module, *machine, settings.optLevel);
-			InsertStatepoints(module, machine.get());
+			InsertStatepoints(module);
 			if (diagnostics.size() == before) WriteObject(module, *machine, objPath, diagnostics);
 		}
 

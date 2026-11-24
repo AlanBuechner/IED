@@ -360,7 +360,7 @@ namespace C4Compiler
 		llvm::Type* registers = ret ? abi.RegisterType(ret) : nullptr;
 		if (!registers)
 		{
-			B.CreateRet(ModuleContext::InSpace(B, v, fn->getReturnType()));
+			B.CreateRet(v);
 			return;
 		}
 		llvm::Value* tmp = m_Ctx.Materialize(v, abi.CoercionSlot(v->getType(), registers));

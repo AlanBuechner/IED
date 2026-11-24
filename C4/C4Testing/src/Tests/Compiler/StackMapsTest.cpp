@@ -4,7 +4,9 @@
 #include "Compiler/ObjectEmission.h"
 #include "Compiler/RuntimeObjects.h"
 #include "Compiler/StackMaps.h"
+#include "Compiler/StackMapValues.h"
 #include "Compiler/Toolchain.h"
+#include <llvm/AsmParser/Parser.h>
 #include <llvm/BinaryFormat/ELF.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
@@ -13,6 +15,7 @@
 #include <llvm/IR/Verifier.h>
 #include <llvm/Object/ELFObjectFile.h>
 #include <llvm/Object/ObjectFile.h>
+#include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
 #include <algorithm>
 #include <filesystem>
@@ -63,6 +66,15 @@ namespace Testing
 			return text;
 		}
 
+		// A type as IR writes it: two modules' types are compared by it (each module has a context of its own).
+		std::string Text(const llvm::Type* type)
+		{
+			std::string text;
+			llvm::raw_string_ostream out(text);
+			type->print(out);
+			return text;
+		}
+
 		Lowered Lower(const char* source, bool stackMaps, TargetSystem system = HostSystem())
 		{
 			CompilerInstance compiler;
@@ -83,6 +95,24 @@ namespace Testing
 			return out;
 		}
 
+		// A module written as IR, for a target, marked for stack maps.
+		std::unique_ptr<llvm::Module> Parsed(llvm::LLVMContext& context, const std::string& body, TargetSystem system = TargetSystem::Windows)
+		{
+			const char* triple = system == TargetSystem::Linux ? "x86_64-unknown-linux-gnu" : "x86_64-pc-windows-msvc";
+			llvm::SMDiagnostic error;
+			std::unique_ptr<llvm::Module> module = llvm::parseAssemblyString(std::string("target triple = \"") + triple + "\"\n" + body, error, context);
+			if (!module)
+			{
+				std::string message;
+				llvm::raw_string_ostream out(message);
+				error.print("stack maps test", out);
+				printf("%s\n", message.c_str());
+				return nullptr;
+			}
+			MarkForStackMaps(*module);
+			return module;
+		}
+
 		const llvm::Function* FunctionNamed(const llvm::Module& module, const char* prefix)
 		{
 			for (const llvm::Function& fn : module)
@@ -99,31 +129,55 @@ namespace Testing
 			return !broken;
 		}
 
-		const llvm::Function* StatepointCallee(const llvm::CallBase& call)
-		{
-			const llvm::Function* callee = call.getCalledFunction();
-			if (!callee || callee->getIntrinsicID() != llvm::Intrinsic::experimental_gc_statepoint) return nullptr;
-			return llvm::dyn_cast<llvm::Function>(call.getArgOperand(2)->stripPointerCasts());
-		}
-
-		// The statepoints of `fn` whose callee's name starts with `prefix`.
-		std::vector<const llvm::CallBase*> StatepointsCalling(const llvm::Function& fn, const char* prefix)
+		// The calls of `fn` with a record (a deopt list) whose callee's name starts with `prefix`.
+		std::vector<const llvm::CallBase*> RecordedCalls(const llvm::Function& fn, const char* prefix)
 		{
 			std::vector<const llvm::CallBase*> found;
 			for (const llvm::Instruction& instruction : llvm::instructions(fn))
 				if (const auto* call = llvm::dyn_cast<llvm::CallBase>(&instruction))
-					if (const llvm::Function* callee = StatepointCallee(*call); callee && callee->getName().starts_with(prefix)) found.push_back(call);
+					if (const llvm::Function* callee = call->getCalledFunction(); callee && callee->getName().starts_with(prefix) && call->getOperandBundle(llvm::LLVMContext::OB_deopt))
+						found.push_back(call);
 			return found;
 		}
 
-		// How many stack slots a statepoint lists (Compiler/StackMapSlots: each slot, then its words and masks).
-		size_t ListedSlots(const llvm::CallBase& statepoint)
+		// How many stack slots a call lists (Compiler/StackMapSlots: each slot, then its words and masks).
+		size_t ListedSlots(const llvm::CallBase& call)
 		{
-			const std::optional<llvm::OperandBundleUse> deopt = statepoint.getOperandBundle(llvm::LLVMContext::OB_deopt);
+			const std::optional<llvm::OperandBundleUse> deopt = call.getOperandBundle(llvm::LLVMContext::OB_deopt);
 			size_t slots = 0;
 			if (deopt)
 				for (const llvm::Use& input : deopt->Inputs) slots += llvm::isa<llvm::AllocaInst>(input.get()) ? 1 : 0;
 			return slots;
+		}
+
+		// The names of the values ValuesLiveAcross gives for the call of `callee` in `fn`.
+		std::vector<std::string> LiveAcross(llvm::Function& fn, const char* callee)
+		{
+			std::vector<llvm::CallBase*> calls;
+			for (llvm::Instruction& instruction : llvm::instructions(fn))
+				if (auto* call = llvm::dyn_cast<llvm::CallBase>(&instruction); call && call->getCalledFunction() && call->getCalledFunction()->getName() == callee)
+					calls.push_back(call);
+			std::vector<std::string> names;
+			if (calls.size() != 1) return names;
+			const auto live = ValuesLiveAcross(fn, calls);
+			const auto found = live.find(calls[0]);
+			if (found != live.end())
+				for (const llvm::Value* value : found->second) names.push_back(value->getName().str());
+			return names;
+		}
+
+		// Whether code generation writes `module` as an object for `system`.
+		bool ObjectWritten(llvm::Module& module, TargetSystem system, int optLevel)
+		{
+			const CpuTarget target = CpuTarget().On(system);
+			const ObjectSettings settings{ optLevel, &target, 1, false };
+			const std::string path = (std::filesystem::temp_directory_path() / "c4_stack_maps_test_object.o").string();
+			std::vector<ObjectDiagnostic> diagnostics;
+			const bool written = WriteObject(module, settings, path, diagnostics);
+			for (const ObjectDiagnostic& diagnostic : diagnostics) printf("%s\n", diagnostic.message.c_str());
+			std::error_code ec;
+			std::filesystem::remove(path, ec);
+			return written && diagnostics.empty();
 		}
 	}
 
@@ -132,34 +186,47 @@ namespace Testing
 		Lowered plain = Lower(kProgram, false);
 		TEST_ASSERT(plain.module != nullptr);
 		if (!plain.module) return;
-		TEST_ASSERT(plain.ir.find("addrspace(1)") == std::string::npos);
 		TEST_ASSERT(!UsesStackMaps(*plain.module));
-		InsertStatepoints(*plain.module, nullptr);
+		InsertStatepoints(*plain.module);
 		TEST_ASSERT(Text(*plain.module) == plain.ir);
 	}
 
-	void StackMapsTest::ManagedPointersHaveTheirOwnSpace()
+	void StackMapsTest::TheFlagChangesNoFunction()
 	{
+		Lowered plain = Lower(kProgram, false);
 		Lowered mapped = Lower(kProgram, true);
-		TEST_ASSERT(mapped.module != nullptr);
-		if (!mapped.module) return;
+		TEST_ASSERT(plain.module != nullptr && mapped.module != nullptr);
+		if (!plain.module || !mapped.module) return;
 		TEST_ASSERT(UsesStackMaps(*mapped.module));
-		TEST_ASSERT(mapped.module->getDataLayout().isNonIntegralAddressSpace(c_ManagedAddressSpace));
-		const llvm::Function* use = FunctionNamed(*mapped.module, "Use");
-		TEST_ASSERT(use && use->arg_size() == 1 && use->getArg(0)->getType()->getPointerAddressSpace() == c_ManagedAddressSpace);
-		TEST_ASSERT(Verified(*mapped.module));
+		TEST_ASSERT(mapped.module->getDataLayoutStr() == plain.module->getDataLayoutStr());
+		TEST_ASSERT(mapped.ir.find("addrspace(") == std::string::npos);
+		for (const llvm::Function& fn : *plain.module)
+		{
+			const llvm::Function* same = mapped.module->getFunction(fn.getName());
+			const bool alike = same != nullptr && Text(same->getFunctionType()) == Text(fn.getFunctionType()) && same->getInstructionCount() == fn.getInstructionCount();
+			if (!alike) printf("not alike: %s (%u instructions, %u with the flag)\n", fn.getName().str().c_str(), fn.getInstructionCount(), same ? same->getInstructionCount() : 0u);
+			TEST_ASSERT(alike);
+			if (!alike) continue;
+			auto other = llvm::instructions(*same).begin();
+			for (const llvm::Instruction& instruction : llvm::instructions(fn))
+			{
+				TEST_ASSERT(instruction.getOpcode() == other->getOpcode() && Text(instruction.getType()) == Text(other->getType()));
+				++other;
+			}
+		}
 	}
 
-	void StackMapsTest::CallsBecomeStatepoints()
+	void StackMapsTest::CallsGetRecords()
 	{
 		Lowered mapped = Lower(kProgram, true);
 		TEST_ASSERT(mapped.module != nullptr);
 		if (!mapped.module) return;
-		InsertStatepoints(*mapped.module, nullptr);
+		InsertStatepoints(*mapped.module);
 		TEST_ASSERT(Verified(*mapped.module));
 		const llvm::Function* slots = FunctionNamed(*mapped.module, "Slots");
 		TEST_ASSERT(slots && slots->hasGC() && slots->getGC() == c_StackMapsGc);
-		if (slots) TEST_ASSERT(StatepointsCalling(*slots, "Call").size() == 1);
+		if (slots) TEST_ASSERT(RecordedCalls(*slots, "Call").size() == 1);
+		TEST_ASSERT(ObjectWritten(*mapped.module, HostSystem(), 0));
 	}
 
 	void StackMapsTest::ADeadSlotIsNotListed()
@@ -167,12 +234,12 @@ namespace Testing
 		Lowered mapped = Lower(kProgram, true);
 		TEST_ASSERT(mapped.module != nullptr);
 		if (!mapped.module) return;
-		InsertStatepoints(*mapped.module, nullptr);
+		InsertStatepoints(*mapped.module);
 		const llvm::Function* slots = FunctionNamed(*mapped.module, "Slots");
 		TEST_ASSERT(slots != nullptr);
 		if (!slots) return;
-		const std::vector<const llvm::CallBase*> calls = StatepointsCalling(*slots, "Call");
-		const std::vector<const llvm::CallBase*> allocations = StatepointsCalling(*slots, "c4_alloc");
+		const std::vector<const llvm::CallBase*> calls = RecordedCalls(*slots, "Call");
+		const std::vector<const llvm::CallBase*> allocations = RecordedCalls(*slots, "c4_alloc");
 		TEST_ASSERT(calls.size() == 1 && allocations.size() == 3);
 		if (calls.size() != 1 || allocations.size() != 3) return;
 		// At the third `new` a and b are read later; at Call only c is.
@@ -181,30 +248,154 @@ namespace Testing
 		TEST_ASSERT(ListedSlots(*calls[0]) < ListedSlots(*allocations[2]));
 	}
 
-	void StackMapsTest::InvokesStayLeaves()
+	void StackMapsTest::AValueLiveAcrossACallIsListed()
 	{
-		Lowered mapped = Lower(R"(
+		llvm::LLVMContext context;
+		std::unique_ptr<llvm::Module> module = Parsed(context, R"(
+			@g = global ptr null
+			declare ptr @make()
+			declare void @call()
+			declare void @use(ptr, i64)
+			define void @f(ptr %a, i64 %n) {
+			entry:
+				%slot = alloca ptr
+				%field = getelementptr i8, ptr %a, i64 8
+				%made = call ptr @make()
+				%dead = call ptr @make()
+				%bits = ptrtoint ptr %made to i64
+				%local = getelementptr i8, ptr %slot, i64 8
+				call void @call()
+				call void @use(ptr %field, i64 %bits)
+				call void @use(ptr %a, i64 %n)
+				call void @use(ptr %local, i64 0)
+				call void @use(ptr @g, i64 0)
+				ret void
+			}
+		)");
+		TEST_ASSERT(module != nullptr);
+		if (!module) return;
+		// %field points into %a, which is listed; %made lives on only as %bits; %dead is not read again; %local is a stack
+		// slot's address, @g a global's.
+		const std::vector<std::string> live = LiveAcross(*module->getFunction("f"), "call");
+		TEST_ASSERT(live == std::vector<std::string>({ "a", "n", "bits" }));
+	}
+
+	void StackMapsTest::ACounterIsNoAddress()
+	{
+		llvm::LLVMContext context;
+		std::unique_ptr<llvm::Module> module = Parsed(context, R"(
+			declare void @call()
+			declare void @use(ptr, i64)
+			define void @f(ptr %p, i32 %count, ptr %q) {
+			entry:
+				%start = load i64, ptr %q
+				br label %body
+			body:
+				%i = phi i64 [ 0, %entry ], [ %next, %body ]
+				%address = phi i64 [ %start, %entry ], [ %step, %body ]
+				call void @call()
+				%next = add i64 %i, 1
+				%step = add i64 %address, 16
+				%wide = zext i32 %count to i64
+				%done = icmp eq i64 %next, %wide
+				br i1 %done, label %exit, label %body
+			exit:
+				call void @use(ptr %p, i64 %step)
+				ret void
+			}
+		)");
+		TEST_ASSERT(module != nullptr);
+		if (!module) return;
+		// The counter starts at a constant and only adds to itself; the integer loaded and stepped may be an address.
+		const std::vector<std::string> live = LiveAcross(*module->getFunction("f"), "call");
+		TEST_ASSERT(live == std::vector<std::string>({ "p", "address" }));
+	}
+
+	void StackMapsTest::OnlyASiblingCallKeepsNoRecord()
+	{
+		llvm::LLVMContext context;
+		std::unique_ptr<llvm::Module> module = Parsed(context, R"(
+			declare void @collect()
+			declare ptr @make()
+			define i32 @returnsZero() {
+				tail call void @collect()
+				ret i32 0
+			}
+			define i64 @returnsItsAddress() {
+				%made = tail call ptr @make()
+				%address = ptrtoint ptr %made to i64
+				ret i64 %address
+			}
+			define ptr @returnsAfterABranch(i1 %which) {
+			entry:
+				br i1 %which, label %call, label %exit
+			call:
+				%made = tail call ptr @make()
+				br label %exit
+			exit:
+				%result = phi ptr [ %made, %call ], [ null, %entry ]
+				ret ptr %result
+			}
+		)");
+		TEST_ASSERT(module != nullptr);
+		if (!module) return;
+		InsertStatepoints(*module);
+		TEST_ASSERT(Verified(*module));
+		// A call before a return of something else is no sibling call: its frame waits in it, and is read by its record.
+		TEST_ASSERT(RecordedCalls(*module->getFunction("returnsZero"), "collect").size() == 1);
+		TEST_ASSERT(RecordedCalls(*module->getFunction("returnsItsAddress"), "make").empty());
+		TEST_ASSERT(RecordedCalls(*module->getFunction("returnsAfterABranch"), "make").empty());
+	}
+
+	void StackMapsTest::AnInvokeGetsARecord()
+	{
+		constexpr const char* kGuarded = R"(
 			int32 g_done = 0;
 			struct Guard { public int32 v; [operator("delete")] void Done() { g_done++; } }
 			void MayThrow(int32 x) { if (x > 5) throw x; }
 			int32 Guarded(int32 x) { Guard g; MayThrow(x); return g.v; }
 			int32 main() { return Guarded(1); }
-		)", true);
-		TEST_ASSERT(mapped.module != nullptr);
-		if (!mapped.module) return;
-		InsertStatepoints(*mapped.module, nullptr);
-		TEST_ASSERT(Verified(*mapped.module));
-		const llvm::Function* guarded = FunctionNamed(*mapped.module, "Guarded");
-		TEST_ASSERT(guarded != nullptr);
-		if (!guarded) return;
-		size_t invokes = 0;
-		for (const llvm::Instruction& instruction : llvm::instructions(*guarded))
-			if (const auto* invoke = llvm::dyn_cast<llvm::InvokeInst>(&instruction))
-			{
-				++invokes;
-				TEST_ASSERT(invoke->hasFnAttr("gc-leaf-function"));
-			}
-		TEST_ASSERT(invokes >= 1);
+		)";
+		for (const TargetSystem system : { TargetSystem::Windows, TargetSystem::Linux })
+		{
+			Lowered mapped = Lower(kGuarded, true, system);
+			TEST_ASSERT(mapped.module != nullptr);
+			if (!mapped.module) continue;
+			InsertStatepoints(*mapped.module);
+			TEST_ASSERT(Verified(*mapped.module));
+			const llvm::Function* guarded = FunctionNamed(*mapped.module, "Guarded");
+			TEST_ASSERT(guarded != nullptr);
+			if (!guarded) continue;
+			size_t invokes = 0;
+			for (const llvm::Instruction& instruction : llvm::instructions(*guarded))
+				if (const auto* invoke = llvm::dyn_cast<llvm::InvokeInst>(&instruction))
+				{
+					++invokes;
+					TEST_ASSERT(invoke->getOperandBundle(llvm::LLVMContext::OB_deopt).has_value());
+				}
+			TEST_ASSERT(invokes >= 1);
+			TEST_ASSERT(ObjectWritten(*mapped.module, system, 0));
+		}
+	}
+
+	void StackMapsTest::ManyValuesAtOneCallFitTheFrame()
+	{
+		// Twelve fields of one object and twelve pointers loaded from them, all read after the call: code generation could
+		// make each field's address again at the call from the object's, which wants a register apiece there.
+		std::string body = "declare void @call()\ndeclare void @use(ptr)\ndefine void @f(ptr %a) {\n";
+		for (int i = 0; i < 12; ++i)
+			body += "%f" + std::to_string(i) + " = getelementptr i8, ptr %a, i64 " + std::to_string(8 * i + 16) + "\n%p" + std::to_string(i) +
+				" = load ptr, ptr %f" + std::to_string(i) + "\n";
+		body += "call void @call()\n";
+		for (int i = 0; i < 12; ++i) body += "call void @use(ptr %f" + std::to_string(i) + ")\ncall void @use(ptr %p" + std::to_string(i) + ")\n";
+		body += "ret void\n}\n";
+		for (const TargetSystem system : { TargetSystem::Windows, TargetSystem::Linux })
+		{
+			llvm::LLVMContext context;
+			std::unique_ptr<llvm::Module> module = Parsed(context, body, system);
+			TEST_ASSERT(module != nullptr);
+			if (module) TEST_ASSERT(ObjectWritten(*module, system, 2));
+		}
 	}
 
 	void StackMapsTest::AnElfStackMapIsWritableAndBracketed()
@@ -244,9 +435,10 @@ namespace Testing
 		std::filesystem::remove(path, ec);
 	}
 
-	void StackMapsTest::ALibraryCallKeepsItsManagedPointers()
+	void StackMapsTest::ALibraryCallCodeGenerationExpandsHasNoRecord()
 	{
-		// Optimized, a memcmp compared with 0 becomes bcmp where the C library has one (Linux), declared with raw pointers.
+		// Optimized, a memcmp compared with 0 becomes bcmp where the C library has one (Linux), and code generation expands
+		// it in place; a record would hide the call from it.
 		Lowered mapped = Lower(R"(
 			struct T { public int64 v; }
 			uint64 g_size = 8;
@@ -262,10 +454,19 @@ namespace Testing
 		const ObjectSettings settings{ 2, &target, 1, false };
 		std::vector<ObjectDiagnostic> diagnostics;
 		TEST_ASSERT(OptimizeModule(*mapped.module, settings, diagnostics));
+		InsertStatepoints(*mapped.module);
 		TEST_ASSERT(Verified(*mapped.module));
-		TEST_ASSERT(mapped.module->getFunction("bcmp") == nullptr);
-		const llvm::Function* memcmp = mapped.module->getFunction("memcmp");
-		TEST_ASSERT(memcmp && memcmp->hasFnAttribute(llvm::Attribute::NoBuiltin));
+		size_t compares = 0;
+		for (const llvm::Function& fn : *mapped.module)
+			for (const llvm::Instruction& instruction : llvm::instructions(fn))
+				if (const auto* call = llvm::dyn_cast<llvm::CallBase>(&instruction))
+					if (const llvm::Function* callee = call->getCalledFunction(); callee && (callee->getName() == "bcmp" || callee->getName() == "memcmp"))
+					{
+						++compares;
+						TEST_ASSERT(!call->getOperandBundle(llvm::LLVMContext::OB_deopt));
+					}
+		TEST_ASSERT(compares >= 1);
+		TEST_ASSERT(ObjectWritten(*mapped.module, TargetSystem::Linux, 2));
 	}
 
 	void StackMapsTest::OnlyAProgramWithStackMapsLinksTheirRuntime()

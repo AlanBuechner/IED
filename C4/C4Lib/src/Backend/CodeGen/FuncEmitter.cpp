@@ -14,7 +14,7 @@ namespace C4Compiler
 			Abi& abi = mc.abi();
 			const Type* ret = signature->GetReturnType();
 			const Abi::Signature s = abi.SignatureOf(ret, kind);
-			std::vector<llvm::Type*> params(s.firstParam, mc.ManagedPtr()); // the environment, the sret pointer
+			std::vector<llvm::Type*> params(s.firstParam, llvm::PointerType::get(mc.context(), 0));
 			for (const Type* p : signature->GetParameterTypes())
 			{
 				llvm::Type* pt = abi.ParamType(p);
@@ -41,14 +41,13 @@ namespace C4Compiler
 			const Abi::Signature member = abi.SignatureOf(ret, Abi::CallKind::Member);
 			const Abi::Signature free = abi.SignatureOf(ret, Abi::CallKind::Free);
 			llvm::IRBuilder<> B(llvm::BasicBlock::Create(mc.context(), "entry", thunk));
-			llvm::Value* target = ModuleContext::InSpace(B, thunk->getArg(static_cast<unsigned>(member.thisIndex)), mc.RawPtr()); // code
+			llvm::Value* target = thunk->getArg(static_cast<unsigned>(member.thisIndex));
 			llvm::Value* result = member.sret ? thunk->getArg(static_cast<unsigned>(member.sretIndex)) : nullptr;
 
 			std::vector<llvm::Value*> args(free.firstParam, nullptr);
 			if (free.sret) args[static_cast<size_t>(free.sretIndex)] = result;
 			for (unsigned i = member.firstParam; i < thunk->arg_size(); ++i) args.push_back(thunk->getArg(i));
-			llvm::FunctionType* type = SignatureFunctionType(mc, signature, Abi::CallKind::Free);
-			llvm::CallInst* call = B.CreateCall(type, target, ModuleContext::Arguments(B, type, args));
+			llvm::CallInst* call = B.CreateCall(SignatureFunctionType(mc, signature, Abi::CallKind::Free), target, args);
 
 			if (member.sret && !free.sret) B.CreateStore(call, result);
 			if (thunk->getReturnType()->isVoidTy()) B.CreateRetVoid();
@@ -69,7 +68,7 @@ namespace C4Compiler
 		B.CreateStore(adapter->getArg(0), object); // the closure's one field, at offset 0
 		std::vector<llvm::Value*> args{ object };
 		for (unsigned i = 1; i < adapter->arg_size(); ++i) args.push_back(adapter->getArg(i));
-		llvm::CallInst* result = B.CreateCall(method, ModuleContext::Arguments(B, method->getFunctionType(), args));
+		llvm::CallInst* result = B.CreateCall(method, args);
 		if (adapter->getReturnType()->isVoidTy()) B.CreateRetVoid();
 		else B.CreateRet(result);
 		return adapter;
@@ -131,9 +130,10 @@ namespace C4Compiler
 	llvm::Value* FuncEmitter::Pack(llvm::Value* code, llvm::Value* environment)
 	{
 		auto& B = m_Ctx.builder();
-		ModuleContext& mc = m_Ctx.mctx();
-		auto* funcTy = llvm::StructType::get(mc.context(), { mc.RawPtr(), mc.ManagedPtr() });
-		llvm::Value* packed = B.CreateInsertValue(llvm::PoisonValue::get(funcTy), ModuleContext::InSpace(B, code, mc.RawPtr()), { 0 });
-		return B.CreateInsertValue(packed, ModuleContext::InSpace(B, environment, mc.ManagedPtr()), { 1 });
+		llvm::LLVMContext& ctx = m_Ctx.mctx().context();
+		auto* ptr = llvm::PointerType::get(ctx, 0);
+		auto* funcTy = llvm::StructType::get(ctx, { ptr, ptr });
+		llvm::Value* packed = B.CreateInsertValue(llvm::PoisonValue::get(funcTy), code, { 0 });
+		return B.CreateInsertValue(packed, environment, { 1 });
 	}
 }

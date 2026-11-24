@@ -75,7 +75,7 @@ namespace C4Compiler
 		if (sig.thisIndex >= 0)
 		{
 			thisArg = func ? m_Ctx.builder().CreateExtractValue(func, { 1 }) : n->receiver ? m_Expr.LValueAddress(n->receiver) : nullptr;
-			args[sig.thisIndex] = thisArg ? thisArg : llvm::ConstantPointerNull::get(mc.ManagedPtr());
+			args[sig.thisIndex] = thisArg ? thisArg : llvm::ConstantPointerNull::get(llvm::PointerType::get(mc.context(), 0));
 		}
 		if (sig.sretIndex >= 0) args[sig.sretIndex] = sret;
 		AppendArguments({ n->callee, n->target, n->args }, args);
@@ -196,8 +196,7 @@ namespace C4Compiler
 		const Type* elemType = static_cast<const InitListType*>(pe)->GetElementType();
 		llvm::Value* data = B.CreateExtractValue(list, { 0 });
 		llvm::Value* last = B.CreateInBoundsGEP(m_Ctx.mctx().Storage(elemType), data, B.CreateExtractValue(list, { 1 }));
-		llvm::PointerType* element = m_Ctx.mctx().ManagedPtr();
-		auto* msvcList = llvm::StructType::get(ctx, { element, element });
+		auto* msvcList = llvm::StructType::get(ctx, { llvm::PointerType::get(ctx, 0), llvm::PointerType::get(ctx, 0) });
 		llvm::Value* agg = B.CreateInsertValue(B.CreateInsertValue(llvm::PoisonValue::get(msvcList), data, { 0 }), last, { 1 });
 		llvm::Value* temp = m_Ctx.EntryAlloca(msvcList, "ms_initializer_list");
 		B.CreateStore(agg, temp);
@@ -240,7 +239,7 @@ namespace C4Compiler
 		const SignatureType* fp = TargetSignature(n->target);
 		const Type* ret = fp ? fp->GetReturnType() : nullptr;
 		const Abi::Signature sig = abi.SignatureOf(ret, Abi::CallKind::Free);
-		std::vector<llvm::Type*> tys(sig.firstParam, mc.ManagedPtr()); // the sret pointer, as FunctionTypeOf has it
+		std::vector<llvm::Type*> tys(sig.firstParam, llvm::PointerType::get(mc.context(), 0));
 		for (uint32_t i = 0; fp && i < fp->GetParameterCount(); ++i)
 		{
 			const Type* p = fp->GetParameterTypes()[i];

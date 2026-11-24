@@ -23,7 +23,7 @@ namespace C4Compiler
 
 		void CallDestroy(llvm::IRBuilder<>& B, llvm::Function* destroy, llvm::Value* object)
 		{
-			llvm::CallInst* call = B.CreateCall(destroy, ModuleContext::Arguments(B, destroy->getFunctionType(), { object }));
+			llvm::CallInst* call = B.CreateCall(destroy, { object });
 			call->setCallingConv(destroy->getCallingConv());
 		}
 

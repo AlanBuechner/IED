@@ -41,7 +41,8 @@ namespace C4Compiler
 	void ObjectEmitter::RegisterFinalizer(llvm::Value* object, const FunctionRecord& finalizer)
 	{
 		ModuleContext& mc = m_Ctx.mctx();
-		auto* regFn = mc.RuntimeFunction("c4_gc_register_finalizer", llvm::Type::getVoidTy(mc.context()), { mc.ManagedPtr(), mc.RawPtr() });
+		auto* ptr = llvm::PointerType::get(mc.context(), 0);
+		auto* regFn = mc.RuntimeFunction("c4_gc_register_finalizer", llvm::Type::getVoidTy(mc.context()), { ptr, ptr });
 		m_Ctx.Call(regFn, { object, mc.GetOrCreateFunction(finalizer) }, false);
 	}
 
@@ -71,7 +72,7 @@ namespace C4Compiler
 		const char* allocator = !TypeHandle::MayHoldPointers(type) ? "c4_alloc_typed_noscan"
 			: m_Ctx.mctx().census().HasPointerMap(type) ? precise : "c4_alloc_typed";
 		auto& B = m_Ctx.builder();
-		auto* allocFn = m_Ctx.mctx().RuntimeFunction(allocator, m_Ctx.mctx().ManagedPtr(), { B.getInt64Ty(), B.getInt64Ty(), B.getPtrTy() });
+		auto* allocFn = m_Ctx.mctx().RuntimeFunction(allocator, B.getPtrTy(), { B.getInt64Ty(), B.getInt64Ty(), B.getPtrTy() });
 		return m_Ctx.Call(allocFn, { size, B.getInt64(align), census }, false);
 	}
 
@@ -90,14 +91,14 @@ namespace C4Compiler
 		llvm::Value* elements = m_Expr.LValueAddress(n->elements);
 		B.CreateStore(first, elements);
 		m_Ctx.EmitNestedBlock(n->initialize);
-		first = B.CreateLoad(m_Ctx.mctx().ManagedPtr(), elements);
+		first = B.CreateLoad(B.getPtrTy(), elements);
 		if (n->finalizer)
 		{
 			const ArrayCount layout = Layout(element);
 			const uint64 countBytes = CountedArray::PrefixBytes(element->GetAlignment());
 			llvm::Value* base = B.CreateGEP(B.getInt8Ty(), first, B.getInt64(-static_cast<int64>(countBytes)));
 			llvm::Function* finalizer = ArrayStorage::Finalizer(m_Ctx.mctx(), *n->finalizer, layout.perElement, layout.stride, countBytes);
-			auto* regFn = m_Ctx.mctx().RuntimeFunction("c4_gc_register_finalizer", B.getVoidTy(), { m_Ctx.mctx().ManagedPtr(), B.getPtrTy() });
+			auto* regFn = m_Ctx.mctx().RuntimeFunction("c4_gc_register_finalizer", B.getVoidTy(), { B.getPtrTy(), B.getPtrTy() });
 			m_Ctx.Call(regFn, { base, finalizer }, false);
 		}
 		return first;
@@ -232,7 +233,7 @@ namespace C4Compiler
 			m_Expr.GcStore(slotAddr, m_Expr.Emit(n->elements[i]), elemType);
 		}
 		llvm::StructType* listTy = llvm::cast<llvm::StructType>(mc.Lower(n->type));
-		llvm::Value* agg = B.CreateInsertValue(llvm::PoisonValue::get(listTy), ModuleContext::InSpace(B, arr, listTy->getElementType(0)), { 0 });
+		llvm::Value* agg = B.CreateInsertValue(llvm::PoisonValue::get(listTy), arr, { 0 });
 		return B.CreateInsertValue(agg, llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx), n->elements.size()), { 1 });
 	}
 
@@ -242,7 +243,7 @@ namespace C4Compiler
 		// exception escaping the finalizer is fatal (runtime/01), so the call never unwinds.
 		llvm::LLVMContext& ctx = m_Ctx.mctx().context();
 		llvm::Value* object = m_Expr.Emit(n->operand);
-		auto* freeFn = m_Ctx.mctx().RuntimeFunction("c4_free", llvm::Type::getVoidTy(ctx), { m_Ctx.mctx().ManagedPtr() });
+		auto* freeFn = m_Ctx.mctx().RuntimeFunction("c4_free", llvm::Type::getVoidTy(ctx), { llvm::PointerType::get(ctx, 0) });
 		m_Ctx.Call(freeFn, { object }, false);
 		return llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx), 0);
 	}

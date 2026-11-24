@@ -120,8 +120,8 @@ By default every registered thread's stack and registers are read whole: an obje
 its address sits in a dead slot or a register. The collector's own concurrent thread is not read while it waits for its
 next cycle (`GCThread::idle`, BUG-501): it holds nothing of the program's then, and its waiting frames reuse stack memory
 its last cycle wrote - the objects it marked and swept, a finalizer's locals - which kept dead objects alive through a
-collection the program asked for (IsolatedTest `MemoryGC/CollectorThreadKeepsNothing`: 16 of 16 dropped targets before). A program built with `-fstack-maps` (R16 phase 3, off by default for its
-run-time cost, measured in [compiler/04 "Stack maps"](../compiler/04-codegen-and-abi.md#stack-maps)) carries LLVM's stack
+collection the program asked for (IsolatedTest `MemoryGC/CollectorThreadKeepsNothing`: 16 of 16 dropped targets before). A program built with `-fstack-maps` (R16 phase 3, off by default, its
+cost measured in [compiler/04 "Stack maps"](../compiler/04-codegen-and-abi.md#stack-maps)) carries LLVM's stack
 map of its C4 code and links the runtime built with `C4_STACK_MAPS` (`GC/GCStackMaps.{h,c}`, `GC/GCStackWalkWin32.c`,
 `GC/GCStackWalkPosix.c`; only that runtime has them). At its first collection the runtime reads the image's maps (PE:
 the `.llvm_st` section; ELF: `__start_`/`__stop_llvm_stackmaps`) into a table by return address. Each stack is then
@@ -131,23 +131,30 @@ script's JIT code, ends the walk); on Linux the loaded modules' `.eh_frame_hdr` 
 (`dl_iterate_phdr`, `gc_os_prepare_stack_walk`) and the runtime runs the call frame instructions itself (a DWARF
 expression or a signal frame ends the walk). Where the walk ends the rest of the stack is read whole.
 
-- A frame waiting in a call with a record is read only at the record's places: the spill slots of the managed values
-  live across the call, and the mapped words of the stack slots listed for it (a slot whose loads all come before the
-  call is not listed).
+- A frame waiting in a call with a record is read only at the record's places: the values live across the call, each
+  where it is while the call runs - a register (its value as the unwinder restored it for this frame), a spill slot -
+  and the mapped words of the stack slots listed for it (a slot whose loads all come before the call is not listed; a
+  value a loop around the call does not use is listed through a slot of its own).
 - Any other frame - C, C++, the runtime, a script, a call the compiler left without a record, the innermost frame of a
-  stopped thread - is read whole: from its stack pointer to its caller's and 160 bytes on (its stack arguments, a
-  Windows frame's register homes), less the slots where it saved its callers' registers, and with the callee-saved
-  registers it saved (a register's value belongs to the frame that saved it; one passed through untouched belongs to a
-  frame further out). The innermost frame of a stopped thread is also read with its volatile registers and, on Linux,
-  its red zone; the collector's own thread starts the walk at its caller's frame, so the registers it captured are not
-  read again from its own.
+  stopped thread - is read whole: from its stack pointer to its caller's, less the slots where it saved its callers'
+  registers, and with the callee-saved registers it saved (a register's value belongs to the frame that saved it; one
+  passed through untouched belongs to a frame further out). The 160 bytes past its end, in its caller's frame (its stack
+  arguments, a Windows frame's register homes), are read with it too: by the caller itself when that is read whole, else
+  as part of the caller read by its record, but for the slots where that caller saved its own callers' registers. The
+  innermost frame of a stopped thread is also read with its volatile registers and, on Linux, its red zone; the
+  collector's own thread starts the walk at its caller's frame, so the registers it captured are not read again from its
+  own.
 - The precision is the C4 frames': a runtime or C frame is still read whole, so an address an earlier call left in
-  stack memory such a frame reuses can still keep an object (IsolatedTest `MemoryGC/StackMaps` collects below 256
-  C4 frames for that reason: 20 of 20 dead targets go with the flag, 18 of 20 without). An explicit collection
-  (`c4_gc_collect`, `GC::Collect`) zeroes 8 KiB of stack below its caller first, where its own frames will lie: before that,
-  an interior pointer an allocation had left there (BUG-502, about one run in thirty) sat in a shadow-space or spill slot of
-  `gc_os_scan_stack`'s frame and kept one target alive. A collection an allocation starts has no such cleaning: it reads
-  whatever its frames cover, as a conservative collector does.
+  stack memory such a frame reuses can still keep an object, and so can a value a C4 frame left in a register a callee
+  preserves (C4 code keeps values across calls there) where such a frame saved that register and has not overwritten it
+  yet. An explicit collection (`c4_gc_collect`, `GC::Collect`) reads none of its own frames: while it collects (not while
+  finalizers run), the walk of its thread steps through the frames below the program's call unread
+  (`gc_stack_set_collection_caller`) - the alignment slot of a prologue there once held the address the program had just
+  stored and kept its object. It also zeroes 8 KiB of stack below its caller first (BUG-502), for the program built
+  without stack maps. A collection an allocation starts reads whatever its frames cover and the registers they saved, as
+  a conservative collector does, and so does the walk of a thread stopped in the runtime or in C (IsolatedTest
+  `MemoryGC/StackMaps` collects explicitly below 256 C4 frames: 20 of 20 dead targets go with the flag, 18 of 20
+  without).
 
 ---
 
@@ -243,7 +250,7 @@ enumerators or callbacks.
 | Gap | Status |
 |---|---|
 | Win32 only (`GCPlatformWin32.c`). Linux needs a `GCPlatformPosix.c` (B31). | **Planned** |
-| By default stacks, registers and scan regions are read conservatively: an object stays alive while a stale copy of its address sits in a register, a dead stack slot or a region's unused memory. Heap objects of known type and global roots are read by their pointer maps (R16 phases 1 and 2); Bedrock's scanned buffers (B70) and reflected values (B71) by their element type's map (`gc_type_of`, typed regions). Precise C4 frames are built (R16 phase 3, `-fstack-maps`, section 2 "Stacks") but off by default: they cost run time (Bedrock kernels up to +50%, string-keyed map lookups up to +60%, the GC benchmark's frames +22-27%), mostly from what a managed address space takes from LLVM's optimizer and from the values spilled around calls. | **Behind a flag** |
+| By default stacks, registers and scan regions are read conservatively: an object stays alive while a stale copy of its address sits in a register, a dead stack slot or a region's unused memory. Heap objects of known type and global roots are read by their pointer maps (R16 phases 1 and 2); Bedrock's scanned buffers (B70) and reflected values (B71) by their element type's map (`gc_type_of`, typed regions). Precise C4 frames are built (R16 phase 3, `-fstack-maps`, section 2 "Stacks"), off by default; they cost no measurable run time (compiler/04 "Stack maps"). | **Behind a flag** |
 
 ---
 
@@ -266,6 +273,5 @@ needs a decision before work starts:
 - Compiler-driven frame arenas with promotion to the GC heap.
 - Young/old generations (would need a write barrier in codegen's store helper).
 - Lazy or concurrent sweeping, for a shorter final stop on a very large heap.
-- Precise stack scanning by default: it exists behind `-fstack-maps` (R16 phase 3, section 2 "Stacks") and needs its
-  cost gone first - an LLVM that treats null in the managed address space as it does in 0, values kept in callee-saved
-  registers without dead ones keeping their objects. A moving or generational collector would need it.
+- Precise stack scanning by default: it exists behind `-fstack-maps` (R16 phase 3, section 2 "Stacks"), at no measurable
+  run-time cost. A moving or generational collector would need it, and relocations, which its records do not make.

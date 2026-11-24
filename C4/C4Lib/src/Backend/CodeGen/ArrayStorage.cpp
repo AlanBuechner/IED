@@ -7,6 +7,8 @@ namespace C4Compiler
 {
 	namespace
 	{
+		llvm::Type* Ptr(ModuleContext& m) { return llvm::PointerType::get(m.context(), 0); }
+
 		// for (i = count; i > 0; ) { --i; destroy(first + i * stride); } with count > 0
 		void DestroyLastFirst(llvm::IRBuilder<>& B, llvm::Function* destroy, llvm::Value* first, llvm::Value* count, uint64 stride)
 		{
@@ -53,7 +55,7 @@ namespace C4Compiler
 			std::to_string(countBytes);
 		if (llvm::Function* existing = m.module().getFunction(name)) return existing;
 		llvm::Function* body = m.GetOrCreateFunction(destroy);
-		auto* fn = llvm::Function::Create(llvm::FunctionType::get(llvm::Type::getVoidTy(m.context()), { m.ManagedPtr() }, false), // the heap array
+		auto* fn = llvm::Function::Create(llvm::FunctionType::get(llvm::Type::getVoidTy(m.context()), { Ptr(m) }, false),
 			llvm::Function::InternalLinkage, name, m.module());
 		llvm::IRBuilder<> B(llvm::BasicBlock::Create(m.context(), "entry", fn));
 		llvm::Value* base = fn->getArg(0);

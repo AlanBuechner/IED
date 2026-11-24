@@ -39,6 +39,15 @@ void gc_os_stack_maps(const uint8_t** start, const uint8_t** end);
 // arguments are, and on Windows its register arguments' home.
 enum { GC_FRAME_ARGUMENT_BYTES = 160 };
 
+// The argument bytes frames read whole have left to the frames above them, [from, to): a frame above read whole reads
+// them with its own memory; one read by its record reads only those within it, without the slots where it saved its
+// callers' registers (a value there is read with the frame it belongs to - a C4 frame's dead one not at all).
+typedef struct GCArgumentBytes
+{
+	uintptr_t from;
+	uintptr_t to;
+} GCArgumentBytes;
+
 // Where a frame keeps registers of its callers (the unwinder restored them from there). A whole read of the frame skips
 // them: each value is read with the frame it belongs to, or is dead (a frame read by its record keeps nothing live in a
 // register across a call). A register's value belongs to the frame that saved it, which may have set it; a frame that did
@@ -57,6 +66,10 @@ typedef struct GCSaveSlots
 void gc_save_slots_add(GCSaveSlots* saves, uintptr_t at, unsigned bytes);
 // Reads [from, to) whole through `later`, but for the save slots.
 void gc_scan_frame_whole(uintptr_t from, uintptr_t to, GCSaveSlots* saves, gc_scan_range_fn later, void* ctx);
+// A frame that ends at `callerSp` was read whole: its argument bytes (and those an inner one left past it) are owed.
+void gc_arguments_after_whole(GCArgumentBytes* owed, uintptr_t callerSp, uintptr_t top);
+// A frame [sp, callerSp) was read by its record: the argument bytes owed within it are read, but its save slots.
+void gc_arguments_in_mapped(GCArgumentBytes* owed, uintptr_t sp, uintptr_t callerSp, GCSaveSlots* saves, gc_scan_range_fn later, void* ctx);
 
 // Reads a stopped thread's stack, whose innermost frame's registers are `registers` (Windows: a CONTEXT; Linux: the
 // stopped context's mcontext_t), up to `top`: a frame whose record gc_stack_record_scan reads, each other one whole (from
@@ -66,8 +79,16 @@ void gc_scan_frame_whole(uintptr_t from, uintptr_t to, GCSaveSlots* saves, gc_sc
 // platform's walker (GCStackWalkWin32.c, GCStackWalkPosix.c) unwinds without taking any lock a stopped thread may hold.
 void gc_stack_walk(void* registers, uintptr_t top, gc_scan_range_fn now, gc_scan_range_fn later, void* ctx);
 // The same for the calling thread from its caller's frame out: the registers it captures stay in its own frame, which is
-// not read, so no copy of a dead value in a register is read from there.
+// not read, so no copy of a dead value in a register is read from there. While an explicit collection runs, the frames
+// below the one that called it (gc_stack_set_collection_caller) are stepped through unread.
 void gc_stack_walk_own(uintptr_t top, gc_scan_range_fn scan, void* ctx);
+// An explicit collection's own frames, below the program's call of it, are the collector's: they hold nothing of the
+// program's, and what earlier calls left in their memory (an allocation's result in a prologue's alignment slot) or in a
+// register they saved would keep objects alive. While it collects, the calling thread's walk steps through them without
+// reading them, up to the frame waiting at `returnAddress` (the call's), read as any other; 0 when none runs. A walk
+// that does not find that frame reads every frame.
+void gc_stack_set_collection_caller(uintptr_t returnAddress);
+uintptr_t gc_stack_collection_caller(void);
 // Before the program's threads stop, with the collector's lock: what the walks of this collection need to know that only
 // a lock a stopped thread may hold can tell (on Linux the loaded modules' unwind tables; nothing on Windows).
 void gc_os_prepare_stack_walk(void);

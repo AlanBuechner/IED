@@ -3,9 +3,10 @@
 
 // LLVM's stack map, version 3 (llvm.org/docs/StackMaps.html): a header, the functions with their record counts, the
 // large constants, then the records - each a call's return address (the function's address plus its offset) and its
-// locations; a statepoint's are its calling convention, its flags and its count of deopt operands, the deopt operands
-// (Compiler/StackMaps.cpp: each stack slot that may hold a pointer, its word count, a mask per 32 words), then the
-// managed values live across the call.
+// locations; a statepoint's are its calling convention, its flags and its count of deopt operands, then the deopt
+// operands (Compiler/StackMaps.cpp): the count of words of the values live across the call that may hold an address, those
+// words (each where it is while the call runs: a register, a spill slot), then each stack slot that may hold a pointer,
+// its word count and a mask per 32 words.
 enum { kVersion = 3, kHeaderBytes = 16, kFunctionBytes = 24, kRecordHeaderBytes = 16, kLocationBytes = 12 };
 enum { kRegister = 1, kDirect = 2, kIndirect = 3, kConstant = 4, kConstantIndex = 5 };
 enum { kStatepointHeader = 3, kDeoptCount = 2 };
@@ -29,6 +30,10 @@ typedef struct StackMapTable
 } StackMapTable;
 
 static StackMapTable g_maps;
+static _Thread_local uintptr_t t_collectionCaller;
+
+void gc_stack_set_collection_caller(uintptr_t returnAddress) { t_collectionCaller = returnAddress; }
+uintptr_t gc_stack_collection_caller(void) { return t_collectionCaller; }
 
 static uint16_t read16(const uint8_t* at) { uint16_t v; memcpy(&v, at, sizeof v); return v; }
 static uint32_t read32(const uint8_t* at) { uint32_t v; memcpy(&v, at, sizeof v); return v; }
@@ -157,6 +162,23 @@ void gc_scan_frame_whole(uintptr_t from, uintptr_t to, GCSaveSlots* saves, gc_sc
 	if (cursor < to) later(ctx, (const void*)cursor, (const void*)to);
 }
 
+void gc_arguments_after_whole(GCArgumentBytes* owed, uintptr_t callerSp, uintptr_t top)
+{
+	uintptr_t to = callerSp + GC_FRAME_ARGUMENT_BYTES;
+	if (owed->to > to) to = owed->to;
+	owed->from = callerSp;
+	owed->to = to < top ? to : top;
+}
+
+void gc_arguments_in_mapped(GCArgumentBytes* owed, uintptr_t sp, uintptr_t callerSp, GCSaveSlots* saves, gc_scan_range_fn later, void* ctx)
+{
+	if (owed->from >= owed->to) return;
+	const uintptr_t from = owed->from > sp ? owed->from : sp;
+	const uintptr_t to = owed->to < callerSp ? owed->to : callerSp;
+	if (from < to) gc_scan_frame_whole(from, to, saves, later, ctx);
+	owed->from = callerSp;
+}
+
 // --- reading a frame by its record -------------------------------------------------------------------------------
 
 static int register_of(const GCFrameState* frame, uint16_t number, uint64_t* value)
@@ -190,14 +212,37 @@ static int slot_address(const uint8_t* location, const GCFrameState* frame, uint
 	}
 }
 
+// One word a record names: in a register, or in a stack slot (Indirect); a stack slot's own address (Direct) and a
+// constant name no object.
+static int scan_value(const uint8_t* location, const GCFrameState* frame, gc_scan_range_fn now, void* ctx)
+{
+	uint64_t value = 0;
+	if (location[0] == kIndirect)
+	{
+		if (!register_of(frame, read16(location + 4), &value)) return 0;
+		const uintptr_t slot = (uintptr_t)(value + (int64_t)(int32_t)read32(location + 8));
+		now(ctx, (const void*)slot, (const void*)(slot + kWordBytes));
+	}
+	else if (location[0] == kRegister)
+	{
+		if (!register_of(frame, read16(location + 4), &value)) return 0;
+		now(ctx, &value, &value + 1);
+	}
+	return 1;
+}
+
 int gc_stack_record_scan(const GCStackRecord* record, const GCFrameState* frame, gc_scan_range_fn now, gc_scan_range_fn later, void* ctx)
 {
 	const uint8_t* locations = record->record + kRecordHeaderBytes;
 	const uint16_t count = read16(record->record + 14);
 	if (count < kStatepointHeader) return 1; // a record of no statepoint: nothing lives across the call
 	const size_t deoptEnd = kStatepointHeader + (size_t)constant_of(record, locations + kDeoptCount * kLocationBytes);
-	if (deoptEnd > count) return 0;
-	size_t i = kStatepointHeader;
+	if (deoptEnd > count || deoptEnd == kStatepointHeader) return 0;
+	const size_t valuesEnd = kStatepointHeader + 1 + (size_t)constant_of(record, locations + kStatepointHeader * kLocationBytes);
+	if (valuesEnd > deoptEnd) return 0;
+	size_t i = kStatepointHeader + 1;
+	for (; i < valuesEnd; ++i)
+		if (!scan_value(locations + i * kLocationBytes, frame, now, ctx)) return 0;
 	while (i < deoptEnd)
 	{
 		uintptr_t base = 0;
@@ -218,23 +263,6 @@ int gc_stack_record_scan(const GCStackRecord* record, const GCFrameState* frame,
 				now(ctx, (const void*)word, (const void*)(word + kWordBytes));
 			}
 		}
-	}
-	for (; i < count; ++i)
-	{
-		const uint8_t* location = locations + i * kLocationBytes;
-		uint64_t value = 0;
-		if (location[0] == kIndirect)
-		{
-			if (!register_of(frame, read16(location + 4), &value)) return 0;
-			const uintptr_t slot = (uintptr_t)(value + (int64_t)(int32_t)read32(location + 8));
-			now(ctx, (const void*)slot, (const void*)(slot + kWordBytes));
-		}
-		else if (location[0] == kRegister)
-		{
-			if (!register_of(frame, read16(location + 4), &value)) return 0;
-			now(ctx, &value, &value + 1);
-		}
-		// Direct: a stack slot's own address, made a managed pointer; a constant: no object.
 	}
 	return 1;
 }

@@ -424,6 +424,15 @@ static __attribute__((noinline)) void clear_stack_below(void)
 	for (size_t i = 0; i < sizeof(pad) / sizeof(pad[0]); ++i) pad[i] = 0;
 }
 
+#if C4_STACK_MAPS
+// While it collects (not while finalizers run: they are the program's code), the walk of this thread's stack steps through
+// the collector's frames below the program's call unread (GC/GCStackMaps.h, gc_stack_set_collection_caller).
+#include "GC/GCStackMaps.h"
+#define GC_COLLECTING_FOR(caller) gc_stack_set_collection_caller((uintptr_t)(caller))
+#else
+#define GC_COLLECTING_FOR(caller)
+#endif
+
 void c4_gc_collect(void)
 {
 	clear_stack_below();
@@ -431,12 +440,16 @@ void c4_gc_collect(void)
 	GCState* gc = ready_collector();
 	for (;;)
 	{
+		GC_COLLECTING_FOR(__builtin_return_address(0));
 		settle_cycle(gc, self);
+		GC_COLLECTING_FOR(0);
 		after_collection();
 		gc_os_lock();
 		// another thread asked for a cycle meanwhile: finish that one too
 		const int busy = gc->concurrent.thread != self && gc_concurrent_busy(gc);
+		GC_COLLECTING_FOR(__builtin_return_address(0));
 		if (!busy) gc_collect(gc, self);
+		GC_COLLECTING_FOR(0);
 		gc_os_unlock();
 		if (!busy) break;
 	}

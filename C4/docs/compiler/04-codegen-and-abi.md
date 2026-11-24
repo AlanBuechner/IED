@@ -434,64 +434,57 @@ R16 phase 3, `-fstack-maps` (`ProgramBackend::UseStackMaps`), **off by default**
 in a call only at the places LLVM's stack map names for that call, so an address left in a dead slot or register of the
 frame keeps nothing alive. The runtime's side is [runtime/01 "Stacks"](../runtime/01-memory-and-gc.md#stacks).
 
-- **The managed address space.** With the flag `ModuleContext::UseStackMaps` makes a C4 pointer or reference, `this`, the
-  sret pointer, a func's environment and an `__init_list`'s data a `ptr addrspace(1)` (`ManagedPtr`); a stack slot's, a
-  global's and code's address stays a `ptr` (`RawPtr`). Where a raw address becomes a pointer value (`&x`, a slot passed
-  as `this` or by reference, a string literal, a constant table's entry) it is cast: `ModuleContext::InSpace` at the
-  value (`EmitAddressOf`, `GcStore`, a ternary's arms, a conversion, a return, an atomic's operand, `DataImage`) and
-  `ModuleContext::Arguments` at every call (`IRContext::Call`, the thunks). Runtime entry points that take or return
-  objects are declared with managed pointers. An aggregate's eightbyte that is exactly a managed pointer crosses a call
-  as that pointer, not an integer (`AggregateShape::managedSpace`), since the optimizer may not make one from an integer.
-  The module gets the flag `c4.stack_maps` and its layout `ni:1` (`MarkForStackMaps`): the managed space is
-  non-integral, so the optimizer never carries a managed pointer in an integer, which no record could name. A C library
-  function declared with managed pointers (`memcmp` from the prelude) is `nobuiltin` before the optimizer
-  (`KeepLibraryCallsAsWritten`): LLVM rewrites a builtin's call into library calls it declares with raw pointers
-  (`memcmp(..) == 0` into `bcmp` on Linux) and hands them the managed ones, invalid IR. Without the
-  flag both spaces are 0 and every cast is none: the output is byte for byte what it was (checked on the benchmarks and
-  test programs at `-O0`, `-O2` and `-g`, objects and linked executables, both targets).
-- **Statepoints** (`Compiler/StackMaps`, `InsertStatepoints`, after the optimizer in `ObjectEmission`'s `Assemble`, so
-  every path - partitions, `-c`, the Dist merge - has them). Each function with a body gets `gc "c4"` (a GCStrategy whose
-  managed pointers are address space 1) and RewriteStatepointsForGC makes its calls statepoints, first:
-  - calls left leaves (no record; a frame waiting in one is read whole): an invoke and a call in a funclet (LLVM 22's
-    RS4GC faults on funclet invokes and makes invalid IR for landing-pad ones), inline assembly, a variadic call (a
-    statepoint loses Windows' variadic double in both registers), a call that never returns, one in tail position
-    (it keeps its sibling-call optimization), `returns_twice`, one passing a `byval` aggregate;
-  - a raw address cast to the managed space is made again as `inttoptr(ptrtoint)` right before each use, so it never
-    lives across a call (RS4GC takes an addrspacecast's raw operand for the base, which it cannot relocate);
-  - a first-class aggregate holding managed pointers (a func value, a cmpxchg's result) is split into its parts where it
-    is made and rebuilt before each use that needs it whole: RS4GC tracks no pointer inside one;
-  - each statepoint's deopt bundle lists the frame's stack slots that may hold a managed pointer there
-    (`Compiler/StackMapSlots`): each alloca whose type may (a managed pointer, bytes, a 64-bit integer), its word count
-    (bit 31: read every word, past 1024 words) and a 32-bit mask per 32 words; code generation records the slot as a
-    `Direct` location. A slot reached only by its own loads, stores, copies and lifetime markers is listed where it is
-    live (a later load reads it before a store over all of it, by backward liveness over the blocks); any other at every
-    call. Live managed values are spilled to recorded slots (LLVM's `max-registers-for-gc-values` stays 0: in registers
-    a dead value a callee saved would keep its object, and it costs as much).
-- **Objects.** LLVM writes `.llvm_stackmaps`: a COFF image keeps it as `.llvm_st`; an ELF object's is made writable
-  (it holds absolute function addresses a position-independent program relocates), kept by `--gc-sections`
+- **The same IR.** The flag only marks the module (`c4.stack_maps`, `ModuleContext::UseStackMaps` -> `MarkForStackMaps`):
+  emission and the optimizer see what they see without it, every pointer in address space 0. The collector never moves
+  an object, so a call need not tell LLVM which pointers may move - only where the live ones are while it runs.
+- **Records** (`Compiler/StackMaps`, `InsertStatepoints`, after the optimizer in `ObjectEmission`'s `Assemble`, so every
+  path - partitions, `-c`, the Dist merge - has them). Each function with a body gets `gc "c4"`, a GCStrategy under which
+  no pointer is a managed one (LLVM spills nothing for a relocation that never comes), and each call its record: a
+  `deopt` operand bundle, which code generation lowers as a statepoint by itself (`LowerCallSiteWithDeoptBundle`) with each
+  operand where it is - a register, the slot the register allocator spilled it to, a constant
+  (`use-registers-for-deopt-values`, set once for the process). The list (`Compiler/StackMapRecords`):
+  - the count of words of the values live across the call, then those words (`Compiler/StackMapValues`, by liveness over
+    the SSA values: computed before the call, read after it) that may hold a heap object's address - a pointer; a 64-bit
+    integer that may carry one (an argument, a load, a call's result, `ptrtoint`, a part of an aggregate or vector, and
+    what adds to, masks or chooses among those; not a counter, a size or a converted float); a vector or aggregate of
+    those, split into words before the call - but no constant and no stack slot's or global's address. Liveness runs over
+    each object's base: a use of an address made from a value (a field's, an integer offset by a constant) counts as a
+    use of that value, which is what the record names - the collector keeps an object for any address inside it, and code
+    generation keeps the base across the call and makes the field's address again after it (named themselves, those
+    addresses would each want a register at the call: more callee-saved registers, and "ran out of registers" where
+    the register allocator would rematerialize them there);
+  - then stack slots, each with its word count (bit 31: read every word, past 1024 words) and a 32-bit mask per 32
+    words: the frame's slots that may hold a pointer where they are live (`Compiler/StackMapSlots`: a slot reached only by
+    its own loads, stores, copies and lifetime markers where a later load reads it before a store over all of it, any
+    other at every call), and a slot of its own for a value live across a call in a loop that does not use it, stored once
+    where the value is made. LLVM weighs a statepoint's operands as uses (`CalcSpillWeights`), so such a value named
+    itself would look used at every call of the loop, and the register allocator would keep it in registers and move it
+    around each call instead of spilling it once before the loop (the GC benchmark's allocation loop: six moves a call).
+  - Calls left without a record, whose frame is read whole: a call inside a Windows funclet (its slots are the parent
+    frame's), inline assembly, a variadic call (a statepoint loses Windows' variadic double in both registers), a call that
+    never returns, one that may become a sibling call (marked `tail`, and the function returns nothing or what it returns,
+    through no-op casts and a branch to a block that only returns, which code generation copies back), `returns_twice`, one
+    passing a `byval` aggregate (its copy is in the caller's outgoing area, which no record names), and a C library
+    function code generation expands in place (`memcmp`, `strlen`, `sqrt`: TargetLibraryInfo's `hasOptimizedCodeGen`),
+    which never collects. Invokes have records, with landing pads and with funclets.
+- **Objects.** LLVM writes `.llvm_stackmaps`: a COFF image keeps it as `.llvm_st`; an ELF object's is made writable (it
+  holds absolute function addresses a position-independent program relocates), kept by `--gc-sections`
   (`SHF_GNU_RETAIN`) and named `llvm_stackmaps` (`PrepareElfStackMaps`), which the linker brackets with
   `__start_`/`__stop_` symbols. A program with the flag links the runtime built with `C4_STACK_MAPS`
-  (`EnsureRuntimeObjects`, a folder of its own; `GC/GCStack*` only there).
-- **Measured** (R16, 2026-11-21, worktree at 935658a9 with the final compiler; the same compiler with and without the
-  flag, `-O2`, median of 7 alternating runs, twice in each order): math (per vector and batch) and gemm at parity (their
-  sub-millisecond kernels -20% to +3%); the Bedrock benchmark json_read +12-13%, json_write +7-9%, map_int_find_hit -2%
-  to +9%, map_int_remove +44-50%, map_text_find +24-60%, map_text_insert +14-19%, the others -6% to +4% (one run's
-  +10-11% outliers aside); the GC benchmark's frames +22-27% in both modes with pauses within -2% to +6%. Of that, the
-  `nobuiltin` C library calls (`KeepLibraryCallsAsWritten`: the optimizer no longer expands `memcmp`) cost the string
-  keys: without them (Windows makes valid IR either way) map_text_find is +9-10%, json_read -0% to +2%, map_text_insert
-  -3% to +3%. Tried and not landed (2026-11-23, patch `.ied/local/v16/raw-library-pointers.patch`): passing a C library
-  function raw pointers instead (its declaration's pointer parameters raw, each managed argument cast at the call, the
-  cast made again before each use) keeps `memcmp`'s builtin attributes and valid IR, yet costs nearly as much: against
-  the same compiler without the flag (21 alternating runs, both orders) map_text_find +36% (nobuiltin +46%, none +4%),
-  map_text_insert +6% (+20%, -4%), json_read +16% (+15%, +3%), the map_int kernels unchanged; why the cast costs that
-  much is not found (a suspect: RS4GC treating a library call as a GC leaf). The cheaper next step: make `nobuiltin` a
-  target question - LLVM rewrites `memcmp == 0` into `bcmp` (declared with raw pointers, invalid IR here) only where
-  `bcmp` exists, Linux; Windows has none, so it could drop `nobuiltin` and get the 'none' column. Split by
-  part (first measurement, before `nobuiltin`): the managed address space alone costs up to +28% (LLVM treats null as
-  defined outside address space 0, so null folds are lost), non-integral up to +23% more in string-keyed maps, the statepoints the rest (a managed value live across a
-  call is stored before and loaded after it; the GC benchmark's allocation loops). Values in up to 16 callee-saved
-  registers instead of spill slots: the GC benchmark +11%, Bedrock kernels +4% to +55%, so no better. Compile time with
-  the flag: +8-13% at `-O0`, +2-3% at `-O2`; without it at parity. Hence off by default.
+  (`EnsureRuntimeObjects`, a folder of its own; `GC/GCStack*` only there). Without the flag the output is byte for byte
+  what it was (objects at `-O0`, `-O2` and `-O2 -g` of the benchmarks and test programs, both targets).
+- **Measured** (2026-11-24, the same compiler with and without the flag, `-O2`, medians of 31 alternating rounds): Windows -
+  the Bedrock benchmark's kernels -6% to +6% (11 of 14 within 2%), math (per vector and batch) -4% to +5% on its
+  sub-millisecond kernels, gemm 0%, the GC benchmark's frames +1% and -1% (stop-the-world, concurrent); Linux (in Docker on
+  the same machine) the same within its noise - an A/A run of one program against itself moves the map kernels by up to
+  10%, the others by 1% - with gemm 0% and the GC frames -1% and 0%. Code +1.6% instructions; the stack map is data beside
+  it (the GC benchmark's object 1.3 -> 2.8 MB). Compile time (5 alternating builds from empty build folders, 16 threads):
+  `-O0` +3% (the Bedrock benchmark) and +6% (Bedrock's tests), `-O2` +0-1%; on one thread `-O0` costs +28% (code
+  generation +60%: FastISel hands each call with a record to SelectionDAG). The design before (managed pointers in address
+  space 1, RewriteStatepointsForGC spilling and reloading each live value around each call, `nobuiltin` C library calls)
+  cost map_int_remove +49%, map_text_find +34%, json_read +13% and the GC frames +23% on Windows, map_text_find +86% and
+  the GC frames +31-34% on Linux: the address space cost the optimizer its null and integer folds, the relocations a spill
+  and a reload per value per call.
 - Tests: C4Testing `Compiler.StackMaps`; IsolatedTest `MemoryGC/StackMaps` (20 of 20 dead targets go at `-O0` and `-O2`
   with the flag; 18 of 20 without it); `RunTests.ps1 -StackMaps` runs the whole corpus with the flag on Windows,
   `run_linux.py --stack-maps` (with and without `-O2`) on Linux.

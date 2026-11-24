@@ -123,16 +123,15 @@ namespace C4Compiler
 		std::vector<llvm::OperandBundleDef> bundles;
 		if (llvm::FuncletPadInst* funclet = CurrentFunclet())
 			bundles.emplace_back("funclet", std::vector<llvm::Value*>{ funclet });
-		const std::vector<llvm::Value*> passed = ModuleContext::Arguments(*m_B, fty, args);
 		llvm::BasicBlock* unwind = mayThrow ? UnwindTarget() : nullptr;
 		if (!unwind)
 		{
-			llvm::CallBase* call = m_B->CreateCall(fty, callee, passed, bundles);
+			llvm::CallBase* call = m_B->CreateCall(fty, callee, args, bundles);
 			CopyStackArguments(*call, callee);
 			return call;
 		}
 		llvm::BasicBlock* normal = llvm::BasicBlock::Create(m_MCtx.context(), "invoke.cont", m_B->GetInsertBlock()->getParent());
-		llvm::CallBase* invoke = m_B->CreateInvoke(fty, callee, normal, unwind, passed, bundles);
+		llvm::CallBase* invoke = m_B->CreateInvoke(fty, callee, normal, unwind, args, bundles);
 		CopyStackArguments(*invoke, callee);
 		m_B->SetInsertPoint(normal);
 		return invoke;

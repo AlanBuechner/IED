@@ -43,7 +43,7 @@ namespace C4Compiler
 	llvm::Type* Abi::RegisterType(const Type* t) const
 	{
 		if (!IsByValueAggregate(t)) return nullptr;
-		return m_Target.AggregateRegisters({ m_Ctx, m_Layout, AggregateBase(t)->GetSize(), [&] { return m_Lower(t); }, m_ManagedSpace });
+		return m_Target.AggregateRegisters({ m_Ctx, m_Layout, AggregateBase(t)->GetSize(), [&] { return m_Lower(t); } });
 	}
 
 	bool Abi::PassesInRegister(const Type* t) const

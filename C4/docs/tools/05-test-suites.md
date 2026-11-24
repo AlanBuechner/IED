@@ -142,10 +142,10 @@ Adding a test:
   (`--partitions`), so the partition merge (D-90) and the parallel code generation path run the whole corpus: run it
   when touching codegen, linkage, `PartitionMerge` or `ModulePartitions`. Without it a program of 48 functions or more
   is merged from its partitions too.
-- `-StackMaps` builds every folder with `-fstack-maps` (R16 phase 3), so the statepoint pass, the managed address space
-  and the precise stack walk run the whole corpus: run it at `-O0` and `-O2` when touching codegen, `Compiler/StackMaps*`
-  or the runtime's stack scanning. `ExpectedIR.json`'s checks read the IR without the flag (the managed pointers' address
-  space changes the text). `MemoryGC/StackMaps` is the flag's own case: a dead slot of a frame keeps nothing alive.
+- `-StackMaps` builds every folder with `-fstack-maps` (R16 phase 3), so the calls' records and the precise stack walk
+  run the whole corpus: run it at `-O0` and `-O2` when touching codegen, `Compiler/StackMap*` or the runtime's stack
+  scanning (`run_linux.py --stack-maps` on Linux). `MemoryGC/StackMaps` is the flag's own case: a dead slot or register
+  of a frame keeps nothing alive.
 - Manifests next to the runner:
   - `NegativeTests.json` - folders that must fail to compile, with expected diagnostics;
   - `ExpectedExit.json` - folders that must compile and exit with a given code (for example uncaught

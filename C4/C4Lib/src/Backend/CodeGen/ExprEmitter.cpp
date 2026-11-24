@@ -280,7 +280,7 @@ namespace C4Compiler
 		if (!fn)
 			fn = llvm::Function::Create(llvm::FunctionType::get(llvm::Type::getVoidTy(mc.context()), std::vector<llvm::Type*>(args.size(), ptr), false),
 				llvm::Function::ExternalLinkage, name, &mc.module());
-		return m_Ctx.builder().CreateCall(fn, ModuleContext::Arguments(m_Ctx.builder(), fn->getFunctionType(), args));
+		return m_Ctx.builder().CreateCall(fn, args);
 	}
 
 	llvm::Value* ExprEmitter::EmitVa(const VaNode* n)
@@ -426,10 +426,7 @@ namespace C4Compiler
 
 	llvm::Value* ExprEmitter::GcStore(llvm::Value* addr, llvm::Value* value, const Type* elemType, MemoryAccess access)
 	{
-		// The collector needs no barrier today; a generational or concurrent one would add it here. A stack slot's or a
-		// global's address stored as a pointer is a managed pointer there.
-		if (m_Ctx.mctx().StackMaps() && value->getType()->isPointerTy() && elemType)
-			value = ModuleContext::InSpace(m_Ctx.builder(), value, m_Ctx.mctx().Lower(elemType));
+		(void)elemType; // the collector needs no barrier today; a generational or concurrent one would add it here
 		Attach(m_Ctx.builder().CreateStore(value, addr, access.isVolatile), access.aliasTag);
 		return value;
 	}
@@ -474,8 +471,7 @@ namespace C4Compiler
 
 	llvm::Value* ExprEmitter::EmitAddressOf(const AddressOfNode* n)
 	{
-		// A stack slot's or a global's address made a pointer value: a managed pointer (ModuleContext::UseStackMaps).
-		return ModuleContext::InSpace(m_Ctx.builder(), LValueAddress(n->loc), m_Ctx.mctx().Lower(n->type));
+		return LValueAddress(n->loc);
 	}
 
 	llvm::Value* ExprEmitter::EmitAddressArithmetic(const AddressArithmeticNode* n)
@@ -548,14 +544,14 @@ namespace C4Compiler
 		// be recorded from THAT block, not the arm's entry block. Hardcoding thenBB/elseBB breaks dominance.
 		{
 			InsertGuard g(B, thenBB);
-			llvm::Value* tv = ModuleContext::InSpace(B, Emit(n->thenExpr), phi->getType());
+			llvm::Value* tv = Emit(n->thenExpr);
 			llvm::BasicBlock* end = B.GetInsertBlock();
 			phi->addIncoming(tv, end);
 			B.CreateBr(joinBB);
 		}
 		{
 			InsertGuard g(B, elseBB);
-			llvm::Value* ev = ModuleContext::InSpace(B, Emit(n->elseExpr), phi->getType());
+			llvm::Value* ev = Emit(n->elseExpr);
 			llvm::BasicBlock* end = B.GetInsertBlock();
 			phi->addIncoming(ev, end);
 			B.CreateBr(joinBB);
@@ -575,10 +571,10 @@ namespace C4Compiler
 		llvm::Value* target = mc.rtti().TypeDescriptor(n->target);
 		if (n->testOnly)
 		{
-			llvm::Function* test = mc.RuntimeFunction("c4_instance_of", llvm::Type::getInt32Ty(ctx), { mc.ManagedPtr(), ptr });
+			llvm::Function* test = mc.RuntimeFunction("c4_instance_of", llvm::Type::getInt32Ty(ctx), { ptr, ptr });
 			return m_Ctx.builder().CreateICmpNE(m_Ctx.Call(test, { object, target }, false), llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx), 0));
 		}
-		llvm::Function* cast = mc.RuntimeFunction("c4_dynamic_cast", mc.ManagedPtr(), { mc.ManagedPtr(), ptr });
+		llvm::Function* cast = mc.RuntimeFunction("c4_dynamic_cast", ptr, { ptr, ptr });
 		return m_Ctx.Call(cast, { object, target }, false);
 	}
 } // namespace C4Compiler
