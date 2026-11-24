@@ -140,10 +140,13 @@ static DWORD milliseconds(int64_t ns)
 // resolution), so a frame limiter that waits 3 ms waited 15.6. Systems without such timers fall back to Sleep, said once on standard error.
 static _Thread_local HANDLE t_sleepTimer;
 static volatile LONG s_sleepFallbackReported;
+static volatile LONG64 s_sleepFallbacks;
 
-// A sleep that cannot use the timer ends on the tick: said once on standard error, with the call that failed (BUG-441).
+// A sleep that cannot use the timer ends on the tick: counted (c4_thread_sleep_fallbacks), and said once on standard
+// error with the call that failed (BUG-441).
 static void ReportSleepFallback(const char* call, DWORD error)
 {
+	InterlockedIncrement64(&s_sleepFallbacks);
 	if (InterlockedExchange(&s_sleepFallbackReported, 1)) return;
 	char text[200];
 	const int length = snprintf(text, sizeof(text), "c4: %s failed (error %lu): Thread::Sleep ends on the system tick, up to 15.6 ms late\n", call, (unsigned long)error);
@@ -175,6 +178,8 @@ void c4_thread_sleep_ns(int64_t ns)
 	}
 	WaitForSingleObject(t_sleepTimer, INFINITE);
 }
+
+int64_t c4_thread_sleep_fallbacks(void) { return InterlockedCompareExchange64(&s_sleepFallbacks, 0, 0); }
 
 // The calling thread on one logical processor of core number `core` of those this process may run on, so that no two threads pinned to
 // different cores share one through its hyperthreads. -1 when there is no such core.

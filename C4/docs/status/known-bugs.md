@@ -43,7 +43,6 @@ Next ID: **BUG-503**
 
 | ID | Title | Area | Severity |
 |---|---|---|---|
-| BUG-441 | `threading.thread.sleep_is_precise` fails in the gates while the machine is busy: sleeps land on the 15.6 ms tick | Runtime | Medium |
 | BUG-497 | The IED master on Linux aborted in `malloc` (heap corruption) relaying WebSocket frames after half an hour of a chat | Runtime | High |
 
 ---
@@ -51,27 +50,6 @@ Next ID: **BUG-503**
 ## Parser, lexer and preprocessor
 
 ## Model, templates and semantics
-
-### BUG-441 `threading.thread.sleep_is_precise` fails in the gates while the machine is busy: sleeps land on the 15.6 ms tick
-- **Area:** Runtime
-- **Severity:** Medium
-- **Status:** Open
-- **Found:** 2026-11-05
-- **Symptom:** In `nuke gates` (the `bedrock` step, and again under `gc-concurrent`) the fastest of three runs of ten 2 ms
-  `Threading::Thread::Sleep`s took 238 ms (714 ms for the case), the system tick's 15.6 ms each, and the case failed
-  (`threading_tests.cf:172`). Run alone right after (`BedrockTests.exe --filter "threading.thread.*"`) it took 82 ms
-  and passed. Several other chats were building and testing on the machine at the time.
-- **Where:** `Threading::Thread::Sleep` (Bedrock's precise sleep), `Bedrock/Tests/threading_tests.cf`.
-- **Notes:** a frame limiter sleeping on the tick would cap a game well under its target, so this matters beyond the
-  test: find whether the precise timer is lost under load (a waitable timer refused, a resolution request dropped),
-  or whether the case asks more than a loaded machine can give.
-  2026-11-21 (chat J): not reproduced - the case (now the fastest of up to ten runs) passed in two full `nuke gates`
-  runs and 8 of 8 times alone under a full server-checks run (26-29 ms for ten 2 ms sleeps: the high-resolution timer
-  held). Still open, not reproduced: `c4_thread_sleep_ns` fell back to `Sleep` without a word when the high-resolution timer
-  could not be made, which would explain the tick-length sleeps. 2026-11-22 (chat L): the fallback now says so once on
-  standard error (`c4: CreateWaitableTimerExW failed (error N): Thread::Sleep ends on the system tick`); the case passed in
-  two more full `nuke gates` runs. Close this when a loaded run fails without that line (the cause is then the case's
-  demand on a busy machine, not the timer), or fix what the line names.
 
 ## Interop, runtime and Bedrock
 

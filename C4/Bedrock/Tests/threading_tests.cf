@@ -160,18 +160,36 @@ class ThreadTests {
 		return clock_now_ns() - start;
 	}
 
-	// The fastest of up to ten runs, stopping at one near its time: a loaded machine only delays a run (a gate run beside a
-	// game's build took 180 ms a run), while sleeps on the system tick are slow in every one.
+	// Ten 2 ms waits that never sleep - the clock watched, the processor yielded as a busy thread yields it: slow only
+	// when every processor is taken, so they tell a saturated machine from sleeps on the tick.
+	static int64 TenSpunWaits() {
+		const int64 start = clock_now_ns();
+		for (int32 i = 0; i < 10; i++) {
+			const int64 end = clock_now_ns() + 2 * kMillisecond;
+			while (clock_now_ns() < end) Threading::Thread::Yield();
+		}
+		return clock_now_ns() - start;
+	}
+
+	// Every sleep waits on the high-resolution timer: a fallback to the tick is counted (BUG-441). Up to ten runs, stopping
+	// at one near its time; a slow run counts against the sleep only when ten spun waits right after it were not slow -
+	// with every processor taken (a gate beside builds and 32 CPU burners) a 2 ms sleep took 36-69 ms, the timer's or the
+	// tick's alike, since the woken thread waits for a processor.
 	[test("sleep_is_precise")]
 	public static void TestSleepIsPrecise() {
 		const int64 nearItsTime = 80 * kMillisecond;
-		int64 fastest = TenShortSleeps();
-		for (int32 attempt = 1; attempt < 10 && fastest >= nearItsTime; attempt++) {
+		const int64 fallbacks = Threading::Thread::SleepFallbacks();
+		int64 fastest = 0;
+		bool lateOnAFreeMachine = false;
+		for (int32 attempt = 0; attempt < 10; attempt++) {
 			const int64 took = TenShortSleeps();
-			if (took < fastest) fastest = took;
+			if (attempt == 0 || took < fastest) fastest = took;
+			if (took < nearItsTime) break;
+			if (TenSpunWaits() < nearItsTime) lateOnAFreeMachine = true;
 		}
+		assert_eq(fallbacks, Threading::Thread::SleepFallbacks(), "every sleep waited on the high-resolution timer");
 		assert_true(fastest >= 20 * kMillisecond, "a sleep lasts at least its time");
-		assert_true(fastest < nearItsTime, "and ends near it, not on the next system tick");
+		assert_true(fastest < nearItsTime || !lateOnAFreeMachine, "and ends near it, not on the next system tick, while a processor is free");
 	}
 }
 

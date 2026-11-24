@@ -170,6 +170,8 @@ void c4_thread_sleep_ns(int64_t ns)
 	while (clock_nanosleep(CLOCK_MONOTONIC, 0, &wait, &wait) == EINTR) {}
 }
 
+int64_t c4_thread_sleep_fallbacks(void) { return 0; }
+
 // --- names ------------------------------------------------------------------------------------------------------
 
 // A thread's name as it was given, which c4_thread_name answers (a thread nobody named has none, as on Windows; the

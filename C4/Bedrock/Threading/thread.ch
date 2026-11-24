@@ -31,6 +31,9 @@ namespace Threading
 		public static void Yield() { thread_yield(); }
 		// Sleeps on a high-resolution timer: it ends within about half a millisecond of `nanoseconds`, not on the system's tick.
 		public static void Sleep(int64 nanoseconds) { thread_sleep_ns(nanoseconds); }
+		// How many of this process's sleeps ended on the system's tick (up to 15.6 ms late) because the high-resolution timer
+		// could not be used - Windows only, which then also says so once on standard error; 0 on Linux.
+		public static int64 SleepFallbacks();
 		// Names the calling thread for debuggers, profilers and crash dumps; false when the system cannot.
 		public static bool SetCurrentName(const char* name) { return thread_set_name(name) == 0; }
 		// Keeps the calling thread on one logical processor of core number `core` of those this process may run on (CoreCount), so threads pinned to

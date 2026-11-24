@@ -25,6 +25,9 @@ void c4_thread_yield(void);
 // A spin-wait hint: lets the core's other hardware thread run and saves power while a loop waits.
 void c4_cpu_relax(void);
 void c4_thread_sleep_ns(int64_t ns);
+// How many sleeps this process made that ended on the system tick because the high-resolution timer could not be made
+// or set (Windows; 0 on Linux, whose sleep is always the monotonic clock's own).
+int64_t c4_thread_sleep_fallbacks(void);
 // The calling thread's name as debuggers, profilers and crash dumps show it (UTF-8): 0, or -1 when the system cannot
 // name it.
 int32_t c4_thread_set_name(const char* name);

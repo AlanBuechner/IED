@@ -1,5 +1,7 @@
 include "thread.ch"
 
+[link("c4_thread_sleep_fallbacks")] int64 c4_thread_sleep_fallbacks() noexcept;
+
 namespace Threading
 {
 	// Room for any name SetCurrentName gives in a debugger's thread list.
@@ -23,6 +25,8 @@ namespace Threading
 	}
 
 	void Thread::RunBody(void* body) { ((ThreadBody*)body)->run(); }
+
+	int64 Thread::SleepFallbacks() { return c4_thread_sleep_fallbacks(); }
 
 	void Thread::Join() {
 		if (!handle) return;
