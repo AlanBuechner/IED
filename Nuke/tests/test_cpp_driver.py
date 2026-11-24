@@ -555,6 +555,33 @@ class ObjectStampTests(unittest.TestCase):
 		self.assertFalse(self.decided(self.job("keep")))
 		self.assertTrue(self.decided(self.job("other arguments")), "a changed command compiles again")
 
+	def test_a_file_copied_in_with_an_older_time_stamp_compiles_again(self):
+		objects = module("objects")
+		first = self.job("keep")
+		first.compile_needed = True
+		self.assertEqual(0, objects.run_job(first, self.tmp), first.log)
+		with open(self.source, "w") as f:
+			f.write("int main() { return 1; }\n")
+		long_ago = time.time() - 3600
+		os.utime(self.source, (long_ago, long_ago))
+		self.assertTrue(self.decided(self.job("keep")), "older than the object, yet not the file it compiled")
+
+	def test_an_object_without_its_stamps_compiles_again(self):
+		objects = module("objects")
+		first = self.job("keep")
+		first.compile_needed = True
+		self.assertEqual(0, objects.run_job(first, self.tmp), first.log)
+		os.remove(objects.stamps_path(first))
+		self.assertTrue(self.decided(self.job("keep")), "no record of what it read")
+
+	def test_a_failed_compile_leaves_no_stamps(self):
+		objects = module("objects")
+		first = self.job("keep")
+		first.compile_needed = True
+		self.assertEqual(0, objects.run_job(first, self.tmp), first.log)
+		objects.discard(first)
+		self.assertFalse(os.path.exists(objects.stamps_path(first)))
+
 
 class DepfileTests(unittest.TestCase):
 	def test_escaped_spaces_and_continued_lines(self):

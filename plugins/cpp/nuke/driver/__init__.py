@@ -202,6 +202,6 @@ def _remove_stale_objects(target, log):
 	for name in os.listdir(target.int_dir):
 		stem, extension = os.path.splitext(name)
 		path = os.path.join(target.int_dir, name)
-		if extension in (".obj", ".o", ".d", ".args") and stem.lower() not in expected and os.path.isfile(path):
+		if extension in (".obj", ".o", ".d", ".args", ".stamps") and stem.lower() not in expected and os.path.isfile(path):
 			os.remove(path)
 			log.line(f"{target.name}: removed the stale {name}")

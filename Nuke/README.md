@@ -498,8 +498,11 @@ linux-sysroot = "c4"               # Linux builds compile and link against it in
   compiler links against its Linux sysroot (glibc 2.31, GCC 10's libstdc++), so a C++ library it links is built with
   `linux-sysroot = "c4"`: compiled against the system's newer headers it would need symbols that libstdc++ lacks.
 - **Compiles.** A source compiles when it has no object or dependency file yet, its arguments changed, clang is newer,
-  or a file it read changed or went (clang's dependency files). An object is stamped with the time its compile began,
-  so a file edited during the build compiles again the next time. `-j N` (`NUKE_JOBS`) compiles N at once, by default
+  or a file it read changed or went (clang's dependency files). Changed means its time stamp is not the one it had when
+  the object compiled - older too: a file copied in with the time stamp it had elsewhere (robocopy, a checkout of
+  another branch) is older than the object yet not what it compiled. Each object keeps those time stamps beside it
+  (`<name>.stamps`); one without them compiles again. A file edited during the build compiles again the next time, and
+  an object is stamped with the time its compile began. `-j N` (`NUKE_JOBS`) compiles N at once, by default
   one per processor. A crash of clang or the HeaderTool - they crash now and then under a parallel build on Windows,
   never on a rerun - is retried twice; an error never is. A failed compile leaves no object or dependency file, and
   nothing links. The objects of removed sources go; two sources that would share an object (`a/Types.cpp`,

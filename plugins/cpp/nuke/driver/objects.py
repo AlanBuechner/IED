@@ -2,8 +2,11 @@
 dependency file, other arguments than last time, a newer clang, or a file it read changed or went. A reflecting
 project's sources also go through the HeaderTool after they compile (and again when the HeaderTool is newer).
 
-An object is stamped with the time its compile began (to the nanosecond), so a file edited while the compile ran is newer
-than it and the next build compiles it again (BUG-346, found in Frost)."""
+A file it read changed when its time stamp is not the one it had when the object compiled - older too: a file copied in
+with the time stamp it had elsewhere (robocopy, a checkout of another branch) is older than the object yet not what it
+compiled. Each object keeps those time stamps beside it (<name>.stamps); one without them compiles again. A file edited
+while its compile ran is kept with no time stamp, so the next build compiles it again (BUG-346, found in Frost); the
+object itself is stamped with the time its compile began, so the link sees it changed."""
 
 import concurrent.futures
 import os
@@ -118,6 +121,10 @@ def object_extension(toolchain):
 	return ".o" if toolchain.linux else ".obj"
 
 
+def stamps_path(job):
+	return os.path.splitext(job.depfile)[0] + ".stamps"
+
+
 def make_job(toolchain, configuration, target, source, includes, system_includes, header_tool):
 	name = os.path.join(target.int_dir, object_name(source)).replace("\\", "/")
 	obj, dep = name + object_extension(toolchain), name + ".d"
@@ -153,20 +160,37 @@ def decide(job, stats, clang, header_tool):
 	built = stats.mtime(job.obj)
 	if built is None or stats.mtime(job.depfile) is None or read_text(job.argsfile) != command_text(job.command):
 		job.compile_needed = True
-	elif (stats.mtime(clang) or 0) > built or not dependencies_older(job.depfile, built, stats):
+	elif (stats.mtime(clang) or 0) > built or not dependencies_unchanged(stamps_path(job), stats):
 		job.compile_needed = True
 	elif job.header_tool and (stats.mtime(header_tool) or 0) > built:
 		job.reflect_needed = True
 	job.reflect_needed = job.reflect_needed or (job.compile_needed and job.header_tool is not None)
 
 
-def dependencies_older(path, built, stats):
-	"""Every file the dependency file lists is still there and older than the object."""
-	for dependency in depfile.parse(read_text(path) or ""):
-		changed = stats.mtime(dependency)
-		if changed is None or changed > built:
+def dependencies_unchanged(path, stats):
+	"""Every file the stamps file lists is still there with the time stamp it had when the object compiled."""
+	text = read_text(path)
+	if not text:
+		return False
+	for line in text.splitlines():
+		stamp, _, dependency = line.partition(" ")
+		if not dependency or not stamp.isdigit() or stats.mtime(dependency) != int(stamp):
 			return False
 	return True
+
+
+def keep_stamps(job, started):
+	"""The time stamps of the files the compile read, from its dependency file: "-" for one changed since the compile
+	began (or gone), which no file has, so the next build compiles again."""
+	lines = []
+	for dependency in depfile.parse(read_text(job.depfile) or ""):
+		try:
+			changed = os.stat(dependency).st_mtime_ns
+		except OSError:
+			changed = None
+		lines.append(f"{'-' if changed is None or changed > started else changed} {dependency}")
+	with open(stamps_path(job), "w", encoding="utf-8") as f:
+		f.write("\n".join(lines) + "\n")
 
 
 def run_retrying_crashes(command, cwd, log, label):
@@ -189,7 +213,7 @@ def run_retrying_crashes(command, cwd, log, label):
 def discard(job):
 	"""A failed compile's object and dependency file go, so the next build compiles the file again instead of trusting
 	what a crash left."""
-	for path in (job.obj, job.depfile):
+	for path in (job.obj, job.depfile, stamps_path(job)):
 		if os.path.exists(path):
 			os.remove(path)
 
@@ -207,6 +231,7 @@ def run_job(job, cwd):
 		if job.code != 0:
 			discard(job)
 			return job.code
+		keep_stamps(job, started)
 	if job.reflect_needed:
 		os.makedirs(job.header_tool[2], exist_ok=True)
 		# What the HeaderTool found in the source's own header before goes first: a header that reflects nothing now (its
