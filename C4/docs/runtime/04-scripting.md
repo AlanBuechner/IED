@@ -365,6 +365,10 @@ Rules:
   alive keep their memory, but their finalizers are dropped (they would call freed code): unload reports how
   many there were. The GC census forgets their types too (`c4_gc_forget_types_in`): the records it noted with
   them live in the script's image, so from then on they count as of no known type.
+- A `Scripting::Script` the collector finds unreachable unloads too, so the host keeps it reachable - a field, a
+  variable it reads again - while it calls the script's functions and closures. A pointer into the script's code (a
+  `funcptr`, a `func` it made) does not keep it, nor, with stack maps (the default), does a local the host no longer
+  reads ([runtime/01 "Stacks"](01-memory-and-gc.md#stacks)).
 - Reflection keeps every registration of an identity: registering one that another tag holds puts the new one in
   front; unloading a tag removes only its own, so the previous one is found again.
 - State that must survive a reload is the host's to carry (for example through `Serialization` and reflection,

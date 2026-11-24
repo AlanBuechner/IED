@@ -85,7 +85,7 @@ of the current design. Treat them as unconfirmed; adopt one only by moving it in
 | Idea | Status |
 |---|---|
 | Hybrid ARC + concurrent generational GC, `T^` references, `[GC]` / `[Nogc]`, manual zones | Replaced by the Go-style collector |
-| Tiered frame arenas, young/old generations, precise stack maps | Possible future GC work; not committed |
+| Tiered frame arenas, young/old generations, a moving collector (C4 frames' stack maps are the default, but relocate nothing) | Possible future GC work; not committed |
 | `delegate<...>` | Replaced by `funcptr<...>` |
 | Nullable `T?`, `tuple<...>`, `auto`, `import`, `println` | Not part of C4 (multiple return values replace tuples) |
 | "Basis" library namespace, StringView / HashSet / Deque / Span / Optional / Result / BitSet / Random / Time | The library is Bedrock; individual types can be proposed into section 2 |
@@ -116,8 +116,9 @@ files and tests it moves into [plan.md](plan.md) like every other package.
 parser, R8 macros over tokens, R9 declarations resolved on demand, R10 lowering's model changes as requests (every body lowers
 once, in one pass, on threads), R11 one `TargetAbi` per build, R12 one emission path (every linked build emits partitions),
 R13 a reflection scope, R14 the C++ namespace `C4Compiler` (was `Scripting`, which Bedrock's script API also names) and the
-docs, R16 precise GC metadata (heap objects, global roots, Bedrock's buffers; stack maps behind `-fstack-maps`, off because
-they cost 7-37% in Bedrock's containers and 24% in the GC benchmark). Not done, for the weekly usage reset: R1 (an incremental
+docs, R16 precise GC metadata (heap objects, global roots, Bedrock's buffers, and stack maps of C4 frames - the default since
+2026-11-24, at no measurable run-time cost once every value stays where it is across a call instead of in a managed
+address space reloaded after it). Not done, for the weekly usage reset: R1 (an incremental
 front end: keep parse trees, the model and HIR of unchanged files between builds - what 5.1 and 5.3 name as next) and R15
 (C4Api's queries over it). The files that carry the first of them are in [compiler/02](../compiler/02-program-model.md#changes-while-bodies-lower).
 

@@ -105,7 +105,8 @@ namespace Scripting
 		public Script* base = nullptr;
 	}
 
-	// One compiled script. Unload ends it; a Script that is collected unloads first.
+	// One compiled script. Unload ends it; a Script that is collected unloads first, so the host keeps it reachable (a
+	// field, a variable it reads again) while it calls the script's functions and closures.
 	class Script
 	{
 	public:

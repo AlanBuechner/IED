@@ -20,15 +20,15 @@
 #     (for features whose effect is the code itself: volatile accesses, thread_local storage).
 #   - Every other folder must compile AND run with exit 0.
 #
-# Usage:  .\RunTests.ps1 [-Filter "Types"] [-O2] [-DebugInfo] [-Partitions <n>] [-StackMaps]   (-DebugInfo: every program
+# Usage:  .\RunTests.ps1 [-Filter "Types"] [-O2] [-DebugInfo] [-Partitions <n>] [-NoStackMaps]   (-DebugInfo: every program
 #         built with -g; -Partitions: every program assembled into <n> objects, the parallel code generation path;
-#         -StackMaps: every program built with -fstack-maps, its frames read by their stack maps)
+#         -NoStackMaps: every program built with -fno-stack-maps, its frames read whole)
 param(
     [string]$Filter = "",
     [switch]$O2,
     [switch]$DebugInfo,
     [int]$Partitions = 0,
-    [switch]$StackMaps
+    [switch]$NoStackMaps
 )
 $ErrorActionPreference = "Continue"
 
@@ -96,7 +96,7 @@ $flags = @()
 if ($O2) { $flags += "-O2" }
 if ($DebugInfo) { $flags += "-g" }
 if ($Partitions -gt 0) { $flags += @("--partitions", "$Partitions") }
-if ($StackMaps) { $flags += "-fstack-maps" }
+if ($NoStackMaps) { $flags += "-fno-stack-maps" }
 
 # A test program still running after this long is killed and fails its case: a hang (an infinite loop the
 # optimizer made of a recursion, a deadlock) must not stall the whole run.

@@ -1,0 +1,26 @@
+// No object starts at a mapping's first page (GC/GCPageHeap.c, kGuardPages): a word with its low bits clear that only
+// looks like an address - a 64 MiB boundary C or OS code left in memory the collector reads whole - reaches none. On
+// Linux libc's start frame held the boundary of its own mapping, which the heap's first mapping shared in about one run
+// of fifty, and the program's first object stayed alive (MemoryGC/StackMaps failed so).
+include "Memory/gc.ch"
+
+struct Small { public int32 v; }
+struct Large { public int64[1000] v; }
+
+const uint64 kMappingAlign = 64 * 1024 * 1024; // GC_ARENA_SIZE
+
+bool AtABoundary(void* object) { return (uint64)object % kMappingAlign == 0; }
+
+int32 main() {
+	Small* first = new Small;
+	if (AtABoundary((void*)first)) return 1;
+	Large* large = new Large;
+	if (AtABoundary((void*)large)) return 2;
+	// Larger than a mapping: a run of mappings of its own.
+	const int64 hugeBytes = 80 * 1024 * 1024;
+	uint8* huge = new uint8[hugeBytes];
+	if (AtABoundary((void*)huge)) return 3;
+	huge[hugeBytes - 1] = 1;
+	printf("MAPPING START OK %d\n", (int32)huge[hugeBytes - 1] + first->v + (int32)large->v[0]);
+	return 0;
+}

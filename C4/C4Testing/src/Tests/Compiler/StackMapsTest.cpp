@@ -1,8 +1,10 @@
 #include "StackMapsTest.h"
 #include "Backend/ProgramBackend.h"
+#include "Compiler/BuildUtils.h"
 #include "Compiler/CompilerInstance.h"
 #include "Compiler/ObjectEmission.h"
 #include "Compiler/RuntimeObjects.h"
+#include "Compiler/StackMapFormat.h"
 #include "Compiler/StackMaps.h"
 #include "Compiler/StackMapValues.h"
 #include "Compiler/Toolchain.h"
@@ -15,11 +17,16 @@
 #include <llvm/IR/Verifier.h>
 #include <llvm/Object/ELFObjectFile.h>
 #include <llvm/Object/ObjectFile.h>
+#include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
 #include <algorithm>
+#include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <memory>
+#include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -29,6 +36,8 @@ namespace Testing
 
 	namespace
 	{
+		constexpr llvm::CodeGenOptLevel kOptimized = llvm::CodeGenOptLevel::Default;
+
 		// `a`, `b` and `c` are read after the third `new`, only `c` after Call: at -O0 each is a stack slot.
 		constexpr const char* kProgram = R"(
 			struct T { public int32 v; }
@@ -166,8 +175,8 @@ namespace Testing
 			return names;
 		}
 
-		// Whether code generation writes `module` as an object for `system`.
-		bool ObjectWritten(llvm::Module& module, TargetSystem system, int optLevel)
+		// The object code generation writes for `module` and `system`; nullopt when it writes none.
+		std::optional<std::string> ObjectOf(llvm::Module& module, TargetSystem system, int optLevel)
 		{
 			const CpuTarget target = CpuTarget().On(system);
 			const ObjectSettings settings{ optLevel, &target, 1, false };
@@ -175,10 +184,130 @@ namespace Testing
 			std::vector<ObjectDiagnostic> diagnostics;
 			const bool written = WriteObject(module, settings, path, diagnostics);
 			for (const ObjectDiagnostic& diagnostic : diagnostics) printf("%s\n", diagnostic.message.c_str());
+			std::ostringstream bytes;
+			bytes << std::ifstream(path, std::ios::binary).rdbuf();
 			std::error_code ec;
 			std::filesystem::remove(path, ec);
-			return written && diagnostics.empty();
+			if (!written || !diagnostics.empty()) return std::nullopt;
+			return bytes.str();
 		}
+
+		bool ObjectWritten(llvm::Module& module, TargetSystem system, int optLevel) { return ObjectOf(module, system, optLevel).has_value(); }
+
+		// The section `name` of `object`, nullopt when it has none.
+		std::optional<llvm::object::SectionRef> SectionNamed(const llvm::object::ObjectFile& object, llvm::StringRef name)
+		{
+			for (const llvm::object::SectionRef& section : object.sections())
+			{
+				llvm::Expected<llvm::StringRef> found = section.getName();
+				if (!found)
+				{
+					llvm::consumeError(found.takeError());
+					continue;
+				}
+				if (*found == name) return section;
+			}
+			return std::nullopt;
+		}
+
+		// What a stack map (Compiler/StackMapFormat) says of a record: how many values it names, how many slots it lists.
+		struct MapRecord
+		{
+			bool whole = false;
+			size_t values = 0;
+			size_t slots = 0;
+		};
+
+		uint64_t Uleb(const uint8_t*& at)
+		{
+			uint64_t value = 0;
+			for (unsigned shift = 0;; shift += 7)
+			{
+				const uint8_t byte = *at++;
+				value |= static_cast<uint64_t>(byte & 0x7f) << shift;
+				if (!(byte & 0x80)) return value;
+			}
+		}
+
+		uint32_t Read32(const uint8_t* at)
+		{
+			uint32_t value = 0;
+			std::memcpy(&value, at, sizeof value);
+			return value;
+		}
+
+		// The records of each function of one object's map; empty when `map` does not start with a map of this format.
+		std::vector<std::vector<MapRecord>> RecordsOf(llvm::StringRef map)
+		{
+			constexpr size_t c_HeaderBytes = 16, c_AddressBytes = 8, c_OffsetBytes = 4;
+			std::vector<std::vector<MapRecord>> functions;
+			const uint8_t* at = reinterpret_cast<const uint8_t*>(map.data());
+			if (map.size() < c_HeaderBytes || Read32(at) != c_StackMapMagic || Read32(at + 4) != c_StackMapVersion || Read32(at + 12) > map.size()) return functions;
+			const uint32_t count = Read32(at + 8);
+			at += c_HeaderBytes + count * c_AddressBytes;
+			for (uint32_t f = 0; f < count; ++f)
+			{
+				const uint64_t records = Uleb(at);
+				const uint64_t slots = Uleb(at);
+				for (uint64_t s = 0; s < slots; ++s)
+				{
+					Uleb(at);
+					Uleb(at); // a SLEB is skipped as a ULEB
+					const uint64_t words = Uleb(at);
+					if (!(words & 1))
+						for (uint64_t first = 0; first < (words >> 1); first += 32) Uleb(at);
+				}
+				std::vector<MapRecord>& list = functions.emplace_back();
+				for (uint64_t r = 0; r < records; ++r)
+				{
+					at += c_OffsetBytes;
+					MapRecord record;
+					const uint64_t values = Uleb(at);
+					record.whole = (values & 1) != 0;
+					record.values = values >> 1;
+					if (!record.whole)
+					{
+						for (size_t v = 0; v < record.values; ++v)
+							if (Uleb(at) & 1) Uleb(at);
+						for (uint64_t s = 0; s < slots; ++s) record.slots += (at[s / 8] >> (s % 8)) & 1;
+						at += (slots + 7) / 8;
+					}
+					list.push_back(record);
+				}
+			}
+			return functions;
+		}
+
+		// The records of each function of the map in `object`'s `section` (one object's map); empty when there is none.
+		std::vector<std::vector<MapRecord>> MapOf(const std::string& object, llvm::StringRef section)
+		{
+			llvm::Expected<std::unique_ptr<llvm::object::ObjectFile>> file = llvm::object::ObjectFile::createObjectFile(llvm::MemoryBufferRef(object, "object"));
+			if (!file)
+			{
+				llvm::consumeError(file.takeError());
+				return {};
+			}
+			const std::optional<llvm::object::SectionRef> found = SectionNamed(**file, section);
+			if (!found) return {};
+			llvm::Expected<llvm::StringRef> contents = found->getContents();
+			if (!contents)
+			{
+				llvm::consumeError(contents.takeError());
+				return {};
+			}
+			return RecordsOf(*contents);
+		}
+	}
+
+	void StackMapsTest::StackMapsAreTheDefault()
+	{
+		char program[] = "C4.exe", source[] = "main.cf", without[] = "-fno-stack-maps", with[] = "-fstack-maps";
+		char* plain[] = { program, source };
+		char* off[] = { program, source, without };
+		char* offThenOn[] = { program, source, without, with };
+		TEST_ASSERT(ParseArgs(2, plain).stackMaps);
+		TEST_ASSERT(!ParseArgs(3, off).stackMaps);
+		TEST_ASSERT(ParseArgs(4, offThenOn).stackMaps);
 	}
 
 	void StackMapsTest::WithoutTheFlagNothingChanges()
@@ -187,7 +316,7 @@ namespace Testing
 		TEST_ASSERT(plain.module != nullptr);
 		if (!plain.module) return;
 		TEST_ASSERT(!UsesStackMaps(*plain.module));
-		InsertStatepoints(*plain.module);
+		InsertStatepoints(*plain.module, kOptimized);
 		TEST_ASSERT(Text(*plain.module) == plain.ir);
 	}
 
@@ -221,7 +350,7 @@ namespace Testing
 		Lowered mapped = Lower(kProgram, true);
 		TEST_ASSERT(mapped.module != nullptr);
 		if (!mapped.module) return;
-		InsertStatepoints(*mapped.module);
+		InsertStatepoints(*mapped.module, kOptimized);
 		TEST_ASSERT(Verified(*mapped.module));
 		const llvm::Function* slots = FunctionNamed(*mapped.module, "Slots");
 		TEST_ASSERT(slots && slots->hasGC() && slots->getGC() == c_StackMapsGc);
@@ -234,7 +363,7 @@ namespace Testing
 		Lowered mapped = Lower(kProgram, true);
 		TEST_ASSERT(mapped.module != nullptr);
 		if (!mapped.module) return;
-		InsertStatepoints(*mapped.module);
+		InsertStatepoints(*mapped.module, kOptimized);
 		const llvm::Function* slots = FunctionNamed(*mapped.module, "Slots");
 		TEST_ASSERT(slots != nullptr);
 		if (!slots) return;
@@ -339,7 +468,7 @@ namespace Testing
 		)");
 		TEST_ASSERT(module != nullptr);
 		if (!module) return;
-		InsertStatepoints(*module);
+		InsertStatepoints(*module, kOptimized);
 		TEST_ASSERT(Verified(*module));
 		// A call before a return of something else is no sibling call: its frame waits in it, and is read by its record.
 		TEST_ASSERT(RecordedCalls(*module->getFunction("returnsZero"), "collect").size() == 1);
@@ -361,7 +490,7 @@ namespace Testing
 			Lowered mapped = Lower(kGuarded, true, system);
 			TEST_ASSERT(mapped.module != nullptr);
 			if (!mapped.module) continue;
-			InsertStatepoints(*mapped.module);
+			InsertStatepoints(*mapped.module, kOptimized);
 			TEST_ASSERT(Verified(*mapped.module));
 			const llvm::Function* guarded = FunctionNamed(*mapped.module, "Guarded");
 			TEST_ASSERT(guarded != nullptr);
@@ -398,41 +527,127 @@ namespace Testing
 		}
 	}
 
+	void StackMapsTest::AtO0EveryValueGoesThroughASlot()
+	{
+		// Twenty-four pointers and a pair of them live across one call. -O0's register allocator cannot spill a statepoint's
+		// register operands: with each value in place it ran out of registers.
+		constexpr int kPointers = 24;
+		std::string body = "declare void @call()\ndeclare void @use(ptr)\ndeclare { ptr, ptr } @pair()\ndefine void @f(ptr %a) {\n%two = call { ptr, ptr } @pair()\n";
+		for (int i = 0; i < kPointers; ++i)
+			body += "%f" + std::to_string(i) + " = getelementptr i8, ptr %a, i64 " + std::to_string(8 * i) + "\n%p" + std::to_string(i) + " = load ptr, ptr %f" +
+				std::to_string(i) + "\n";
+		body += "call void @call()\n";
+		for (int i = 0; i < kPointers; ++i) body += "call void @use(ptr %p" + std::to_string(i) + ")\n";
+		body += "%first = extractvalue { ptr, ptr } %two, 0\ncall void @use(ptr %first)\n%second = extractvalue { ptr, ptr } %two, 1\n"
+				"call void @use(ptr %second)\nret void\n}\n";
+		for (const TargetSystem system : { TargetSystem::Windows, TargetSystem::Linux })
+		{
+			llvm::LLVMContext context;
+			std::unique_ptr<llvm::Module> module = Parsed(context, body, system);
+			TEST_ASSERT(module != nullptr);
+			if (!module) continue;
+			InsertStatepoints(*module, llvm::CodeGenOptLevel::None);
+			TEST_ASSERT(Verified(*module));
+			const std::vector<const llvm::CallBase*> calls = RecordedCalls(*module->getFunction("f"), "call");
+			TEST_ASSERT(calls.size() == 1);
+			if (calls.size() != 1) continue;
+			for (const llvm::Use& input : calls[0]->getOperandBundle(llvm::LLVMContext::OB_deopt)->Inputs)
+				TEST_ASSERT(llvm::isa<llvm::Constant>(input.get()) || llvm::isa<llvm::AllocaInst>(input.get()));
+			TEST_ASSERT(ListedSlots(*calls[0]) == kPointers + 1); // each pointer's and the pair's
+			TEST_ASSERT(ObjectWritten(*module, system, 0));
+		}
+	}
+
+	void StackMapsTest::RecordsAreTheSameEveryTime()
+	{
+		// Each `make` has the values made before it live across it, and at -O0 each value goes through a slot of its own:
+		// made in the calls' order, whatever the addresses of the module's values. The modules stay alive, so each round's
+		// values are at other addresses.
+		constexpr int kValues = 12;
+		constexpr int kRounds = 8;
+		std::string body = "declare ptr @make()\ndeclare void @use(ptr)\ndefine void @f() {\n";
+		for (int i = 0; i < kValues; ++i) body += "%v" + std::to_string(i) + " = call ptr @make()\n";
+		for (int i = 0; i < kValues; ++i) body += "call void @use(ptr %v" + std::to_string(i) + ")\n";
+		body += "ret void\n}\n";
+		std::vector<std::unique_ptr<llvm::LLVMContext>> contexts;
+		std::vector<std::unique_ptr<llvm::Module>> modules;
+		std::vector<std::string> texts;
+		for (int round = 0; round < kRounds; ++round)
+		{
+			contexts.push_back(std::make_unique<llvm::LLVMContext>());
+			modules.push_back(Parsed(*contexts.back(), body));
+			TEST_ASSERT(modules.back() != nullptr);
+			if (!modules.back()) return;
+			InsertStatepoints(*modules.back(), llvm::CodeGenOptLevel::None);
+			texts.push_back(Text(*modules.back()));
+		}
+		for (const std::string& text : texts) TEST_ASSERT(text == texts.front());
+	}
+
 	void StackMapsTest::AnElfStackMapIsWritableAndBracketed()
 	{
 		Lowered mapped = Lower(kProgram, true, TargetSystem::Linux);
 		TEST_ASSERT(mapped.module != nullptr);
 		if (!mapped.module) return;
-		const CpuTarget target = CpuTarget().On(TargetSystem::Linux);
-		const ObjectSettings settings{ 0, &target, 1, false };
-		const std::string path = (std::filesystem::temp_directory_path() / "c4_stack_maps_test.o").string();
-		std::vector<ObjectDiagnostic> diagnostics;
-		TEST_ASSERT(WriteObject(*mapped.module, settings, path, diagnostics));
-		llvm::Expected<llvm::object::OwningBinary<llvm::object::ObjectFile>> object = llvm::object::ObjectFile::createObjectFile(path);
-		TEST_ASSERT(static_cast<bool>(object));
-		if (!object)
+		const std::optional<std::string> object = ObjectOf(*mapped.module, TargetSystem::Linux, 0);
+		TEST_ASSERT(object.has_value());
+		if (!object) return;
+		llvm::Expected<std::unique_ptr<llvm::object::ObjectFile>> file = llvm::object::ObjectFile::createObjectFile(llvm::MemoryBufferRef(*object, "object"));
+		TEST_ASSERT(static_cast<bool>(file));
+		if (!file)
 		{
-			llvm::consumeError(object.takeError());
+			llvm::consumeError(file.takeError());
 			return;
 		}
-		bool found = false;
-		for (const llvm::object::SectionRef& section : object->getBinary()->sections())
-		{
-			llvm::Expected<llvm::StringRef> name = section.getName();
-			if (!name || *name != "llvm_stackmaps")
-			{
-				if (!name) llvm::consumeError(name.takeError());
-				continue;
+		// The linker brackets a section named as a C identifier with __start_/__stop_ symbols.
+		const std::optional<llvm::object::SectionRef> section = SectionNamed(**file, c_StackMapSectionElf);
+		TEST_ASSERT(section.has_value());
+		if (!section) return;
+		const uint64_t flags = llvm::object::ELFSectionRef(*section).getFlags();
+		TEST_ASSERT((flags & llvm::ELF::SHF_WRITE) != 0);
+		TEST_ASSERT((flags & llvm::ELF::SHF_GNU_RETAIN) != 0);
+		TEST_ASSERT(!MapOf(*object, c_StackMapSectionElf).empty());
+		TEST_ASSERT(!SectionNamed(**file, ".llvm_stackmaps").has_value()); // LLVM's own format is not written
+	}
+
+	void StackMapsTest::TheMapNamesEachCallsValuesAndSlots()
+	{
+		// At `call`: `a`, `n` and `bits` are read after it, and `slot`, whose address goes to `use`, is listed at every call.
+		constexpr const char* kBody = R"(
+			declare ptr @make()
+			declare void @call()
+			declare void @use(ptr, i64)
+			define void @f(ptr %a, i64 %n) {
+			entry:
+				%slot = alloca ptr
+				%made = call ptr @make()
+				%bits = ptrtoint ptr %made to i64
+				call void @call()
+				call void @use(ptr %a, i64 %n)
+				call void @use(ptr %slot, i64 %bits)
+				ret void
 			}
-			found = true;
-			const uint64_t flags = llvm::object::ELFSectionRef(section).getFlags();
-			TEST_ASSERT((flags & llvm::ELF::SHF_WRITE) != 0);
-			TEST_ASSERT((flags & llvm::ELF::SHF_GNU_RETAIN) != 0);
-			TEST_ASSERT(section.getSize() > 0);
-		}
-		TEST_ASSERT(found);
-		std::error_code ec;
-		std::filesystem::remove(path, ec);
+		)";
+		for (const TargetSystem system : { TargetSystem::Windows, TargetSystem::Linux })
+			for (const int optLevel : { 2, 0 })
+			{
+				llvm::LLVMContext context;
+				std::unique_ptr<llvm::Module> module = Parsed(context, kBody, system);
+				TEST_ASSERT(module != nullptr);
+				if (!module) continue;
+				const std::optional<std::string> object = ObjectOf(*module, system, optLevel);
+				TEST_ASSERT(object.has_value());
+				if (!object) continue;
+				const std::vector<std::vector<MapRecord>> map = MapOf(*object, system == TargetSystem::Linux ? c_StackMapSectionElf : c_StackMapSectionCoff);
+				TEST_ASSERT(map.size() == 1 && map[0].size() == 4); // f's calls: make, call, use, use
+				if (map.size() != 1 || map[0].size() != 4) continue;
+				const MapRecord& atCall = map[0][1];
+				TEST_ASSERT(!atCall.whole);
+				// Optimized, the three values are where they are; at -O0 each through a slot of its own.
+				TEST_ASSERT(atCall.values == (optLevel == 0 ? 0u : 3u));
+				TEST_ASSERT(atCall.slots == (optLevel == 0 ? 4u : 1u));
+				TEST_ASSERT(map[0][3].values == 0 && map[0][3].slots == 1); // after the last call nothing is read but `slot`
+			}
 	}
 
 	void StackMapsTest::ALibraryCallCodeGenerationExpandsHasNoRecord()
@@ -454,7 +669,7 @@ namespace Testing
 		const ObjectSettings settings{ 2, &target, 1, false };
 		std::vector<ObjectDiagnostic> diagnostics;
 		TEST_ASSERT(OptimizeModule(*mapped.module, settings, diagnostics));
-		InsertStatepoints(*mapped.module);
+		InsertStatepoints(*mapped.module, kOptimized);
 		TEST_ASSERT(Verified(*mapped.module));
 		size_t compares = 0;
 		for (const llvm::Function& fn : *mapped.module)

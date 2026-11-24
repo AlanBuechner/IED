@@ -44,5 +44,7 @@ int32 main(int32 argc, char** argv)
 	if (!host->IsOpen()) return checks.End("Callbacks");
 	Scripting::Script* script = ScriptTest::Load(host, checks, ScriptTest::OptionsFor(checks, "callbacks", "callbacks.cf"));
 	if (script->Ok()) CheckCallbacks(script, checks);
+	// The host keeps its script until it is done with the script's code: a Script the collector finds unreachable unloads.
+	script->Unload();
 	return checks.End("Callbacks");
 }

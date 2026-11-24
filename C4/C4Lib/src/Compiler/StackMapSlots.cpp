@@ -1,5 +1,4 @@
 #include "Compiler/StackMapSlots.h"
-#include "Compiler/StackMaps.h"
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DataLayout.h>
@@ -294,5 +293,12 @@ namespace C4Compiler
 			if (!operands.empty()) listed.emplace(call, std::move(operands));
 		}
 		return listed;
+	}
+
+	std::vector<llvm::Value*> SlotOperands(llvm::AllocaInst& slot)
+	{
+		const std::optional<llvm::TypeSize> size = slot.getAllocationSize(slot.getDataLayout());
+		if (!size || size->isScalable()) return {};
+		return Operands(slot, size->getFixedValue());
 	}
 }

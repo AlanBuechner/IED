@@ -36,13 +36,13 @@ void gc_os_prepare_stack_walk(void) {}
 
 void gc_os_stack_maps(const uint8_t** start, const uint8_t** end)
 {
-	// lld-link keeps the objects' `.llvm_stackmaps` as one section named by its first eight bytes.
+	// lld-link keeps the objects' `.c4smap` (Compiler/StackMapFormat.h) as one section of the image.
 	*start = *end = NULL;
 	const uint8_t* base = (const uint8_t*)&__ImageBase;
 	const IMAGE_NT_HEADERS64* headers = (const IMAGE_NT_HEADERS64*)(base + __ImageBase.e_lfanew);
 	const IMAGE_SECTION_HEADER* section = IMAGE_FIRST_SECTION(headers);
 	for (WORD i = 0; i < headers->FileHeader.NumberOfSections; ++i, ++section)
-		if (memcmp(section->Name, ".llvm_st", IMAGE_SIZEOF_SHORT_NAME) == 0)
+		if (memcmp(section->Name, ".c4smap", IMAGE_SIZEOF_SHORT_NAME) == 0)
 		{
 			*start = base + section->VirtualAddress;
 			*end = *start + section->Misc.VirtualSize;

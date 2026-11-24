@@ -1,7 +1,7 @@
 #pragma once
-// Precise stack scanning (R16 phase 3, `-fstack-maps`, docs/runtime/01 "Stacks"): LLVM's stack map of the program's C4 code
-// names, for each call a C4 function makes, where the managed pointers live across it are (a stack slot, a register) and
-// which of its stack slots may hold one (the compiler's deopt list: each slot, its word count, a mask per 32 words). A
+// Precise stack scanning (R16 phase 3, `-fstack-maps`, docs/runtime/01 "Stacks"): the stack maps of the program's C4 code
+// (Compiler/StackMapFormat.h) name, for each call a C4 function makes, where the managed pointers live across it are (a
+// register, a word in memory) and which of its stack slots may hold one (each slot, its word count, a mask per 32 words). A
 // stopped thread's stack is walked frame by frame by its unwind data: a frame waiting in a call with a record is read
 // at those places only; every other frame - C, C++, the runtime, a script, the innermost one, a call left without a
 // record - is read whole, with its registers. A program built without stack maps has none, and every frame is read whole.
@@ -29,8 +29,8 @@ const GCStackRecord* gc_stack_maps_find(uintptr_t pc);
 // registers do not give (the caller then reads the frame whole).
 int gc_stack_record_scan(const GCStackRecord* record, const GCFrameState* frame, gc_scan_range_fn now, gc_scan_range_fn later, void* ctx);
 
-// The stack maps of one image, as the linker gathered them: the objects' `.llvm_stackmaps` one after another. The platform
-// gives them (gc_os_stack_maps); a test may add its own.
+// The stack maps of one image, as the linker gathered them: the objects' maps one after another. The platform gives them
+// (gc_os_stack_maps); a test may add its own.
 void gc_stack_maps_add(const uint8_t* start, const uint8_t* end);
 // Where the program's image keeps its stack maps: [*start, *end), both NULL when it has none.
 void gc_os_stack_maps(const uint8_t** start, const uint8_t** end);

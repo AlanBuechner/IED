@@ -1,6 +1,6 @@
 ---
 name: c4-garbage-collector
-description: C4 garbage collector - non-moving mark-sweep, precise for heap objects by compiler pointer maps and conservative for stacks and raw regions, mostly concurrent past 16 MiB live (OS write watch, no barrier), with size-class spans, an O(1) page map, an explicit mark stack, ordered finalizers and noscan allocation for pointer-free types (C4Runtime/GC/, linked into every executable). Covers the managed-pointer model, roots, raw allocation, scan regions, root enumerators, collection callbacks, custom-allocator pools, counted pins, pacing, disable/enable windows, stats and the Bedrock GC namespace.
+description: C4 garbage collector - non-moving mark-sweep, precise for heap objects by compiler pointer maps and for C4 frames by stack maps (the default), conservative for other frames and raw regions, mostly concurrent past 16 MiB live (OS write watch, no barrier), with size-class spans, an O(1) page map, an explicit mark stack, ordered finalizers and noscan allocation for pointer-free types (C4Runtime/GC/, linked into every executable). Covers the managed-pointer model, roots, raw allocation, scan regions, root enumerators, collection callbacks, custom-allocator pools, counted pins, pacing, disable/enable windows, stats and the Bedrock GC namespace.
 triggers:
   - "C4 garbage collector"
   - "non-moving mark-sweep stop-the-world finalizer"
@@ -15,7 +15,8 @@ triggers:
 
 C4 uses a **non-moving mark-sweep** collector with **no write barriers** (it rescans everything each collection;
 past 16 MiB live it marks mostly concurrently): **precise for heap objects of known type** (R16: compiler pointer
-maps), **conservative for stacks, registers and raw regions**. The C API is `C4Runtime/GCRuntimeC.h`; the implementation is
+maps) **and for C4 frames** (stack maps, the default), **conservative for other frames, the registers they saved and
+raw regions**. The C API is `C4Runtime/GCRuntimeC.h`; the implementation is
 `C4Runtime/GC/` (pure C plus a C++ finalizer shim), linked into every executable. The reference is
 `docs/runtime/01-memory-and-gc.md`.
 
@@ -43,24 +44,29 @@ maps), **conservative for stacks, registers and raw regions**. The C API is `C4R
   Buffers too: `gc_type_of(T)` (a builtin) names T's record, and a region registered with it
   (`gc_register_typed_region`, `buffer_resize_scanned_typed`; a reflected type's `Reflection::Type::GcType()`) is
   read by T's map; Bedrock's containers and serializers register theirs so.
-  Still conservative: stacks, registers, untyped scan regions, `c4_alloc` memory - stacks unless the program is built
-  with `-fstack-maps` (R16 phase 3, off by default, at no measurable run-time cost). With it each C4 frame waiting in a
-  call is read only where LLVM's stack map says its live values and pointer-holding slots are (`Compiler/StackMap*`: after
-  the optimizer each call gets a `deopt` bundle naming them, nothing relocated, the IR otherwise unchanged - keep it so:
-  a statepoint operand counts as a use to the register allocator, so a value a loop does not use is named through a slot
-  of its own), every other frame (C, runtime, scripts, the innermost one, calls left without a record) whole with the
-  callee-saved registers it saved; an explicit collection does not read its own frames. The walk unwinds without loader
-  locks (`GC/GCStackWalk{Win32,Posix}.c`) and the program links the runtime built with `C4_STACK_MAPS` (`GC/GCStack*`
-  only there). Build and test it with `RunTests.ps1 -StackMaps` (`run_linux.py --stack-maps`).
+  Stacks (R16 phase 3, the default; `-fno-stack-maps` reads every frame whole, at no measurable run-time cost either
+  way): each C4 frame waiting in a call is read only where its stack map says its live values and pointer-holding
+  slots are (in C4's format, `Compiler/StackMapFormat`: a function's slots once, a bit each in a record - LLVM's own
+  format made the IED server 5x larger; `Compiler/StackMap*`: after the optimizer each call gets a `deopt` bundle naming them, nothing relocated,
+  the IR otherwise unchanged - keep it so: a statepoint operand counts as a use to the register allocator, so a word a
+  loop does not use is named through a slot of its own, and at `-O0`, whose register allocator cannot spill a
+  statepoint's operands, every value is; make anything you add in a fixed order, never a pointer-keyed map's), every
+  other frame (C, runtime, scripts, the innermost one, calls left without a record) whole with the callee-saved
+  registers it saved; an explicit collection does not read its own frames. The walk unwinds without loader locks
+  (`GC/GCStackWalk{Win32,Posix}.c`) and the program links the runtime built with `C4_STACK_MAPS` (`GC/GCStack*` only
+  there). So a local the code no longer reads keeps nothing: a program keeps what it still needs reachable (a script
+  host its `Scripting::Script` while it calls the script's code). Still conservative: other frames, the registers they
+  saved, untyped scan regions, `c4_alloc` memory. Test the frames read whole with `RunTests.ps1 -NoStackMaps`
+  (`run_linux.py --no-stack-maps`).
 
 ## Roots
 `__c4_gc_roots` (compiler-emitted `{address, size, pointers}` ranges for every global, static member and static
 local that may hold a pointer; `pointers` the storage type's map, R16 phase 2, so only those words are read - null
 reads the range whole; thread_locals the same through `__c4_gc_thread_roots`), every registered thread's registers
-and stack (conservative; with `-fstack-maps` C4 frames by their stack maps), registered scan regions,
+and stack (C4 frames by their stack maps, the rest conservatively), registered scan regions,
 root enumerators, pinned objects and objects waiting for their finalizer. A conservative collector can keep
 an object alive while a stale copy of its address sits in a register or dead stack slot - tests that assert
-"was collected" must allow a few survivors, or collect explicitly below many C4 frames with `-fstack-maps` (a runtime
+"was collected" must allow a few survivors, or collect explicitly below many C4 frames (with stack maps; a runtime
 or C frame other than the collection's own is read whole: give it stack memory no earlier call used, as
 `MemoryGC/StackMaps` does).
 

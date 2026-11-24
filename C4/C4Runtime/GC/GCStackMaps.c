@@ -1,24 +1,21 @@
 #include "GC/GCStackMaps.h"
 #include <string.h>
 
-// LLVM's stack map, version 3 (llvm.org/docs/StackMaps.html): a header, the functions with their record counts, the
-// large constants, then the records - each a call's return address (the function's address plus its offset) and its
-// locations; a statepoint's are its calling convention, its flags and its count of deopt operands, then the deopt
-// operands (Compiler/StackMaps.cpp): the count of words of the values live across the call that may hold an address, those
-// words (each where it is while the call runs: a register, a spill slot), then each stack slot that may hold a pointer,
-// its word count and a mask per 32 words.
-enum { kVersion = 3, kHeaderBytes = 16, kFunctionBytes = 24, kRecordHeaderBytes = 16, kLocationBytes = 12 };
-enum { kRegister = 1, kDirect = 2, kIndirect = 3, kConstant = 4, kConstantIndex = 5 };
-enum { kStatepointHeader = 3, kDeoptCount = 2 };
+// C4's stack maps (Compiler/StackMapFormat.h, which says the format): one an object, each a header, its functions'
+// addresses, then function by function its slots and its records. A record is a call's return address (the function's
+// address plus its offset), the values live across the call that may hold an address (each where it is while the call
+// runs: a register, a word in memory), and a bit per slot of its function for those it lists - each a stack slot that
+// may hold a pointer, with its word count and a mask per 32 words.
+enum { kMagic = 0x4D533443, kVersion = 1, kHeaderBytes = 16, kAddressBytes = 8, kOffsetBytes = 4 };
+enum { kSlotDirect = 0, kSlotIndirect = 1, kSlotRegister = 2 };
 enum { kWordBytes = 8, kMaskWords = 32 };
-#define GC_SLOT_WHOLE 0x80000000u
 
 struct GCStackRecord
 {
 	uintptr_t pc;
 	const uint8_t* record;
-	const uint8_t* constants; // its stack map's large constants
-	uint32_t constantCount;
+	const uint8_t* slots; // its function's slots
+	uint32_t slotCount;
 };
 
 typedef struct StackMapTable
@@ -35,7 +32,6 @@ static _Thread_local uintptr_t t_collectionCaller;
 void gc_stack_set_collection_caller(uintptr_t returnAddress) { t_collectionCaller = returnAddress; }
 uintptr_t gc_stack_collection_caller(void) { return t_collectionCaller; }
 
-static uint16_t read16(const uint8_t* at) { uint16_t v; memcpy(&v, at, sizeof v); return v; }
 static uint32_t read32(const uint8_t* at) { uint32_t v; memcpy(&v, at, sizeof v); return v; }
 static uint64_t read64(const uint8_t* at) { uint64_t v; memcpy(&v, at, sizeof v); return v; }
 static const uint8_t* align8(const uint8_t* at) { return (const uint8_t*)(((uintptr_t)at + 7u) & ~(uintptr_t)7u); }
@@ -68,34 +64,105 @@ static void add_record(const GCStackRecord* record)
 	++g_maps.count;
 }
 
+// LEB128 numbers. Those of a map are checked as it is added (a number past `end` fails it: *at becomes NULL), so a
+// record is read again without checks.
+static uint64_t uleb_within(const uint8_t** at, const uint8_t* end)
+{
+	uint64_t value = 0;
+	for (unsigned shift = 0; *at && *at < end && shift < 64; shift += 7)
+	{
+		const uint8_t byte = *(*at)++;
+		value |= (uint64_t)(byte & 0x7f) << shift;
+		if (!(byte & 0x80)) return value;
+	}
+	*at = NULL;
+	return 0;
+}
+
+static void sleb_skip(const uint8_t** at, const uint8_t* end)
+{
+	while (*at && *at < end)
+		if (!(*(*at)++ & 0x80)) return;
+	*at = NULL;
+}
+
+static uint64_t uleb(const uint8_t** at)
+{
+	uint64_t value = 0;
+	for (unsigned shift = 0;; shift += 7)
+	{
+		const uint8_t byte = *(*at)++;
+		value |= (uint64_t)(byte & 0x7f) << shift;
+		if (!(byte & 0x80)) return value;
+	}
+}
+
+static int64_t sleb(const uint8_t** at)
+{
+	int64_t value = 0;
+	unsigned shift = 0;
+	uint8_t byte;
+	do
+	{
+		byte = *(*at)++;
+		value |= (int64_t)(byte & 0x7f) << shift;
+		shift += 7;
+	} while (byte & 0x80);
+	if (shift < 64 && (byte & 0x40)) value |= -((int64_t)1 << shift);
+	return value;
+}
+
+// A slot of a function's map (see GCSlot below): where the next one starts, NULL when it does not fit before `end`.
+static const uint8_t* skip_slot(const uint8_t* at, const uint8_t* end)
+{
+	uleb_within(&at, end);
+	sleb_skip(&at, end);
+	const uint64_t words = uleb_within(&at, end);
+	if (!(words & 1))
+		for (uint64_t mask = 0; at && mask < ((words >> 1) + kMaskWords - 1) / kMaskWords; ++mask) uleb_within(&at, end);
+	return at;
+}
+
+// A record whose return offset is at `at`: where the next one starts, NULL when it does not fit before `end`.
+static const uint8_t* skip_record(const uint8_t* at, const uint8_t* end, uint32_t slotCount)
+{
+	if (end - at < kOffsetBytes) return NULL;
+	at += kOffsetBytes;
+	const uint64_t values = uleb_within(&at, end);
+	if (values & 1) return at; // the frame is read whole: nothing follows
+	for (uint64_t v = 0; at && v < (values >> 1); ++v)
+		if (uleb_within(&at, end) & 1) sleb_skip(&at, end);
+	if (!at || (size_t)(end - at) < ((size_t)slotCount + 7) / 8) return NULL;
+	return at + ((size_t)slotCount + 7) / 8;
+}
+
 // One object's stack map at `at`: its records added; where the next one starts, or NULL when it is not one.
 static const uint8_t* add_map(const uint8_t* at, const uint8_t* end)
 {
-	if (end - at < kHeaderBytes || at[0] != kVersion) return NULL;
-	const uint32_t functions = read32(at + 4);
-	const uint32_t constants = read32(at + 8);
-	const uint8_t* function = at + kHeaderBytes;
-	const uint8_t* constant = function + (size_t)functions * kFunctionBytes;
-	const uint8_t* record = constant + (size_t)constants * kWordBytes;
-	if (record > end) return NULL;
-	for (uint32_t f = 0; f < functions; ++f, function += kFunctionBytes)
+	if (end - at < kHeaderBytes || read32(at) != kMagic || read32(at + 4) != kVersion) return NULL;
+	const uint32_t functions = read32(at + 8);
+	const uint8_t* mapEnd = at + read32(at + 12);
+	const uint8_t* address = at + kHeaderBytes;
+	const uint8_t* stream = address + (size_t)functions * kAddressBytes;
+	if (mapEnd > end || stream > mapEnd) return NULL;
+	for (uint32_t f = 0; f < functions; ++f, address += kAddressBytes)
 	{
-		const uint64_t address = read64(function);
-		const uint64_t count = read64(function + 16);
-		for (uint64_t r = 0; r < count; ++r)
+		const uint64_t function = read64(address);
+		const uint64_t records = uleb_within(&stream, mapEnd);
+		const uint64_t slotCount = uleb_within(&stream, mapEnd);
+		const uint8_t* slots = stream;
+		for (uint64_t s = 0; stream && s < slotCount; ++s) stream = skip_slot(stream, mapEnd);
+		if (!stream || slotCount > UINT32_MAX) return NULL;
+		for (uint64_t r = 0; r < records; ++r)
 		{
-			if (end - record < kRecordHeaderBytes) return NULL;
-			const uint16_t locations = read16(record + 14);
-			const uint8_t* liveOuts = align8(record + kRecordHeaderBytes + (size_t)locations * kLocationBytes);
-			if (end - liveOuts < 4) return NULL;
-			const uint8_t* next = align8(liveOuts + 4 + (size_t)read16(liveOuts + 2) * 4);
-			if (next > end) return NULL;
-			const GCStackRecord entry = { (uintptr_t)(address + read32(record + 8)), record, constant, constants };
+			const uint8_t* next = skip_record(stream, mapEnd, (uint32_t)slotCount);
+			if (!next) return NULL;
+			const GCStackRecord entry = { (uintptr_t)(function + read32(stream)), stream, slots, (uint32_t)slotCount };
 			add_record(&entry);
-			record = next;
+			stream = next;
 		}
 	}
-	return record;
+	return mapEnd;
 }
 
 void gc_stack_maps_add(const uint8_t* start, const uint8_t* end)
@@ -188,81 +255,95 @@ static int register_of(const GCFrameState* frame, uint16_t number, uint64_t* val
 	return 1;
 }
 
-static uint32_t constant_of(const GCStackRecord* record, const uint8_t* location)
+// One word a record names: in a register, or in memory (a spill slot, an incoming argument's slot).
+static int scan_value(const uint8_t** at, const GCFrameState* frame, gc_scan_range_fn now, void* ctx)
 {
-	const uint8_t kind = location[0];
-	const uint32_t small = read32(location + 8);
-	if (kind == kConstant) return small;
-	if (kind == kConstantIndex && small < record->constantCount) return (uint32_t)read64(record->constants + (size_t)small * kWordBytes);
-	return 0;
+	const uint64_t place = uleb(at);
+	uint64_t value = 0;
+	if (!register_of(frame, (uint16_t)(place >> 1), &value)) return 0;
+	if (place & 1)
+	{
+		const uintptr_t word = (uintptr_t)(value + (uint64_t)sleb(at));
+		now(ctx, (const void*)word, (const void*)(word + kWordBytes));
+	}
+	else now(ctx, &value, &value + 1);
+	return 1;
 }
 
-// Where a listed stack slot starts: a static slot's address (Direct), or one kept in a register or a spill slot.
-static int slot_address(const uint8_t* location, const GCFrameState* frame, uintptr_t* address)
+// A stack slot a function's records may list: where it starts, its words, whether each is read, and for each 32 words
+// a mask of those that may hold a pointer.
+typedef struct GCSlot
+{
+	uint8_t base;
+	uint16_t reg;
+	int64_t offset;
+	uint64_t words;
+	int whole;
+	const uint8_t* masks;
+} GCSlot;
+
+static GCSlot read_slot(const uint8_t** at)
+{
+	GCSlot slot;
+	const uint64_t place = uleb(at);
+	slot.base = (uint8_t)(place & 3);
+	slot.reg = (uint16_t)(place >> 2);
+	slot.offset = sleb(at);
+	const uint64_t words = uleb(at);
+	slot.words = words >> 1;
+	slot.whole = (int)(words & 1);
+	slot.masks = *at;
+	if (!slot.whole)
+		for (uint64_t mask = 0; mask < (slot.words + kMaskWords - 1) / kMaskWords; ++mask) uleb(at);
+	return slot;
+}
+
+// Where `slot` starts in the frame whose registers are `frame`.
+static int slot_address(const GCSlot* slot, const GCFrameState* frame, uintptr_t* address)
 {
 	uint64_t base = 0;
-	if (!register_of(frame, read16(location + 4), &base)) return 0;
-	const int32_t offset = (int32_t)read32(location + 8);
-	switch (location[0])
+	if (!register_of(frame, slot->reg, &base)) return 0;
+	switch (slot->base)
 	{
-	case kDirect: *address = (uintptr_t)(base + (int64_t)offset); return 1;
-	case kIndirect: *address = (uintptr_t)read64((const uint8_t*)(uintptr_t)(base + (int64_t)offset)); return 1;
-	case kRegister: *address = (uintptr_t)base; return 1;
+	case kSlotDirect: *address = (uintptr_t)(base + (uint64_t)slot->offset); return 1;
+	case kSlotIndirect: *address = (uintptr_t)read64((const uint8_t*)(uintptr_t)(base + (uint64_t)slot->offset)); return 1;
+	case kSlotRegister: *address = (uintptr_t)base; return 1;
 	default: return 0;
 	}
 }
 
-// One word a record names: in a register, or in a stack slot (Indirect); a stack slot's own address (Direct) and a
-// constant name no object.
-static int scan_value(const uint8_t* location, const GCFrameState* frame, gc_scan_range_fn now, void* ctx)
+static int scan_slot(const GCSlot* slot, const GCFrameState* frame, gc_scan_range_fn now, gc_scan_range_fn later, void* ctx)
 {
-	uint64_t value = 0;
-	if (location[0] == kIndirect)
+	uintptr_t base = 0;
+	if (!slot_address(slot, frame, &base)) return 0;
+	if (slot->whole)
 	{
-		if (!register_of(frame, read16(location + 4), &value)) return 0;
-		const uintptr_t slot = (uintptr_t)(value + (int64_t)(int32_t)read32(location + 8));
-		now(ctx, (const void*)slot, (const void*)(slot + kWordBytes));
+		later(ctx, (const void*)base, (const void*)(base + (uintptr_t)slot->words * kWordBytes));
+		return 1;
 	}
-	else if (location[0] == kRegister)
-	{
-		if (!register_of(frame, read16(location + 4), &value)) return 0;
-		now(ctx, &value, &value + 1);
-	}
+	const uint8_t* masks = slot->masks;
+	for (uint64_t first = 0; first < slot->words; first += kMaskWords)
+		for (uint64_t mask = uleb(&masks); mask; mask &= mask - 1u)
+		{
+			const uintptr_t word = base + (uintptr_t)(first + (uint64_t)__builtin_ctzll(mask)) * kWordBytes;
+			now(ctx, (const void*)word, (const void*)(word + kWordBytes));
+		}
 	return 1;
 }
 
 int gc_stack_record_scan(const GCStackRecord* record, const GCFrameState* frame, gc_scan_range_fn now, gc_scan_range_fn later, void* ctx)
 {
-	const uint8_t* locations = record->record + kRecordHeaderBytes;
-	const uint16_t count = read16(record->record + 14);
-	if (count < kStatepointHeader) return 1; // a record of no statepoint: nothing lives across the call
-	const size_t deoptEnd = kStatepointHeader + (size_t)constant_of(record, locations + kDeoptCount * kLocationBytes);
-	if (deoptEnd > count || deoptEnd == kStatepointHeader) return 0;
-	const size_t valuesEnd = kStatepointHeader + 1 + (size_t)constant_of(record, locations + kStatepointHeader * kLocationBytes);
-	if (valuesEnd > deoptEnd) return 0;
-	size_t i = kStatepointHeader + 1;
-	for (; i < valuesEnd; ++i)
-		if (!scan_value(locations + i * kLocationBytes, frame, now, ctx)) return 0;
-	while (i < deoptEnd)
+	const uint8_t* at = record->record + kOffsetBytes;
+	const uint64_t values = uleb(&at);
+	if (values & 1) return 0; // the record says to read the frame whole
+	for (uint64_t v = 0; v < (values >> 1); ++v)
+		if (!scan_value(&at, frame, now, ctx)) return 0;
+	const uint8_t* listed = at;
+	const uint8_t* slots = record->slots;
+	for (uint32_t s = 0; s < record->slotCount; ++s)
 	{
-		uintptr_t base = 0;
-		if (i + 1 >= deoptEnd || !slot_address(locations + i * kLocationBytes, frame, &base)) return 0;
-		const uint32_t words = constant_of(record, locations + (i + 1) * kLocationBytes);
-		i += 2;
-		if (words & GC_SLOT_WHOLE)
-		{
-			later(ctx, (const void*)base, (const void*)(base + (uintptr_t)(words & ~GC_SLOT_WHOLE) * kWordBytes));
-			continue;
-		}
-		for (uint32_t first = 0; first < words; first += kMaskWords, ++i)
-		{
-			if (i >= deoptEnd) return 0;
-			for (uint32_t mask = constant_of(record, locations + i * kLocationBytes); mask; mask &= mask - 1u)
-			{
-				const uintptr_t word = base + (uintptr_t)(first + (uint32_t)__builtin_ctz(mask)) * kWordBytes;
-				now(ctx, (const void*)word, (const void*)(word + kWordBytes));
-			}
-		}
+		const GCSlot slot = read_slot(&slots);
+		if ((listed[s / 8] & (1u << (s % 8))) && !scan_slot(&slot, frame, now, later, ctx)) return 0;
 	}
 	return 1;
 }

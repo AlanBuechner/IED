@@ -17,14 +17,14 @@ enum { kSame = 0, kUndefined, kOffset, kValueOffset, kRegisterRule };
 // The registers a System V function keeps for its callers, and the stack pointer.
 #define GC_KEPT_REGISTERS ((1u << 3) | (1u << 6) | (1u << 12) | (1u << 13) | (1u << 14) | (1u << 15))
 
-extern const uint8_t __start_llvm_stackmaps[] __attribute__((weak, visibility("hidden")));
-extern const uint8_t __stop_llvm_stackmaps[] __attribute__((weak, visibility("hidden")));
+extern const uint8_t __start_c4_stackmaps[] __attribute__((weak, visibility("hidden")));
+extern const uint8_t __stop_c4_stackmaps[] __attribute__((weak, visibility("hidden")));
 
 void gc_os_stack_maps(const uint8_t** start, const uint8_t** end)
 {
-	// Compiler/StackMaps.cpp names each object's stack map `llvm_stackmaps`, which the linker brackets.
-	*start = __start_llvm_stackmaps;
-	*end = __stop_llvm_stackmaps;
+	// Each object's stack map is in `c4_stackmaps` (Compiler/StackMapFormat.h), which the linker brackets.
+	*start = __start_c4_stackmaps;
+	*end = __stop_c4_stackmaps;
 }
 
 // --- the modules, noted before the threads stop --------------------------------------------------------------------

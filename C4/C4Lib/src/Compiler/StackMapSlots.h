@@ -2,7 +2,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace llvm { class CallBase; class Function; class Value; }
+namespace llvm { class AllocaInst; class CallBase; class Function; class Value; }
 
 namespace C4Compiler
 {
@@ -12,6 +12,10 @@ namespace C4Compiler
 	/// nowhere but its own loads and stores is listed where it is live (a load of it may follow the call before a store
 	/// over all of it); any other slot at every call. A call that lists none is not in the map.
 	std::unordered_map<llvm::CallBase*, std::vector<llvm::Value*>> FrameSlotsAt(llvm::Function& function, const std::vector<llvm::CallBase*>& calls);
+
+	/// `slot`'s deopt operands as FrameSlotsAt lists a frame slot: the slot, its count of words, a mask per 32 words of
+	/// those that may hold a managed pointer; none when no word may.
+	std::vector<llvm::Value*> SlotOperands(llvm::AllocaInst& slot);
 
 	/// The flag of a frame slot's word count that says every word is read (GC/GCStackMaps.c, GC_SLOT_WHOLE).
 	constexpr unsigned c_WholeSlot = 0x80000000u;

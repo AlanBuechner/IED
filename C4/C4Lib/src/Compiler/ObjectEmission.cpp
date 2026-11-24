@@ -182,36 +182,8 @@ namespace C4Compiler
 			return true;
 		}
 
-		// An ELF object's stack map is made ready for the link before the object is written (PrepareElfStackMaps).
-		void WriteElfWithStackMaps(llvm::Module& module, llvm::TargetMachine& machine, const std::string& objPath, std::vector<ObjectDiagnostic>& diagnostics)
-		{
-			llvm::SmallVector<char, 0> buffer;
-			llvm::raw_svector_ostream stream(buffer);
-			if (!EmitObject(module, machine, stream, diagnostics)) return;
-			std::string object(buffer.begin(), buffer.end());
-			if (!PrepareElfStackMaps(object))
-			{
-				diagnostics.push_back({ 0, "the object for '" + objPath + "' is no ELF object its stack map could be prepared in" });
-				return;
-			}
-			std::error_code ec;
-			llvm::raw_fd_ostream out(objPath, ec, llvm::sys::fs::OF_None);
-			if (ec)
-			{
-				diagnostics.push_back({ 0, "cannot write the object file '" + objPath + "': " + ec.message() });
-				return;
-			}
-			out << object;
-			out.flush();
-		}
-
 		void WriteObject(llvm::Module& module, llvm::TargetMachine& machine, const std::string& objPath, std::vector<ObjectDiagnostic>& diagnostics)
 		{
-			if (UsesStackMaps(module) && module.getTargetTriple().isOSBinFormatELF())
-			{
-				WriteElfWithStackMaps(module, machine, objPath, diagnostics);
-				return;
-			}
 			std::error_code ec;
 			llvm::raw_fd_ostream out(objPath, ec, llvm::sys::fs::OF_None);
 			if (ec)
@@ -231,7 +203,7 @@ namespace C4Compiler
 			const size_t before = diagnostics.size();
 			if (settings.optimizePartitions && settings.optLevel == 0) LowerAggregateCopies(module);
 			if (settings.optimizePartitions) RunPipeline(module, *machine, settings.optLevel);
-			InsertStatepoints(module);
+			InsertStatepoints(module, machine->getOptLevel());
 			if (diagnostics.size() == before) WriteObject(module, *machine, objPath, diagnostics);
 		}
 

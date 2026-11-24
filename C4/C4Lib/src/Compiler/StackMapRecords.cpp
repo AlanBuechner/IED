@@ -1,4 +1,5 @@
 #include "Compiler/StackMapRecords.h"
+#include "Compiler/StackMapSlots.h"
 #include "Compiler/StackMapValues.h"
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/IR/Dominators.h>
@@ -6,20 +7,27 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/ValueHandle.h>
+#include <algorithm>
 #include <iterator>
+#include <optional>
 
 namespace C4Compiler
 {
 	namespace
 	{
 		constexpr unsigned c_AddressBits = 64;
+		// The stack's own alignment: a slot aligned more would make its frame realign the stack.
+		constexpr uint64_t c_StackAlignBytes = 16;
 
-		// The words of `value` that may hold an address, each a value a stack map records as it is: a pointer or a 64-bit
-		// integer. Made right before the call from a vector, an aggregate or a wider integer.
+		// A value a stack map records as it is: a pointer or a 64-bit integer.
+		bool IsWord(const llvm::Type* type) { return type->isPointerTy() || type->isIntegerTy(c_AddressBits); }
+
+		// The words of `value` that may hold an address. Made right before the call from a vector, an aggregate or a wider
+		// integer.
 		void AddressWords(llvm::IRBuilder<>& B, llvm::Value* value, std::vector<llvm::Value*>& words)
 		{
 			llvm::Type* type = value->getType();
-			if (type->isPointerTy() || type->isIntegerTy(c_AddressBits))
+			if (IsWord(type))
 			{
 				words.push_back(value);
 				return;
@@ -84,61 +92,91 @@ namespace C4Compiler
 		public:
 			explicit ValueSlots(llvm::Function& function) : m_Function(function) {}
 
-			// `value`'s slot; null when it is no word or cannot be stored where it is made.
-			llvm::AllocaInst* Of(llvm::Value* value)
+			// `value`'s slot as a record lists it (StackMapSlots: the slot, its words, its masks); none when it cannot be
+			// stored where it is made.
+			const std::vector<llvm::Value*>& Of(llvm::Value* value)
 			{
 				const auto found = m_Slots.find(value);
 				if (found != m_Slots.end()) return found->second;
-				llvm::AllocaInst* slot = nullptr;
-				llvm::Instruction* at = AfterDefinition(value);
-				if (at && (value->getType()->isPointerTy() || value->getType()->isIntegerTy(c_AddressBits)))
-				{
-					llvm::BasicBlock& entry = m_Function.getEntryBlock();
-					slot = new llvm::AllocaInst(value->getType(), m_Function.getDataLayout().getAllocaAddrSpace(), "stack_map.value", entry.begin());
-					new llvm::StoreInst(value, slot, at->getIterator());
-				}
-				m_Slots.emplace(value, slot);
-				return slot;
+				std::vector<llvm::Value*> operands;
+				if (llvm::Instruction* at = AfterDefinition(value)) operands = Made(value, *at);
+				return m_Slots.emplace(value, std::move(operands)).first->second;
 			}
 
 		private:
+			std::vector<llvm::Value*> Made(llvm::Value* value, llvm::Instruction& at)
+			{
+				llvm::Type* type = value->getType();
+				const llvm::DataLayout& layout = m_Function.getDataLayout();
+				const llvm::Align align = std::min(layout.getPrefTypeAlign(type), llvm::Align(c_StackAlignBytes));
+				auto* slot = new llvm::AllocaInst(type, layout.getAllocaAddrSpace(), nullptr, align, "stack_map.value", m_Function.getEntryBlock().begin());
+				std::vector<llvm::Value*> operands = SlotOperands(*slot);
+				if (operands.empty()) slot->eraseFromParent();
+				else new llvm::StoreInst(value, slot, false, align, at.getIterator());
+				return operands;
+			}
+
 			llvm::Function& m_Function;
-			std::unordered_map<const llvm::Value*, llvm::AllocaInst*> m_Slots;
+			std::unordered_map<const llvm::Value*, std::vector<llvm::Value*>> m_Slots;
 		};
 
 		// A call's record before it is listed: the values recorded as they are (followed through the calls replaced as they
-		// get their lists), and the slots of those recorded through one.
+		// get their lists), and the slots of those recorded through one, as listed.
 		struct Record
 		{
 			std::vector<llvm::WeakTrackingVH> values;
-			std::vector<llvm::AllocaInst*> valueSlots;
+			std::vector<llvm::Value*> valueSlots;
 		};
 
-		std::unordered_map<llvm::CallBase*, Record> Records(llvm::Function& function, const std::vector<llvm::CallBase*>& calls, const CallLists& values)
+		// Which of the values live across a call a record names through a slot (see RecordCalls). In place, only a word
+		// goes through one: a slot for an aggregate or a wider value too made the Bedrock benchmark's code 0.6% larger.
+		class SlotChoice
+		{
+		public:
+			SlotChoice(llvm::Function& function, RecordedValues where)
+			{
+				if (where == RecordedValues::InSlots) return;
+				m_Tree.emplace(function);
+				m_Loops.emplace(*m_Tree);
+			}
+
+			bool ThroughSlot(const llvm::Value* value, const llvm::CallBase& call) const
+			{
+				if (!m_Loops) return true;
+				const llvm::Loop* loop = m_Loops->getLoopFor(call.getParent());
+				return loop && IsWord(value->getType()) && !UsedIn(value, *loop);
+			}
+
+		private:
+			std::optional<llvm::DominatorTree> m_Tree;
+			std::optional<llvm::LoopInfo> m_Loops;
+		};
+
+		std::unordered_map<llvm::CallBase*, Record> Records(llvm::Function& function, const std::vector<llvm::CallBase*>& calls, const CallLists& values,
+			RecordedValues where)
 		{
 			std::unordered_map<llvm::CallBase*, Record> records;
 			if (values.empty()) return records;
-			const llvm::DominatorTree tree(function);
-			const llvm::LoopInfo loops(tree);
-			std::unordered_map<llvm::CallBase*, std::vector<llvm::Value*>> quiet;
+			const SlotChoice choice(function, where);
+			// In the calls' order, so the slots are made in the same order every time.
+			std::vector<std::pair<llvm::CallBase*, llvm::Value*>> slotted;
 			for (llvm::CallBase* call : calls)
 			{
 				const auto live = values.find(call);
 				if (live == values.end()) continue;
-				const llvm::Loop* loop = loops.getLoopFor(call->getParent());
 				for (llvm::Value* value : live->second)
 				{
-					if (loop && !UsedIn(value, *loop)) quiet[call].push_back(value);
+					if (choice.ThroughSlot(value, *call)) slotted.emplace_back(call, value);
 					else records[call].values.emplace_back(value);
 				}
 			}
 			ValueSlots slots(function);
-			for (const auto& [call, list] : quiet)
-				for (llvm::Value* value : list)
-				{
-					if (llvm::AllocaInst* slot = slots.Of(value)) records[call].valueSlots.push_back(slot);
-					else records[call].values.emplace_back(value);
-				}
+			for (const auto& [call, value] : slotted)
+			{
+				const std::vector<llvm::Value*>& slot = slots.Of(value);
+				if (!slot.empty()) records[call].valueSlots.insert(records[call].valueSlots.end(), slot.begin(), slot.end());
+				else records[call].values.emplace_back(value);
+			}
 			return records;
 		}
 
@@ -149,15 +187,10 @@ namespace C4Compiler
 			std::vector<llvm::Value*> words;
 			for (llvm::Value* value : record.values) AddressWords(B, value, words);
 			std::vector<llvm::Value*> list;
-			list.reserve(1 + words.size() + 3 * record.valueSlots.size() + frameSlots.size());
+			list.reserve(1 + words.size() + record.valueSlots.size() + frameSlots.size());
 			list.push_back(B.getInt32(static_cast<uint32_t>(words.size())));
 			list.insert(list.end(), words.begin(), words.end());
-			for (llvm::AllocaInst* slot : record.valueSlots)
-			{
-				list.push_back(slot);
-				list.push_back(B.getInt32(1)); // one word
-				list.push_back(B.getInt32(1)); // which may hold a pointer
-			}
+			list.insert(list.end(), record.valueSlots.begin(), record.valueSlots.end());
 			list.insert(list.end(), frameSlots.begin(), frameSlots.end());
 			return list;
 		}
@@ -172,9 +205,10 @@ namespace C4Compiler
 		}
 	}
 
-	void RecordCalls(llvm::Function& function, const std::vector<llvm::CallBase*>& calls, const CallLists& values, const CallLists& slots)
+	void RecordCalls(llvm::Function& function, const std::vector<llvm::CallBase*>& calls, const CallLists& values, const CallLists& slots,
+		RecordedValues where)
 	{
-		const std::unordered_map<llvm::CallBase*, Record> records = Records(function, calls, values);
+		const std::unordered_map<llvm::CallBase*, Record> records = Records(function, calls, values, where);
 		const Record none;
 		const std::vector<llvm::Value*> noSlots;
 		for (llvm::CallBase* call : calls)

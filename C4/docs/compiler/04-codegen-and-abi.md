@@ -422,7 +422,8 @@ The runtime contract is in [../runtime/01-memory-and-gc.md](../runtime/01-memory
 4. **Roots.** `__c4_gc_roots` for global storage, each range with its pointer map (assembly step 8); everything
    else is found by the runtime, which captures the register file and then scans the stack conservatively, so
    pointers that optimized code keeps only in callee-saved registers are roots too (no per-slot anchors are needed).
-   With `-fstack-maps` (off by default) a C4 frame is read by its stack map instead: section "Stack maps" below.
+   With stack maps (the default; `-fno-stack-maps` turns them off) a C4 frame is read by its stack map instead: section
+   "Stack maps" below.
 5. **Value locals** are not GC objects: their `create`/`delete` are RAII, emitted as scope-exit defers by HIR.
 
 6. **Statistics.** With `-gc-stats`, `StartupEmitter::InstallGcStatsPrinter` adds a last-priority global
@@ -430,11 +431,12 @@ The runtime contract is in [../runtime/01-memory-and-gc.md](../runtime/01-memory
 
 ## Stack maps
 
-R16 phase 3, `-fstack-maps` (`ProgramBackend::UseStackMaps`), **off by default**: the collector reads a C4 frame waiting
-in a call only at the places LLVM's stack map names for that call, so an address left in a dead slot or register of the
-frame keeps nothing alive. The runtime's side is [runtime/01 "Stacks"](../runtime/01-memory-and-gc.md#stacks).
+R16 phase 3, **on by default** (`-fstack-maps`; `-fno-stack-maps` turns it off; `ProgramBackend::UseStackMaps`): the
+collector reads a C4 frame waiting in a call only at the places its stack map names for that call, so an address left
+in a dead slot or register of the frame keeps nothing alive. The runtime's side is
+[runtime/01 "Stacks"](../runtime/01-memory-and-gc.md#stacks).
 
-- **The same IR.** The flag only marks the module (`c4.stack_maps`, `ModuleContext::UseStackMaps` -> `MarkForStackMaps`):
+- **The same IR.** Stack maps only mark the module (`c4.stack_maps`, `ModuleContext::UseStackMaps` -> `MarkForStackMaps`):
   emission and the optimizer see what they see without it, every pointer in address space 0. The collector never moves
   an object, so a call need not tell LLVM which pointers may move - only where the live ones are while it runs.
 - **Records** (`Compiler/StackMaps`, `InsertStatepoints`, after the optimizer in `ObjectEmission`'s `Assemble`, so every
@@ -456,10 +458,18 @@ frame keeps nothing alive. The runtime's side is [runtime/01 "Stacks"](../runtim
   - then stack slots, each with its word count (bit 31: read every word, past 1024 words) and a 32-bit mask per 32
     words: the frame's slots that may hold a pointer where they are live (`Compiler/StackMapSlots`: a slot reached only by
     its own loads, stores, copies and lifetime markers where a later load reads it before a store over all of it, any
-    other at every call), and a slot of its own for a value live across a call in a loop that does not use it, stored once
-    where the value is made. LLVM weighs a statepoint's operands as uses (`CalcSpillWeights`), so such a value named
-    itself would look used at every call of the loop, and the register allocator would keep it in registers and move it
-    around each call instead of spilling it once before the loop (the GC benchmark's allocation loop: six moves a call).
+    other at every call), and a slot of its own for a pointer or 64-bit integer live across a call in a loop that does
+    not use it, stored once where the value is made. LLVM weighs a statepoint's operands as uses (`CalcSpillWeights`), so
+    such a value named itself would look used at every call of the loop, and the register allocator would keep it in
+    registers and move it around each call instead of spilling it once before the loop (the GC benchmark's allocation
+    loop: six moves a call). At `-O0` every value goes through a slot of its own (an aggregate's lists its words and
+    masks as a frame slot's): the fast register allocator cannot spill a statepoint's register operands, and ran out of
+    registers at a call many values live across. The slots are made in the calls' order, so a build is the same every
+    time.
+  - What it changes for a program: an object is kept while the code may still read it. A local the code no longer reads
+    keeps nothing, even before its function returns (as in C# or Go), so a program that needs an object past its last
+    use keeps it reachable - a script host its `Scripting::Script` while it calls the script's code
+    ([runtime/04 section 5](../runtime/04-scripting.md#5-reload-and-unload)); ScriptTest `Callbacks` had let it go.
   - Calls left without a record, whose frame is read whole: a call inside a Windows funclet (its slots are the parent
     frame's), inline assembly, a variadic call (a statepoint loses Windows' variadic double in both registers), a call that
     never returns, one that may become a sibling call (marked `tail`, and the function returns nothing or what it returns,
@@ -467,18 +477,26 @@ frame keeps nothing alive. The runtime's side is [runtime/01 "Stacks"](../runtim
     passing a `byval` aggregate (its copy is in the caller's outgoing area, which no record names), and a C library
     function code generation expands in place (`memcmp`, `strlen`, `sqrt`: TargetLibraryInfo's `hasOptimizedCodeGen`),
     which never collects. Invokes have records, with landing pads and with funclets.
-- **Objects.** LLVM writes `.llvm_stackmaps`: a COFF image keeps it as `.llvm_st`; an ELF object's is made writable (it
-  holds absolute function addresses a position-independent program relocates), kept by `--gc-sections`
-  (`SHF_GNU_RETAIN`) and named `llvm_stackmaps` (`PrepareElfStackMaps`), which the linker brackets with
-  `__start_`/`__stop_` symbols. A program with the flag links the runtime built with `C4_STACK_MAPS`
-  (`EnsureRuntimeObjects`, a folder of its own; `GC/GCStack*` only there). Without the flag the output is byte for byte
-  what it was (objects at `-O0`, `-O2` and `-O2 -g` of the benchmarks and test programs, both targets).
+- **Objects.** Code generation writes the records in C4's own format (`Compiler/StackMapFormat`: the `c4` strategy's
+  `GCMetadataPrinter`), not LLVM's, whose 12 bytes a location (three of them a listed slot, at every call that lists it)
+  made the IED server's executable 5.2 times as large (107 of its 133 MB). Each object's map is a header and its
+  functions' addresses (the linker relocates them), then function by function its slots, each once (register, offset,
+  words, masks: LEB128), and its records: a return offset, the values (a register, or a word in memory - a spill slot,
+  or a stack argument's own slot, which LLVM names Direct) and a bit per slot of the function, set for those listed; a
+  record LLVM gave something the format cannot say tells the runtime to read the frame whole. A COFF object's section
+  is `.c4smap`; an ELF object's `c4_stackmaps` is writable (it holds absolute function addresses a position-independent
+  program relocates), kept by `--gc-sections` (`SHF_GNU_RETAIN`) and bracketed by the linker's `__start_`/`__stop_`
+  symbols. A program with stack maps links the runtime built with `C4_STACK_MAPS`
+  (`EnsureRuntimeObjects`, a folder of its own; `GC/GCStack*` only there). With `-fno-stack-maps` the output is byte for
+  byte what it was before stack maps (objects at `-O0`, `-O2` and `-O2 -g` of the benchmarks and test programs, both
+  targets).
 - **Measured** (2026-11-24, the same compiler with and without the flag, `-O2`, medians of 31 alternating rounds): Windows -
   the Bedrock benchmark's kernels -6% to +6% (11 of 14 within 2%), math (per vector and batch) -4% to +5% on its
   sub-millisecond kernels, gemm 0%, the GC benchmark's frames +1% and -1% (stop-the-world, concurrent); Linux (in Docker on
   the same machine) the same within its noise - an A/A run of one program against itself moves the map kernels by up to
-  10%, the others by 1% - with gemm 0% and the GC frames -1% and 0%. Code +1.6% instructions; the stack map is data beside
-  it (the GC benchmark's object 1.3 -> 2.8 MB). Compile time (5 alternating builds from empty build folders, 16 threads):
+  10%, the others by 1% - with gemm 0% and the GC frames -1% and 0%. Code +1.6% instructions (the IED server's `.text` +3.8%); the stack map is data beside it,
+  in C4's format the IED server's 2.0 MB (its executable 27.8 MB, 25.3 MB without stack maps: +9.6%) and the GC
+  benchmark's 80 KB (2.65 MB against 2.54 MB: +4%). Compile time (5 alternating builds from empty build folders, 16 threads):
   `-O0` +3% (the Bedrock benchmark) and +6% (Bedrock's tests), `-O2` +0-1%; on one thread `-O0` costs +28% (code
   generation +60%: FastISel hands each call with a record to SelectionDAG). The design before (managed pointers in address
   space 1, RewriteStatepointsForGC spilling and reloading each live value around each call, `nobuiltin` C library calls)
@@ -486,8 +504,8 @@ frame keeps nothing alive. The runtime's side is [runtime/01 "Stacks"](../runtim
   the GC frames +31-34% on Linux: the address space cost the optimizer its null and integer folds, the relocations a spill
   and a reload per value per call.
 - Tests: C4Testing `Compiler.StackMaps`; IsolatedTest `MemoryGC/StackMaps` (20 of 20 dead targets go at `-O0` and `-O2`
-  with the flag; 18 of 20 without it); `RunTests.ps1 -StackMaps` runs the whole corpus with the flag on Windows,
-  `run_linux.py --stack-maps` (with and without `-O2`) on Linux.
+  with stack maps; 18 of 20 without); every suite runs with them (the default), and `RunTests.ps1 -NoStackMaps` runs the
+  corpus without them on Windows, `run_linux.py --no-stack-maps` (with and without `-O2`) on Linux.
 
 ## Test harness (`-test`)
 
@@ -629,10 +647,5 @@ allowed (unions, bytes, `memcpy`, bit casts) where the optimizer cannot see that
 
 - Any C4-side optimization pass (deliberately none; revisit only if a benchmark shows C4 slower than C++).
 - Additional targets (ARM64): one more `TargetAbi` implementation, with its convention's `AggregateRegisters` - **Planned**.
-- Stack maps by default - **Behind `-fstack-maps`** (section "Stack maps"): built and measured, off by default for its
-  run-time cost. Prototype history (R16, kept out of the tree, F): every pointer in address space 0 crashed RS4GC's
-  base search; the rewrite alone, with nothing live across calls, cost nothing measurable - the cost measured since is
-  the managed address space's (null and integral semantics) and the values live across calls.
-- A statepoint at an invoke or a call in a funclet: LLVM 22's RS4GC faults on funclet invokes and makes invalid IR for
-  landing-pad ones, so those calls are leaves and their frames are read whole - **Open** (a statepoint of our own
-  without relocations would do, the collector being non-moving).
+- A record for a call inside a Windows funclet (its slots are the parent frame's, which its record cannot name): such
+  a call is left without one and its frame is read whole - **Open**.

@@ -10,11 +10,18 @@ namespace C4Compiler
 	/// may hold a pointer there (Compiler/StackMapSlots: each slot, its word count, its masks).
 	using CallLists = std::unordered_map<llvm::CallBase*, std::vector<llvm::Value*>>;
 
+	/// Where a record names the values live across its call: in place (a register, a spill slot), but a pointer or 64-bit
+	/// integer live across a call in a loop that does not use it, through a slot of its own; or every value through a
+	/// slot of its own (an aggregate's lists its words and masks, as a frame slot's).
+	enum class RecordedValues { InPlace, InSlots };
+
 	/// Gives each of `calls` its record (docs/compiler/04 "Stack maps"): a `deopt` operand bundle - the count of words of the
 	/// values `values` names for it, those words (each a pointer or a 64-bit integer, where it is while the call runs), then
-	/// stack slots, each with its word count and masks: `slots`', and a slot of its own for a value live across a call in a
-	/// loop that does not use it, stored once where the value is made (as a deopt operand there it would count as a use at
-	/// every call of the loop, and the register allocator would keep it in registers around them instead of spilling it
-	/// once before the loop). Code generation lowers a call with such a bundle as a statepoint, which relocates nothing.
-	void RecordCalls(llvm::Function& function, const std::vector<llvm::CallBase*>& calls, const CallLists& values, const CallLists& slots);
+	/// stack slots, each with its word count and masks: `slots`', and the slots of values recorded through one (`where`),
+	/// each stored once where its value is made. A word live across a call in a loop that does not use it goes through
+	/// one: as a deopt operand there it would count as a use at every call of the loop, and the register allocator would
+	/// keep it in registers around them instead of spilling it once before the loop. Code generation lowers a call with
+	/// such a bundle as a statepoint, which relocates nothing.
+	void RecordCalls(llvm::Function& function, const std::vector<llvm::CallBase*>& calls, const CallLists& values, const CallLists& slots,
+		RecordedValues where);
 }

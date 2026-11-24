@@ -194,9 +194,14 @@ static int for_each_arena_piece(uint8_t* base, size_t bytes, gc_range_op op)
 // ------------------------------------------------------------------------------------------------
 // Growth and allocation
 
+// A mapping's first page holds no object: a word that only looks like an address - a value with its low bits clear,
+// such as the 64 MiB boundary a mapping starts at, which C and OS code leave in memory read whole - reaches none
+// (IsolatedTest MemoryGC/StackMaps on Linux: libc's start frame held the boundary its own mapping and the heap's shared).
+enum { kGuardPages = 1 };
+
 static int add_arenas(GCPageHeap* heap, size_t npages)
 {
-	const size_t count = (npages + GC_ARENA_PAGES - 1) / GC_ARENA_PAGES;
+	const size_t count = (npages + kGuardPages + GC_ARENA_PAGES - 1) / GC_ARENA_PAGES;
 	const size_t bytes = count * GC_ARENA_SIZE;
 	uint8_t* base = (uint8_t*)gc_os_map(bytes, GC_ARENA_SIZE);
 	if (!base) return 0;
@@ -208,8 +213,8 @@ static int add_arenas(GCPageHeap* heap, size_t npages)
 	heap->committedBytes += bytes;
 
 	GCSpan* run = new_record(heap);
-	run->base = base;
-	run->npages = count * GC_ARENA_PAGES;
+	run->base = base + ((size_t)kGuardPages << GC_PAGE_SHIFT);
+	run->npages = count * GC_ARENA_PAGES - kGuardPages;
 	run->state = GC_SPAN_FREE;
 	insert_free_run(heap, run);
 	return 1;
