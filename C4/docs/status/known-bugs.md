@@ -3,7 +3,7 @@
 Every open bug in the C4 compiler, runtime, Bedrock and tools. Add an entry when a bug is found;
 delete it when the fix lands.
 
-Next ID: **BUG-503**
+Next ID: **BUG-504**
 
 ## Rules for this file
 
@@ -43,6 +43,7 @@ Next ID: **BUG-503**
 
 | ID | Title | Area | Severity |
 |---|---|---|---|
+| BUG-503 | Every pinned job system pins its submitting thread to core 0: two such programs starve each other | Bedrock | Medium |
 
 ---
 
@@ -51,4 +52,26 @@ Next ID: **BUG-503**
 ## Model, templates and semantics
 
 ## Interop, runtime and Bedrock
+
+### BUG-503 Every pinned job system pins its submitting thread to core 0: two such programs starve each other
+- **Area:** Bedrock
+- **Severity:** Medium
+- **Status:** Open
+- **Found:** 2026-11-24
+- **Symptom:** With `JobSystemDesc.pinToCores` the thread that makes the job system is pinned to core 0
+  (`Thread::PinCurrentToCore(0)`), whatever else runs on the machine. Two processes that pin this way share logical
+  processor 0: when one keeps it busy, the other's main thread waits for it while every other processor is idle.
+  Seen 2026-11-24: an LSEditor left running (its main loop at 100% on processor 0, mask 0x1) made Claymore's
+  `nuke test` 20-100 times slower (a test of 1.1 s took 127 s; the test process used 67 s of CPU in 78 minutes),
+  every test passing; closing LSEditor brought it back at once. Claymore pins in every `GameScene` that has no host
+  and was not told `LeaveCores(true)` (ClaymoreEngine `Scene/GameScene.cf:68`).
+- **Repro:** start two programs that make a job system with `pinToCores = true` and keep the main thread busy in
+  one; time anything on the other's main thread. `GetThreadGroupAffinity` shows both main threads at mask 0x1.
+- **Where:** `C4/Bedrock/Threading/jobs.cf:168-180` (`JobSystem` start: `PinCurrentToCore(0)`, workers on cores
+  1..n), `C4/C4Runtime/ThreadRuntimeWin32.c` / `ThreadRuntimePosix.c` `c4_thread_pin_to_core`.
+- **Notes:** a hard pin to a fixed core is only safe when the program owns the machine (a shipped game, a
+  benchmark). Directions: pin the submitting thread softly (an ideal processor, `SetThreadIdealProcessor`, not an
+  affinity mask), or leave it unpinned and pin only the workers, or pin only when asked by the program's command
+  line; tests and editors should not pin at all. Separately, LSEditor's main loop never waited (worth a look in the
+  LS project: an editor with nothing to draw should block on its messages).
 
