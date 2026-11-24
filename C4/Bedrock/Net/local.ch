@@ -2,7 +2,8 @@
 // named pipe on Windows. No other machine and no other user can use one: remote clients are refused, only the current
 // user may open it, and Connect refuses a listener that runs as anyone else. A second Listen on a name someone listens
 // on fails, so a name is also a single-instance lock. Like the TCP pair, each owns its pipe and closes it on delete,
-// neither can be copied (move one with take()), and a call that fails keeps why in Error().
+// neither can be copied (move one with take()), and a call that fails keeps why in Error(). One thread may send on a
+// stream while another receives on it (each direction keeps its own outcome; Error() is the latest call's).
 //     Net::LocalListener server;
 //     if (!server.Listen(Net::UserLocalName("ied").CStr())) ...   // another instance runs
 //     Net::LocalStream client = Net::LocalStream::Connect(Net::UserLocalName("ied").CStr(), 2000);
@@ -34,11 +35,11 @@ namespace Net
 		public int64 Receive(void* buffer, int64 capacity, int32 timeoutMs = kWaitForever);
 		public void Close();   // idempotent
 
-		public const char* Error() const { return last.error.CStr(); }
-		public bool TimedOut() const { return last.timedOut; }
+		public const char* Error() const { return outcomes.Last().error.CStr(); }
+		public bool TimedOut() const { return outcomes.Last().timedOut; }
 
 		private void* pipe;   // the runtime's pipe, not GC memory
-		private Outcome last;
+		private Outcomes outcomes;
 	}
 
 	class LocalListener

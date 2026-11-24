@@ -344,6 +344,46 @@ class ProcessChildTests {
 		for (int32 t = 0; t < 8; ++t) assert_eq(4, right[t], "each thread's children printed their own text and ended");
 	}
 
+	// One thread writes the child's input, another's reads fail, a third waits (BUG-497): each kind of call keeps its own
+	// outcome, so none frees the text another is writing, and Error() is the latest call's.
+	[test("calls_from_threads_at_once")]
+	public static void TestCallsFromThreadsAtOnce() {
+		Process::StartInfo info = Program("findstr");
+		info.arguments.Push(Core::String("never-in-the-input"));
+		info.input = Process::Redirect::Pipe;
+		info.output = Process::Redirect::Pipe;
+		Process::Child findstr = Process::Child::Start(info);
+		Process::Child* child = &findstr;
+		Threading::Atomic<bool> stop;
+		Threading::Atomic<bool>* stopping = &stop;
+		Threading::Atomic<int64> written;
+		Threading::Atomic<int64>* lines = &written;
+		Threading::Thread writer = Threading::Thread::Run([child, stopping, lines]() {
+			while (!stopping->Load())
+				if (child->WriteText(Core::StringView("a line\r\n"), kProcessWaitMs)) lines->FetchAdd(1);
+		});
+		Threading::Thread reader = Threading::Thread::Run([child, stopping]() {
+			char[8] buffer;
+			while (!stopping->Load()) child->Read(Process::Stream::Input, (void*)&buffer[0], 8, 0);
+		});
+		Threading::Thread waiter = Threading::Thread::Run([child, stopping]() {
+			while (!stopping->Load()) child->Wait(0);
+		});
+		Threading::Thread::Sleep(1000000000);
+		stop.Store(true);
+		writer.Join();
+		reader.Join();
+		waiter.Join();
+		assert_true(written.Load() > 0, "the input was written meanwhile");
+		char[16] buffer;
+		assert_eq(Process::kError, findstr.Read(Process::Stream::Input, (void*)&buffer[0], 16, 0), "a read of the input fails");
+		assert_se("the child's input is written, not read", findstr.Error(), "and says why");
+		assert_true(findstr.WriteText(Core::StringView("one more\r\n"), kProcessWaitMs) && findstr.Error()[0] == 0, "a write after it is the latest call");
+		findstr.CloseInput();
+		ReadOutput(findstr);
+		assert_eq((int64)1, findstr.Wait(kProcessWaitMs), "no line matched");
+	}
+
 	[test("misuse")]
 	public static void TestMisuse() {
 		Process::StartInfo info = Cmd("exit 0");

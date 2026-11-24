@@ -33,7 +33,7 @@ namespace Net
 		LocalStream stream;
 		char[kErrorBytes] why;
 		int32 timedOut = 0;
-		stream.pipe = Opened(stream.last, c4_local_connect(name, timeoutMs, &timedOut, &why[0], kErrorBytes), timedOut, &why[0]);
+		stream.pipe = Opened(stream.outcomes.Received(), c4_local_connect(name, timeoutMs, &timedOut, &why[0], kErrorBytes), timedOut, &why[0]);
 		return stream;
 	}
 
@@ -44,13 +44,13 @@ namespace Net
 	}
 
 	int64 LocalStream::Send(const void* bytes, int64 count, int32 timeoutMs) {
-		if (!IsOpen()) return last.Fail("the stream is closed");
-		return Moved(last, c4_local_send(pipe, bytes, count, timeoutMs));
+		if (!IsOpen()) return outcomes.Sent().Fail("the stream is closed");
+		return Moved(outcomes.Sent(), c4_local_send(pipe, bytes, count, timeoutMs));
 	}
 
 	bool LocalStream::SendAll(const void* bytes, int64 count, int32 timeoutMs) {
 		if (!IsOpen()) {
-			last.Fail("the stream is closed");
+			outcomes.Sent().Fail("the stream is closed");
 			return false;
 		}
 		const uint8* next = (const uint8*)bytes;
@@ -65,8 +65,8 @@ namespace Net
 	}
 
 	int64 LocalStream::Receive(void* buffer, int64 capacity, int32 timeoutMs) {
-		if (!IsOpen()) return last.Fail("the stream is closed");
-		return Moved(last, c4_local_receive(pipe, buffer, capacity, timeoutMs));
+		if (!IsOpen()) return outcomes.Received().Fail("the stream is closed");
+		return Moved(outcomes.Received(), c4_local_receive(pipe, buffer, capacity, timeoutMs));
 	}
 
 	void LocalStream::Close() {

@@ -225,7 +225,7 @@ namespace Http
 			}
 			if (got == Net::kTimedOut) continue;
 			if (got == 0) closeCode = kCloseAbnormal;
-			else if (!cutOff.Load()) error = Core::String(stream.Error());
+			else if (!cutOff.Load()) error = Core::String(stream.ReceiveError());   // another thread may be sending
 			else if (closeCode == 0) closeCode = kCloseAbnormal;
 			EndStream();
 			return false;

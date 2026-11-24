@@ -1,7 +1,9 @@
 // Child: a program this one started (D-68). It owns the child's handles and closes them on delete, so it cannot be
 // copied (move it with take()); a zero Child is closed. The child runs in a job: Kill ends it and every process it
 // started, and with killOnClose (the default) so does closing the Child. A call that waits takes a timeout in
-// milliseconds (kWaitForever, or 0 to only check); a call that fails keeps why in Error().
+// milliseconds (kWaitForever, or 0 to only check); a call that fails keeps why in Error(). One thread may write the
+// child's input while another reads its output and a third waits for it or kills it: each kind of call keeps its own
+// outcome, and Error() is the latest call's.
 //     Process::StartInfo info;
 //     info.program = Core::String("git");
 //     info.arguments.Push(Core::String("status"));
@@ -15,6 +17,7 @@ include "Text/string.ch"
 include "Text/stringview.ch"
 include "Container/array.ch"
 include "usage.ch"
+include "Threading/atomic.ch"
 
 namespace Process
 {
@@ -47,6 +50,24 @@ namespace Process
 		public Core::String shellCommand;             // instead of program and arguments: a command line the system's
 		                                              // shell runs as written (cmd.exe /d /s /c), batch files included
 	}
+
+	// What one kind of call came to: why it failed (empty when it did not) and whether it gave up waiting.
+	struct CallOutcome
+	{
+		public Core::String error;
+		public bool timedOut;
+
+		// Keeps why a call failed: `why` when it returned kError, nothing otherwise.
+		public int64 Record(int64 result, const char* why) {
+			timedOut = result == kTimedOut;
+			if (result == kError && why[0] != 0) error = Core::String(why);
+			else error.Clear();
+			return result;
+		}
+	}
+
+	// The kinds of call a Child keeps an outcome for.
+	enum class CallKind { Control = 0, Write = 1, Read = 2 }
 
 	// The runtime's handles (c4_process).
 	struct Handles
@@ -97,13 +118,20 @@ namespace Process
 		public bool Resize(int32 columns, int32 rows);
 		public void Close();   // idempotent
 
-		public const char* Error() const { return error.CStr(); }
-		public bool TimedOut() const { return timedOut; }
+		public const char* Error() const { return Latest().error.CStr(); }
+		public bool TimedOut() const { return Latest().timedOut; }
 
-		private int64 Record(int64 result, const char* why);
+		// The outcome a kind of call records into, marked as the latest.
+		private CallOutcome& Writing();
+		private CallOutcome& Reading();
+		private CallOutcome& Controlling();
+		private const CallOutcome& Latest() const;
 
 		private Handles handles;
-		private Core::String error;
-		private bool timedOut;
+		// Apart, so no call frees the text another thread's call is writing (BUG-497).
+		private CallOutcome writing;       // Write's and WriteAll's
+		private CallOutcome reading;       // Read's and ReadAny's
+		private CallOutcome controlling;   // Start's, Wait's, Kill's and Resize's
+		private Threading::Atomic<CallKind> latest;   // which of them the latest call recorded into (Latest())
 	}
 }

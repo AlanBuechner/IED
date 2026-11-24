@@ -65,17 +65,17 @@ namespace Process
 		Child child;
 		char[kErrorBytes] why;
 		const int32 started = c4_process_start(&start, &child.handles, &why[0], kErrorBytes);
-		child.Record((int64)started, &why[0]);
+		child.Controlling().Record((int64)started, &why[0]);
 		return child;
 	}
 
 	int64 Child::Write(const void* bytes, int64 count, int32 timeoutMs) {
-		if (!IsOpen()) return Record(kError, "the child is closed");
-		return Record(c4_process_write(&handles, bytes, count, timeoutMs), "the child's input is closed");
+		if (!IsOpen()) return Writing().Record(kError, "the child is closed");
+		return Writing().Record(c4_process_write(&handles, bytes, count, timeoutMs), "the child's input is closed");
 	}
 
 	bool Child::WriteAll(const void* bytes, int64 count, int32 timeoutMs) {
-		if (!IsOpen()) return Record(kError, "the child is closed") == 0;
+		if (!IsOpen()) return Writing().Record(kError, "the child is closed") == 0;
 		const uint8* next = (const uint8*)bytes;
 		int64 left = count;
 		while (left > 0) {
@@ -90,42 +90,56 @@ namespace Process
 	void Child::CloseInput() { c4_process_close_pipe(&handles, (int32)Stream::Input); }
 
 	int64 Child::Read(Stream from, void* buffer, int64 capacity, int32 timeoutMs) {
-		if (!IsOpen()) return Record(kError, "the child is closed");
-		if (from == Stream::Input) return Record(kError, "the child's input is written, not read");
-		return Record(c4_process_read(&handles, (int32)from, buffer, capacity, timeoutMs), "the stream is not open to read");
+		if (!IsOpen()) return Reading().Record(kError, "the child is closed");
+		if (from == Stream::Input) return Reading().Record(kError, "the child's input is written, not read");
+		return Reading().Record(c4_process_read(&handles, (int32)from, buffer, capacity, timeoutMs), "the stream is not open to read");
 	}
 
 	int64 Child::ReadAny(void* buffer, int64 capacity, Stream& from, int32 timeoutMs) {
 		from = Stream::Output;
-		if (!IsOpen()) return Record(kError, "the child is closed");
+		if (!IsOpen()) return Reading().Record(kError, "the child is closed");
 		int32 stream = -1;
-		const int64 read = Record(c4_process_read_any(&handles, buffer, capacity, timeoutMs, &stream), "reading the child's output failed");
+		const int64 read = Reading().Record(c4_process_read_any(&handles, buffer, capacity, timeoutMs, &stream), "reading the child's output failed");
 		if (stream == (int32)Stream::Errors) from = Stream::Errors;
 		return read;
 	}
 
 	int64 Child::Wait(int32 timeoutMs) {
-		if (!IsOpen()) return Record(kError, "the child is closed");
-		return Record(c4_process_wait(&handles, timeoutMs), "waiting for the child failed");
+		if (!IsOpen()) return Controlling().Record(kError, "the child is closed");
+		return Controlling().Record(c4_process_wait(&handles, timeoutMs), "waiting for the child failed");
 	}
 
 	bool Child::Kill() {
-		if (!IsOpen()) return Record(kError, "the child is closed") == 0;
-		return Record((int64)c4_process_kill(&handles), "the child could not be ended") == 0;
+		if (!IsOpen()) return Controlling().Record(kError, "the child is closed") == 0;
+		return Controlling().Record((int64)c4_process_kill(&handles), "the child could not be ended") == 0;
 	}
 
 	bool Child::Resize(int32 columns, int32 rows) {
-		if (!IsOpen()) return Record(kError, "the child is closed") == 0;
-		return Record((int64)c4_process_resize(&handles, columns, rows), "the child is not a terminal, or the size is not one") == 0;
+		if (!IsOpen()) return Controlling().Record(kError, "the child is closed") == 0;
+		return Controlling().Record((int64)c4_process_resize(&handles, columns, rows), "the child is not a terminal, or the size is not one") == 0;
 	}
 
 	void Child::Close() { c4_process_close(&handles); }
 
-	// Keeps why a call failed: `why` when it returned kError, nothing otherwise.
-	int64 Child::Record(int64 result, const char* why) {
-		timedOut = result == kTimedOut;
-		if (result == kError && why[0] != 0) error = Core::String(why);
-		else error.Clear();
-		return result;
+	CallOutcome& Child::Writing() {
+		latest.Store(CallKind::Write, MemoryOrder::Relaxed);
+		return writing;
+	}
+
+	CallOutcome& Child::Reading() {
+		latest.Store(CallKind::Read, MemoryOrder::Relaxed);
+		return reading;
+	}
+
+	CallOutcome& Child::Controlling() {
+		latest.Store(CallKind::Control, MemoryOrder::Relaxed);
+		return controlling;
+	}
+
+	const CallOutcome& Child::Latest() const {
+		const CallKind kind = latest.Load(MemoryOrder::Relaxed);
+		if (kind == CallKind::Write) return writing;
+		if (kind == CallKind::Read) return reading;
+		return controlling;
 	}
 }

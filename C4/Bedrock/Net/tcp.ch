@@ -1,7 +1,9 @@
 // TcpStream and TcpListener: TCP connections (D-65). Each owns its socket and closes it on delete, so a value local is
 // RAII; neither can be copied (move one with take()). A zero one is closed. A call that waits takes a timeout in
 // milliseconds (kWaitForever, or 0 to only check); a call that fails keeps why in Error(). A stream secured with TLS
-// (StartTls as a client, AcceptTls as a server: tls.ch, D-84) sends and receives through it.
+// (StartTls as a client, AcceptTls as a server: tls.ch, D-84) sends and receives through it. One thread may send on a
+// stream while another receives on it: each direction keeps its own outcome, so the receiving thread reads
+// ReceiveError() (Error() is the latest call's, whichever thread made it).
 //     Net::TcpListener server;
 //     server.Listen(Net::Address::Loopback(0));                          // port 0: any free port
 //     Net::TcpStream client = Net::TcpStream::Connect(server.LocalAddress(), 2000);
@@ -66,9 +68,11 @@ namespace Net
 		public void Close();
 
 		// Why the last call failed; empty when it succeeded.
-		public const char* Error() const { return last.error.CStr(); }
+		public const char* Error() const { return outcomes.Last().error.CStr(); }
 		// Whether the last call gave up waiting.
-		public bool TimedOut() const { return last.timedOut; }
+		public bool TimedOut() const { return outcomes.Last().timedOut; }
+		// Why the last call other than a send failed (a receive, the connection, TLS), whatever another thread sent since.
+		public const char* ReceiveError() const { return outcomes.receiving.error.CStr(); }
 		// The runtime's socket (Net::Poll), -1 when closed. A secured stream may hold received bytes Poll cannot see:
 		// Receive with a timeout of 0 until it times out.
 		public int64 Socket() const { return slot - 1; }
@@ -79,7 +83,7 @@ namespace Net
 
 		private int64 slot;   // the runtime's socket plus one: a zero stream has none
 		private int64 tls;    // the runtime's TLS session plus one, when secured
-		private Outcome last;
+		private Outcomes outcomes;
 	}
 
 	class TcpListener

@@ -228,6 +228,63 @@ class NetTcpTests {
 		assert_true(pair.server.ReceiveAll((void*)&got[0], 2, kNetWaitMs), "end to end");
 	}
 
+	// BUG-497: a WebSocket sends on one thread while its session receives on another, so each direction keeps its own
+	// outcome - a timed-out receive's text outlives a later send.
+	[test("directions_apart")]
+	public static void TestDirectionsApart() {
+		NetPair pair;
+		Connect(pair, Net::Address::Loopback(0));
+		char[2] got;
+		assert_eq(Net::kTimedOut, pair.client.Receive((void*)&got[0], 2, 0), "nothing to receive yet");
+		assert_true(pair.client.TimedOut() && NetContains(pair.client.Error(), "timed out"), "the receive timed out");
+		assert_eq((int64)2, pair.client.Send((const void*)"ok", 2, kNetWaitMs), "a send after it");
+		assert_true(!pair.client.TimedOut() && pair.client.Error()[0] == 0, "Error() is the latest call's: the send's");
+		assert_true(NetContains(pair.client.ReceiveError(), "timed out"), "the receive's outcome is kept apart");
+		assert_true(pair.server.ReceiveAll((void*)&got[0], 2, kNetWaitMs) && pair.server.ReceiveError()[0] == 0, "a receive that succeeds clears it");
+	}
+
+	// One thread sends while another's receives time out, on several connections at once - a WebSocket relay idling
+	// between messages. With one outcome for both, a send's success cleared text a timed-out receive had just freed, and
+	// glibc's malloc aborted on the corrupted free list (BUG-497).
+	[test("send_while_receiving")]
+	public static void TestSendWhileReceiving() {
+		NetPair[4] pairs;
+		Threading::Thread[12] threads;
+		Threading::Atomic<bool> stop;
+		Threading::Atomic<bool>* stopping = &stop;
+		Threading::Atomic<int64> sends;
+		Threading::Atomic<int64> timeouts;
+		Threading::Atomic<int64>* sent = &sends;
+		Threading::Atomic<int64>* timedOut = &timeouts;
+		for (int32 i = 0; i < 4; ++i) {
+			Connect(pairs[i], Net::Address::Loopback(0));
+			Net::TcpStream* shared = &pairs[i].client;
+			Net::TcpStream* peer = &pairs[i].server;
+			threads[i * 3] = Threading::Thread::Run([peer, stopping]() {
+				uint8[4096] drained;
+				while (!stopping->Load()) peer->Receive((void*)&drained[0], 4096, 20);
+			});
+			threads[i * 3 + 1] = Threading::Thread::Run([shared, stopping, sent]() {
+				while (!stopping->Load())
+					if (shared->Send((const void*)"x", 1, kNetWaitMs) == 1) sent->FetchAdd(1);
+			});
+			threads[i * 3 + 2] = Threading::Thread::Run([shared, stopping, timedOut]() {
+				char[1] none;
+				while (!stopping->Load())
+					if (shared->Receive((void*)&none[0], 1, 0) == Net::kTimedOut) timedOut->FetchAdd(1);
+			});
+		}
+		Threading::Thread::Sleep(1500000000);
+		stop.Store(true);
+		for (int32 t = 0; t < 12; ++t) threads[t].Join();
+		assert_true(sends.Load() > 0 && timeouts.Load() > 0, "both directions ran at once");
+		for (int32 i = 0; i < 4; ++i) {
+			char[2] got;
+			assert_true(pairs[i].server.SendText(Core::StringView("ok"), kNetWaitMs) && pairs[i].client.ReceiveAll((void*)&got[0], 2, kNetWaitMs), "each connection still carries bytes");
+			assert_true(pairs[i].client.ReceiveError()[0] == 0 && pairs[i].client.Error()[0] == 0, "with no error left");
+		}
+	}
+
 	[test("ipv6")]
 	public static void TestIPv6() {
 		NetPair pair;

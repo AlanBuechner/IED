@@ -1,7 +1,8 @@
 // Outcome: what a socket's last call came to (D-65) - why it failed, empty when it succeeded, and whether it gave up
-// waiting. TcpStream, TcpListener and UdpSocket each keep one.
+// waiting. TcpListener keeps one; TcpStream, LocalStream and UdpSocket keep one per direction (Outcomes).
 
 include "Text/string.ch"
+include "Threading/atomic.ch"
 
 namespace Net
 {
@@ -27,5 +28,29 @@ namespace Net
 			error = Core::String(why);
 			return kError;
 		}
+	}
+
+	// A connection's outcomes, its sends' apart from its other calls' (BUG-497): one thread may send while another
+	// receives - a WebSocket's pushes beside its session - and each records only into its own Outcome, so neither frees
+	// the text the other is writing. Last() is the latest call's, for Error() and TimedOut() on a stream one thread uses.
+	struct Outcomes
+	{
+		public Outcome sending;     // Send's and SendAll's
+		public Outcome receiving;   // every other call's: receives, and the calls that open or secure the connection
+
+		public Outcome& Sent() {
+			lastSent.Store(true, MemoryOrder::Relaxed);
+			return sending;
+		}
+		public Outcome& Received() {
+			lastSent.Store(false, MemoryOrder::Relaxed);
+			return receiving;
+		}
+		public const Outcome& Last() const {
+			if (lastSent.Load(MemoryOrder::Relaxed)) return sending;
+			return receiving;
+		}
+
+		private Threading::Atomic<bool> lastSent;
 	}
 }

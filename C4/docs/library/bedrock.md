@@ -1153,7 +1153,10 @@ if (!accepted.ReceiveAll((void*)&reply[0], 4, 2000)) printf("%s\n", accepted.Err
   `Receive` return a byte count, `Net::kTimedOut` or `Net::kError`; a socket keeps why its last call failed
   (`Error()`: the system's message and code, empty after a success) and whether it gave up waiting (`TimedOut()`).
   `Connect` and `Accept` return a closed stream when they fail - the stream's (for `Connect`) or the listener's (for
-  `Accept`) `Error()` and `TimedOut()` say why.
+  `Accept`) `Error()` and `TimedOut()` say why. One thread may send on a stream or UDP socket while another receives
+  on it: each direction keeps its own outcome (BUG-497), `Error()` and `TimedOut()` are the latest call's whichever
+  thread made it, and `TcpStream::ReceiveError()` is the latest call's other than a send (what a receiving thread
+  reads).
 - Sockets are not inherited by processes the program starts. A listener takes its port exclusively. Windows answers
   a connection refused on this machine after about 2 seconds of retries.
 - **The event loop** (`loop.ch`, B54, D-70): `Net::EventLoop` runs one thread's callbacks one at a time - a socket's
@@ -1319,7 +1322,8 @@ if (git.exitCode == 0) printf("%s", git.output.CStr());
   `WriteAll`, `WriteText` and `CloseInput` feed the input. `Read(stream, ...)` reads one stream, and
   `ReadAny(buffer, capacity, from, timeoutMs)` whichever of output and errors has bytes first, so one thread can
   follow both. A stream that ends is closed, and `HasOutput()` turns false once both have. A stream ends (a read
-  gives 0) when the child and everything it started have closed it.
+  gives 0) when the child and everything it started have closed it. One thread may write while another reads and a
+  third waits or kills: writes, reads and the rest each keep their own outcome, and `Error()` is the latest call's.
 - **The child's life:** `Wait(timeoutMs)` gives the exit code (0 to 4294967295) or `kTimedOut`. The child runs in a
   job object: `Kill()` ends it and every process it started (their exit code is 1), and so does closing or
   deleting the `Child` unless `killOnClose` is false. A `Child` owns its handles and cannot be copied (move it with

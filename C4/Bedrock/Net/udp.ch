@@ -1,5 +1,6 @@
 // UdpSocket: datagrams (D-65). It owns its socket and closes it on delete; it cannot be copied (move it with take()).
-// A zero one is closed. A datagram arrives whole or not at all, possibly out of order or more than once.
+// A zero one is closed. A datagram arrives whole or not at all, possibly out of order or more than once. One thread may
+// send while another receives (each direction keeps its own outcome; Error() is the latest call's).
 //     Net::UdpSocket socket;
 //     socket.Open(Net::Address::Loopback(0));
 //     socket.SendTo("hi", 2, peer);
@@ -29,11 +30,11 @@ namespace Net
 		public bool IsOpen() const { return slot != 0; }
 		public Address LocalAddress() const;
 		public void Close();   // idempotent
-		public const char* Error() const { return last.error.CStr(); }
-		public bool TimedOut() const { return last.timedOut; }
+		public const char* Error() const { return outcomes.Last().error.CStr(); }
+		public bool TimedOut() const { return outcomes.Last().timedOut; }
 		public int64 Socket() const { return slot - 1; }
 
 		private int64 slot;   // the runtime's socket plus one
-		private Outcome last;
+		private Outcomes outcomes;
 	}
 }
