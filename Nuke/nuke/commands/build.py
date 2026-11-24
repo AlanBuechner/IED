@@ -5,7 +5,8 @@ import os
 from .. import copies, fsutil, languages
 from ..variables import expand
 from ..c4 import compile as c4compile
-from ..c4 import ide_bridge
+from ..c4 import ide_bridge, server
+from ..errors import NukeError
 from . import base
 
 
@@ -72,9 +73,21 @@ class Clean(base.Command):
 	def work(self, session, project):
 		if project.is_driven and callable(getattr(session.driver(project), "clean", None)):
 			session.driver(project).clean(session.driver_context(project))
+		if not project.is_driven and project.kind == "executable":
+			stop_server(session, project)
 		removed = [d for d in (session.bin_dir(project), session.int_dir(project)) if fsutil.remove_tree(d)]
 		if removed:
 			session.log.note(f"cleaned {project.name} ({session.configuration.name})")
+
+
+def stop_server(session, project):
+	"""Ends the program's C4 build server, which holds its folder and a build's memory until it ends."""
+	try:
+		job = c4compile.plan(session, project)
+	except NukeError:
+		return  # no toolchain to compile with: no server of it runs
+	if job.compiler and server.stop(job.argv, cwd=job.cwd):
+		session.log.note(f"{project.name}: ended its C4 build server")
 
 
 class Rebuild(base.Command):

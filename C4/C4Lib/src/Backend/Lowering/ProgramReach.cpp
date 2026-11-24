@@ -91,6 +91,7 @@ namespace C4Compiler
 	void ProgramReach::KeepBody(LoweredBody body, const BodyNeeds& needs)
 	{
 		NoteUse(*body.record, body.errors);
+		const uint32 firstDiagnostic = m_Errors.GetErrors().Count();
 		m_Errors.Append(body.errors);
 		NeedWhatItNeeds(*body.tree, needs);
 		if (!body.tree->complete)
@@ -99,7 +100,12 @@ namespace C4Compiler
 			return;
 		}
 		m_Defined.insert(body.record);
-		m_Program.units.push_back({ UnitKind::Function, std::move(body.tree), body.record });
+		LoweredUnit unit{ UnitKind::Function, std::move(body.tree), body.record };
+		unit.asks = std::move(body.asks);
+		unit.needs = needs;
+		unit.firstDiagnostic = firstDiagnostic;
+		unit.diagnosticCount = m_Errors.GetErrors().Count() - firstDiagnostic;
+		m_Program.units.push_back(std::move(unit));
 	}
 
 	void ProgramReach::NeedWhatItNeeds(const HIRFunction& user, const BodyNeeds& needs)
@@ -132,6 +138,18 @@ namespace C4Compiler
 			m_Program.census.push_back({ need, &record, std::move(tree) });
 		}
 		m_PendingCensus.clear();
+	}
+
+	const HIRFunction* ProgramReach::FirstUser(const FunctionRecord& record) const
+	{
+		const auto user = m_FirstUsers.find(&record);
+		return user == m_FirstUsers.end() ? nullptr : user->second;
+	}
+
+	void ProgramReach::FirstUsesMoved(const HIRFunction* before, const HIRFunction* after)
+	{
+		for (auto& [record, user] : m_FirstUsers)
+			if (user == before) user = after;
 	}
 
 	void ProgramReach::NoteUse(const FunctionRecord& record, ErrorTracker& errors) const

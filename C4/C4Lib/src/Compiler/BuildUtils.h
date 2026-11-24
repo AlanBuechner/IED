@@ -51,6 +51,9 @@ namespace C4Compiler
 	Core::String intermediateDir;  // --int-dir: where the intermediates (.obj, .ll, .bc) go; empty: next to the output
 	Core::Vector<Core::String> linkArguments; // -l<lib> / -L<dir>, passed to the link as written
 	bool serve = false;            // --serve: stay alive and build again on each request (docs/compiler/07 stage 2a)
+	std::string serveOn;           // --serve-on: the same, for the clients of this pipe (a Unix socket on Linux)
+	std::string serveStamp;        // --serve-stamp: what a request must carry, else the server is stale
+	unsigned serveIdleSeconds = 1800; // --serve-idle: the server ends after this long without a build
 	bool printVersion = false;     // --version
 	bool printHelp = false;        // -h
 	Core::String error;            // what the command line got wrong; empty when it parsed

@@ -41,13 +41,6 @@ namespace C4Compiler
 			return false;
 		}
 
-		// Whether only the function's own lowering reads its body: other bodies copy an inline one, constants run a
-		// [compile_time] one, and each instance of a template lowers the template's.
-		bool BodyIsItsOwn(const FunctionDefinitionNode& fn)
-		{
-			return fn.IsDefinition() && !fn.IsInline() && !fn.IsTemplated() && !fn.GetOwnerTemplateDefinition() && !IsCompileTime(fn);
-		}
-
 		void CollectBodies(const AstNode& node, uint32 sourceId, std::vector<BodySpan>& bodies)
 		{
 			if (const auto* fn = dynamic_cast<const FunctionDefinitionNode*>(&node))
@@ -69,6 +62,11 @@ namespace C4Compiler
 				if (byteOffset >= body.begin && byteOffset < body.end) return true;
 			return false;
 		}
+	}
+
+	bool BodyIsItsOwn(const FunctionDefinitionNode& fn)
+	{
+		return fn.IsDefinition() && !fn.IsInline() && !fn.IsTemplated() && !fn.GetOwnerTemplateDefinition() && !IsCompileTime(fn);
 	}
 
 	uint64 DeclarationFingerprint(const Source& source, uint32 sourceId, const MacroLayout* macros,

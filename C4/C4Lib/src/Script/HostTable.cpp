@@ -203,36 +203,53 @@ namespace C4Compiler
 		return names;
 	}
 
-	std::vector<HostEntry> HostEntries(const std::vector<llvm::Module*>& partitions, const std::vector<std::string>& alsoListed)
+	std::vector<HostCandidate> HostCandidates(llvm::Module& partition, bool first)
 	{
-		std::unordered_set<std::string> always(alsoListed.begin(), alsoListed.end());
-		const std::vector<const char*>& entryPoints = ScriptRuntimeEntryPoints(!partitions.empty() && ForLinux(*partitions.front()));
-		for (const char* name : entryPoints) always.insert(name);
-		std::vector<HostEntry> entries;
-		llvm::DenseSet<llvm::StringRef> seen; // the values' own names and the listed ones, which outlive the walk
-		auto add = [&](llvm::GlobalValue& value, bool first) {
+		const std::unordered_set<std::string> none;
+		std::vector<HostCandidate> candidates;
+		auto add = [&](llvm::GlobalValue& value, bool listed) {
 			if (value.hasLocalLinkage())
 			{
 				if (!first) return; // another partition's helper
 				ShareLocal(value);
 			}
-			if (!seen.insert(ProgramName(value)).second) return;
-			entries.push_back({ ProgramName(value).str(), value.getName().str(), llvm::isa<llvm::Function>(value), value.hasHiddenVisibility() });
+			candidates.push_back({ { ProgramName(value).str(), value.getName().str(), llvm::isa<llvm::Function>(value), value.hasHiddenVisibility() }, !listed });
 		};
-		for (llvm::Module* partition : partitions)
-		{
-			const bool first = partition == partitions.front();
-			for (llvm::Function& f : *partition)
-				if (ListedFunction(f, always)) add(f, first);
-			for (llvm::GlobalVariable& g : partition->globals())
-				if (ListedGlobal(g, always)) add(g, first);
-		}
-		auto addMissing = [&](llvm::StringRef name) {
-			if (seen.insert(name).second) entries.push_back({ name.str(), name.str(), true, false });
+		for (llvm::Function& f : partition)
+			if (!f.isIntrinsic() && f.hasName()) add(f, ListedFunction(f, none));
+		// A global is a candidate when some list of names would list it: one that names it.
+		for (llvm::GlobalVariable& g : partition.globals())
+			if (g.hasName() && (ListedGlobal(g, none) || ListedGlobal(g, { g.getName().str() }))) add(g, ListedGlobal(g, none));
+		return candidates;
+	}
+
+	std::vector<HostEntry> MergeHostEntries(const std::vector<const std::vector<HostCandidate>*>& partitions, const std::vector<std::string>& alsoListed,
+		bool forLinux)
+	{
+		std::unordered_set<std::string> always(alsoListed.begin(), alsoListed.end());
+		const std::vector<const char*>& entryPoints = ScriptRuntimeEntryPoints(forLinux);
+		for (const char* name : entryPoints) always.insert(name);
+		std::vector<HostEntry> entries;
+		std::unordered_set<std::string> seen;
+		for (const std::vector<HostCandidate>* candidates : partitions)
+			for (const HostCandidate& candidate : *candidates)
+				if ((!candidate.onlyIfAlwaysListed || always.count(candidate.entry.symbol)) && seen.insert(candidate.entry.name).second)
+					entries.push_back(candidate.entry);
+		auto addMissing = [&](const std::string& name) {
+			if (seen.insert(name).second) entries.push_back({ name, name, true, false });
 		};
 		for (const char* name : entryPoints) addMissing(name);
 		for (const std::string& name : alsoListed) addMissing(name);
 		return entries;
+	}
+
+	std::vector<HostEntry> HostEntries(const std::vector<llvm::Module*>& partitions, const std::vector<std::string>& alsoListed)
+	{
+		std::vector<std::vector<HostCandidate>> candidates;
+		for (llvm::Module* partition : partitions) candidates.push_back(HostCandidates(*partition, partition == partitions.front()));
+		std::vector<const std::vector<HostCandidate>*> each;
+		for (const std::vector<HostCandidate>& partition : candidates) each.push_back(&partition);
+		return MergeHostEntries(each, alsoListed, !partitions.empty() && ForLinux(*partitions.front()));
 	}
 
 	std::vector<std::string> HostNamesOf(const std::vector<HostEntry>& entries)

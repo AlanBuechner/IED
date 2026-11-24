@@ -96,6 +96,14 @@ namespace C4Compiler
 			uint32& m_Depth;
 		};
 
+		// What a request made, kept for the lowering that asked it (ModelMaking::Ask) when it was made.
+		template <typename T>
+		QueryResult<T> MadeFor(const ModelMaking::Ask& ask, QueryResult<T> made)
+		{
+			if (made.Ok()) ask.Made(made.value);
+			return made;
+		}
+
 		QueryResult<const Type*> NeverEnds(const Core::String& name)
 		{
 			return QueryResult<const Type*>::Fail(QueryError::CyclicDependency, "instantiating '" + name + "' goes more than " +
@@ -109,6 +117,7 @@ namespace C4Compiler
 	QueryResult<const Type*> TemplateInstantiator::InstantiateTypeTemplate(const ProgramModel& model, const Core::String& name, const Scope* declScope,
 		const TemplateArgumentListNode& args, uint32 unitId, Scope* outerBinding, const Scope* argContext) const
 	{
+		const ModelMaking::Ask ask(model.Making());
 		auto visible = VisibleTypeDefinition(model, name, declScope, unitId);
 		if (!visible.Ok()) return QueryResult<const Type*>::Fail(visible.error, visible.message);
 		const ProgramModel::TemplateDef* def = visible.value;
@@ -118,7 +127,7 @@ namespace C4Compiler
 		if (!written.Ok()) return QueryResult<const Type*>::Fail(written.error, written.message);
 		// Written in full, the arguments are the key as they are: an instance made before needs no binding scope.
 		if (TemplateArgumentResolver::Complete(*def->params, written.value))
-			if (const Type* made = Cached(model.m_TypeInstantiations, DefinitionKey(name, def, written.value))) return QueryResult<const Type*>::Success(made);
+			if (const Type* made = Cached(model.m_TypeInstantiations, DefinitionKey(name, def, written.value))) return QueryResult<const Type*>::Success(ask.Found(made));
 		Scope* binding = model.m_Symbols->CreateScope(Scope::Kind::Block, "inst", BodyParent(model, *def));
 		// From here on the instance is the template's and its arguments' alone: a default argument, the alias's
 		// target and the body's members resolve as the template's file's declarations do, whoever asks.
@@ -126,9 +135,9 @@ namespace C4Compiler
 		if (!complete.Ok()) return QueryResult<const Type*>::Fail(complete.error, complete.message);
 
 		const Core::String key = DefinitionKey(name, def, complete.value);
-		if (const Type* cached = Cached(model.m_TypeInstantiations, key)) return QueryResult<const Type*>::Success(cached);
+		if (const Type* cached = Cached(model.m_TypeInstantiations, key)) return QueryResult<const Type*>::Success(ask.Found(cached));
 		const ModelMaking::Request request(model.Making(), "a class template instance");
-		if (const Type* cached = Cached(model.m_TypeInstantiations, key)) return QueryResult<const Type*>::Success(cached); // made meanwhile
+		if (const Type* cached = Cached(model.m_TypeInstantiations, key)) return QueryResult<const Type*>::Success(ask.Found(cached)); // made meanwhile
 
 		if (def->isAlias && def->aliasTarget)
 		{
@@ -137,7 +146,7 @@ namespace C4Compiler
 			if (!target.Ok()) return target;
 			model.m_InstantiationBindings.emplace(target.value, BindingsFor(model, *def->params, complete.value));
 			model.m_TypeInstantiations.Add(key, target.value);
-			return target;
+			return MadeFor(ask, target);
 		}
 		auto chosen = Specializations::ForType(model, *def, name, complete.value);
 		if (!chosen.Ok()) return QueryResult<const Type*>::Fail(chosen.error, chosen.message);
@@ -146,12 +155,12 @@ namespace C4Compiler
 			if (!def->objectBody || def->objectBody->IsDeclaration())
 				return QueryResult<const Type*>::Fail(QueryError::NotFound, "'" + name + "' is declared but not defined, and no specialization of it "
 					"is for these arguments");
-			return InstantiateObject(model, *def, name, key, complete.value, complete.value, binding);
+			return MadeFor(ask, InstantiateObject(model, *def, name, key, complete.value, complete.value, binding));
 		}
 		// A specialization's body binds its own parameters (`T` of `Box<T*>` for `Box<int32*>`).
 		Scope* own = model.m_Symbols->CreateScope(Scope::Kind::Block, "inst", BodyParent(model, *chosen.value.def));
 		TemplateArgumentResolver::BindAll(model, own, *chosen.value.def->params, chosen.value.args);
-		return InstantiateObject(model, *chosen.value.def, name, key, complete.value, chosen.value.args, own);
+		return MadeFor(ask, InstantiateObject(model, *chosen.value.def, name, key, complete.value, chosen.value.args, own));
 	}
 
 	// A scope's templates of the name are one template (its declaration, its definition); the use sees it when it
@@ -308,16 +317,18 @@ namespace C4Compiler
 	const FunctionRecord* TemplateInstantiator::MadeFunction(const ProgramModel& model, const ProgramModel::TemplateDef& def, const Core::String& name,
 		const TemplateArgs& args) const
 	{
-		return Cached(model.m_FunctionInstantiations, FunctionKey(name, def, args, nullptr));
+		// Found, it is asked for as making it is (ModelMaking::Ask).
+		return ModelMaking::Ask(model.Making()).Found(Cached(model.m_FunctionInstantiations, FunctionKey(name, def, args, nullptr)));
 	}
 
 	QueryResult<const FunctionRecord*> TemplateInstantiator::InstantiateFunction(const ProgramModel& model, const ProgramModel::TemplateDef& def,
 		const Core::String& name, const TemplateArgs& args, Scope* binding, const Type* receiver) const
 	{
+		const ModelMaking::Ask ask(model.Making());
 		const Core::String key = FunctionKey(name, def, args, receiver);
-		if (const FunctionRecord* cached = Cached(model.m_FunctionInstantiations, key)) return QueryResult<const FunctionRecord*>::Success(cached);
+		if (const FunctionRecord* cached = Cached(model.m_FunctionInstantiations, key)) return QueryResult<const FunctionRecord*>::Success(ask.Found(cached));
 		const ModelMaking::Request request(model.Making(), "a function template instance");
-		if (const FunctionRecord* cached = Cached(model.m_FunctionInstantiations, key)) return QueryResult<const FunctionRecord*>::Success(cached); // made meanwhile
+		if (const FunctionRecord* cached = Cached(model.m_FunctionInstantiations, key)) return QueryResult<const FunctionRecord*>::Success(ask.Found(cached)); // made meanwhile
 
 		// The signature and the body are the template's: their names resolve as its file's do.
 		auto expanded = FunctionSignature(model, *def.functionBody, binding, def.unit);
@@ -385,7 +396,7 @@ namespace C4Compiler
 		model.m_TemplateOfInstance.emplace(stored, &def);
 		if (rec.primitiveReceiverType) model.m_PrimitiveExtensions.Add(rec.primitiveReceiverType, stored);
 		model.m_FunctionInstantiations.Add(key, stored);
-		return QueryResult<const FunctionRecord*>::Success(stored);
+		return QueryResult<const FunctionRecord*>::Success(ask.Made(stored));
 	}
 
 	InstantiationBindings TemplateInstantiator::WithOwnerNames(InstantiationBindings own, const InstantiationBindings& ownerNames)

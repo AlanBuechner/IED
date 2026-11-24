@@ -111,6 +111,8 @@ ied-plugins = ["plugins/*"]        # IED plugins it develops: projects of its IE
 optimize = 2                       # 0..3
 debug-info = true
 incremental = false                # C4's --incremental (default: true for Debug and Development)
+server = true                      # C4's build server: the compiler stays between builds (default: true for Debug
+                                   # and Development; see below)
 aliases = ["prof"]
 defines = { PROFILE = "1" }        # passed to every C4 compile of this configuration
 
@@ -350,6 +352,21 @@ compiler runs and stamped only after it succeeds, so a source edited while a bui
 finishing later included) is compiled by the next build, never reported up to date. Compiler output streams as it happens; the compiler's progress lines (`ENGINE: Phase 1: Parsing`) show only with `-v`, its errors and warnings always. An output that is running (a server under test, the IDE
 built from this checkout) cannot be written on Windows, so it is renamed to `<output>.<ms>.old` first and the old
 program keeps running; a later build removes the `.old` copies nothing runs any more.
+
+**The build server** (Debug and Development, and any configuration that says `server = true`; `server = false` turns
+it off; `nuke/c4/server.py`, C4/docs/compiler/07). A program's
+compile goes to a C4 compiler that stays between builds - one per command line and folder, started on the first
+build as `C4.exe <the command line> --serve-on c4-serve-<hash> --serve-stamp <the compiler's time and size>
+--serve-idle 1800`, a process of its own outside the build's job, asked over the named pipe `\\.\pipe\c4-serve-<hash>`
+(a Unix socket in the temporary folder on Linux). It answers with the compile's output and its exit code, as a
+one-shot compile would, and the stamp and the rest of the rebuild check work as above. An edit that changed only
+function bodies is lowered and emitted again in the server for the bodies it changed alone; any other edit is a cold
+compile there, which still reuses the parses of the files it did not change. A server of a compiler since rebuilt
+answers `stale` and ends, and a new one starts; one idle for half an hour ends, and `nuke clean` ends the servers of
+the programs it cleans. Until it ends a server keeps its last build in memory (the IED server's: 6.4 GB committed,
+3.7 GB in use at Development; 5.5 / 2.9 GB at Debug) and its project folder open (Windows will not delete the folder):
+end it with `nuke clean` before removing a checkout. When no server answers the program is compiled one-shot. Test harnesses (`nuke test`) and
+Dist always compile one-shot.
 
 **Tests.** `nuke test` compiles each test-bearing C4 project separately with `-test -test-json
 <int>/tests/results.json` into `<bin>/<P>-tests.exe` (a plain build never includes the harness), runs it from

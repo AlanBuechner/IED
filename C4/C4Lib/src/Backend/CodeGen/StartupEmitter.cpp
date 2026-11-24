@@ -34,6 +34,14 @@ namespace C4Compiler
 		// A script's rounds are its own: the host's carry these names too (docs/runtime/04 section 4.2).
 		Rounds process{ m_Script ? "__c4_script_init_round" : "__c4_global_init_round" };
 		Rounds thread{ "__c4_thread_init_round" };
+		if (!m_Partitions.Emits(0))
+		{
+			// A build server's partial emission (PartialEmission): partition 0's starts are the build before's; the globals
+			// of an emitted partition start as data there again.
+			for (LoweredUnit& unit : units)
+				if (unit.kind == UnitKind::ProcessStarts || unit.kind == UnitKind::ThreadStarts) StartAsData(unit.constants, *unit.tree);
+			return true;
+		}
 		for (LoweredUnit& unit : units)
 		{
 			if (unit.kind == UnitKind::ProcessStarts) EmitRound(model, unit, process);
@@ -70,8 +78,14 @@ namespace C4Compiler
 	void StartupEmitter::StartAsData(std::vector<ConstantStart>& constants, HIRFunction& round)
 	{
 		bool started = false;
+		std::vector<ConstantStart> asData;
 		for (ConstantStart& constant : constants)
 		{
+			if (!m_Partitions.Emits(m_Partitions.Of(*constant.variable)))
+			{
+				asData.push_back(std::move(constant)); // its home is not emitted this time: it started as data before
+				continue;
+			}
 			ModuleContext& home = m_Partitions.Partition(m_Partitions.Of(*constant.variable));
 			llvm::GlobalVariable* storage = home.GlobalAddress(*constant.variable);
 			const llvm::DataLayout& layout = home.module().getDataLayout();
@@ -86,7 +100,10 @@ namespace C4Compiler
 			}
 			storage->setInitializer(data);
 			if (constant.variable->isConst) storage->setConstant(true);
+			asData.push_back(std::move(constant));
 		}
+		// A start moved into the round runs there from now on: emitting the program again (a build server) emits it once.
+		constants = std::move(asData);
 		// Only the storage's type tells whether a start fits as data: one that does not runs in the round, so the round's
 		// MIR is built again with it.
 		if (!started) return;

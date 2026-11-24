@@ -30,6 +30,13 @@ namespace C4Compiler
 		PriorParse ToPriorParse() const;
 		/// Its declaration fingerprint (Compiler/DeclarationFingerprint, docs/compiler/07); the unit has parsed.
 		uint64 Fingerprint() const;
+		/// The text it parsed, and what the macro pass made of it (null: nothing).
+		const Source* GetSource() const { return m_Source.Get(); }
+		const MacroLayout* GetMacros() const { return m_Macros.Get(); }
+		/// A build server's body edit (docs/compiler/07): `edited`'s parse of this unit's file - another compile's, of the
+		/// file's new text - is this unit's from now on; its includes are the same. The tree before is the caller's to keep
+		/// while the model points into it.
+		void TakeParse(const CompilationUnit& edited);
 		bool IsWorking() { return m_ProcessingThread.joinable(); }
 
 		ErrorTracker& GetErrorTracker() { return m_ErrorTracker; }

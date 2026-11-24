@@ -5,10 +5,15 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace C4Compiler
 {
+	/// What one lowering asked the model for with requests of its own - the answers it found or made, not those a request
+	/// it made asked inside - so a build server knows what a body asks before it lowers the body again (docs/compiler/07).
+	using AskedAnswers = std::vector<const void*>;
+
 	/// What a request made that the other lowerings may find only once the request has ended (a table's new entries).
 	class IShownWhenMade
 	{
@@ -58,6 +63,51 @@ namespace C4Compiler
 			const ModelMaking& m_Making;
 		};
 
+		/// While alive, the requests this thread asks outside any other request keep their answers in `answers`.
+		class Asking
+		{
+		public:
+			explicit Asking(AskedAnswers& answers);
+			~Asking();
+			Asking(const Asking&) = delete;
+			Asking& operator=(const Asking&) = delete;
+
+		private:
+			AskedAnswers* m_Outer;
+		};
+
+		/// One request, from where it is asked (before its lock): its answer, found or made, goes to the asking lowering's
+		/// answers when no other request of the thread is open; a made one is noted with the phase it was made in.
+		class Ask
+		{
+		public:
+			explicit Ask(const ModelMaking& making);
+			template <typename T> T* Found(T* answer) const
+			{
+				Keep(answer);
+				return answer;
+			}
+			template <typename T> T* Made(T* answer) const
+			{
+				m_Making.NoteMade(answer);
+				Keep(answer);
+				return answer;
+			}
+
+		private:
+			void Keep(const void* answer) const;
+
+			const ModelMaking& m_Making;
+			AskedAnswers* m_Answers; // null when asked inside another request, or by no lowering
+		};
+
+		/// What made the model's state at a moment: one more at each start and end of a sharing, so an answer made while
+		/// lowerings shared the model is told apart from one made between.
+		uint32 Phase() const { return m_Phase.load(std::memory_order_acquire); }
+		/// The phase a request made `answer` in; c_BeforeLowering for one no request made.
+		uint32 MadeIn(const void* answer) const;
+		static constexpr uint32 c_BeforeLowering = 0;
+
 		/// Whether lowerings share the model now (several threads may read it).
 		bool Shared() const { return m_Sharing.load(std::memory_order_acquire) != 0; }
 		/// Whether the calling thread is inside a request: it alone changes the model now.
@@ -90,6 +140,7 @@ namespace C4Compiler
 		void Violate(const char* what) const;
 		void Begin(const char* what) const;
 		void End() const;
+		void NoteMade(const void* answer) const;
 
 		mutable std::recursive_mutex m_Lock;              // held by the thread that makes
 		mutable std::atomic<std::thread::id> m_Maker{};   // that thread, while it holds the lock
@@ -98,6 +149,9 @@ namespace C4Compiler
 		mutable std::vector<std::atomic<bool>*> m_MadeShown; // the types and scopes it made
 		mutable std::map<std::string, uint64> m_Requests;  // under m_Lock
 		mutable std::atomic<uint32> m_Sharing{ 0 };
+		mutable std::atomic<uint32> m_Phase{ c_BeforeLowering };
+		mutable std::mutex m_MadeLock;
+		mutable std::unordered_map<const void*, uint32> m_MadeIn; // under m_MadeLock
 		mutable std::mutex m_ViolationsLock;
 		mutable std::vector<std::string> m_Violations;
 	};

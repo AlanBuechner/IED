@@ -64,7 +64,8 @@ namespace C4Compiler
 	}
 
 	std::optional<std::vector<std::vector<std::string>>> InlineBodyCache::Chunks(const std::vector<llvm::Module*>& partitions,
-		const std::vector<std::string>& bitcode, const HostNames& names, unsigned maxGroups, unsigned threads, std::string& error) const
+		const std::vector<std::string>& bitcode, const HostNames& names, unsigned maxGroups, unsigned threads, std::string& error,
+		const std::vector<std::filesystem::path>& keptToo, std::vector<std::filesystem::path>* pathsOut) const
 	{
 		if (CreateFolders(PathText(m_Folder)))
 		{
@@ -102,7 +103,10 @@ namespace C4Compiler
 			}
 		for (size_t i = 0; i < partitions.size(); ++i)
 			if (const size_t owner = first.at(PathText(paths[i])); owner != i) chunks[i] = chunks[owner];
-		ObjectCache(m_Folder, m_Salt).KeepOnly(paths);
+		std::vector<std::filesystem::path> kept = paths;
+		kept.insert(kept.end(), keptToo.begin(), keptToo.end());
+		ObjectCache(m_Folder, m_Salt).KeepOnly(kept);
+		if (pathsOut) *pathsOut = std::move(paths);
 		return chunks;
 	}
 

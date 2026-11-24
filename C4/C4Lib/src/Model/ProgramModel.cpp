@@ -133,9 +133,10 @@ namespace C4Compiler
 
 	const FunctionRecord* ProgramModel::EnsureSynthesizedLifecycle(const ObjectType* type, LifecycleOp op) const
 	{
-		if (const FunctionRecord* existing = SynthesizedLifecycle(type, op)) return existing;
+		const ModelMaking::Ask ask(*m_Making);
+		if (const FunctionRecord* existing = SynthesizedLifecycle(type, op)) return ask.Found(existing);
 		const ModelMaking::Request request(*m_Making, "a compiler-written lifecycle function");
-		if (const FunctionRecord* made = SynthesizedLifecycle(type, op)) return made; // by another lowering meanwhile
+		if (const FunctionRecord* made = SynthesizedLifecycle(type, op)) return ask.Found(made); // by another lowering meanwhile
 		static const char* const kNames[] = { "", "create", "delete", "copy" };
 		Core::Vector<const Type*> params;
 		FunctionRecord rec;
@@ -155,7 +156,7 @@ namespace C4Compiler
 		rec.mangledName = "__c4_" + Core::String(kNames[static_cast<int>(op)]) + "_" + TypeSymbol(type);
 		const FunctionRecord* stored = m_Symbols->AddFunctionRecord(rec);
 		m_SynthesizedLifecycle.Add({ type, op }, stored);
-		return stored;
+		return ask.Made(stored);
 	}
 
 	Core::Vector<const FunctionRecord*> ProgramModel::PrimitiveExtensions(const Type* type) const
@@ -380,8 +381,19 @@ namespace C4Compiler
 
 	const Closure* ProgramModel::ClosureMadeFor(const Core::String& owner, const AstNode* body) const
 	{
+		// A lowering that finds its lambda's closure asks for it as making it does (ModelMaking::Ask).
 		const Closure* const* made = m_ClosuresMade.Find({ owner, body });
-		return made ? *made : nullptr;
+		return made ? ModelMaking::Ask(*m_Making).Found(*made) : nullptr;
+	}
+
+	void ProgramModel::ClosureBodiesMoved(const std::unordered_map<const AstNode*, const AstNode*>& moved)
+	{
+		for (auto& made : m_Closures)
+			if (const auto to = moved.find(made.second->call->bodyNode); to != moved.end())
+			{
+				made.second->call->bodyNode = to->second;
+				m_ClosuresMade.Add(std::make_pair(made.second->owner, to->second), made.second.get());
+			}
 	}
 
 	const Closure* ProgramModel::ClosureOf(const Type* t) const

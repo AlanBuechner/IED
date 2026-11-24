@@ -2,6 +2,7 @@
 #include "Backend/HIR/GlobalInit.h"
 #include "Backend/HIR/HIRNodes.h"
 #include "Backend/Lowering/BodyNeeds.h"
+#include "Backend/Lowering/ParallelLowering.h"
 #include "Backend/Lowering/TypeThunkPlan.h"
 #include <deque>
 #include <memory>
@@ -30,6 +31,10 @@ namespace C4Compiler
 		const FunctionRecord* placedBy = nullptr; // whose partition it goes to (an own invoke thunk's: its target's)
 		const SymbolInfo* variable = nullptr;     // FirstUseStart: the thread_local it starts
 		std::vector<ConstantStart> constants;     // a round's globals that start as data where their storage can hold it
+		LoweringAsks asks;                        // what its lowering asked the model for (a body or a thunk)
+		BodyNeeds needs;                          // what it needs lowered with it (a function's body)
+		uint32 firstDiagnostic = 0;               // a function's body: where its lowering's diagnostics are in the program's
+		uint32 diagnosticCount = 0;
 	};
 
 	/// A census counter (CensusNeed) and its body; codegen gives each partition that allocates such objects its own.

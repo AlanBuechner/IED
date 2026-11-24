@@ -55,6 +55,7 @@ namespace C4Compiler
 		const ObjectType* enclosingType = nullptr;
 		bool isMutable = false;
 		Core::String displayName;   // "lambda in Profile::StartSession", "lambda #2 in ...": the census shows it
+		Core::String owner;         // ClosureSpec::owner: the code that writes it
 
 		bool CapturesNothing() const { return captures.Empty(); }
 		/// Whether the closure is one pointer (`[this]`, `[&x]`): a func then holds that pointer as its

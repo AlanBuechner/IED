@@ -508,6 +508,8 @@ def _configuration(name, t):
 		fields["debug-info"] = t.boolean("debug-info", True)
 	if "incremental" in t.data:
 		fields["incremental"] = t.boolean("incremental", False)
+	if "server" in t.data:
+		fields["server"] = t.boolean("server", False)
 	if "aliases" in t.data:
 		fields["aliases"] = t.strings("aliases")
 	if "defines" in t.data:

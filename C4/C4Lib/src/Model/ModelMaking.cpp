@@ -4,6 +4,46 @@
 
 namespace C4Compiler
 {
+	namespace
+	{
+		// The answers the lowering running on this thread keeps (ModelMaking::Asking): a request deep in the model has no
+		// other way to its lowering, and each thread runs one lowering at a time.
+		thread_local AskedAnswers* t_Answers = nullptr;
+	}
+
+	ModelMaking::Asking::Asking(AskedAnswers& answers) : m_Outer(t_Answers)
+	{
+		t_Answers = &answers;
+	}
+
+	ModelMaking::Asking::~Asking()
+	{
+		t_Answers = m_Outer;
+	}
+
+	ModelMaking::Ask::Ask(const ModelMaking& making) : m_Making(making), m_Answers(making.Making() ? nullptr : t_Answers)
+	{
+	}
+
+	void ModelMaking::Ask::Keep(const void* answer) const
+	{
+		if (m_Answers && answer) m_Answers->push_back(answer);
+	}
+
+	void ModelMaking::NoteMade(const void* answer) const
+	{
+		if (!answer) return;
+		const std::lock_guard<std::mutex> noting(m_MadeLock);
+		m_MadeIn.emplace(answer, Phase());
+	}
+
+	uint32 ModelMaking::MadeIn(const void* answer) const
+	{
+		const std::lock_guard<std::mutex> reading(m_MadeLock);
+		const auto made = m_MadeIn.find(answer);
+		return made == m_MadeIn.end() ? c_BeforeLowering : made->second;
+	}
+
 	ModelMaking::Request::Request(const ModelMaking& making, const char* what) : m_Making(making)
 	{
 		m_Making.Begin(what);
@@ -16,12 +56,12 @@ namespace C4Compiler
 
 	ModelMaking::Sharing::Sharing(const ModelMaking& making) : m_Making(making)
 	{
-		m_Making.m_Sharing.fetch_add(1, std::memory_order_acq_rel);
+		if (m_Making.m_Sharing.fetch_add(1, std::memory_order_acq_rel) == 0) m_Making.m_Phase.fetch_add(1, std::memory_order_acq_rel);
 	}
 
 	ModelMaking::Sharing::~Sharing()
 	{
-		m_Making.m_Sharing.fetch_sub(1, std::memory_order_acq_rel);
+		if (m_Making.m_Sharing.fetch_sub(1, std::memory_order_acq_rel) == 1) m_Making.m_Phase.fetch_add(1, std::memory_order_acq_rel);
 	}
 
 	void ModelMaking::Begin(const char* what) const

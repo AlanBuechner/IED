@@ -34,6 +34,9 @@ namespace C4Compiler
 		/// instantiated, so those types are concrete before any body is lowered. An instance's methods are bodies
 		/// too, visited as they are made.
 		static void InstantiateBodyReferences(ProgramModel& model);
+		/// What that pass makes of one body, in the unit its names resolve in: each type a template specialization in it names,
+		/// in its order (null for one that does not resolve). A build server compares a body's before it lowers the body again.
+		static std::vector<const Type*> TypeInstancesNamedIn(ProgramModel& model, const AstNode* body, uint32 unit);
 
 	private:
 		/// The values of `e`'s members in order, or why one does not fold.

@@ -272,6 +272,9 @@ namespace C4Compiler
 		const Closure* ClosureMadeFor(const Core::String& owner, const AstNode* body) const;
 		/// The closure facts of a lambda's type; null for every other type.
 		const Closure* ClosureOf(const Type* t) const;
+		/// A build server's body edit (docs/compiler/07): the lambdas whose bodies `moved` maps (old node -> new node, the same
+		/// tokens elsewhere) keep their closures, found by the new bodies from now on and lowered from them.
+		void ClosureBodiesMoved(const std::unordered_map<const AstNode*, const AstNode*>& moved);
 
 		// --- Lowering on several threads (docs/compiler/02, "Changes while bodies lower") -------
 		/// How the model changes while lowerings read it on several threads (Backend/Lowering/ParallelLowering): every

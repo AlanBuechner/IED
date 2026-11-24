@@ -2,6 +2,7 @@
 #include "Backend/HIR/HIRNodes.h"
 #include "Compiler/ErrorTracker.h"
 #include "Compiler/WorkerPool.h"
+#include "Model/ModelMaking.h"
 #include <functional>
 #include <map>
 #include <memory>
@@ -13,12 +14,21 @@ namespace C4Compiler
 	class ProgramModel;
 	struct FunctionRecord;
 
+	/// What a lowering asked the model for (its requests' answers, ModelMaking::Asking) and the phase it ran in: a build
+	/// server lowering the body again checks that it asks the same (docs/compiler/07).
+	struct LoweringAsks
+	{
+		AskedAnswers answers;
+		uint32 phase = ModelMaking::c_BeforeLowering;
+	};
+
 	/// A function's lowered body and what its lowering reported.
 	struct LoweredBody
 	{
 		const FunctionRecord* record = nullptr;
 		std::unique_ptr<HIRFunction> tree;
 		ErrorTracker errors;
+		LoweringAsks asks;
 	};
 
 	/// Lowers the ith of a batch, with its diagnostics in the tracker given (LowerFunction for a function's body).

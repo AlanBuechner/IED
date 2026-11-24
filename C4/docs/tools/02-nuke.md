@@ -87,12 +87,30 @@ A program is compiled again when:
 - its output is missing;
 - the command line or the build description changed;
 - the set of tracked files changed (a file was added or deleted);
-- any tracked file is newer than the output.
+- any tracked file changed - its time stamp or size is not what it was when the last successful compile began (an
+  older time stamp too: a file copied in from elsewhere).
 
 The tracked files are every file under the sources and includes of the program and its modules, the toolchain's
 `C4.exe`, and the toolchain's `Bedrock/` and `C4Runtime/`, so a new compiler in the toolchain rebuilds the
 programs that use it. The stamps (`compile.args`, `deps.d` in `<int>`) are written only after a successful
 compile: a failed compile is never taken for an up-to-date one, and `nuke run` never starts an older executable.
+
+### The build server
+
+In Debug and Development (and a configuration of the workspace's own with `server = true`; `[configurations.Development]
+server = false` turns it off) a program's compile goes to a C4.exe that stays between builds
+([../compiler/07-incremental-builds.md](../compiler/07-incremental-builds.md#stage-2a-as-built)):
+Nuke starts `C4.exe <the command line> --serve-on c4-serve-<hash> --serve-stamp <C4.exe's time and size>
+--serve-idle 1800` once - a process of its own, outside the build's job, one per command line and folder - and asks it
+for each build over the named pipe `\\.\pipe\c4-serve-<hash>`; the answer is the compile's output and exit code, as a
+one-shot C4.exe gives them. An edit that changed only function bodies (their own: not `inline`, not `[compile_time]`,
+not in a template; no lambda or local type in a changed one) is lowered and emitted again for those bodies alone - and
+for the bodies after it in its file when it added or removed lines and only such functions follow - and relinked; any
+other edit is compiled cold in the server, which still keeps the parses of the files it did not change. Every build writes what a cold build writes, byte for byte. A server whose C4.exe was rebuilt answers `stale` and
+ends, and a new one starts; one idle for half an hour ends; `nuke clean` ends the servers of the programs it cleans (the
+pipe's `quit`); when none answers, the program is compiled one-shot. A server keeps its last build in memory and its
+project folder open until it ends (Nuke's README section 9: what each costs), so end it with `nuke clean` before
+removing a checkout. Test harnesses (`nuke test`) and Dist compile one-shot.
 
 ---
 

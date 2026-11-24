@@ -65,8 +65,13 @@ namespace C4Compiler
 		Core::Vector<const FunctionRecord*> records;
 		m_Model.AllFunctionRecords(records);
 		for (const FunctionRecord* record : records)
-			if (IsWritten(*record) && HasBody(*record) && !record->isLocal && !IsHosts(*record)) m_Reach.Need(record, nullptr);
+			if (LoweredFirst(*record)) m_Reach.Need(record, nullptr);
 		m_Reach.LowerNeeded();
+	}
+
+	bool ProgramLowering::LoweredFirst(const FunctionRecord& record) const
+	{
+		return IsWritten(record) && HasBody(record) && !record.isLocal && !IsHosts(record);
 	}
 
 	bool ProgramLowering::IsHosts(const FunctionRecord& record) const
@@ -110,7 +115,9 @@ namespace C4Compiler
 			{
 				complete[i] = bodies[i].tree->complete;
 				const FunctionRecord* placedBy = jobs[i].shared ? jobs[i].thunk : jobs[i].target;
-				if (complete[i]) thunks.push_back({ UnitKind::InvokeThunk, std::move(bodies[i].tree), placedBy });
+				if (!complete[i]) continue;
+				thunks.push_back({ UnitKind::InvokeThunk, std::move(bodies[i].tree), placedBy });
+				thunks.back().asks = std::move(bodies[i].asks);
 			}
 			m_Reach.Keep(std::move(thunks));
 			for (const InvokeThunkUse& use : m_Invokes.Settle(jobs, complete))
@@ -140,6 +147,7 @@ namespace C4Compiler
 			}
 			m_Program.types.Lowered(jobs[i]);
 			thunks.push_back({ UnitKind::TypeThunk, std::move(bodies[i].tree), jobs[i].thunk });
+			thunks.back().asks = std::move(bodies[i].asks);
 		}
 		m_Reach.Keep(std::move(thunks));
 		m_Reach.LowerNeeded();

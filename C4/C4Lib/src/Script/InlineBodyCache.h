@@ -21,9 +21,11 @@ namespace C4Compiler
 
 		/// Each partition's chunks, up to `maxGroups` each, in partition order: a kept one's read back, the others'
 		/// extracted from `partitions[i]`, whose bitcode is `bitcode[i]`, on up to `threads` threads and kept. None, with
-		/// the reason in `error`, when the folder cannot be made or a file written.
+		/// the reason in `error`, when the folder cannot be made or a file written. The folder keeps these and `keptToo` (a
+		/// build server's partitions not emitted again, which it read before); `paths` gets each partition's file.
 		std::optional<std::vector<std::vector<std::string>>> Chunks(const std::vector<llvm::Module*>& partitions,
-			const std::vector<std::string>& bitcode, const HostNames& names, unsigned maxGroups, unsigned threads, std::string& error) const;
+			const std::vector<std::string>& bitcode, const HostNames& names, unsigned maxGroups, unsigned threads, std::string& error,
+			const std::vector<std::filesystem::path>& keptToo = {}, std::vector<std::filesystem::path>* paths = nullptr) const;
 
 	private:
 		std::filesystem::path m_Folder;

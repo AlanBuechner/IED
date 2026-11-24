@@ -42,7 +42,11 @@ namespace C4Compiler
 	{
 		std::vector<LoweredBody> bodies(count);
 		m_Stats.bodies += count;
-		RunShared(model, count, [&](size_t i) { bodies[i].tree = std::make_unique<HIRFunction>(lower(i, bodies[i].errors)); }, m_Stats.lowerSeconds);
+		RunShared(model, count, [&](size_t i) {
+			const ModelMaking::Asking asking(bodies[i].asks.answers);
+			bodies[i].asks.phase = model.Making().Phase();
+			bodies[i].tree = std::make_unique<HIRFunction>(lower(i, bodies[i].errors));
+		}, m_Stats.lowerSeconds);
 		return bodies;
 	}
 

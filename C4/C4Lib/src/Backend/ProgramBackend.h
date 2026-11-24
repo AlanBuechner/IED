@@ -4,11 +4,19 @@
 #include <llvm/IR/LLVMContext.h>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 namespace C4Compiler
 {
+	/// An emission a later one replaced, freed apart from the build (its emitter before the context of its partition 0).
+	struct RetiredEmission
+	{
+		std::unique_ptr<llvm::LLVMContext> context;
+		std::unique_ptr<ProgramEmitter> emitter;
+	};
+
 	/// A program's backend (docs/compiler/01): ProgramLowering lowers what the program needs, then ProgramEmitter emits
 	/// it as LLVM modules - what C4.exe and a script's compile run. The language server runs the same lowering alone.
 	class ProgramBackend
@@ -16,7 +24,8 @@ namespace C4Compiler
 	public:
 		/// A backend emitting the program for `system` (D-86): the build's, or the running host's for a program that runs
 		/// here (a script, a test's).
-		explicit ProgramBackend(llvm::LLVMContext& context, TargetSystem system = HostSystem()) : m_Emitter(context, system) {}
+		explicit ProgramBackend(llvm::LLVMContext& context, TargetSystem system = HostSystem())
+			: m_System(system), m_Emitter(std::make_unique<ProgramEmitter>(context, system)) {}
 
 		/// Bodies are lowered, and partitions emitted, on up to `threads` threads, with the result of doing it on one.
 		void LowerOn(unsigned threads) { m_Lowering.threads = threads; }
@@ -51,6 +60,24 @@ namespace C4Compiler
 		/// fails to lower (LoweringErrors()) or emission fails (`errorMessage` says why).
 		bool Lower(ProgramModel& model, const Core::String& entryName, std::string* errorMessage = nullptr, const TestHarnessOptions* tests = nullptr);
 
+		/// A build server's backend (docs/compiler/07): each emission keeps what every partition tells the others
+		/// (PartitionFacts), so the emission after a body edit emits again only the partitions the edit changes. Before Lower.
+		void KeepPartitionFacts() { m_Serving = true; }
+		/// The next EmitAgain emits every partition (an output a partition not emitted again needs is gone).
+		void ForgetPartitionFacts() { m_Facts.clear(); }
+		/// A build server's body edit (docs/compiler/07 stage 2a), after Lower: `records` lowered again from the bodies they
+		/// hold now. Empty when the program is now what a cold build of the edit lowers; otherwise why not (ProgramLowering::
+		/// Relower), and the backend is spent: a cold build follows.
+		std::string Relower(const std::vector<const FunctionRecord*>& records);
+		/// After Relower: the program emitted again, partition 0 into a context of its own that `context` takes. With partition
+		/// facts kept, only the partitions the lowered-again bodies change are emitted, and those whose facts say they would
+		/// come out otherwise now; the others are as the build before left them (Emitted). The emissions replaced go to
+		/// `retired`, to be freed while the build goes on. As Lower's emission otherwise.
+		bool EmitAgain(ProgramModel& model, std::unique_ptr<llvm::LLVMContext>& context, std::vector<RetiredEmission>& retired,
+			std::string* errorMessage, const TestHarnessOptions* tests);
+		/// Whether the last emission emitted partition `i` (EmitAgain): one it did not is as the build before made it.
+		bool Emitted(unsigned i) const { return m_Emitted.empty() || m_Emitted[i]; }
+
 		/// The located diagnostics of lowering and of the reflection image, warnings too.
 		const Core::Vector<CompilationError>& LoweringErrors() const { return m_Errors.GetErrors(); }
 		const LoweringStats& LoweringStatistics() const;
@@ -58,19 +85,29 @@ namespace C4Compiler
 		const std::vector<std::pair<const char*, double>>& StepSeconds() const { return m_StepSeconds; }
 
 		/// Partition 0, the program's module, owned by the backend until TakeModule.
-		llvm::Module* module() { return &m_Emitter.Partitions().Partition(0).module(); }
-		std::unique_ptr<llvm::Module> TakeModule() { return m_Emitter.Partitions().Partition(0).TakeModule(); }
+		llvm::Module* module() { return &m_Emitter->Partitions().Partition(0).module(); }
+		std::unique_ptr<llvm::Module> TakeModule() { return m_Emitter->Partitions().Partition(0).TakeModule(); }
 		unsigned PartitionCount() const { return m_Partitions; }
-		llvm::Module& PartitionModule(unsigned i) { return m_Emitter.Partitions().Partition(i).module(); }
+		llvm::Module& PartitionModule(unsigned i) { return m_Emitter->Partitions().Partition(i).module(); }
 		/// A split program's reflection image is an object of its own (D-82), kept by this key; empty for a program that
 		/// is not split or registers nothing.
-		const std::string& ReflectionImageKey() { return m_Emitter.Reflection().ImageKey(); }
+		const std::string& ReflectionImageKey() { return m_Emitter->Reflection().ImageKey(); }
 		std::unique_ptr<llvm::Module> BuildReflectionModule(llvm::LLVMContext& context) const;
 		/// `-gc-stats`: before main, the program installs the GC's default statistics printer.
-		void InstallGcStatsPrinter() { m_Emitter.Startup().InstallGcStatsPrinter(); }
+		void InstallGcStatsPrinter() { m_Emitter->Startup().InstallGcStatsPrinter(); }
 
 	private:
 		bool LowerProgram(ProgramModel& model, std::string* errorMessage);
+		/// Emits what m_Lowered lowered with m_Emitter (only `partial`'s partitions, when given); its diagnostics follow
+		/// lowering's.
+		bool Emit(ProgramModel& model, std::string* errorMessage, PartialEmission* partial);
+		/// EmitAgain: the partitions emitted first - those holding what Relower lowered again, and those that copied it; every
+		/// one when no facts are kept.
+		std::vector<bool> FirstEmitted(const ProgramModel& model) const;
+		/// EmitAgain: the stale partitions `partial` found are emitted too (all, with partition 0); whether there were any.
+		static bool Widen(PartialEmission& partial);
+		/// The facts of the partitions `partial` emitted, kept for the next emission.
+		void Keep(PartialEmission& partial);
 		/// The lowering failures as one message; false when there are none.
 		bool Failed(std::string* errorMessage) const;
 
@@ -78,7 +115,13 @@ namespace C4Compiler
 		EmitSettings m_Emit;
 		unsigned m_Partitions = 1;
 		std::unique_ptr<ProgramLowering> m_Lowered; // made by Lower: it holds the model
-		ProgramEmitter m_Emitter;
+		TargetSystem m_System;
+		std::unique_ptr<ProgramEmitter> m_Emitter;
+		bool m_Serving = false;                            // KeepPartitionFacts
+		std::vector<PartitionFacts> m_Facts;               // by partition, from the emission that last emitted it
+		std::shared_ptr<const KeptImage> m_Image;          // the reflection image the last whole emission kept apart
+		std::unordered_set<const FunctionRecord*> m_Changed; // what Relower lowered again since the last emission
+		std::vector<bool> m_Emitted;                       // by partition: what the last emission emitted
 		ErrorTracker m_Errors;
 		std::vector<std::pair<const char*, double>> m_StepSeconds;
 	};

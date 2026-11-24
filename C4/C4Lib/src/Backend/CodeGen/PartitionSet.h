@@ -41,6 +41,10 @@ namespace C4Compiler
 
 		/// `count` partitions; one keeps the program in one module. Before Prepare.
 		void SplitInto(unsigned count);
+		/// Only the partitions `emitted` says are emitted (a build server's emission after an edit, PartialEmission): the
+		/// others' modules stay empty. Before Prepare; null: every one.
+		void EmitOnly(const std::vector<bool>* emitted) { m_Emitted = emitted; }
+		bool Emits(unsigned i) const { return !m_Emitted || (*m_Emitted)[i]; }
 		unsigned Count() const { return 1 + static_cast<unsigned>(m_Others.size()); }
 		bool Split() const { return !m_Others.empty(); }
 		ModuleContext& Partition(unsigned i) { return i == 0 ? m_First : m_Others[i - 1]->mctx(); }
@@ -80,5 +84,6 @@ namespace C4Compiler
 		FunctionEmitter m_FirstEmitter;
 		std::vector<std::unique_ptr<PartitionEmitter>> m_Others; // partitions 1..n-1 of a split program
 		std::optional<ProgramPlacement> m_Placement;            // where a split program's functions and globals go
+		const std::vector<bool>* m_Emitted = nullptr;           // EmitOnly
 	};
 } // namespace C4Compiler

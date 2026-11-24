@@ -37,8 +37,17 @@ namespace
 	std::string ScriptHostLibrary(const C4Compiler::TargetAbi& target) { return target.SharedLibrary("C4Script"); }
 }
 
+bool ServedOutputs::ObjectsExist(size_t count) const
+{
+	if (partitions.size() != count) return false;
+	for (const PartitionOutput& partition : partitions)
+		if (partition.object.empty() || !C4Compiler::IsFile(partition.object)) return false;
+	return true;
+}
+
 bool ProgramOutput::Write(const std::vector<llvm::Module*>& partitions, const C4Compiler::KeyedModule& image)
 {
+	if (m_In.served) m_In.served->partitions.resize(partitions.size());
 	if (!MakeOutputFolder()) return false;
 	const std::string base = IntermediateBase();
 	if (base.empty()) return false;
@@ -125,8 +134,14 @@ bool ProgramOutput::WritePartitions(const std::vector<llvm::Module*>& partitions
 	if (m_HostBuild && split) keyed.push_back(HostTable(*partitions.front()));
 	const unsigned count = static_cast<unsigned>(partitions.size() + keyed.size());
 	std::vector<std::string> bitcode;
+	std::vector<std::string> reused(partitions.size());
+	for (size_t i = 0; i < partitions.size(); ++i)
+		if (Reused(i)) reused[i] = m_In.served->partitions[i].object;
 	C4Compiler::CachedObjects objects = C4Compiler::WriteCachedObjects(partitions.size(),
-		[&](size_t i) { return C4Compiler::PartitionBitcode(*partitions[i], optimization); }, std::move(keyed), settings, cache, diagnostics, bitcode);
+		[&](size_t i) { return C4Compiler::PartitionBitcode(*partitions[i], optimization); }, std::move(keyed), settings, cache, diagnostics, bitcode,
+		reused);
+	if (m_In.served)
+		for (size_t i = 0; i < objects.byPartition.size(); ++i) m_In.served->partitions[i].object = objects.byPartition[i];
 	Report(diagnostics);
 	Timed("optimize+codegen", start);
 	if (m_In.options.timePhases) ReportPartitions(objects, count, settings.threads);
@@ -423,7 +438,8 @@ bool ProgramOutput::PrepareScriptHost(const std::vector<llvm::Module*>& partitio
 		return true;
 	}
 	const auto start = std::chrono::steady_clock::now();
-	for (llvm::Module* partition : partitions) C4Compiler::EmitThreadLocalAccessors(*partition);
+	for (size_t i = 0; i < partitions.size(); ++i)
+		if (!Reused(i)) C4Compiler::EmitThreadLocalAccessors(*partitions[i]);
 	const C4Compiler::ProgramModel& model = m_In.compiler.GetProgramModel();
 	std::string error;
 	std::vector<std::string> objects;
@@ -444,7 +460,7 @@ bool ProgramOutput::PrepareScriptHost(const std::vector<llvm::Module*>& partitio
 	m_HostBuild->debugInfo = m_In.options.debugInfo;
 	if (partitions.size() > 1)
 	{
-		m_HostEntries = C4Compiler::HostEntries(partitions, *listed); // the table is an object of its own (HostTable)
+		m_HostEntries = HostEntriesOf(partitions, *listed); // the table is an object of its own (HostTable)
 		m_HostBuild->symbols = C4Compiler::HostNamesOf(m_HostEntries);
 		m_AlwaysListed = std::move(*listed);
 	}
@@ -467,6 +483,24 @@ bool ProgramOutput::PrepareScriptHost(const std::vector<llvm::Module*>& partitio
 	return FinishInterface(module);
 }
 
+bool ProgramOutput::Reused(size_t partition) const
+{
+	return m_In.served && m_In.served->Reused(partition);
+}
+
+// The script table's entries from each partition's candidates; a partition not emitted again gives those it gave before.
+std::vector<C4Compiler::HostEntry> ProgramOutput::HostEntriesOf(const std::vector<llvm::Module*>& partitions, const std::vector<std::string>& listed)
+{
+	if (!m_In.served) return C4Compiler::HostEntries(partitions, listed);
+	std::vector<const std::vector<C4Compiler::HostCandidate>*> each;
+	for (size_t i = 0; i < partitions.size(); ++i)
+	{
+		if (!Reused(i)) m_In.served->partitions[i].hostCandidates = C4Compiler::HostCandidates(*partitions[i], i == 0);
+		each.push_back(&m_In.served->partitions[i].hostCandidates);
+	}
+	return C4Compiler::MergeHostEntries(each, listed, m_In.options.target.System() == C4Compiler::TargetSystem::Linux);
+}
+
 // A script host's inline bodies, each partition's from the inline body cache (D-81): an edit extracts only those of the
 // partitions it changed. A partition's bodies name only what it lists itself and what every table lists.
 bool ProgramOutput::CollectInlineBodies(const std::vector<llvm::Module*>& partitions, const std::vector<std::string>& bitcode,
@@ -476,14 +510,33 @@ bool ProgramOutput::CollectInlineBodies(const std::vector<llvm::Module*>& partit
 	const C4Compiler::InlineBodyCache cache(base + ".inline", CacheSalt(settings) + " " + C4Compiler::HostNamesSalt(m_AlwaysListed));
 	const C4Compiler::HostNames names(m_HostBuild->symbols);
 	std::string error;
-	const auto chunks = cache.Chunks(partitions, bitcode, names, kInlineBodyChunksPerPartition, settings.threads, error);
+	std::vector<llvm::Module*> emitted;
+	std::vector<std::string> emittedBitcode;
+	std::vector<std::filesystem::path> keptFiles;
+	for (size_t i = 0; i < partitions.size(); ++i)
+		if (Reused(i)) keptFiles.push_back(m_In.served->partitions[i].inlineFile);
+		else
+		{
+			emitted.push_back(partitions[i]);
+			emittedBitcode.push_back(bitcode[i]);
+		}
+	std::vector<std::filesystem::path> files;
+	const auto chunks = cache.Chunks(emitted, emittedBitcode, names, kInlineBodyChunksPerPartition, settings.threads, error, keptFiles, &files);
 	if (!chunks)
 	{
 		m_In.result.AddBackendError(Core::String(error.c_str()));
 		return false;
 	}
-	for (const std::vector<std::string>& partition : *chunks)
+	for (size_t i = 0, made = 0; i < partitions.size(); ++i)
+	{
+		if (!Reused(i) && m_In.served)
+		{
+			m_In.served->partitions[i].inlineBodies = (*chunks)[made];
+			m_In.served->partitions[i].inlineFile = files[made];
+		}
+		const std::vector<std::string>& partition = Reused(i) ? m_In.served->partitions[i].inlineBodies : (*chunks)[made++];
 		m_HostBuild->inlineBodies.insert(m_HostBuild->inlineBodies.end(), partition.begin(), partition.end());
+	}
 	Timed("inline bodies", start);
 	return true;
 }

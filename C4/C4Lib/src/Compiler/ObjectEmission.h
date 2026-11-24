@@ -59,6 +59,7 @@ namespace C4Compiler
 	struct CachedObjects
 	{
 		std::vector<std::string> paths; // each once: partitions with the same code share their object
+		std::vector<std::string> byPartition; // a program emitted in partitions: each partition's object
 		size_t reused = 0;
 		double splitSeconds = 0;       // splitting the module into partitions and writing each one's bitcode
 		struct Assembled { uint64_t instructions = 0; double seconds = 0; };
@@ -80,7 +81,9 @@ namespace C4Compiler
 	/// The same with partition i's bitcode made by `bitcode(i)` on the threads that assemble: a partition whose object
 	/// is missing is assembled on the thread that made its bitcode, at once, so an edit's partitions start while the
 	/// others' bitcode is still being written. The keyed modules go first, their building the longest work when it is
-	/// needed. `written` gets each partition's bitcode.
+	/// needed. `written` gets each partition's bitcode. A partition whose `reused` entry is not empty is that object, which
+	/// a build server kept for a partition it did not emit again (docs/compiler/07): no bitcode is made for it.
 	CachedObjects WriteCachedObjects(size_t partitions, const std::function<std::string(size_t)>& bitcode, std::vector<KeyedModule> keyed,
-		const ObjectSettings& settings, const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics, std::vector<std::string>& written);
+		const ObjectSettings& settings, const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics, std::vector<std::string>& written,
+		const std::vector<std::string>& reused = {});
 }

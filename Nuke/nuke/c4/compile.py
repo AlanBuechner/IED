@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from .. import fsutil, process
 from ..errors import StepFailed
 from ..variables import expand, expand_argv
-from . import description, native
+from . import description, native, server
 
 ARGS_STAMP = "compile.args"
 DEPENDENCY_STAMP = "deps.d"
@@ -36,6 +36,7 @@ class CompileJob:
 	modules: tuple
 	test_results: str = None
 	cwd: str = None
+	compiler: str = None    # the compiler's file, when the build goes through its server (c4/server.py)
 
 
 def plan(session, project, test=False):
@@ -68,9 +69,13 @@ def plan(session, project, test=False):
 	argv += expand_argv(compiler_args(project, configuration, session.system), session.variables(project))
 	argv += ["--int-dir", int_dir, "-o", output]
 	tracked = description.tracked_files(modules) + list(native_links) + _toolchain_files(toolchain)
+	# A program's build is served; a test harness is compiled one-shot (a server per harness would hold a compile's memory for
+	# each of a workspace's test projects).
+	served = configuration.server and not test and toolchain.accepts("--serve-on")
 	return CompileJob(label=f"{project.name}{' tests' if test else ''}", argv=tuple(argv), output=output, int_dir=int_dir,
 		description_path=description_path, description_text=description.render(project.name, modules),
-		tracked=tuple(tracked), modules=tuple(modules), test_results=results, cwd=project.dir)
+		tracked=tuple(tracked), modules=tuple(modules), test_results=results, cwd=project.dir,
+		compiler=toolchain.compiler_path() if served else None)
 
 
 def collect_links(session, project, test=False):
@@ -141,9 +146,20 @@ def compile_program(session, job):
 		session.log.note(f"{os.path.basename(job.output)} is running: moved aside to {os.path.basename(aside)}")
 	session.log.note(f"compiling {job.label} with {session.toolchain().describe()}")
 	inputs = fsutil.input_states(job.tracked)
-	code = process.run(list(job.argv), session.log, cwd=job.cwd, chatter=COMPILER_PROGRESS)
+	code = _compile(session, job)
 	if code != 0:
 		raise StepFailed(f"compiling {job.label}", code)
 	fsutil.write_if_changed(fsutil.join(job.int_dir, ARGS_STAMP), _stamp_text(job))
 	fsutil.write_if_changed(fsutil.join(job.int_dir, DEPENDENCY_STAMP), inputs)
 	return True
+
+
+def _compile(session, job):
+	"""The compiler's exit code: through the program's build server when the configuration has one and it answers,
+	else a one-shot compile."""
+	if job.compiler:
+		code = server.build(job.argv, job.compiler, session.log, cwd=job.cwd, chatter=COMPILER_PROGRESS)
+		if code is not None:
+			return code
+		session.log.note(f"{job.label}: the C4 build server did not answer; compiling one-shot")
+	return process.run(list(job.argv), session.log, cwd=job.cwd, chatter=COMPILER_PROGRESS)

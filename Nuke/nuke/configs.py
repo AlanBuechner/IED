@@ -20,11 +20,12 @@ class Configuration:
 	aliases: tuple = ()
 	defines: dict = field(default_factory=dict)
 	incremental: bool = False   # C4's --incremental: each object optimized alone, so an edit reoptimizes only its own
+	server: bool = False        # C4's build server (c4/server.py): the compiler stays between builds of the program
 
 
 BUILT_IN = (
-	Configuration("Debug", optimize=0, debug_info=True, aliases=("debug",), incremental=True),
-	Configuration("Development", optimize=3, debug_info=True, aliases=("dev", "development"), incremental=True),
+	Configuration("Debug", optimize=0, debug_info=True, aliases=("debug",), incremental=True, server=True),
+	Configuration("Development", optimize=3, debug_info=True, aliases=("dev", "development"), incremental=True, server=True),
 	Configuration("Dist", optimize=3, debug_info=False, aliases=("dist", "release", "ship")),
 )
 DEFAULT_CONFIGURATION = "Development"
@@ -40,7 +41,8 @@ def merge(overrides):
 			debug_info=fields.get("debug-info", base.debug_info),
 			aliases=tuple(fields.get("aliases", base.aliases)),
 			defines={**base.defines, **fields.get("defines", {})},
-			incremental=fields.get("incremental", base.incremental))
+			incremental=fields.get("incremental", base.incremental),
+			server=fields.get("server", base.server))
 	return list(by_name.values())
 
 

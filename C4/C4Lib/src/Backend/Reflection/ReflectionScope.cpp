@@ -36,6 +36,13 @@ namespace C4Compiler
 		}
 
 		uint64 KeyOf(const SourceLocation& where) { return (uint64(where.sourceId) << 32) | where.byteOffset; }
+
+		// Places in one file by line and column, which a build server's body edit keeps for everything outside the bodies it
+		// changed (docs/compiler/07); bytes after a longer body move, and the model holds nodes of both parses.
+		bool NotAfter(const SourceLocation& a, const SourceLocation& b)
+		{
+			return a.line < b.line || (a.line == b.line && a.column <= b.column);
+		}
 	}
 
 	ReflectionScope::ReflectionScope(const ProgramModel& model) : m_Model(model)
@@ -89,8 +96,7 @@ namespace C4Compiler
 		{
 			const Block* innermost = nullptr;
 			for (const Block& block : blocks->second)
-				if (block.start.byteOffset <= at.byteOffset && at.byteOffset <= block.end.byteOffset &&
-					(!innermost || block.start.byteOffset >= innermost->start.byteOffset))
+				if (NotAfter(block.start, at) && NotAfter(at, block.end) && (!innermost || NotAfter(innermost->start, block.start)))
 					innermost = &block;
 			if (innermost && innermost->setting == Setting::On) return {};
 			if (innermost) return { false, "its namespace block's [reflect(\"off\")] at " + Place(m_Model, innermost->written) };

@@ -73,6 +73,8 @@ namespace C4Compiler
 		/// Record a named pipeline phase's wall-clock duration (seconds). The driver measures each
 		/// phase around the CompilerInstance call it makes, so the instance stays free of timing code.
 		void AddPhaseTime(const char* name, double seconds) { m_PhaseTimes.Push({ name, seconds }); }
+		/// A build server's next build times its own phases.
+		void ClearPhaseTimes() { m_PhaseTimes.Clear(); }
 		const Core::Vector<std::pair<const char*, double>>& GetPhaseTimes() const { return m_PhaseTimes; }
 		double GetPhaseTotalSeconds() const
 		{
@@ -98,6 +100,11 @@ namespace C4Compiler
 		std::shared_ptr<PriorParses> Parses() const;
 		/// How many files took their tree from the prior parses.
 		uint32 ReusedParses() const { return m_ReusedParses; }
+		/// A build server's body edit (docs/compiler/07 stage 2a): `edited` - a compile of the file's new text - has the text,
+		/// macro layout and parse of `sourceId` this compile has from now on (CompilationUnit::TakeParse).
+		void TakeEditedFile(uint32 sourceId, const CompilerInstance& edited);
+		/// The macro pass's diagnostics of `edited`, a compile of the same files, are this compile's.
+		void TakeMacroDiagnostics(const CompilerInstance& edited) { m_MacroErrorTracker.GetErrorsMutable() = edited.m_MacroErrorTracker.GetErrors(); }
 
 		/// Parse `roots` and the files they include, transitively, as they ask for them: a registered file nothing
 		/// reaches is never parsed and has no unit. A script compile reads only what its project reaches of its host's

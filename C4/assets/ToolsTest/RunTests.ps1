@@ -1,7 +1,8 @@
 # ToolsTest runner - checks of the build output, the toolchain layout and the compiler's flags, and a toolchain
 # built and installed for Nuke. Each check returns its failures; an empty list passes.
 #
-# Usage:  .\RunTests.ps1
+# Usage:  .\RunTests.ps1 [-Only Test-Name,...]   (-Only: just those checks)
+param([string[]]$Only = @())
 $ErrorActionPreference = "Continue"
 
 $root     = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -878,6 +879,100 @@ int32 main()
     return $failures
 }
 
+# The edit kinds of docs/compiler/07's invalidation table, built in turn by one --serve process and by a cold build each:
+# every served build writes the cold build's objects, executable (but the link's stamps) and script interface, and an
+# edit of bodies alone is served by lowering those bodies again ('bodies again' among the phases), any other cold.
+function Test-ServedBuilds {
+    $header = @'
+#define FACTOR 2
+const int32 c_Base = 10;
+inline int32 Clamp(int32 v) { return v < 0 ? 0 : v; }
+template<T> T Larger(T a, T b) { return a > b ? a : b; }
+[compile_time] int32 Square(int32 v) { return v * v; }
+class Shape
+{
+	public int32 sides = 3;
+	public virtual int32 Corners() { return sides; }
+}
+int32 Twice(int32 v);
+'@
+    $twice = @'
+include "lib.ch"
+int32 Twice(int32 v) { return v * FACTOR; }
+int32 Thrice(int32 v) { return v * 3; }
+'@
+    $main = @'
+include "lib.ch"
+int32 Thrice(int32 v);
+int32 Pick(int32 a, int32 b) { return Larger<int32>(a, b); }
+int32 Edited(int32 v) { return v + 1; }
+int32 Lambda() { funcptr<int32()> f = []() -> int32 { return 4; }; return f(); }
+int32[Square(2)] g_Table;
+int32 main()
+{
+	Shape s;
+	return Twice(1) + Pick(2, 3) + Edited(4) + Lambda() + Clamp(-1) + c_Base + s.Corners() + g_Table[0];
+}
+'@
+    $dir = New-Sources "served" @{ "src/lib.ch" = $header; "src/extra.ch" = "int32 Extra();`n"; "src/twice.cf" = $twice; "src/main.cf" = $main }
+    $src = Join-Path $dir "src"
+    $flags = @($src, "--incremental", "--partitions", "4", "-O1", "-g", "--script-host", "-ftime")
+    $edits = @(
+        @{ file = "main.cf"; from = "return v + 1;"; to = "return v + 7;"; served = $true; what = "a statement" },
+        @{ file = "main.cf"; from = "return v + 7;"; to = "return Thrice(v) + 7;"; served = $true; what = "a call of another function" },
+        @{ file = "main.cf"; from = "return Thrice(v) + 7;"; to = "return Larger<int32>(v, 7);"; served = $true; what = "an instance made before" },
+        @{ file = "main.cf"; from = "return Larger<int32>(v, 7);"; to = "return (int32)Larger<int64>(v, 7);"; served = $false; what = "a new instance" },
+        @{ file = "main.cf"; from = "return (int32)Larger<int64>(v, 7);"; to = "`n`treturn v + 1;"; served = $false; what = "an added line" },
+        @{ file = "twice.cf"; from = "v * 3"; to = "v * 4"; served = $true; what = "a statement of another file" },
+        @{ file = "twice.cf"; from = "{ return v * FACTOR; }"; to = "{`n`treturn v * FACTOR;`n}"; served = $true; what = "lines added before another function" },
+        @{ file = "lib.ch"; from = "#define FACTOR 2"; to = "#define FACTOR 5"; served = $false; what = "a macro only a body uses" },
+        @{ file = "lib.ch"; from = "c_Base = 10"; to = "c_Base = 11"; served = $false; what = "a constant" },
+        @{ file = "lib.ch"; from = "v < 0 ? 0 : v"; to = "v < 1 ? 1 : v"; served = $false; what = "an inline body" },
+        @{ file = "lib.ch"; from = "a > b ? a : b"; to = "a >= b ? a : b"; served = $false; what = "a template's body" },
+        @{ file = "lib.ch"; from = "return v * v;"; to = "return v * v + 0;"; served = $false; what = "a [compile_time] body" },
+        @{ file = "lib.ch"; from = "public int32 sides = 3;"; to = "public int32 sides = 4; public int32 extra;"; served = $false; what = "a field" },
+        @{ file = "main.cf"; from = "return 4; };"; to = "return 5; };"; served = $false; what = "a lambda's body" },
+        @{ file = "twice.cf"; from = "int32 Thrice"; to = "[reflect(`"off`")] int32 Thrice"; served = $false; what = "an annotation" },
+        @{ file = "twice.cf"; from = "include `"lib.ch`""; to = "include `"lib.ch`"`ninclude `"extra.ch`""; served = $false; what = "an include" },
+        @{ file = "twice.cf"; from = "v * 4"; to = "v * 4"; served = $true; what = "nothing" })
+    $failures = @()
+    $info = New-Object System.Diagnostics.ProcessStartInfo $compiler
+    $info.Arguments = (($flags + @("-o", (Join-Path $dir "live/app.exe"), "--serve")) | ForEach-Object { '"' + $_ + '"' }) -join " "
+    $info.UseShellExecute = $false
+    $info.RedirectStandardInput = $true
+    $info.RedirectStandardOutput = $true
+    $server = [System.Diagnostics.Process]::Start($info)
+    $serve = { $server.StandardInput.WriteLine("build"); $lines = @()
+        while ($true) { $line = $server.StandardOutput.ReadLine(); if ($null -eq $line -or $line -match '^done ') { return @{ done = $line; lines = $lines } }; $lines += $line } }
+    $hash = { param([string]$exe) $bytes = [System.IO.File]::ReadAllBytes($exe); $pe = [BitConverter]::ToInt32($bytes, 0x3c)
+        $stamp = [BitConverter]::ToInt32($bytes, $pe + 8) # the link's: the COFF header's and the debug directory's copies
+        for ($i = 0; $i + 4 -le $bytes.Length; $i += 4) { if ([BitConverter]::ToInt32($bytes, $i) -eq $stamp) { [Array]::Clear($bytes, $i, 4) } }
+        $text = [System.Text.Encoding]::ASCII.GetString($bytes); $at = $text.IndexOf('RSDS')
+        while ($at -ge 0) { $end = $text.IndexOf([char]0, $at + 24); [Array]::Clear($bytes, $at + 4, $end - $at - 4); $at = $text.IndexOf('RSDS', $at + 4) }
+        return [BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes)) }
+    $objects = { param([string]$out) ((Get-ChildItem (Join-Path $dir "$out/app.objects") -Filter "*.obj" | ForEach-Object { $_.Name } | Sort-Object) -join " ") }
+    $first = & $serve
+    if ($first.done -ne "done 0") { $server.Kill(); return @("the first served build answered '$($first.done)': $($first.lines -join ' | ')") }
+    foreach ($edit in $edits) {
+        $path = Join-Path $src $edit.file
+        $text = [System.IO.File]::ReadAllText($path)
+        if (-not $text.Contains($edit.from)) { $failures += "$($edit.what): $($edit.file) has no '$($edit.from)'"; break }
+        [System.IO.File]::WriteAllText($path, $text.Replace($edit.from, $edit.to))
+        $cold = Invoke-Compiler $compiler ($flags + @("-o", (Join-Path $dir "cold/app.exe")))
+        if ($cold.exit -ne 0) { $failures += "$($edit.what): the cold build failed: $($cold.output)"; break }
+        $answer = & $serve
+        if ($answer.done -ne "done 0") { $failures += "$($edit.what): the served build answered '$($answer.done)': $($answer.lines -join ' | ')"; break }
+        $bodies = [bool]($answer.lines -match 'bodies again')
+        if ($bodies -ne $edit.served) { $failures += "$($edit.what): served by $(if ($bodies) { 'the bodies' } else { 'a cold build' }), expected otherwise ($(($answer.lines -match '^serve: ') -join ' '))" }
+        if ((& $objects "cold") -ne (& $objects "live")) { $failures += "$($edit.what): the objects differ from a cold build's" }
+        if ((& $hash (Join-Path $dir "cold/app.exe")) -ne (& $hash (Join-Path $dir "live/app.exe"))) { $failures += "$($edit.what): the executable differs from a cold build's" }
+        if ([System.IO.File]::ReadAllText((Join-Path $dir "cold/app.c4i")) -ne [System.IO.File]::ReadAllText((Join-Path $dir "live/app.c4i"))) { $failures += "$($edit.what): the script interface differs from a cold build's" }
+    }
+    $server.StandardInput.WriteLine("quit")
+    if (-not $server.WaitForExit(30000)) { $server.Kill() }
+    return $failures
+}
+
 function Test-ObjectCache {
     $program = @'
 include "bedrock.ch"
@@ -1069,8 +1164,10 @@ function Test-LoweringThreads {
 $checks = @("Test-ShippedBedrockMirrorsSource", "Test-DefineFlag", "Test-VersionFlag", "Test-UsageErrors", "Test-HelpListsEveryOption",
     "Test-OutputFlags", "Test-GcStatsFlag", "Test-TimePhasesFlag", "Test-ScriptHostFlag", "Test-FailedRelinkKeepsTheProgramsFiles", "Test-IncludeProject", "Test-LinkFlags", "Test-InstallOutsideRepository",
     "Test-HomeVariable", "Test-NukeToolchainProject", "Test-ToolchainRefreshWhileRunning", "Test-ProjectDefines", "Test-ProjectTests", "Test-ProjectBoundaries", "Test-ProjectInterop", "Test-ProjectsShareABoundHeader", "Test-ABindingDoesNotHideABuiltin", "Test-DebugInfoFlag", "Test-SourceLines", "Test-DeepFolder",
-    "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ServeFlag", "Test-ObjectCache", "Test-IncrementalBuild", "Test-LinkStamp", "Test-StandardInput",
+    "Test-NoIgnoredSources", "Test-LspStdio", "Test-DapAdapter", "Test-TargetFlags", "Test-StrictAliasingFlag", "Test-Partitions", "Test-ServeFlag", "Test-ServedBuilds", "Test-ObjectCache", "Test-IncrementalBuild", "Test-LinkStamp", "Test-StandardInput",
     "Test-LoweringThreads")
+$wanted = @($Only | ForEach-Object { $_ -split ',' } | Where-Object { $_ }) # -File passes a list as one argument
+if ($wanted.Count -gt 0) { $checks = @($checks | Where-Object { $wanted -contains $_ }) }
 $passed = 0
 $failed = 0
 foreach ($check in $checks) {

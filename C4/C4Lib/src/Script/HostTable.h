@@ -51,6 +51,21 @@ namespace C4Compiler
 		bool hidden = false;
 	};
 
+	/// What one partition may give the table of a program emitted in partitions (HostEntries), in its order: an entry, and
+	/// whether the table lists it only when the names every table lists name it (an unused declaration). A build server
+	/// keeps a partition's while it does not emit the partition again (docs/compiler/07).
+	struct HostCandidate
+	{
+		HostEntry entry;
+		bool onlyIfAlwaysListed = false;
+	};
+
+	/// The candidates of `partition`; the first partition's own locals the table lists are made hidden globals (ShareLocal).
+	std::vector<HostCandidate> HostCandidates(llvm::Module& partition, bool first);
+	/// HostEntries from each partition's candidates, in partition order, for a Linux program or a Windows one.
+	std::vector<HostEntry> MergeHostEntries(const std::vector<const std::vector<HostCandidate>*>& partitions, const std::vector<std::string>& alsoListed,
+		bool forLinux);
+
 	/// HostSymbols of a program emitted in partitions: every partition's in partition order, then the runtime entry
 	/// points and `alsoListed` none of them declares, each name once. The table is a module of its own
 	/// (HostTableModule), so no partition changes with what another holds: partition 0's own locals (the shared vtables

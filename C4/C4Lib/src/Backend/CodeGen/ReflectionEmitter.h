@@ -12,6 +12,16 @@
 
 namespace C4Compiler
 {
+	/// A split program's reflection image as one emission described it, for an emission that does not describe it again (a
+	/// build server's after an edit of bodies alone: what the image is made of is the same, docs/compiler/07).
+	struct KeptImage
+	{
+		ImageDescription image;
+		std::string key;
+		std::string triple;
+		std::string layout;
+	};
+
 	/// The program's reflection (docs/runtime/02): its thunks made locals that only the image names, the image of every
 	/// type, function and global it registers, and `__c4_reflect_init`, which registers it under the program's tag before
 	/// every other static constructor. A split program's image is a module of its own (D-82), built only when the object
@@ -37,6 +47,10 @@ namespace C4Compiler
 		/// That image built into a module of `context`, which defines `__c4_reflect_image`. It reads no model: any thread
 		/// may build it, once the program is emitted.
 		std::unique_ptr<llvm::Module> BuildImageModule(llvm::LLVMContext& context) const;
+		/// The image this emission kept apart, after Emit; null for one it built into partition 0 or none.
+		std::shared_ptr<const KeptImage> KeepImage();
+		/// An emission that does not describe the image (partition 0 not emitted) has `kept`'s.
+		void UseImage(std::shared_ptr<const KeptImage> kept) { m_Kept = std::move(kept); }
 
 	private:
 		llvm::Function* FinishThunk(const FunctionRecord& thunk, unsigned partition);
@@ -58,6 +72,7 @@ namespace C4Compiler
 		std::string m_ImageKey;
 		std::string m_ImageTriple;
 		std::string m_ImageLayout;
+		std::shared_ptr<const KeptImage> m_Kept; // KeepImage, UseImage: the image is this, its key worked out
 		// The key while its thread works it out from the image, the triple and the layout. Last, so it is destroyed first:
 		// its thread is done before what it reads goes, also when nothing asked for the key (BUG-494).
 		std::future<std::string> m_ImageKeying;

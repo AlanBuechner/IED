@@ -151,6 +151,15 @@ namespace C4Compiler
 		return m_PriorParses ? m_PriorParses->Find(sourceId, m_SourceManager) : nullptr;
 	}
 
+	void CompilerInstance::TakeEditedFile(uint32 sourceId, const CompilerInstance& edited)
+	{
+		SourceInfo& info = m_SourceManager.GetInfo(sourceId);
+		const SourceInfo& now = edited.m_SourceManager.GetInfo(sourceId);
+		info.source = now.source;
+		info.macros = now.macros;
+		m_CompilationUnits.at(sourceId)->TakeParse(*edited.m_CompilationUnits.at(sourceId));
+	}
+
 	std::shared_ptr<PriorParses> CompilerInstance::Parses() const
 	{
 		auto parses = std::make_shared<PriorParses>();

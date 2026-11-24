@@ -35,6 +35,15 @@ namespace C4Compiler
 		/// `record`'s body lowered completely: the program has its code.
 		bool Defined(const FunctionRecord& record) const { return m_Defined.count(&record) != 0; }
 
+		/// The body that first named `record` (null: the program itself).
+		const HIRFunction* FirstUser(const FunctionRecord& record) const;
+		/// What holding an object of `type` makes the program need (Holds).
+		const std::vector<const FunctionRecord*>& VtableEntriesOf(const Type* type) { return m_Vtables.Of(type); }
+		/// A body lowered again (a build server, docs/compiler/07): what `before` first named, `after` names first now.
+		void FirstUsesMoved(const HIRFunction* before, const HIRFunction* after);
+		/// A template-made body's diagnostics name the instance and where the program first uses it.
+		void NoteUse(const FunctionRecord& record, ErrorTracker& errors) const;
+
 	private:
 		/// The needed functions with a body of their own not lowered yet (a nested one comes with its parent).
 		std::vector<const FunctionRecord*> TakeBatch();
@@ -44,8 +53,6 @@ namespace C4Compiler
 		void NeedWhatItNeeds(const HIRFunction& user, const BodyNeeds& needs);
 		void NeedCensus(const CensusNeed& need, const HIRFunction* user);
 		void LowerCensusNeeded();
-		/// A template-made body's diagnostics name the instance and where the program first uses it.
-		void NoteUse(const FunctionRecord& record, ErrorTracker& errors) const;
 
 		ProgramModel& m_Model;
 		ParallelLowering& m_Lowering;

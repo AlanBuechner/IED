@@ -111,7 +111,9 @@ static HANDLE CreateJob(bool killOnClose)
 	if (!job || !killOnClose) return job;
 	JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits;
 	memset(&limits, 0, sizeof(limits));
-	limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+	// A process that asks to leave the job (CREATE_BREAKAWAY_FROM_JOB) may: a C4 build server Nuke starts outlives the
+	// build that started it (C4 docs/compiler/07); every other child goes with the job.
+	limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
 	SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits));
 	return job;
 }

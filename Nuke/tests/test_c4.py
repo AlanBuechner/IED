@@ -2,11 +2,14 @@
 
 import json
 import os
+import signal
+import subprocess
+import sys
 import time
 import tomllib
 import unittest
 
-from support import read, WorkspaceTest
+from support import FAKE_COMPILER, read, WorkspaceTest
 
 
 class C4BuildTests(WorkspaceTest):
@@ -471,6 +474,135 @@ class NativeLibraryTests(WorkspaceTest):
 		with self.assertRaises(NukeError) as wrong:
 			self.plan()
 		self.assertIn("native_library gave", str(wrong.exception))
+
+
+class C4ServerTests(WorkspaceTest):
+	"""Debug and Development build their programs through C4's build server (nuke/c4/server.py) unless a configuration says
+	`server = false`."""
+
+	def setUp(self):
+		super().setUp()
+		os.environ.pop("FAKE_C4_SERVER_DOWN", None)
+		os.environ["FAKE_C4_SERVE"] = "1"
+		self.files({
+			"nuke.toml": "[workspace]\ntoolchain = \"1.0.0\"\ndefault-project = \"Game\"\n",
+			"Game/nuke.toml": "[project]\n",
+			"Game/src/main.cf": "int32 main() { return 0; }\n",
+			"Game/src/tests/t.cf": "\n",
+		})
+
+	def tearDown(self):
+		self.stop_servers()
+		os.environ.pop("FAKE_C4_SERVER_DOWN", None)
+		os.environ.pop("FAKE_C4_SERVE", None)
+		super().tearDown()
+
+	def stop_servers(self):
+		"""Every server this test's builds started ends (the real ones end after an idle half hour)."""
+		for pid in {entry["server"] for entry in self.served()}:
+			try:
+				os.kill(pid, signal.SIGTERM)
+			except OSError:
+				pass
+
+	def served(self):
+		return [entry for entry in self.compiles() if isinstance(entry, dict)]
+
+	def test_two_builds_go_through_one_server(self):
+		code, out = self.nuke("build")
+		self.assertEqual(code, 0, out)
+		self.assertIn("fake-c4: compiling", out, "the server's output is the build's")
+		self.files({"Game/src/main.cf": "int32 main() { return 1; }\n"})
+		code, out = self.nuke("build")
+		self.assertEqual(code, 0, out)
+		served = self.served()
+		self.assertEqual(len(served), 2, self.compiles())
+		self.assertEqual(served[0]["server"], served[1]["server"], "one server answered both")
+		self.assertNotIn("--serve-on", served[0]["args"])
+		self.assertTrue(os.path.isfile(self.path("build", "bin", "Development-windows-x64", "Game", "Game.exe")))
+
+	def test_a_failed_build_is_the_servers_exit_code(self):
+		os.environ["FAKE_C4_FAIL"] = "3"
+		code, out = self.nuke("build")
+		self.assertNotEqual(code, 0, out)
+		self.assertIn("forced failure", out)
+		self.assertEqual(len(self.served()), 1, self.compiles())
+
+	def test_a_rebuilt_compiler_gets_a_new_server(self):
+		self.assertEqual(self.nuke("build")[0], 0)
+		first = self.served()[0]["server"]
+		os.utime(FAKE_COMPILER, None)  # the compiler's stamp changes: its server is stale
+		self.files({"Game/src/main.cf": "int32 main() { return 2; }\n"})
+		self.assertEqual(self.nuke("build")[0], 0)
+		self.assertNotEqual(self.served()[-1]["server"], first)
+
+	def test_no_server_means_a_one_shot_compile(self):
+		os.environ["FAKE_C4_SERVER_DOWN"] = "1"
+		code, out = self.nuke("build")
+		self.assertEqual(code, 0, out)
+		self.assertEqual(self.served(), [])
+		self.assertEqual(len(self.compiles()), 1)
+		self.assertIn("did not answer", out)
+
+	def test_a_compiler_without_a_server_compiles_one_shot(self):
+		os.environ["FAKE_C4_WITHOUT"] = "--serve-on"
+		code, out = self.nuke("build")
+		self.assertEqual(code, 0, out)
+		self.assertEqual(self.served(), [])
+		self.assertNotIn("--serve-on", self.compiles()[0])
+
+	def test_tests_and_dist_compile_one_shot(self):
+		self.assertEqual(self.nuke("build", "dist")[0], 0)
+		self.assertEqual(self.served(), [], "Dist has no server")
+
+	def test_debug_is_served_too(self):
+		code, out = self.nuke("build", "debug")
+		self.assertEqual(code, 0, out)
+		self.assertEqual(len(self.served()), 1, self.compiles())
+
+	def test_server_false_compiles_one_shot(self):
+		self.files({"nuke.toml": "[workspace]\ntoolchain = \"1.0.0\"\ndefault-project = \"Game\"\n[configurations.Development]\nserver = false\n"})
+		code, out = self.nuke("build")
+		self.assertEqual(code, 0, out)
+		self.assertEqual(self.served(), [])
+		self.assertEqual(len(self.compiles()), 1)
+
+	def test_a_configuration_of_its_own_is_served_when_it_says_so(self):
+		self.files({"nuke.toml": "[workspace]\ntoolchain = \"1.0.0\"\ndefault-project = \"Game\"\n[configurations.Profile]\noptimize = 2\nserver = true\n"})
+		code, out = self.nuke("build", "Profile")
+		self.assertEqual(code, 0, out)
+		self.assertEqual(len(self.served()), 1, self.compiles())
+
+	def test_clean_ends_the_programs_server(self):
+		self.assertEqual(self.nuke("build")[0], 0)
+		pid = self.served()[0]["server"]
+		code, out = self.nuke("clean")
+		self.assertEqual(code, 0, out)
+		self.assertIn("Game: ended its C4 build server", out)
+		self.assertTrue(self.ended(pid), "the server is gone")
+		code, out = self.nuke("clean")
+		self.assertNotIn("ended its C4 build server", out, "none runs any more")
+		self.assertEqual(self.nuke("build")[0], 0)
+		self.assertNotEqual(self.served()[-1]["server"], pid, "the next build starts a new one")
+
+	def ended(self, pid):
+		"""Whether the process `pid` ends within a few seconds."""
+		for _ in range(100):
+			if not process_runs(pid):
+				return True
+			time.sleep(0.05)
+		return False
+
+
+def process_runs(pid):
+	if sys.platform.startswith("win"):
+		out = subprocess.run(["tasklist", "/fi", f"pid eq {pid}", "/nh"], capture_output=True, text=True).stdout
+		return str(pid) in out
+	try:
+		os.kill(pid, 0)
+		return True
+	except OSError:
+		return False
 
 
 if __name__ == "__main__":

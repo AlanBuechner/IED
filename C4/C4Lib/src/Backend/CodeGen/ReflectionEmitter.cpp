@@ -24,6 +24,7 @@ namespace C4Compiler
 			if (IsThunk(unit.kind)) thunks.push_back(&unit);
 		std::vector<llvm::Function*> finished(thunks.size());
 		pool.Run(m_Partitions.Count(), [&](size_t partition) {
+			if (!m_Partitions.Emits(static_cast<unsigned>(partition))) return;
 			for (size_t i = 0; i < thunks.size(); ++i)
 				if (m_Partitions.Of(*thunks[i]->placedBy) == partition) finished[i] = FinishThunk(*thunks[i]->tree->record, static_cast<unsigned>(partition));
 		});
@@ -134,16 +135,25 @@ namespace C4Compiler
 
 	const std::string& ReflectionEmitter::ImageKey()
 	{
+		if (m_Kept) return m_Kept->key;
 		if (m_ImageKeying.valid()) m_ImageKey = m_ImageKeying.get();
 		return m_ImageKey;
+	}
+
+	std::shared_ptr<const KeptImage> ReflectionEmitter::KeepImage()
+	{
+		if (m_Kept || !m_ImageKeying.valid()) return m_Kept;
+		std::string key = m_ImageKeying.get(); // its thread reads the image: done with it before the image moves
+		m_Kept = std::make_shared<const KeptImage>(KeptImage{ std::move(m_Image), std::move(key), m_ImageTriple, m_ImageLayout });
+		return m_Kept;
 	}
 
 	std::unique_ptr<llvm::Module> ReflectionEmitter::BuildImageModule(llvm::LLVMContext& context) const
 	{
 		auto module = std::make_unique<llvm::Module>("c4_reflection", context);
-		module->setTargetTriple(llvm::Triple(m_ImageTriple));
-		module->setDataLayout(m_ImageLayout);
-		ReflectionTables(*module).Build(m_Image);
+		module->setTargetTriple(llvm::Triple(m_Kept ? m_Kept->triple : m_ImageTriple));
+		module->setDataLayout(m_Kept ? m_Kept->layout : m_ImageLayout);
+		ReflectionTables(*module).Build(m_Kept ? m_Kept->image : m_Image);
 		return module;
 	}
 } // namespace C4Compiler

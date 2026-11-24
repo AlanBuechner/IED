@@ -44,8 +44,10 @@ namespace C4Compiler
 	// its lambdas are numbered in its order.
 	const Closure* ClosureTypes::Create(ProgramModel& model, const ClosureSpec& spec)
 	{
+		const ModelMaking::Ask ask(model.Making());
+		if (const Closure* made = model.ClosureMadeFor(spec.owner, spec.body)) return ask.Found(made);
 		const ModelMaking::Request request(model.Making(), "a closure");
-		if (const Closure* made = model.ClosureMadeFor(spec.owner, spec.body)) return made;
+		if (const Closure* made = model.ClosureMadeFor(spec.owner, spec.body)) return ask.Found(made); // made meanwhile
 		// Named for the code that writes it and its place there, so every program with that code names it alike.
 		const uint32 index = model.m_ClosuresByOwner[spec.owner]++;
 		const Core::String name = "__c4_closure_" + spec.owner + "_" + std::to_string(index);
@@ -54,6 +56,7 @@ namespace C4Compiler
 		closure->captures = spec.captures;
 		closure->enclosingType = spec.enclosingType;
 		closure->isMutable = spec.isMutable;
+		closure->owner = spec.owner;
 
 		ObjectType* type = NewClosureType(name, closure->captures, *model.m_Types);
 		model.m_Types->Own(type);
@@ -67,7 +70,7 @@ namespace C4Compiler
 		const Closure* stored = closure.get();
 		model.m_Closures.emplace(type, std::move(closure));
 		model.m_ClosuresMade.Add(std::make_pair(spec.owner, spec.body), stored);
-		return stored;
+		return ask.Made(stored);
 	}
 
 	ObjectType* ClosureTypes::NewClosureType(const Core::String& name, Core::Vector<ClosureCapture>& captures, TypeStore& types)

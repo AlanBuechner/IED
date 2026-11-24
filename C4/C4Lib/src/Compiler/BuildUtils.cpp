@@ -35,6 +35,7 @@ namespace C4Compiler
 
 		constexpr unsigned kMaxCount = 64;
 		constexpr unsigned kMaxPartitions = 256; // as ProgramPlacement's
+		constexpr unsigned kMaxIdleSeconds = 7 * 24 * 60 * 60; // a week
 
 		// A count of threads or objects, 1 to `most`; 0 with the error recorded.
 		unsigned ParseCount(const std::string& v, const char* option, CompileOptions& o, unsigned most = kMaxCount)
@@ -122,6 +123,12 @@ namespace C4Compiler
 				{ { "-v" }, nullptr, "Print the tool command lines (clang, CBind, link)", [](CompileOptions& o, const std::string&) { o.verbose = true; } },
 				{ { "--serve" }, nullptr, "Stay alive: each 'build' line on stdin builds again (reusing the parses of unchanged files), answered by 'done <exit code>'; 'quit' or the end of stdin ends it",
 					[](CompileOptions& o, const std::string&) { o.serve = true; } },
+				{ { "--serve-on" }, "<name>", "A build server: each client of the pipe (a socket on Linux) <name> sends 'build <stamp>' and gets the build's output, then 'done <exit code>'",
+					[](CompileOptions& o, const std::string& v) { o.serveOn = v; } },
+				{ { "--serve-stamp" }, "<text>", "With --serve-on: a request with another stamp gets 'stale', and the server ends (its compiler was rebuilt)",
+					[](CompileOptions& o, const std::string& v) { o.serveStamp = v; } },
+				{ { "--serve-idle" }, "<seconds>", "With --serve-on: the server ends after <seconds> without a build (default 1800)",
+					[](CompileOptions& o, const std::string& v) { o.serveIdleSeconds = ParseCount(v, "--serve-idle", o, kMaxIdleSeconds); } },
 				{ { "--version" }, nullptr, "Print the compiler version", [](CompileOptions& o, const std::string&) { o.printVersion = true; } },
 				{ { "-h", "--help" }, nullptr, "Print this help", [](CompileOptions& o, const std::string&) { o.printHelp = true; } },
 			};

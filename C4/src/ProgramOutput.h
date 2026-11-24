@@ -21,6 +21,28 @@
 
 namespace llvm { class Module; }
 
+/// What a build server keeps of a partition's output (docs/compiler/07): for a partition a later build does not emit
+/// again, its object, its inline bodies and its candidates for the script table, as this build wrote them.
+struct PartitionOutput
+{
+	std::string object;
+	std::filesystem::path inlineFile;
+	std::vector<std::string> inlineBodies;
+	std::vector<C4Compiler::HostCandidate> hostCandidates;
+};
+
+/// A build server's outputs from build to build: each partition's, and which partitions this build emitted (the others'
+/// modules are empty: their output is the kept one).
+struct ServedOutputs
+{
+	std::vector<PartitionOutput> partitions;
+	std::vector<bool> emitted; // empty: every one
+
+	bool Reused(size_t partition) const { return !emitted.empty() && !emitted[partition]; }
+	/// Whether every partition has its object still (one not emitted again is linked from it).
+	bool ObjectsExist(size_t count) const;
+};
+
 /// The last stage of a build (docs/tools/01-compiler-cli.md): the program's module as IR (`-S`), bitcode (`-bc`) or one
 /// object (`-c`); else its partitions (D-81) optimized each alone (an incremental build) or merged and optimized whole (a
 /// whole-program build, R12), assembled inside the compiler on several threads and linked with the C4 runtime into the
@@ -36,6 +58,7 @@ public:
 		C4Compiler::CompilerInstance& compiler;
 		const C4Compiler::InteropPass::Result& interop;
 		const std::unordered_map<std::string, C4Compiler::MacroTable>& exportedMacros;
+		ServedOutputs* served = nullptr; // a build server's: partitions not emitted again are the kept ones
 	};
 
 	explicit ProgramOutput(const Inputs& inputs) : m_In(inputs) {}
@@ -81,6 +104,9 @@ private:
 	static DebugInfoPaths DebugInfoPathsFor(const Core::String& program);
 	bool PlaceDebugInfo(const DebugInfoPaths& paths);
 	bool PrepareScriptHost(const std::vector<llvm::Module*>& partitions);
+	/// A build server's partition not emitted again: its output is the kept one (ServedOutputs).
+	bool Reused(size_t partition) const;
+	std::vector<C4Compiler::HostEntry> HostEntriesOf(const std::vector<llvm::Module*>& partitions, const std::vector<std::string>& listed);
 	bool CollectInlineBodies(const std::vector<llvm::Module*>& partitions, const std::vector<std::string>& bitcode, const std::string& base,
 		const C4Compiler::ObjectSettings& settings);
 	C4Compiler::KeyedModule HostTable(const llvm::Module& program) const;

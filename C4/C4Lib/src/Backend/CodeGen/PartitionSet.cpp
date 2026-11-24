@@ -24,7 +24,9 @@ namespace C4Compiler
 	{
 		if (Split()) m_Placement.emplace(model, Count());
 		if (Split()) SettleLayouts(model);
-		pool.Run(Count(), [&](size_t i) { PrepareOne(static_cast<unsigned>(i), model, program, settings); });
+		pool.Run(Count(), [&](size_t i) {
+			if (Emits(static_cast<unsigned>(i))) PrepareOne(static_cast<unsigned>(i), model, program, settings);
+		});
 	}
 
 	void PartitionSet::PrepareOne(unsigned i, const ProgramModel& model, const LoweredProgram& program, const ModuleSettings& settings)
@@ -46,6 +48,7 @@ namespace C4Compiler
 		for (const Placed& placed : trees) own[placed.partition].push_back(placed.tree);
 		if (Split()) SettleLayouts(model);
 		pool.Run(Count(), [&](size_t i) {
+			if (!Emits(static_cast<unsigned>(i))) return;
 			for (const HIRFunction* tree : own[i]) EmitterOf(static_cast<unsigned>(i)).Emit(*tree);
 			DefineCensusCounters(static_cast<unsigned>(i));
 		});
@@ -56,6 +59,7 @@ namespace C4Compiler
 		SettleLayouts(model);
 		pool.Run(Count(), [&](size_t i) {
 			const unsigned partition = static_cast<unsigned>(i);
+			if (!Emits(partition)) return;
 			for (const HIRFunction* tree : copies[i]) EmitterOf(partition).EmitImport(*tree);
 			Partition(partition).TakeNewFunctions();
 			DefineCensusCounters(partition);
@@ -64,7 +68,9 @@ namespace C4Compiler
 
 	void PartitionSet::DefineCensusCounters(WorkerPool& pool)
 	{
-		pool.Run(Count(), [&](size_t i) { DefineCensusCounters(static_cast<unsigned>(i)); });
+		pool.Run(Count(), [&](size_t i) {
+			if (Emits(static_cast<unsigned>(i))) DefineCensusCounters(static_cast<unsigned>(i));
+		});
 	}
 
 	void PartitionSet::DefineCensusCounters(unsigned i)
@@ -77,6 +83,7 @@ namespace C4Compiler
 		std::vector<std::string> missing;
 		for (unsigned i = 0; i < Count(); ++i)
 		{
+			if (!Emits(i)) continue;
 			for (const FunctionRecord* record : Partition(i).TakeNewFunctions())
 				if (HasBody(*record) && !record->isLocal && !program.lowered.count(record) && !(script && script->IsHostUnit(record->definingUnit)))
 					missing.push_back(record->mangledName.c_str());
@@ -95,7 +102,8 @@ namespace C4Compiler
 	std::optional<std::string> PartitionSet::FirstInvalid()
 	{
 		for (unsigned i = 0; i < Count(); ++i)
-			if (std::optional<std::string> invalid = InvalidIr(Partition(i).module())) return invalid;
+			if (Emits(i))
+				if (std::optional<std::string> invalid = InvalidIr(Partition(i).module())) return invalid;
 		return std::nullopt;
 	}
 

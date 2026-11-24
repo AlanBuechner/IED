@@ -1,4 +1,5 @@
 #pragma once
+#include "Backend/CodeGen/PartitionFacts.h"
 #include "Backend/CodeGen/PartitionSet.h"
 #include "Backend/CodeGen/ReflectionEmitter.h"
 #include "Backend/CodeGen/StartupEmitter.h"
@@ -46,8 +47,13 @@ namespace C4Compiler
 		/// The program is emitted into `count` partitions (D-81). Before Emit.
 		void SplitInto(unsigned count) { m_Partitions.SplitInto(count); }
 		/// False, with `error`, when the program has no entry point, a module does not verify, or codegen named what
-		/// lowering did not reach (an internal error); with the reflection image's diagnostics in Errors().
-		bool Emit(ProgramModel& model, LoweredProgram& program, const EmitSettings& settings, WorkerPool& pool, std::string* error);
+		/// lowering did not reach (an internal error); with the reflection image's diagnostics in Errors(). With `partial` (a
+		/// build server's, docs/compiler/07) only the partitions it names are emitted: what the others tell the emitted ones
+		/// is read from the facts it holds, each emitted one's facts are kept there, and a partition not emitted that would
+		/// come out otherwise now is named stale. Without partition 0 the program's own code and its reflection image are the
+		/// build before's (Reflection().UseImage).
+		bool Emit(ProgramModel& model, LoweredProgram& program, const EmitSettings& settings, WorkerPool& pool, std::string* error,
+			PartialEmission* partial = nullptr);
 
 		/// The diagnostics of the reflection image (an annotation argument that does not fold).
 		const ErrorTracker& Errors() const { return m_Errors; }
@@ -73,6 +79,15 @@ namespace C4Compiler
 		void MaterializeGlobals(const ProgramModel& model, bool every);
 		void MaterializeNamedGlobals();
 		void Materialize(const SymbolInfo& info, const Scope& declaredIn);
+		/// Whether any partition's code names `global` (one not emitted again: as the build before's did).
+		bool NamedAnywhere(const SymbolInfo& global);
+		std::vector<const SymbolInfo*> GlobalsNamedIn(unsigned partition);
+		void KeepNamedGlobals();
+		void FindStaleNamedGlobals();
+		void MarkNoUnwind(WorkerPool& pool);
+		void KeepStatics();
+		/// A partition's facts from the build before (a partial emission's); none otherwise.
+		const PartitionFacts& Before(unsigned partition) const;
 		bool EverythingNamedLowered(const LoweredProgram& program, const ScriptLowering* script, std::string* error);
 		void FinishModules(const ProgramModel& model, const EmitSettings& settings, WorkerPool& pool);
 		/// The script-mode passes over the finished module (Script/ScriptModulePasses).
@@ -85,5 +100,6 @@ namespace C4Compiler
 		ErrorTracker m_Errors;
 		std::vector<std::pair<const char*, double>> m_StepSeconds;
 		std::vector<std::pair<const SymbolInfo*, const Scope*>> m_OutOfScope; // globals out of reflection's scope, not yet defined
+		PartialEmission* m_Partial = nullptr;
 	};
 } // namespace C4Compiler

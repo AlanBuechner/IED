@@ -36,6 +36,17 @@ namespace C4Compiler
 		});
 	}
 
+	void CompilationUnit::TakeParse(const CompilationUnit& edited)
+	{
+		m_Source = edited.m_Source;
+		m_Macros = edited.m_Macros;
+		m_Bindings = edited.m_Bindings;
+		m_RootASTNode = edited.m_RootASTNode;
+		m_OriginalChildren = edited.m_OriginalChildren;
+		m_ErrorTracker.GetErrorsMutable() = edited.m_ErrorTracker.GetErrors();
+		m_IncludesAsked = edited.m_IncludesAsked;
+	}
+
 	uint64 CompilationUnit::Fingerprint() const
 	{
 		return m_Source ? DeclarationFingerprint(*m_Source, m_SourceId, m_Macros.Get(), m_OriginalChildren) : 0;

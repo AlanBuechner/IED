@@ -446,7 +446,8 @@ namespace C4Compiler
 	}
 
 	CachedObjects WriteCachedObjects(size_t partitions, const std::function<std::string(size_t)>& bitcode, std::vector<KeyedModule> keyed,
-		const ObjectSettings& settings, const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics, std::vector<std::string>& written)
+		const ObjectSettings& settings, const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics, std::vector<std::string>& written,
+		const std::vector<std::string>& reused)
 	{
 		InitializeX86();
 		const std::error_code ec = llvm::sys::fs::create_directories(cache.Folder().string());
@@ -467,7 +468,8 @@ namespace C4Compiler
 		ParallelFor(parts.size(), std::max(settings.threads, 1u), [&](size_t task) {
 			const size_t i = task < keyed.size() ? partitions + task : task - keyed.size();
 			Partition& part = parts[i];
-			if (i < partitions)
+			if (i < partitions && i < reused.size() && !reused[i].empty()) part.objPath = reused[i];
+			else if (i < partitions)
 			{
 				part.bitcode = bitcode(i);
 				part.objPath = cache.ObjectFor(part.bitcode).string();
@@ -487,7 +489,11 @@ namespace C4Compiler
 		AssembleVanished(parts, settings);
 		CachedObjects objects = Collected(parts, made, cache, diagnostics);
 		written.clear();
-		for (size_t i = 0; i < partitions; ++i) written.push_back(std::move(parts[i].bitcode));
+		for (size_t i = 0; i < partitions; ++i)
+		{
+			objects.byPartition.push_back(parts[i].objPath);
+			written.push_back(std::move(parts[i].bitcode));
+		}
 		return objects;
 	}
 }

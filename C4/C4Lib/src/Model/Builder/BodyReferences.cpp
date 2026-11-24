@@ -8,14 +8,26 @@ namespace C4Compiler
 	namespace
 	{
 		// A template specialization `node` names in a type position, and those its children name: instantiated (no-op for
-		// one that is not a template). Every node of every body passes here, so the node's kind is read, not cast.
-		void InstantiateNamedTypes(ProgramModel& model, const AstNode* node, uint32 unit)
+		// one that is not a template), each answer kept in `named` when it is given. Every node of every body passes here,
+		// so the node's kind is read, not cast.
+		void InstantiateNamedTypes(ProgramModel& model, const AstNode* node, uint32 unit, std::vector<const Type*>* named)
 		{
 			if (!node) return;
 			if (node->Type() == NodeType::QualType)
-				if (const auto* type = static_cast<const QualTypeNode*>(node); type->HasTemplateArgs()) model.ResolveType(*type, unit);
-			for (const auto& child : node->Children()) InstantiateNamedTypes(model, child.Get(), unit);
+				if (const auto* type = static_cast<const QualTypeNode*>(node); type->HasTemplateArgs())
+				{
+					const auto resolved = model.ResolveType(*type, unit);
+					if (named) named->push_back(resolved.Ok() ? resolved.value : nullptr);
+				}
+			for (const auto& child : node->Children()) InstantiateNamedTypes(model, child.Get(), unit, named);
 		}
+	}
+
+	std::vector<const Type*> ModelResolver::TypeInstancesNamedIn(ProgramModel& model, const AstNode* body, uint32 unit)
+	{
+		std::vector<const Type*> named;
+		InstantiateNamedTypes(model, body, unit, &named);
+		return named;
 	}
 
 	// One walk over the records, the ones the walk makes included: an instance made here adds its methods' records
@@ -30,7 +42,7 @@ namespace C4Compiler
 			const AstNode* body = records[i]->bodyNode;
 			const uint32 unit = records[i]->LookupUnit();
 			if (body && body->Type() == NodeType::CodeBlock && opened.emplace(body, unit).second)
-				InstantiateNamedTypes(model, body, unit);
+				InstantiateNamedTypes(model, body, unit, nullptr);
 		}
 	}
 } // namespace C4Compiler

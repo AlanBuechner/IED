@@ -2,6 +2,8 @@
 
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -28,12 +30,25 @@ def available_toolchain():
 TOOLCHAIN = available_toolchain()
 
 
+def stop_servers_under(folder):
+	"""Ends the C4 build servers of the programs under `folder`, so its removal does not wait for their idle end."""
+	if sys.platform.startswith("win"):
+		pattern = folder.replace("\\", "/").replace("'", "''")
+		subprocess.run(["powershell", "-NoProfile", "-Command", "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*--serve-on*' -and "
+			f"$_.CommandLine.Replace('\\', '/') -like '*{pattern}*' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"], capture_output=True)
+	else:
+		subprocess.run(["pkill", "-f", f"{folder}.*--serve-on"], capture_output=True)
+
+
 @unittest.skipIf(TOOLCHAIN is None, f"no C4 toolchain installed in {STORE.kind_dir()}")
 class RealToolchainTests(unittest.TestCase):
 	def setUp(self):
 		self.root = tempfile.mkdtemp(prefix="nuke-it-")
+		os.environ["NUKE_C4_SERVER_IDLE"] = "60"  # Debug and Development builds start build servers
 
 	def tearDown(self):
+		os.environ.pop("NUKE_C4_SERVER_IDLE", None)
+		stop_servers_under(self.root)
 		shutil.rmtree(self.root, ignore_errors=True)
 
 	def nuke(self, *argv, cwd=None):
@@ -70,6 +85,25 @@ class RealToolchainTests(unittest.TestCase):
 		self.assertNotEqual(code, 0, out)
 		self.assertIn("compiling Game failed", out)
 		self.assertNotIn("nuke: running", out)
+
+	@unittest.skipUnless(TOOLCHAIN and TOOLCHAIN.accepts("--serve-on"), "needs a toolchain with C4's build server")
+	def test_the_build_server_serves_a_body_edit(self):
+		"""Development's build after a body edit goes to the server the first build started, which lowers the edited body
+		alone again (its -ftime lists 'bodies again'), and the program runs the edit; nuke clean ends the server."""
+		write_files(self.root, {
+			"nuke.toml": f'[workspace]\ntoolchain = "{TOOLCHAIN.version}"\ndefault-project = "Game"\n',
+			"Game/nuke.toml": '[project]\ncompiler-args = ["-ftime"]\n',
+			"Game/src/main.cf": "int32 Value() { return 3; }\nint32 main() { return Value(); }\n",
+		})
+		code, out = self.nuke("run")
+		self.assertEqual(code, 3, out)
+		write_files(self.root, {"Game/src/main.cf": "int32 Value() { return 4; }\nint32 main() { return Value(); }\n"})
+		code, out = self.nuke("run")
+		self.assertEqual(code, 4, out)
+		self.assertIn("bodies again", out)
+		code, out = self.nuke("clean")
+		self.assertEqual(code, 0, out)
+		self.assertIn("Game: ended its C4 build server", out)
 
 	def test_tests_pass_fail_and_filter(self):
 		write_files(self.root, {

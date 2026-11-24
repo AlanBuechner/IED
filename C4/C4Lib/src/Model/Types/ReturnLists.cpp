@@ -13,9 +13,10 @@ namespace C4Compiler
 	QueryResult<const ObjectType*> ReturnLists::Of(const ProgramModel& model, const std::vector<const Type*>& elements)
 	{
 		using Result = QueryResult<const ObjectType*>;
-		if (const ObjectType* const* cached = model.m_ReturnLists.Find(elements)) return *cached;
+		const ModelMaking::Ask ask(model.Making());
+		if (const ObjectType* const* cached = model.m_ReturnLists.Find(elements)) return ask.Found(*cached);
 		const ModelMaking::Request request(model.Making(), "a return list");
-		if (const ObjectType* const* cached = model.m_ReturnLists.Find(elements)) return *cached; // made meanwhile
+		if (const ObjectType* const* cached = model.m_ReturnLists.Find(elements)) return ask.Found(*cached); // made meanwhile
 		Core::String name = "[";
 		for (size_t i = 0; i < elements.size(); ++i)
 		{
@@ -41,6 +42,6 @@ namespace C4Compiler
 		model.m_Types->Own(type);
 		model.KeepObjectType(type);
 		model.m_ReturnLists.Add(elements, type);
-		return Result(static_cast<const ObjectType*>(type));
+		return Result(ask.Made(static_cast<const ObjectType*>(type)));
 	}
 } // namespace C4Compiler

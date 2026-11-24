@@ -11,6 +11,7 @@
 #include "Compiler/PriorParses.h"
 #include "Compiler/Toolchain.h"
 #include "ProgramOutput.h"
+#include "ServeChannel.h"
 #include "Macro/PredefinedMacros.h"
 #include "Macro/MacroPass.h"
 #include "Interop/InteropPass.h"
@@ -20,6 +21,7 @@
 #include "Backend/CodeGen/TestHarnessEmitter.h"
 #include "Backend/ProgramBackend.h"
 #include "Backend/Reflection/RegistrationEmitter.h"
+#include "Serve/BodySwap.h"
 #include <algorithm>
 #include <memory>
 #include <optional>
@@ -34,6 +36,7 @@
 #include <filesystem>
 #include <chrono>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 
 #ifdef _WIN32
@@ -75,9 +78,16 @@ namespace
 
 		int Run()
 		{
+			return Prepare() ? Finish() : 1;
+		}
+
+		// What a build reads before its model: the sources registered, the macro and interop passes, every file parsed.
+		// False when the inputs cannot be registered (said on stderr).
+		bool Prepare()
+		{
 			auto registered = std::chrono::steady_clock::now();
 			if (!RegisterSources())
-				return 1;
+				return false;
 			m_Compiler.AddPhaseTime("register", SecondsSince(registered));
 
 			m_Result.timePhases = m_Options.timePhases;
@@ -92,9 +102,20 @@ namespace
 			phaseStart = std::chrono::steady_clock::now();
 			m_Compiler.CompileAll();
 			m_Compiler.AddPhaseTime("parse", SecondsSince(phaseStart));
+			return true;
+		}
 
+		// After Prepare: the model, the backend and the output; the build's exit code.
+		int Finish()
+		{
+			m_Code = BuildFromParses();
+			return m_Code;
+		}
+
+		int BuildFromParses()
+		{
 			CORE_INFO("Phase 2: Program model");
-			phaseStart = std::chrono::steady_clock::now();
+			auto phaseStart = std::chrono::steady_clock::now();
 			bool modelOk = m_Compiler.AnalyzeProgram();
 			m_Compiler.AddPhaseTime("model", SecondsSince(phaseStart));
 			for (const auto& err : m_Compiler.GetAllDiagnostics())
@@ -128,6 +149,40 @@ namespace
 		// The warnings, and the phase times when they were asked for.
 		if (!m_Result.errors.Empty() || m_Options.timePhases) C4Compiler::DiagnosticReporter::Report(m_Result, &m_Compiler);
 		return 0;
+		}
+
+		// --serve, after an edit (docs/compiler/07 stage 2a): `edited` prepared the sources as they are now with this build's
+		// parses. When this build succeeded and the edit changed only bodies their own functions read, this build takes the
+		// edit - the changed bodies lowered again in its model - and emits and links the program again: its exit code.
+		// Nothing otherwise (said with -v or -ftime), and this build is spent: `edited` finishes a cold build.
+		std::optional<int> BuildBodyEdit(CompilerDriver& edited)
+		{
+			if (m_Code != 0 || !m_Backend || m_Options.prettyPrint || edited.m_Result.HasErrors()) return std::nullopt;
+			const auto start = std::chrono::steady_clock::now();
+			if (const std::string why = C4Compiler::SwapBodies(m_Compiler, edited.m_Compiler, *m_Backend, m_Retired); !why.empty())
+			{
+				if (m_Options.verbose || m_Options.timePhases) std::printf("serve: a cold build: %s\n", why.c_str());
+				m_Code = 1;
+				return std::nullopt;
+			}
+			m_Interop = std::move(edited.m_Interop);
+			m_ExportedMacros = std::move(edited.m_ExportedMacros);
+			m_Compiler.ClearPhaseTimes();
+			for (const auto& [phase, seconds] : edited.m_Compiler.GetPhaseTimes()) m_Compiler.AddPhaseTime(phase, seconds);
+			m_Compiler.AddPhaseTime("bodies again", SecondsSince(start));
+			m_Result = C4Compiler::CompilationResult{};
+			m_Result.timePhases = m_Options.timePhases;
+			for (const auto& err : m_Compiler.GetAllDiagnostics()) m_Result.errors.Push(err);
+			ApplyWarningOptions();
+			if (m_Result.HasErrors() || !EmitAgain())
+			{
+				C4Compiler::DiagnosticReporter::Report(m_Result, &m_Compiler);
+				m_Code = 1;
+				return m_Code;
+			}
+			if (!m_Result.errors.Empty() || m_Options.timePhases) C4Compiler::DiagnosticReporter::Report(m_Result, &m_Compiler);
+			m_Code = 0;
+			return m_Code;
 		}
 
 	private:
@@ -182,32 +237,63 @@ namespace
 			if (!located) m_Result.AddBackendError(Core::String(backendError.c_str()));
 		}
 
+		// The entry point the generated main calls: a -test run drives the test harness (the compiler emits a synthetic main
+		// that runs every [test] function), otherwise the user's main. Null when it is not a -test build.
+		const C4Compiler::TestHarnessOptions* Tests()
+		{
+			if (!m_Options.runTests) return nullptr;
+			m_Tests.jsonPath = m_Options.testJsonPath.c_str();
+			m_Tests.fileOf = [this](uint32 sourceId) { return m_Compiler.GetSourceManager().GetInfo(sourceId).displayName; };
+			if (!m_Options.projectsFile.empty()) m_Tests.ownUnit = [this](uint32 unit) { return InRootProject(unit); };
+			return &m_Tests;
+		}
+
 		bool RunBackend()
 		{
 			m_Context = std::make_unique<llvm::LLVMContext>();
 			m_Backend = std::make_unique<C4Compiler::ProgramBackend>(*m_Context, m_Options.target.System());
 			C4Compiler::ProgramBackend& driver = *m_Backend;
 
-			// The entry point the generated main calls: a -test run drives the test harness (the compiler
-			// emits a synthetic main that runs every [test] function), otherwise the user's main.
 			std::string backendError;
-			C4Compiler::TestHarnessOptions tests;
-			tests.jsonPath = m_Options.testJsonPath.c_str();
-			tests.fileOf = [this](uint32 sourceId) { return m_Compiler.GetSourceManager().GetInfo(sourceId).displayName; };
-			if (!m_Options.projectsFile.empty()) tests.ownUnit = [this](uint32 unit) { return InRootProject(unit); };
 			if (m_Options.debugInfo) driver.EnableDebugInfo();
 			if (!m_Options.strictAliasing) driver.DisableStrictAliasing();
 			if (m_Options.stackMaps) driver.UseStackMaps();
 			if (m_Options.scriptHost) driver.ShareVtables();
+			if (Serving()) driver.KeepPartitionFacts();
 			if (ProgramOutput::Links(m_Options)) driver.VerifyLater();
 			if (const unsigned count = EmittedPartitions(); count > 1) driver.SplitInto(count, CopiesBetweenPartitions());
 			driver.SetReflectionTag(m_Options.reflectTag);
 			driver.LowerOn(m_Options.threads);
 			auto phaseStart = std::chrono::steady_clock::now();
-			bool ok = driver.Lower(m_Compiler.GetProgramModelForLowering(), "main", &backendError, m_Options.runTests ? &tests : nullptr);
+			bool ok = driver.Lower(m_Compiler.GetProgramModelForLowering(), "main", &backendError, Tests());
 			m_Compiler.AddPhaseTime("lower", SecondsSince(phaseStart));
 			if (m_Options.timePhases) ReportLowering(driver.LoweringStatistics(), driver.StepSeconds());
-			if (!ok)
+			return WriteProgram(ok, backendError);
+		}
+
+		// --serve: the program lowered again (BuildBodyEdit) emitted again into a context of its own; the emitter and context
+		// before are freed on a thread of their own while the program is written.
+		bool EmitAgain()
+		{
+			std::vector<C4Compiler::RetiredEmission> retired;
+			std::string backendError;
+			if (!m_Served.ObjectsExist(m_Backend->PartitionCount())) m_Backend->ForgetPartitionFacts(); // a kept object is gone: emit every partition
+			const auto phaseStart = std::chrono::steady_clock::now();
+			const bool ok = m_Backend->EmitAgain(m_Compiler.GetProgramModelForLowering(), m_Context, retired, &backendError, Tests());
+			m_Compiler.AddPhaseTime("emit", SecondsSince(phaseStart));
+			std::thread([emissions = std::move(retired)]() mutable { emissions.clear(); }).detach();
+			m_Served.emitted.clear();
+			for (unsigned i = 0; i < m_Backend->PartitionCount(); ++i) m_Served.emitted.push_back(m_Backend->Emitted(i));
+			return WriteProgram(ok, backendError);
+		}
+
+		bool Serving() const { return m_Options.serve || !m_Options.serveOn.empty(); }
+
+		// After the backend lowered (`lowered`, else `backendError` says why) and emitted: its diagnostics, then the program.
+		bool WriteProgram(bool lowered, const std::string& backendError)
+		{
+			C4Compiler::ProgramBackend& driver = *m_Backend;
+			if (!lowered)
 			{
 				ReportBackendFailure(driver, backendError);
 				return false;
@@ -221,7 +307,7 @@ namespace
 			for (unsigned i = 0; i < driver.PartitionCount(); ++i) partitions.push_back(&driver.PartitionModule(i));
 			const C4Compiler::KeyedModule image{ driver.ReflectionImageKey(),
 				[&driver](llvm::LLVMContext& context) { return driver.BuildReflectionModule(context); } };
-			return ProgramOutput({ m_Options, m_Result, m_Compiler, m_Interop, m_ExportedMacros }).Write(partitions, image);
+			return ProgramOutput({ m_Options, m_Result, m_Compiler, m_Interop, m_ExportedMacros, Serving() ? &m_Served : nullptr }).Write(partitions, image);
 		}
 
 		// A described build's harness runs the root project's tests; each dependency's own harness runs its (docs/language/15-projects.md rule 7).
@@ -473,7 +559,11 @@ namespace
 		// frees its driver (main), since freeing them object by object takes a second on a large program (clang's
 		// -disable-free does the same); a server frees each between two requests. The driver goes before its context.
 		std::unique_ptr<llvm::LLVMContext> m_Context;
-		std::unique_ptr<C4Compiler::ProgramBackend> m_Backend; // by absolute path: what each file exports
+		std::unique_ptr<C4Compiler::ProgramBackend> m_Backend;
+		C4Compiler::TestHarnessOptions m_Tests;
+		C4Compiler::RetiredParses m_Retired; // the parses edits replaced, which the model still points into
+		ServedOutputs m_Served;              // --serve: each partition's output, for the builds after
+		int m_Code = 1;                      // the last build's exit code // by absolute path: what each file exports
 	};
 }
 
@@ -561,11 +651,32 @@ static std::string_view RequestOf(const std::string& line)
 }
 
 // --serve (docs/compiler/07 stage 2a): a build per 'build' line on stdin, each answered by 'done <exit code>' after its
-// diagnostics. Each is a cold build that takes the parses of the one before: a file whose text did not change is not
-// parsed again. A build's driver is freed once it has answered, while the client waits for its next edit.
+// diagnostics. The build before stays: its sources' parses are the next build's, and when the edit between them changed
+// only bodies their own functions read, it takes the edit (CompilerDriver::BuildBodyEdit) instead of a cold build. What a
+// build no longer needs is freed once it has answered, while the client waits for its next edit.
+// One build of a server: `live` (the build before, if any) takes the edit when it can, else a cold build of the sources
+// as they are now becomes `live`. Its exit code; what `spent` gets is no longer needed, to be freed after answering.
+static int ServeBuild(const C4Compiler::CompileOptions& opts, std::unique_ptr<CompilerDriver>& live, std::unique_ptr<CompilerDriver>& spent)
+{
+	auto edited = std::make_unique<CompilerDriver>(opts, live ? live->Parses() : nullptr);
+	if (!edited->Prepare())
+	{
+		spent = std::move(edited);
+		return 1;
+	}
+	if (const std::optional<int> served = live ? live->BuildBodyEdit(*edited) : std::nullopt)
+	{
+		spent = std::move(edited);
+		return *served;
+	}
+	const int code = edited->Finish();
+	spent = std::exchange(live, std::move(edited));
+	return code;
+}
+
 static int Serve(const C4Compiler::CompileOptions& opts)
 {
-	std::shared_ptr<const C4Compiler::PriorParses> parses;
+	std::unique_ptr<CompilerDriver> live;
 	std::string line;
 	while (std::getline(std::cin, line))
 	{
@@ -576,11 +687,53 @@ static int Serve(const C4Compiler::CompileOptions& opts)
 			std::cout << "error: unknown request '" << request << "': give 'build' or 'quit'" << std::endl;
 			continue;
 		}
-		auto driver = std::make_unique<CompilerDriver>(opts, std::move(parses));
-		const int code = driver->Run();
+		std::unique_ptr<CompilerDriver> spent;
+		const int code = ServeBuild(opts, live, spent);
 		std::cerr.flush();
 		std::cout << "done " << code << std::endl;
-		parses = driver->Parses();
+	}
+	return 0;
+}
+
+// --serve-on (docs/compiler/07, Nuke's `server` setting): the same builds for the clients of a pipe, one at a time, each
+// asking 'build <stamp>'; a stamp other than the server's (its compiler was rebuilt) is answered 'stale' and ends it, and
+// so does --serve-idle without a client, and 'quit' (answered 'bye': nuke clean). A second server of the name ends at
+// once: the first serves.
+static int ServeOn(const C4Compiler::CompileOptions& opts)
+{
+	std::string error;
+	const std::unique_ptr<ServeChannel> channel = ServeChannel::Listen(opts.serveOn, error);
+	if (!channel)
+	{
+		if (!error.empty()) std::cerr << "error: " << error << std::endl;
+		return error.empty() ? 0 : 1;
+	}
+	std::unique_ptr<CompilerDriver> live;
+	while (channel->Accept(opts.serveIdleSeconds))
+	{
+		const std::optional<std::string> line = channel->ReadLine();
+		const std::string_view request = line ? RequestOf(*line) : std::string_view();
+		if (request == "quit")
+		{
+			channel->WriteLine("bye");
+			channel->Hangup();
+			break;
+		}
+		if (request != "build " + opts.serveStamp && request != "build")
+		{
+			channel->WriteLine(request.starts_with("build") ? "stale" : "error: unknown request '" + std::string(request) + "': give 'build <stamp>' or 'quit'");
+			channel->Hangup();
+			if (request.starts_with("build")) break;
+			continue;
+		}
+		std::unique_ptr<CompilerDriver> spent;
+		int code = 1;
+		{
+			const ServeChannel::OutputToClient output(*channel);
+			code = ServeBuild(opts, live, spent);
+		}
+		channel->WriteLine("done " + std::to_string(code));
+		channel->Hangup();
 	}
 	return 0;
 }
@@ -615,7 +768,7 @@ int main(int argc, char** argv)
 		std::cerr << "error: no input: give the folders or files to compile (C4.exe -h lists the options)" << std::endl;
 		return kUsageError;
 	}
-	const int code = opts.serve ? Serve(opts)
+	const int code = opts.serve ? Serve(opts) : !opts.serveOn.empty() ? ServeOn(opts)
 		: (new CompilerDriver(opts, nullptr))->Run(); // the program, its model and its backend go with the process
 	// Everything is written: the process ends without its libraries' shutdown, which hands each of the allocator's
 	// spans back one by one (a tenth of a build that changed nothing) for memory the system takes back whole.

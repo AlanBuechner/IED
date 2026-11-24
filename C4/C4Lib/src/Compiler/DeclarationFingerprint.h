@@ -5,6 +5,12 @@
 
 namespace C4Compiler
 {
+	struct FunctionDefinitionNode;
+
+	/// Whether only the function's own lowering reads its body: other bodies copy an inline one, constants run a
+	/// [compile_time] one, and each instance of a template lowers the template's.
+	bool BodyIsItsOwn(const FunctionDefinitionNode& fn);
+
 	/// A file's declaration fingerprint (docs/compiler/07, stage 2a): a hash of its tokens - as the macro pass expanded them,
 	/// without their places - outside the bodies of the functions whose body only their own lowering reads: not `inline`,
 	/// not `[compile_time]`, not of a template. Two parses of a file with the same fingerprint declare the same things, so
