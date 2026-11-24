@@ -89,6 +89,9 @@ namespace C4Compiler
 			bool operator==(const FirstPassReach&) const = default;
 		};
 		FirstPassReach ReplayFirstPass(const std::unordered_map<size_t, const BodyNeeds*>& swapped);
+		/// Relower: why a body lowered after the first pass (a template's instance, a function the compiler wrote) would make
+		/// the reach go elsewhere from it: it needs otherwise now. Empty when every such body needs what it needed.
+		std::string LaterNeedsDiffer(const std::vector<size_t>& units, const std::vector<BodyNeeds>& needs) const;
 		/// Relower: why the bodies' asks would change what the model makes in a cold build; empty when they change nothing.
 		std::string AsksDiffer(const std::vector<size_t>& units, const std::vector<LoweredBody>& bodies) const;
 		/// Relower: why a body some swapped tree first named would report other diagnostics now; empty when none would.

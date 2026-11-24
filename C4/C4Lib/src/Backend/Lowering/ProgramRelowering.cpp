@@ -44,6 +44,7 @@ namespace C4Compiler
 		for (size_t i = 0; i < units.size(); ++i) needs.push_back(NeedsOf(*bodies[i].tree));
 		for (size_t i = 0; i < units.size(); ++i) swapped.emplace(units[i], &needs[i]);
 		if (ReplayFirstPass({}) != ReplayFirstPass(swapped)) return "an edited body makes the program need other functions or types first now";
+		if (std::string why = LaterNeedsDiffer(units, needs); !why.empty()) return why;
 		if (CountOf(m_Model.Making().Requests()) != requested) return "an edited body holds an object the model had not laid out the vtables of";
 		if (std::string why = AsksDiffer(units, bodies); !why.empty()) return why;
 		if (std::string why = FirstUsesDiffer(units); !why.empty()) return why;
@@ -101,6 +102,19 @@ namespace C4Compiler
 					reach.census.push_back(census);
 		}
 		return reach;
+	}
+
+	// The reach kept a later body where it first needed it, and went on from what it needs: the same needs go the same way.
+	std::string ProgramLowering::LaterNeedsDiffer(const std::vector<size_t>& units, const std::vector<BodyNeeds>& needs) const
+	{
+		for (size_t i = 0; i < units.size(); ++i)
+		{
+			const LoweredUnit& unit = m_Program.units[units[i]];
+			if (LoweredFirst(*unit.placedBy)) continue;
+			if (needs[i].functions != unit.needs.functions || needs[i].objects != unit.needs.objects || needs[i].census != unit.needs.census)
+				return NameOf(*unit.placedBy) + " needs other functions or types now";
+		}
+		return {};
 	}
 
 	// What a cold build makes depends on what each pass asks: an answer only the new body asks for must have been made by

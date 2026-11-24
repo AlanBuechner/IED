@@ -151,15 +151,16 @@ namespace
 		return 0;
 		}
 
-		// --serve, after an edit (docs/compiler/07 stage 2a): `edited` prepared the sources as they are now with this build's
-		// parses. When this build succeeded and the edit changed only bodies their own functions read, this build takes the
-		// edit - the changed bodies lowered again in its model - and emits and links the program again: its exit code.
-		// Nothing otherwise (said with -v or -ftime), and this build is spent: `edited` finishes a cold build.
-		std::optional<int> BuildBodyEdit(CompilerDriver& edited)
+		// --serve, after an edit (docs/compiler/07 stages 2a, 2b): `edited` prepared the sources as they are now with this
+		// build's parses. When this build succeeded and the edit changed only bodies their own functions read and the values
+		// of globals, this build takes the edit - the globals folded again, the changed bodies and those that read a changed
+		// value lowered again in its model - and emits and links the program again: its exit code. Nothing otherwise (said
+		// with -v or -ftime), and this build is spent: `edited` finishes a cold build.
+		std::optional<int> BuildEdit(CompilerDriver& edited)
 		{
 			if (m_Code != 0 || !m_Backend || m_Options.prettyPrint || edited.m_Result.HasErrors()) return std::nullopt;
 			const auto start = std::chrono::steady_clock::now();
-			if (const std::string why = C4Compiler::SwapBodies(m_Compiler, edited.m_Compiler, *m_Backend, m_Retired); !why.empty())
+			if (const std::string why = C4Compiler::SwapEdits(m_Compiler, edited.m_Compiler, *m_Backend, m_Retired); !why.empty())
 			{
 				if (m_Options.verbose || m_Options.timePhases) std::printf("serve: a cold build: %s\n", why.c_str());
 				m_Code = 1;
@@ -271,7 +272,7 @@ namespace
 			return WriteProgram(ok, backendError);
 		}
 
-		// --serve: the program lowered again (BuildBodyEdit) emitted again into a context of its own; the emitter and context
+		// --serve: the program lowered again (BuildEdit) emitted again into a context of its own; the emitter and context
 		// before are freed on a thread of their own while the program is written.
 		bool EmitAgain()
 		{
@@ -650,9 +651,10 @@ static std::string_view RequestOf(const std::string& line)
 	return request;
 }
 
-// --serve (docs/compiler/07 stage 2a): a build per 'build' line on stdin, each answered by 'done <exit code>' after its
-// diagnostics. The build before stays: its sources' parses are the next build's, and when the edit between them changed
-// only bodies their own functions read, it takes the edit (CompilerDriver::BuildBodyEdit) instead of a cold build. What a
+// --serve (docs/compiler/07 stages 2a, 2b): a build per 'build' line on stdin, each answered by 'done <exit code>' after
+// its diagnostics. The build before stays: its sources' parses are the next build's, and when the edit between them
+// changed only bodies their own functions read and globals' values, it takes the edit (CompilerDriver::BuildEdit) instead
+// of a cold build. What a
 // build no longer needs is freed once it has answered, while the client waits for its next edit.
 // One build of a server: `live` (the build before, if any) takes the edit when it can, else a cold build of the sources
 // as they are now becomes `live`. Its exit code; what `spent` gets is no longer needed, to be freed after answering.
@@ -664,7 +666,7 @@ static int ServeBuild(const C4Compiler::CompileOptions& opts, std::unique_ptr<Co
 		spent = std::move(edited);
 		return 1;
 	}
-	if (const std::optional<int> served = live ? live->BuildBodyEdit(*edited) : std::nullopt)
+	if (const std::optional<int> served = live ? live->BuildEdit(*edited) : std::nullopt)
 	{
 		spent = std::move(edited);
 		return *served;

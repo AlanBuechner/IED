@@ -33,6 +33,15 @@ namespace C4Compiler
 		return {};
 	}
 
+	std::vector<const FunctionRecord*> ProgramBackend::LoweredFunctions() const
+	{
+		std::vector<const FunctionRecord*> lowered;
+		if (!m_Lowered) return lowered;
+		for (const LoweredUnit& unit : m_Lowered->Program().units)
+			if (unit.kind == UnitKind::Function) lowered.push_back(unit.placedBy);
+		return lowered;
+	}
+
 	// Each round emits from the start into modules of its own: a partition found stale joins the ones emitted, until none
 	// left out is.
 	bool ProgramBackend::EmitAgain(ProgramModel& model, std::unique_ptr<llvm::LLVMContext>& context, std::vector<RetiredEmission>& retired,
@@ -76,6 +85,7 @@ namespace C4Compiler
 		if (!kept) return emitted;
 		const ProgramPlacement placement(model, m_Partitions);
 		for (const FunctionRecord* record : m_Changed) emitted[placement.Of(*record)] = true;
+		for (const SymbolInfo* global : m_ChangedStorage) emitted[placement.Of(*global)] = true;
 		for (unsigned i = 1; i < m_Partitions; ++i)
 			for (const FunctionRecord* copy : m_Facts[i].copies)
 				if (m_Changed.count(copy)) emitted[i] = true;
@@ -103,6 +113,7 @@ namespace C4Compiler
 		if (partial.Everything()) m_Image = m_Emitter->Reflection().KeepImage();
 		m_Emitted = partial.emitted;
 		m_Changed.clear();
+		m_ChangedStorage.clear();
 	}
 
 	bool ProgramBackend::LowerProgram(ProgramModel& model, std::string* errorMessage)

@@ -107,15 +107,16 @@ backend - between builds (`C4/src/Source.cpp` `ServeBuild`). Each build first pr
 a new compile that takes the last one's parses (registration, the macro and interop passes, `CompileAll`: a file whose
 text, macro layout and bindings are unchanged keeps its tree). Then:
 
-1. **Is it a body edit?** (`Serve/BodySwap` `SwapBodies`, `Serve/BodyEdits` `FindBodyEdit`). The same files of the same
-   projects are registered; every file parsed again has its declaration fingerprint, no parse error, and the same text
-   and tokens outside the bodies its own functions alone read (`BodyIsItsOwn`). When those tokens kept their lines and
+1. **Is it a body edit?** (`Serve/BodySwap` `SwapEdits`, `Serve/BodyEdits` `FindFileEdit`). The same files of the same
+   projects are registered; every file parsed again has no parse error, and the same text and tokens outside the bodies
+   its own functions alone read (`BodyIsItsOwn`) - and, since stage 2b, outside the bodies of inline functions and
+   templates and the initializers of its globals (below). When those tokens kept their lines and
    columns, every declaration keeps its place (only byte offsets after a longer or shorter body move, which nothing
    emitted reads). When a body gained or lost lines (or columns, on its last line), what follows it moved: that is
    served too when nothing but such functions and function declarations follows the first token that moved - their
    bodies are lowered again where they are now (`KeptDefinition::moved`), and a moved body's lambdas keep their
-   closures (`ProgramModel::ClosureBodiesMoved`) - and refused when a type, a global, an inline, `[compile_time]` or
-   template function, an annotated namespace or a `[test]` follows it, whose place the model or the test registry keeps
+   closures (`ProgramModel::ClosureBodiesMoved`) - and refused when a type, a global, a `[compile_time]` function, an
+   annotated namespace or a `[test]` follows it, whose place the model or the test registry keeps
    (the measured choice: lowering the moved bodies again costs milliseconds, a cold build in the server about 1.5 s on
    the IED server). A changed body writes no lambda and declares no local type or function (their model entries are its
    lowering's own), a moved one declares none.
@@ -147,9 +148,42 @@ text, macro layout and bindings are unchanged keeps its tree). Then:
    written and their objects looked up or assembled; the table, the interface and the link are made as a cold build
    makes them.
 
-Any other edit - a declaration, a lambda body, a line added before a type or a global, a parse error, a new template
-instance - is a cold build of the prepared sources in the same process, which then becomes the live build. A build
-whose kept object is gone emits every partition.
+Any other edit (stage 2b's below aside) - a declaration, a lambda body, a line added before a type or a global, a parse
+error, a new template instance - is a cold build of the prepared sources in the same process, which then becomes the
+live build. A build whose kept object is gone emits every partition.
+
+### Stage 2b as built
+
+The declaration edits whose effect on the model is known without re-resolving it are served on the same path; every
+other one is a cold build in the server.
+
+- **A global's value** (`Serve/ValueEdits`): the initializer of a variable of a namespace or a static member of a class
+  that is no template, folded to a value before (a constant, or a global's starting value) - written in place, the
+  rest of its own definition moving with it. Its symbol, and every global's of the edited files, takes the new
+  definition (`declNode`, `initializer`); it and every global whose initializer names it, on to the end, are folded
+  again as a cold build folds them (`FoldAgain`: folding is order-independent, a constant folding what it names on
+  demand) and must fold to a value of the kind they had; the partitions that hold their storage are emitted again
+  (`ProgramBackend::StorageChanged`; only the home partition starts a global with its value). Every place a changed
+  name is written is found - by word in every file's text, then by the lexer's tokens through the macro layout: in a
+  comment or a string it reads nothing; in a function body it makes that body's lowered functions readers, lowered
+  again (a template's instances, an inline function, a lambda's owner alike); in an initializer of a global folded
+  again, or naming such a global where it is declared, it is the fold's. Anywhere else the edit is a cold build: a
+  type's extent, a field's initializer, a parameter's default, an annotation, a macro or a directive, the body of a
+  `[compile_time]` function (a constant may run it), a global that starts at run time. A name is matched as a word
+  wherever it is declared, so a reader of another of that name is lowered again too, which changes nothing; the
+  readers' bodies must name the same template instances with the new values (`TypeInstancesNamedIn`).
+- **An inline function's body**: lowered again like an own body; the partitions that copy it are emitted again with
+  it (their facts say they copy it). No constant runs it: a `[compile_time]` function calls only its kind.
+- **A template's body** (a function template's, a class template's method's): each of its instances the build lowered
+  is lowered again from the new body; one nothing reached stays unlowered (what reaches a function is the lowered
+  bodies' needs). An instance is lowered after the first pass, where the reach comparison does not look, so it must
+  need what it needed (`ProgramLowering::LaterNeedsDiffer`).
+
+What stays a cold build, and why: a signature (the record's types, its name - which places it in a partition - and
+the reflection image and invoke thunks, which a whole emission makes), a field or a type (layouts reach every user),
+an alias, an include (what is visible), a macro (every file's tokens through it), an annotation (reflection), a
+`[compile_time]` function's body (the constants it folds), a function or a global added or removed (the order and
+the names of everything after it).
 
 ### Measured
 
@@ -165,21 +199,28 @@ toolchain with this stage; each edit is undone by the next).
 | first build (cold in both) | 17.1-20.2 / 14.3-14.8 | 4.74 / 3.58 | 28.8 / 26.1 | 13.2 / 9.6 |
 | a string in a body | 2.21-2.41 / 0.99-1.08 | 1.71-1.73 / 0.70-0.73 | 4.98-5.23 / 2.44-2.61 | 3.34-3.47 / 1.28-1.32 |
 | a line added to a body, removed again (moved bodies) | 2.85 / 1.63 | 1.72-1.73 / 0.73-0.74 | 4.33-4.64 / 1.84-2.33 | 3.37 / 1.30-1.33 |
-| a header constant (cold in the server) | 2.93-3.66 / 2.67-2.85 | 1.78-1.91 / 1.54-1.64 | 5.35-5.43 / 4.83-4.92 | 3.35-3.38 / 3.01-3.02 |
+| a header constant (stage 2b: its readers lowered again) | 2.88-2.95 / 1.74-1.79 | 1.74-1.75 / 0.83-0.84 | 4.61-4.66 / 2.22-2.38 | 3.35-3.37 / 1.36-1.37 |
+| a header constant before stage 2b (cold in the server) | 2.93-3.66 / 2.67-2.85 | 1.78-1.91 / 1.54-1.64 | 5.35-5.43 / 4.83-4.92 | 3.35-3.38 / 3.01-3.02 |
+| a signature: a parameter widened, `int32` to `int64` (cold in the server) | 2.58-2.82 / 2.34-2.43 | 1.93-2.03 / 1.74-1.82 | 5.66-5.89 / 5.19-5.23 | 4.39-4.40 / 3.86-3.89 |
 
 IED server: `-Edits "src/web/Rpc.cf|unknown method '|unknown method: '~~..."` with `-ArgsFile
 build/int/Development-windows-x64/ied-server/compile.args` (`-Opt O0` for `-O0`); Claymore's editor:
 `Claymore/Editor/src/Editor/Mcp/McpServer.cf|the body is no JSON|the body is not JSON` (`McpServer::Answer`), a line
-added after `out.AppendInt(code);` (`Failure`), and `McpServer.ch|c_CallTimeoutMs = 20000|c_CallTimeoutMs = 20001`.
-A served body edit is the front end's parse of the edited file, the bodies, the emission of their partitions (a few),
-the edited partition's optimizer and the link; a declaration edit served cold saves the process and the unchanged
-files' parses (0.3-0.5 s). The same edits with `-fstack-maps` give the same bytes too. Between builds the server holds
-its last build: the IED server's is 6.4 GB committed and 3.7 GB in use at `-O3` (5.5 / 2.9 GB at `-O0`).
+added after `out.AppendInt(code);` (`Failure`), `McpServer.ch|c_CallTimeoutMs = 20000|c_CallTimeoutMs = 20001`, and
+`McpServer.cf|int32 code, Core::StringView message|int64 code, Core::StringView message`; the IED server's header
+constant is `src/web/Frames.ch|c_ProtocolVersion = 1|...` (read in two bodies; another global of its name, in
+`plugins/mcp`, is lowered again with them) and its signature `src/web/Proxy.cf|UpstreamUrl(int32 port|UpstreamUrl(int64
+port`. A served body edit is the front end's parse of the edited file, the bodies, the emission of their partitions (a
+few), the edited partition's optimizer and the link; a value edit is that for its readers and the constant's home
+partition; a declaration edit served cold saves the process and the unchanged files' parses (0.2-0.7 s). The same edits
+with `-fstack-maps` give the same bytes too. Between builds the server holds its last build: the IED server's is 6.0-6.4
+GB committed, 3.7-5.2 GB in use at `-O3` (4.7-5.5 / 2.9-4.0 GB at `-O0`), Claymore's editor's 9.1 / 7.9 GB (`-O0`: 7.4 /
+6.2 GB).
 
-**Stage 2b (declaration edits): not built.** The plan was: `DeclarationQueries` records which declaration asked for
-which (the `Ask` edges); a changed fingerprint re-resolves its file's declarations and, transitively, those that asked
-for them; a body re-lowers when a declaration it read changed. Building 2a showed what exactness asks of it beyond
-those edges, each a piece of its own:
+**The rest of stage 2b: not built.** The plan was: `DeclarationQueries` records which declaration asked for which (the
+`Ask` edges); a changed fingerprint re-resolves its file's declarations and, transitively, those that asked for them; a
+body re-lowers when a declaration it read changed. Building 2a and the value edits showed what exactness asks of it
+beyond those edges, each a piece of its own:
 
 - **Order and names.** The model's records, types and scopes are in registration order (files, then declarations), and
   a request's answer takes its place and its `_<n>` in the phase it is made in. A declaration added, removed or changed
@@ -193,8 +234,8 @@ those edges, each a piece of its own:
 - **What was made from it.** Template instances of an edited template, or with an edited type among their arguments,
   and everything their making made; constants folded from an edited constant and the layouts they sized.
 
-So a declaration edit is a cold build in the server today: it keeps the parses of the files the edit did not touch and
-pays no process start (measured above). The first case worth building is the commonest declaration edit of a `.cf`
+So any other declaration edit is a cold build in the server today: it keeps the parses of the files the edit did not
+touch and pays no process start (measured above). The first case worth building is the commonest declaration edit of a `.cf`
 file - a function added - which needs its record registered at its place, its overload set's other callers re-lowered,
 and partition 0's declarations emitted again.
 

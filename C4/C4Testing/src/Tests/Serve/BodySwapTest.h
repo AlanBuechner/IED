@@ -5,9 +5,10 @@
 
 namespace Testing
 {
-	// A build server's body edit (Serve/BodyEdits, Serve/BodySwap, ProgramLowering::Relower; docs/compiler/07 stage 2a):
-	// which edits change only bodies their own functions read, and that the program lowered again from such an edit emits
-	// the cold build's IR, partition for partition - or the edit is refused with why.
+	// A build server's edit (Serve/BodyEdits, Serve/ValueEdits, Serve/BodySwap, ProgramLowering::Relower; docs/compiler/07
+	// stages 2a, 2b): which edits change only bodies their own functions read and the values of globals, and that the
+	// program lowered again from such an edit emits the cold build's IR, partition for partition - or the edit is refused
+	// with why.
 	CLASS(GROUP = Testing) BodySwapTest : public Test
 	{
 	public:
@@ -28,8 +29,29 @@ namespace Testing
 		TEST_FUNC(Serve.BodyEdits)
 		void ABodyThatDoesNotParseIsNone();
 		TEST_FUNC(Serve.BodyEdits)
-		void AnInlineBodyIsNone();
+		void AnInlineBodyIsABodyEdit();
+		TEST_FUNC(Serve.BodyEdits)
+		void AGlobalsValueIsAValueEdit();
+		TEST_FUNC(Serve.BodyEdits)
+		void AValueOfADeclarationIsNone();
 
+		TEST_FUNC(Serve.ValueSwap)
+		void AConstantsValueEmitsTheColdBuild();
+		TEST_FUNC(Serve.ValueSwap)
+		void EveryKindOfValueEmitsTheColdBuild();
+		TEST_FUNC(Serve.ValueSwap)
+		void AValueAndABodyInOneEditEmitTheColdBuild();
+		TEST_FUNC(Serve.ValueSwap)
+		void AValueACommentNamesIsServed();
+		TEST_FUNC(Serve.ValueSwap)
+		void AValueReadOutsideABodyIsRefused();
+		TEST_FUNC(Serve.ValueSwap)
+		void AValueEditEmitsOnlyThePartitionsItChanges();
+
+		TEST_FUNC(Serve.BodySwap)
+		void AnInlineBodyEmitsTheColdBuild();
+		TEST_FUNC(Serve.BodySwap)
+		void ATemplatesBodyEmitsTheColdBuild();
 		TEST_FUNC(Serve.BodySwap)
 		void AStatementEditEmitsTheColdBuild();
 		TEST_FUNC(Serve.BodySwap)

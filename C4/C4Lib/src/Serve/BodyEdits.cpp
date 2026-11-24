@@ -3,17 +3,26 @@
 #include "Lexer/Lexer.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/NamespaceNode.h"
+#include "Parser/Nodes/Declarations/ObjectDefinitionNode.h"
+#include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
+#include <algorithm>
 
 namespace C4Compiler
 {
 	namespace
 	{
-		// The bytes [begin, end) of a body in its file.
+		// What a span of the file holds: a body its own function alone reads, or a global's initializer.
+		enum class SpanKind { Body, Value };
+
+		// The bytes [begin, end) of a body or an initializer in its file, and whose it is (an index into the file's
+		// definitions or globals).
 		struct Span
 		{
 			uint32 begin = 0;
 			uint32 end = 0;
+			SpanKind kind = SpanKind::Body;
+			size_t owner = 0;
 		};
 
 		// A token as the lexer reads it through the file's macro layout.
@@ -24,31 +33,103 @@ namespace C4Compiler
 			SourceLocation at;
 		};
 
-		BodyEdit Refused(std::string why)
+		// What a variable definition is where it stands: a global of a namespace, a member of a class (a static one is a
+		// global), or neither.
+		enum class Place { Namespace, Class, Other };
+
+		// The file's function definitions and globals in its order, with the spans of the bodies their own functions
+		// alone read and of the globals' initializers.
+		struct Layout
 		{
-			BodyEdit edit;
+			std::vector<const FunctionDefinitionNode*> definitions;
+			std::vector<const VariableDefinitionNode*> globals;
+			std::vector<Span> spans;
+			std::string refusal;
+		};
+
+		FileEdit Refused(std::string why)
+		{
+			FileEdit edit;
 			edit.refusal = std::move(why);
 			return edit;
 		}
 
-		// A file's function definitions in its order; one a body declares is that body's.
-		void CollectDefinitions(const AstNode& node, std::vector<const FunctionDefinitionNode*>& out)
+		bool MacroPlaced(const AstNode& node)
+		{
+			return node.startLocation.expansion || node.endLocation.expansion;
+		}
+
+		// A body whose edit lowering its functions again serves: one its own lowering alone reads, an inline function's,
+		// which the partitions that copy it take from its lowered function, and a template's, each of whose lowered
+		// instances is lowered again - but a [compile_time] function's, which constants run (and which alone calls its
+		// kind, so no constant runs another body).
+		bool BodyIsServed(const FunctionDefinitionNode& fn)
+		{
+			return fn.IsDefinition() && !IsCompileTime(fn);
+		}
+
+		void AddDefinition(Layout& layout, const FunctionDefinitionNode& fn)
+		{
+			layout.definitions.push_back(&fn);
+			if (!BodyIsServed(fn)) return;
+			const AstNode& body = *fn.GetBody();
+			if (MacroPlaced(body)) layout.refusal = "a macro writes a body";
+			layout.spans.push_back({ body.startLocation.byteOffset, body.endLocation.byteOffset, SpanKind::Body, layout.definitions.size() - 1 });
+		}
+
+		// An initializer a macro writes has no span: an edit of it is an edit outside.
+		void AddGlobal(Layout& layout, const VariableDefinitionNode& var)
+		{
+			layout.globals.push_back(&var);
+			for (const Declarator& declarator : var.GetDeclarators())
+				if (declarator.m_Initializer && !MacroPlaced(*declarator.m_Initializer))
+					layout.spans.push_back({ declarator.m_Initializer->startLocation.byteOffset, declarator.m_Initializer->endLocation.byteOffset,
+						SpanKind::Value, layout.globals.size() - 1 });
+		}
+
+		// A class template's static members belong to its instances: they are no globals of the file.
+		Place PlaceIn(const AstNode& node)
+		{
+			if (node.Type() == NodeType::Namespace) return Place::Namespace;
+			if (node.Type() == NodeType::ObjectDefinition)
+				return static_cast<const ObjectDefinitionNode&>(node).GetTemplateDefinition() ? Place::Other : Place::Class;
+			return Place::Other;
+		}
+
+		// A body declares nothing the file's layout holds: a function's own definitions are its body's.
+		void Collect(Layout& layout, const AstNode& node, Place place)
 		{
 			if (node.Type() == NodeType::FunctionDefinition)
 			{
-				out.push_back(static_cast<const FunctionDefinitionNode*>(&node));
+				AddDefinition(layout, static_cast<const FunctionDefinitionNode&>(node));
 				return;
 			}
+			if (node.Type() == NodeType::VariableDefinition)
+			{
+				const auto& var = static_cast<const VariableDefinitionNode&>(node);
+				if (place == Place::Namespace || (place == Place::Class && var.IsStatic())) AddGlobal(layout, var);
+				return;
+			}
+			const Place inner = PlaceIn(node);
 			for (const Ref<AstNode>& child : node.Children())
-				if (child) CollectDefinitions(*child, out);
+				if (child) Collect(layout, *child, inner);
 		}
 
-		std::vector<const FunctionDefinitionNode*> DefinitionsOf(const CompilationUnit& unit)
+		Layout LayoutOf(const CompilationUnit& unit)
 		{
-			std::vector<const FunctionDefinitionNode*> definitions;
+			Layout layout;
 			for (const Ref<AstNode>& child : unit.GetOriginalChildren())
-				if (child) CollectDefinitions(*child, definitions);
-			return definitions;
+				if (child) Collect(layout, *child, Place::Namespace);
+			std::stable_sort(layout.spans.begin(), layout.spans.end(), [](const Span& a, const Span& b) { return a.begin < b.begin; });
+			return layout;
+		}
+
+		bool SameSpans(const std::vector<Span>& a, const std::vector<Span>& b)
+		{
+			if (a.size() != b.size()) return false;
+			for (size_t i = 0; i < a.size(); ++i)
+				if (a[i].kind != b[i].kind || a[i].owner != b[i].owner) return false;
+			return true;
 		}
 
 		std::vector<ReadToken> TokensOf(const CompilationUnit& unit)
@@ -94,28 +175,6 @@ namespace C4Compiler
 			for (const Ref<AstNode>& child : node.Children())
 				if (child && MakesItsOwn(*child)) return true;
 			return false;
-		}
-
-		// The bodies their own functions alone read, as spans of the file, each with its definition's index; or why a
-		// body does not keep its place.
-		std::string OwnBodies(const std::vector<const FunctionDefinitionNode*>& was, const std::vector<const FunctionDefinitionNode*>& is,
-			std::vector<size_t>& owners, std::vector<Span>& wasSpans, std::vector<Span>& isSpans)
-		{
-			for (size_t i = 0; i < was.size(); ++i)
-			{
-				const bool own = BodyIsItsOwn(*was[i]);
-				if (own != BodyIsItsOwn(*is[i])) return "a function's kind changed";
-				if (!own) continue;
-				const SourceLocation& start = was[i]->GetBody()->startLocation;
-				const SourceLocation& end = was[i]->GetBody()->endLocation;
-				const SourceLocation& newStart = is[i]->GetBody()->startLocation;
-				const SourceLocation& newEnd = is[i]->GetBody()->endLocation;
-				if (start.expansion || end.expansion || newStart.expansion || newEnd.expansion) return "a macro writes a body";
-				owners.push_back(i);
-				wasSpans.push_back({ start.byteOffset, end.byteOffset });
-				isSpans.push_back({ newStart.byteOffset, newEnd.byteOffset });
-			}
-			return {};
 		}
 
 		// The tokens outside the spans, and those of each span.
@@ -164,11 +223,23 @@ namespace C4Compiler
 			return true;
 		}
 
-		// Where (in the file before) the first token outside the bodies moved; the tokens are the same.
-		SourceLocation FirstMoved(const std::vector<ReadToken>& was, const std::vector<ReadToken>& is)
+		bool Within(const AstNode& node, uint32 byteOffset)
+		{
+			return byteOffset >= node.startLocation.byteOffset && byteOffset < node.endLocation.byteOffset;
+		}
+
+		// Where (in the file before) the first token outside the bodies and initializers moved, the rest of an edited
+		// global's own definition left out (the global takes its new definition); the tokens are the same.
+		SourceLocation FirstMoved(const std::vector<ReadToken>& was, const std::vector<ReadToken>& is, const FileEdit& edit)
 		{
 			for (size_t i = 0; i < was.size(); ++i)
-				if (!SamePlace(was[i].at, is[i].at)) return was[i].at;
+			{
+				if (SamePlace(was[i].at, is[i].at)) continue;
+				const bool ownDefinition = std::any_of(edit.globals.begin(), edit.globals.end(), [&](const KeptGlobal& global) {
+					return global.valueChanged && Within(*global.before, was[i].at.byteOffset);
+				});
+				if (!ownDefinition) return was[i].at;
+			}
 			return {};
 		}
 
@@ -177,17 +248,17 @@ namespace C4Compiler
 			return a.line < b.line || (a.line == b.line && a.column <= b.column);
 		}
 
-		// What may follow a line a body edit added or removed: functions whose own lowering alone reads their bodies, which
-		// are lowered again where they are now, and declarations of functions - whose places nothing emits but their
-		// records, which take the new definitions. A type, a global, a template or the like that moved would keep its old
-		// place in the model, which debug information and reflection's scope read.
+		// What may follow a line a body edit added or removed: functions whose bodies a served edit lowers again, which are
+		// lowered again where they are now, and declarations of functions - whose places nothing emits but their records,
+		// which take the new definitions. A type, a global, a template or the like that moved would keep its old place in the
+		// model, which debug information and reflection's scope read.
 		std::string OnlyFunctionsAfter(const AstNode& node, const SourceLocation& moved)
 		{
 			if (Before(node.endLocation, moved)) return {};
 			if (node.Type() == NodeType::FunctionDefinition)
 			{
 				const auto& fn = static_cast<const FunctionDefinitionNode&>(node);
-				return fn.IsDefinition() && !BodyIsItsOwn(fn) ? "an inline, [compile_time] or template function follows a moved line" : std::string();
+				return fn.IsDefinition() && !BodyIsServed(fn) ? "a [compile_time] or template function follows a moved line" : std::string();
 			}
 			if (node.Type() != NodeType::Namespace) return "a declaration other than a function follows a moved line";
 			if (!static_cast<const NamespaceNode&>(node).GetAnnotations().Empty()) return "an annotated namespace holds a moved line";
@@ -196,46 +267,59 @@ namespace C4Compiler
 					if (std::string why = OnlyFunctionsAfter(*child, moved); !why.empty()) return why;
 			return {};
 		}
+
+		// A changed span's body or global. An initializer whose tokens only moved is no value edit: its definition moved with
+		// what is around it, which the moved line's rule decides.
+		std::string Changed(FileEdit& edit, const Span& span, const std::vector<ReadToken>& was, const std::vector<ReadToken>& is)
+		{
+			if (span.kind == SpanKind::Value)
+			{
+				if (!SameText(was, is)) edit.globals[span.owner].valueChanged = true;
+				return {};
+			}
+			KeptDefinition& kept = edit.definitions[span.owner];
+			kept.bodyChanged = true;
+			kept.moved = SameText(was, is);
+			if (!kept.moved && (MakesItsOwn(*kept.before->GetBody()) || MakesItsOwn(*kept.after->GetBody())))
+				return "a changed body writes a lambda or declares a local type or function";
+			if (kept.moved && DeclaresLocals(*kept.before->GetBody())) return "a moved body declares a local type or function";
+			return {};
+		}
 	}
 
-	BodyEdit FindBodyEdit(const CompilationUnit& before, const CompilationUnit& after)
+	FileEdit FindFileEdit(const CompilationUnit& before, const CompilationUnit& after)
 	{
 		if (!before.GetSource() || !after.GetSource()) return Refused("it has no text");
 		if (after.GetErrorTracker().HasErrors()) return Refused("it does not parse");
-		if (before.Fingerprint() != after.Fingerprint()) return Refused("its declarations changed");
-		const std::vector<const FunctionDefinitionNode*> was = DefinitionsOf(before);
-		const std::vector<const FunctionDefinitionNode*> is = DefinitionsOf(after);
-		if (was.size() != is.size()) return Refused("its functions changed");
-		std::vector<size_t> owners;
-		std::vector<Span> wasSpans, isSpans;
-		if (std::string why = OwnBodies(was, is, owners, wasSpans, isSpans); !why.empty()) return Refused(why);
+		const Layout was = LayoutOf(before);
+		const Layout is = LayoutOf(after);
+		if (!was.refusal.empty()) return Refused(was.refusal);
+		if (!is.refusal.empty()) return Refused(is.refusal);
+		if (was.definitions.size() != is.definitions.size()) return Refused("its functions changed");
+		if (was.globals.size() != is.globals.size()) return Refused("its globals changed");
+		if (!SameSpans(was.spans, is.spans)) return Refused("a function's kind or a global's initializers changed");
 
 		std::vector<ReadToken> wasOutside, isOutside;
-		std::vector<std::vector<ReadToken>> wasBodies, isBodies;
-		Split(TokensOf(before), wasSpans, wasOutside, wasBodies);
-		Split(TokensOf(after), isSpans, isOutside, isBodies);
-		if (!SameText(wasOutside, isOutside)) return Refused("its tokens outside the bodies changed");
-		if (TextOutside(before.GetSource()->Text(), wasSpans) != TextOutside(after.GetSource()->Text(), isSpans))
-			return Refused("its text outside the bodies changed");
+		std::vector<std::vector<ReadToken>> wasInside, isInside;
+		Split(TokensOf(before), was.spans, wasOutside, wasInside);
+		Split(TokensOf(after), is.spans, isOutside, isInside);
+		if (!SameText(wasOutside, isOutside)) return Refused("its declarations changed");
+		if (TextOutside(before.GetSource()->Text(), was.spans) != TextOutside(after.GetSource()->Text(), is.spans))
+			return Refused("its text outside the bodies and initializers changed");
 
-		BodyEdit edit;
+		FileEdit edit;
+		for (size_t i = 0; i < was.definitions.size(); ++i) edit.definitions.push_back({ was.definitions[i], is.definitions[i], false, false });
+		for (size_t i = 0; i < was.globals.size(); ++i) edit.globals.push_back({ was.globals[i], is.globals[i], false });
+		for (size_t span = 0; span < was.spans.size(); ++span)
+			if (!SameTokens(wasInside[span], isInside[span]))
+				if (std::string why = Changed(edit, was.spans[span], wasInside[span], isInside[span]); !why.empty()) return Refused(why);
 		if (!SameTokens(wasOutside, isOutside))
 		{
-			edit.movedFrom = FirstMoved(wasOutside, isOutside);
-			for (const Ref<AstNode>& child : before.GetOriginalChildren())
-				if (child)
-					if (std::string why = OnlyFunctionsAfter(*child, edit.movedFrom); !why.empty()) return Refused(why);
-		}
-		for (size_t i = 0; i < was.size(); ++i) edit.definitions.push_back({ was[i], is[i], false, false });
-		for (size_t body = 0; body < owners.size(); ++body)
-		{
-			if (SameTokens(wasBodies[body], isBodies[body])) continue;
-			KeptDefinition& kept = edit.definitions[owners[body]];
-			kept.bodyChanged = true;
-			kept.moved = SameText(wasBodies[body], isBodies[body]);
-			if (!kept.moved && (MakesItsOwn(*kept.before->GetBody()) || MakesItsOwn(*kept.after->GetBody())))
-				return Refused("a changed body writes a lambda or declares a local type or function");
-			if (kept.moved && DeclaresLocals(*kept.before->GetBody())) return Refused("a moved body declares a local type or function");
+			edit.movedFrom = FirstMoved(wasOutside, isOutside, edit);
+			if (edit.movedFrom.line)
+				for (const Ref<AstNode>& child : before.GetOriginalChildren())
+					if (child)
+						if (std::string why = OnlyFunctionsAfter(*child, edit.movedFrom); !why.empty()) return Refused(why);
 		}
 		return edit;
 	}

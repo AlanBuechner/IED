@@ -360,11 +360,13 @@ build as `C4.exe <the command line> --serve-on c4-serve-<hash> --serve-stamp <th
 --serve-idle 1800`, a process of its own outside the build's job, asked over the named pipe `\\.\pipe\c4-serve-<hash>`
 (a Unix socket in the temporary folder on Linux). It answers with the compile's output and its exit code, as a
 one-shot compile would, and the stamp and the rest of the rebuild check work as above. An edit that changed only
-function bodies is lowered and emitted again in the server for the bodies it changed alone; any other edit is a cold
-compile there, which still reuses the parses of the files it did not change. A server of a compiler since rebuilt
+function bodies and the values of globals is lowered and emitted again in the server for the bodies it changed and
+those that read a changed value alone; any other edit is a cold compile there, which still reuses the parses of the
+files it did not change. A server of a compiler since rebuilt
 answers `stale` and ends, and a new one starts; one idle for half an hour ends, and `nuke clean` ends the servers of
-the programs it cleans. Until it ends a server keeps its last build in memory (the IED server's: 6.4 GB committed,
-3.7 GB in use at Development; 5.5 / 2.9 GB at Debug) and its project folder open (Windows will not delete the folder):
+the programs it cleans. Until it ends a server keeps its last build in memory (the IED server's: about 6 GB committed,
+4-5 GB in use at Development, 5 / 3-4 GB at Debug; Claymore's editor's 9 / 8 GB at Development) and its project folder
+open (Windows will not delete the folder):
 end it with `nuke clean` before removing a checkout. When no server answers the program is compiled one-shot. Test harnesses (`nuke test`) and
 Dist always compile one-shot.
 

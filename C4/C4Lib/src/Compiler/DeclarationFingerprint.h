@@ -11,6 +11,9 @@ namespace C4Compiler
 	/// [compile_time] one, and each instance of a template lowers the template's.
 	bool BodyIsItsOwn(const FunctionDefinitionNode& fn);
 
+	/// Whether the function is `[compile_time]`: a constant's initializer may call it, which runs its body.
+	bool IsCompileTime(const FunctionDefinitionNode& fn);
+
 	/// A file's declaration fingerprint (docs/compiler/07, stage 2a): a hash of its tokens - as the macro pass expanded them,
 	/// without their places - outside the bodies of the functions whose body only their own lowering reads: not `inline`,
 	/// not `[compile_time]`, not of a template. Two parses of a file with the same fingerprint declare the same things, so

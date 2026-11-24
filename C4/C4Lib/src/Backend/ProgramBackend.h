@@ -69,6 +69,12 @@ namespace C4Compiler
 		/// hold now. Empty when the program is now what a cold build of the edit lowers; otherwise why not (ProgramLowering::
 		/// Relower), and the backend is spent: a cold build follows.
 		std::string Relower(const std::vector<const FunctionRecord*>& records);
+	/// After Lower: the functions lowered as functions (written, made from a template, written by the compiler), in the
+	/// order they were lowered.
+	std::vector<const FunctionRecord*> LoweredFunctions() const;
+	/// A build server's value edit (docs/compiler/07 stage 2b): `globals` start with other values now, so the next
+	/// EmitAgain emits the partitions that hold their storage.
+	void StorageChanged(const std::vector<SymbolInfo*>& globals) { m_ChangedStorage.insert(globals.begin(), globals.end()); }
 		/// After Relower: the program emitted again, partition 0 into a context of its own that `context` takes. With partition
 		/// facts kept, only the partitions the lowered-again bodies change are emitted, and those whose facts say they would
 		/// come out otherwise now; the others are as the build before left them (Emitted). The emissions replaced go to
@@ -101,8 +107,8 @@ namespace C4Compiler
 		/// Emits what m_Lowered lowered with m_Emitter (only `partial`'s partitions, when given); its diagnostics follow
 		/// lowering's.
 		bool Emit(ProgramModel& model, std::string* errorMessage, PartialEmission* partial);
-		/// EmitAgain: the partitions emitted first - those holding what Relower lowered again, and those that copied it; every
-		/// one when no facts are kept.
+		/// EmitAgain: the partitions emitted first - those holding what Relower lowered again, those that copied it, and those
+		/// holding the storage of the globals StorageChanged named; every one when no facts are kept.
 		std::vector<bool> FirstEmitted(const ProgramModel& model) const;
 		/// EmitAgain: the stale partitions `partial` found are emitted too (all, with partition 0); whether there were any.
 		static bool Widen(PartialEmission& partial);
@@ -121,6 +127,7 @@ namespace C4Compiler
 		std::vector<PartitionFacts> m_Facts;               // by partition, from the emission that last emitted it
 		std::shared_ptr<const KeptImage> m_Image;          // the reflection image the last whole emission kept apart
 		std::unordered_set<const FunctionRecord*> m_Changed; // what Relower lowered again since the last emission
+	std::unordered_set<const SymbolInfo*> m_ChangedStorage; // the globals StorageChanged named since the last emission
 		std::vector<bool> m_Emitted;                       // by partition: what the last emission emitted
 		ErrorTracker m_Errors;
 		std::vector<std::pair<const char*, double>> m_StepSeconds;

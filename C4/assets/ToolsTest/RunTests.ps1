@@ -881,11 +881,19 @@ int32 main()
 
 # The edit kinds of docs/compiler/07's invalidation table, built in turn by one --serve process and by a cold build each:
 # every served build writes the cold build's objects, executable (but the link's stamps) and script interface, and an
-# edit of bodies alone is served by lowering those bodies again ('bodies again' among the phases), any other cold.
+# edit of bodies and of globals' values alone is served by lowering bodies again ('bodies again' among the phases), any
+# other cold.
 function Test-ServedBuilds {
     $header = @'
 #define FACTOR 2
 const int32 c_Base = 10;
+const int32 c_Size = 2;
+const int32 c_Macro = 1;
+#define MACRO_VALUE c_Macro
+class Limits
+{
+	public static const int32 k_Max = 9;
+}
 inline int32 Clamp(int32 v) { return v < 0 ? 0 : v; }
 template<T> T Larger(T a, T b) { return a > b ? a : b; }
 [compile_time] int32 Square(int32 v) { return v * v; }
@@ -908,10 +916,12 @@ int32 Pick(int32 a, int32 b) { return Larger<int32>(a, b); }
 int32 Edited(int32 v) { return v + 1; }
 int32 Lambda() { funcptr<int32()> f = []() -> int32 { return 4; }; return f(); }
 int32[Square(2)] g_Table;
+int32[c_Size] g_Sized;
+int32 g_Start = 3;
 int32 main()
 {
 	Shape s;
-	return Twice(1) + Pick(2, 3) + Edited(4) + Lambda() + Clamp(-1) + c_Base + s.Corners() + g_Table[0];
+	return Twice(1) + Pick(2, 3) + Edited(4) + Lambda() + Clamp(-1) + c_Base + s.Corners() + g_Table[0] + g_Sized[0] + g_Start + Limits::k_Max + MACRO_VALUE;
 }
 '@
     $dir = New-Sources "served" @{ "src/lib.ch" = $header; "src/extra.ch" = "int32 Extra();`n"; "src/twice.cf" = $twice; "src/main.cf" = $main }
@@ -926,9 +936,14 @@ int32 main()
         @{ file = "twice.cf"; from = "v * 3"; to = "v * 4"; served = $true; what = "a statement of another file" },
         @{ file = "twice.cf"; from = "{ return v * FACTOR; }"; to = "{`n`treturn v * FACTOR;`n}"; served = $true; what = "lines added before another function" },
         @{ file = "lib.ch"; from = "#define FACTOR 2"; to = "#define FACTOR 5"; served = $false; what = "a macro only a body uses" },
-        @{ file = "lib.ch"; from = "c_Base = 10"; to = "c_Base = 11"; served = $false; what = "a constant" },
-        @{ file = "lib.ch"; from = "v < 0 ? 0 : v"; to = "v < 1 ? 1 : v"; served = $false; what = "an inline body" },
-        @{ file = "lib.ch"; from = "a > b ? a : b"; to = "a >= b ? a : b"; served = $false; what = "a template's body" },
+        @{ file = "lib.ch"; from = "c_Base = 10"; to = "c_Base = 11"; served = $true; what = "a constant" },
+        @{ file = "lib.ch"; from = "c_Base = 11"; to = "c_Base = 1100"; served = $true; what = "a longer constant" },
+        @{ file = "lib.ch"; from = "k_Max = 9"; to = "k_Max = 90"; served = $true; what = "a static member's value" },
+        @{ file = "main.cf"; from = "g_Start = 3"; to = "g_Start = 4"; served = $true; what = "a global's starting value" },
+        @{ file = "lib.ch"; from = "c_Size = 2"; to = "c_Size = 3"; served = $false; what = "a constant an array's size reads" },
+        @{ file = "lib.ch"; from = "c_Macro = 1"; to = "c_Macro = 2"; served = $false; what = "a constant a macro names" },
+        @{ file = "lib.ch"; from = "v < 0 ? 0 : v"; to = "v < 1 ? 1 : v"; served = $true; what = "an inline body" },
+        @{ file = "lib.ch"; from = "a > b ? a : b"; to = "a >= b ? a : b"; served = $true; what = "a template's body" },
         @{ file = "lib.ch"; from = "return v * v;"; to = "return v * v + 0;"; served = $false; what = "a [compile_time] body" },
         @{ file = "lib.ch"; from = "public int32 sides = 3;"; to = "public int32 sides = 4; public int32 extra;"; served = $false; what = "a field" },
         @{ file = "main.cf"; from = "return 4; };"; to = "return 5; };"; served = $false; what = "a lambda's body" },

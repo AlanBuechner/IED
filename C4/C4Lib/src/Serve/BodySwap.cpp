@@ -3,10 +3,14 @@
 #include "Model/Builder/ModelResolver.h"
 #include "Parser/Nodes/Declarations/FunctionDefinitionNode.h"
 #include "Parser/Nodes/Declarations/ParameterNode.h"
+#include "Parser/Nodes/Declarations/VariableDefinitionNode.h"
 #include "Parser/Nodes/Expressions/LambdaNode.h"
 #include "Parser/Nodes/Statements/CodeBlockNode.h"
 #include "Serve/BodyEdits.h"
+#include "Serve/ValueEdits.h"
+#include <set>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace C4Compiler
 {
@@ -112,6 +116,75 @@ namespace C4Compiler
 			return {};
 		}
 
+		// The symbols of the globals each of `globals` defines (a definition's `before` node), static members too.
+		std::unordered_map<const AstNode*, std::vector<SymbolInfo*>> SymbolsOf(const ProgramModel& model, const std::vector<const KeptGlobal*>& globals)
+		{
+			std::unordered_map<const AstNode*, std::vector<SymbolInfo*>> symbols;
+			for (const KeptGlobal* kept : globals) symbols.emplace(kept->before, std::vector<SymbolInfo*>{});
+			model.Symbols()->ForEachScopedSymbol([&](const Core::String&, SymbolInfo* info, const Scope&) {
+				if (info->kind != SymbolKind::Variable) return;
+				if (const auto found = symbols.find(info->declNode); found != symbols.end()) found->second.push_back(info);
+			});
+			return symbols;
+		}
+
+		// A global whose new value an edit serves: one its initializer folded to a value, which its storage starts with and
+		// lowering reads where it is named.
+		std::string ServedValue(const SymbolInfo& global)
+		{
+			const std::string name = (global.plainName.empty() ? global.mangledName : global.plainName).c_str();
+			if (!global.linkSymbol.empty() || !global.initializer) return "'" + name + "' has no value of its own";
+			if (global.constValue.IsNone()) return "'" + name + "' starts at run time";
+			return {};
+		}
+
+		// `global` reads `kept`'s new definition where it read the old: its declaration and its initializer.
+		void PointAtNew(SymbolInfo& global, const KeptGlobal& kept)
+		{
+			const auto& was = kept.before->GetDeclarators();
+			const auto& is = kept.after->GetDeclarators();
+			global.declNode = kept.after;
+			for (uint32 i = 0; i < was.Count() && i < is.Count(); ++i)
+				if (global.initializer && global.initializer == was[i].m_Initializer.Get()) global.initializer = is[i].m_Initializer.Get();
+		}
+
+		// The template instances the model's pass that opens bodies makes for each of `readers`' bodies, in its order.
+		std::vector<std::vector<const Type*>> InstancesNamed(ProgramModel& model, const std::vector<const FunctionRecord*>& readers)
+		{
+			std::set<std::pair<const AstNode*, uint32>> opened;
+			std::vector<std::vector<const Type*>> named;
+			for (const FunctionRecord* reader : readers)
+				if (reader->bodyNode && reader->bodyNode->Type() == NodeType::CodeBlock && opened.emplace(reader->bodyNode, reader->LookupUnit()).second)
+					named.push_back(ModelResolver::TypeInstancesNamedIn(model, reader->bodyNode, reader->LookupUnit()));
+			return named;
+		}
+
+		// docs/compiler/07 stage 2b: the edited globals and those folded from them folded again, their storage's partitions
+		// emitted again, and the lowered bodies that read one of them joining `relowered` - when a cold build would make the
+		// same of them (ReachOfValues, FoldAgain) and the bodies name the template instances they named.
+		std::string ServeValues(const CompilerInstance& live, ProgramModel& model, ProgramBackend& backend, const std::vector<SymbolInfo*>& edited,
+			const std::vector<const FunctionRecord*>& lowered, std::vector<const FunctionRecord*>& relowered)
+		{
+			ValueReach reach;
+			if (std::string why = ReachOfValues(live, model, edited, lowered, reach); !why.empty()) return why;
+			const uint64 requested = RequestsAsked(model);
+			const auto named = InstancesNamed(model, reach.readers);
+			if (std::string why = FoldAgain(model, reach.globals); !why.empty()) return why;
+			if (InstancesNamed(model, reach.readers) != named || RequestsAsked(model) != requested) return "a new value makes a body name other template instances";
+			backend.StorageChanged(reach.globals);
+			relowered.insert(relowered.end(), reach.readers.begin(), reach.readers.end());
+			return {};
+		}
+
+		std::vector<const FunctionRecord*> Unique(const std::vector<const FunctionRecord*>& records)
+		{
+			std::unordered_set<const FunctionRecord*> seen;
+			std::vector<const FunctionRecord*> unique;
+			for (const FunctionRecord* record : records)
+				if (seen.insert(record).second) unique.push_back(record);
+			return unique;
+		}
+
 		// `record` reads `kept`'s new definition where it read the old: its declarations, its body, its parameters' defaults.
 		void PointAtNew(const FunctionRecord& record, const KeptDefinition& kept)
 		{
@@ -126,21 +199,25 @@ namespace C4Compiler
 		}
 	}
 
-	std::string SwapBodies(CompilerInstance& live, const CompilerInstance& edited, ProgramBackend& backend, RetiredParses& retired)
+	std::string SwapEdits(CompilerInstance& live, const CompilerInstance& edited, ProgramBackend& backend, RetiredParses& retired)
 	{
 		std::vector<uint32> changed;
 		if (std::string why = ChangedFiles(live, edited, changed); !why.empty()) return why;
-		std::vector<BodyEdit> edits;
+		std::vector<FileEdit> edits;
 		std::vector<const KeptDefinition*> definitions;
+		std::vector<const KeptGlobal*> globals;
 		for (uint32 id : changed)
 		{
-			edits.push_back(FindBodyEdit(*live.FindCompilationUnit(id), *edited.FindCompilationUnit(id)));
+			edits.push_back(FindFileEdit(*live.FindCompilationUnit(id), *edited.FindCompilationUnit(id)));
 			const std::string why = !edits.back().refusal.empty() ? edits.back().refusal
 				: TestsKeepTheirLines(live.GetProgramModel(), id, edits.back().movedFrom);
 			if (!why.empty()) return live.GetSourceManager().GetInfo(id).displayName + ": " + why;
 		}
-		for (const BodyEdit& edit : edits)
+		for (const FileEdit& edit : edits)
+		{
 			for (const KeptDefinition& kept : edit.definitions) definitions.push_back(&kept);
+			for (const KeptGlobal& kept : edit.globals) globals.push_back(&kept);
+		}
 
 		ProgramModel& model = live.GetProgramModelForLowering();
 		const auto functions = FunctionsOf(model, definitions);
@@ -148,6 +225,22 @@ namespace C4Compiler
 			if (kept->bodyChanged)
 				for (const FunctionRecord* record : functions.at(kept->before))
 					if (std::string why = SameInstancesNamed(model, *record, *kept); !why.empty()) return why;
+		const auto symbols = SymbolsOf(model, globals);
+		std::vector<SymbolInfo*> valued;
+		for (const KeptGlobal* kept : globals)
+		{
+			if (!kept->valueChanged) continue;
+			if (symbols.at(kept->before).empty()) return "a global whose value changed has no symbol in the model";
+			for (SymbolInfo* global : symbols.at(kept->before))
+			{
+				if (std::string why = ServedValue(*global); !why.empty()) return why;
+				valued.push_back(global);
+			}
+		}
+		// A function the build before did not lower (a template's instance nothing reached) stays unlowered: what reaches
+		// a function is the lowered bodies' needs, which Relower keeps.
+		const std::vector<const FunctionRecord*> lowered = backend.LoweredFunctions();
+		const std::unordered_set<const FunctionRecord*> wasLowered(lowered.begin(), lowered.end());
 		std::vector<const FunctionRecord*> relowered;
 		std::unordered_map<const AstNode*, const AstNode*> movedLambdas;
 		for (const KeptDefinition* kept : definitions)
@@ -157,9 +250,11 @@ namespace C4Compiler
 			{
 				const bool ownBody = record->bodyNode == kept->before->GetBody().Get();
 				PointAtNew(*record, *kept);
-				if (ownBody && kept->bodyChanged) relowered.push_back(record);
+				if (ownBody && kept->bodyChanged && wasLowered.count(record)) relowered.push_back(record);
 			}
 		}
+		for (const KeptGlobal* kept : globals)
+			for (SymbolInfo* global : symbols.at(kept->before)) PointAtNew(*global, *kept);
 		model.ClosureBodiesMoved(movedLambdas);
 		for (uint32 id : changed)
 		{
@@ -167,6 +262,8 @@ namespace C4Compiler
 			live.TakeEditedFile(id, edited);
 		}
 		live.TakeMacroDiagnostics(edited);
-		return backend.Relower(relowered);
+		if (!valued.empty())
+			if (std::string why = ServeValues(live, model, backend, valued, lowered, relowered); !why.empty()) return why;
+		return backend.Relower(Unique(relowered));
 	}
 } // namespace C4Compiler

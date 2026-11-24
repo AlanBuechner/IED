@@ -28,17 +28,22 @@ namespace Testing
 			return compiler;
 		}
 
-		// The refusal of the edit of `main.cf` from `before` to `after` (FindBodyEdit); empty for a body-only edit, whose
-		// changed bodies are counted in `changed`.
-		std::string EditOf(const std::string& before, const std::string& after, size_t* changed = nullptr)
+		// The refusal of the edit of `main.cf` from `before` to `after` (FindFileEdit); empty for an edit of bodies and
+		// values, whose changed bodies are counted in `changed` and changed globals in `values`.
+		std::string EditOf(const std::string& before, const std::string& after, size_t* changed = nullptr, size_t* values = nullptr)
 		{
 			const auto was = Parsed({ { "main.cf", before } }, nullptr);
 			const auto is = Parsed({ { "main.cf", after } }, nullptr);
-			const BodyEdit edit = FindBodyEdit(*was->GetCompilationUnit(1), *is->GetCompilationUnit(1));
+			const FileEdit edit = FindFileEdit(*was->GetCompilationUnit(1), *is->GetCompilationUnit(1));
 			if (changed)
 			{
 				*changed = 0;
 				for (const KeptDefinition& kept : edit.definitions) *changed += kept.bodyChanged ? 1 : 0;
+			}
+			if (values)
+			{
+				*values = 0;
+				for (const KeptGlobal& kept : edit.globals) *values += kept.valueChanged ? 1 : 0;
 			}
 			return edit.refusal;
 		}
@@ -101,11 +106,11 @@ namespace Testing
 			return text;
 		}
 
-		// The edit to `files` served on `live` (SwapBodies, then EmitAgain): why it was refused, or empty.
+		// The edit to `files` served on `live` (SwapEdits, then EmitAgain): why it was refused, or empty.
 		std::string Served(Build& live, const Files& files)
 		{
 			const auto edited = Parsed(files, live.compiler->Parses());
-			if (std::string why = SwapBodies(*live.compiler, *edited, *live.backend, live.retired); !why.empty()) return why;
+			if (std::string why = SwapEdits(*live.compiler, *edited, *live.backend, live.retired); !why.empty()) return why;
 			std::vector<RetiredEmission> retired;
 			std::string error;
 			if (!live.backend->EmitAgain(live.compiler->GetProgramModelForLowering(), live.context, retired, &error, nullptr)) return "emitting failed: " + error;
@@ -113,8 +118,6 @@ namespace Testing
 			return {};
 		}
 
-		// Builds `before`, serves the edit to `after` on it, and checks it gives the cold build of `after`: its IR and its
-		// lowering's diagnostics.
 		// How the edit from `before` to `after` served on a build of `before` differs from a cold build of `after` - its
 		// IR, its lowering's diagnostics, its reflection image - emitting every partition again and only the changed ones;
 		// empty when it does not.
@@ -148,6 +151,51 @@ namespace Testing
 			text.replace(text.find(from), from.size(), to);
 			return { { "main.cf", text } };
 		}
+
+		// Globals of each kind a value edit serves, and the bodies that read them: a template's instance, an inline function,
+		// plain functions.
+		constexpr const char* kValues =
+			"const int32 c_Scale = 2;\n"
+			"const int32 c_Twice = c_Scale * 2;\n"
+			"int32 g_Count = 5;\n"
+			"const char* c_Name = \"name\";\n"
+			"class Settings\n{\n\tpublic static const int32 k_Limit = 7;\n}\n"
+			"template<T> T Scaled(T v) { return v * (T)c_Scale; }\n"
+			"inline int32 Twice() { return c_Twice; }\n"
+			"int32 UsesScale(int32 v) { return v * c_Scale; }\n"
+			"int32 UsesCount() { return g_Count; }\n"
+			"int32 UsesName() { return (int32)c_Name[0]; }\n"
+			"int32 UsesLimit() { return Settings::k_Limit; }\n"
+			"int32 Other(int32 v) { return v + 1; }\n"
+			"int32 main() { return UsesScale(1) + Scaled<int32>(2) + Twice() + UsesCount() + UsesName() + UsesLimit() + Other(3); }\n";
+
+		std::string Replaced(std::string text, const std::string& from, const std::string& to)
+		{
+			text.replace(text.find(from), from.size(), to);
+			return text;
+		}
+
+		Files Values(const std::string& from, const std::string& to)
+		{
+			return { { "main.cf", Replaced(kValues, from, to) } };
+		}
+
+		// Why the edit of main.cf from `before` to `after` is not served when both build cold: "(served)" when it is, and
+		// "(no cold build)" when one does not build.
+		std::string RefusalOf(const std::string& before, const std::string& after)
+		{
+			const auto live = Cold({ { "main.cf", before } }, true);
+			const auto cold = Cold({ { "main.cf", after } });
+			if (!live->error.empty() || !cold->error.empty()) return "(no cold build) " + live->error + cold->error;
+			const std::string why = Served(*live, { { "main.cf", after } });
+			return why.empty() ? "(served)" : why;
+		}
+
+		// `expected` when `why` says it, else all of `why`.
+		std::string Says(const std::string& why, const std::string& expected)
+		{
+			return why.find(expected) != std::string::npos ? expected : why;
+		}
 	}
 
 	void BodySwapTest::AStatementEditIsABodyEdit()
@@ -176,7 +224,9 @@ namespace Testing
 		TEST_ASSERT_EQ(changed, size_t(2));
 		TEST_ASSERT(!EditOf("int32 F()\n{\n\treturn 2;\n}\nint32 g_Value = 1;\n", "int32 F()\n{\n\tint32 x = 2;\n\treturn x;\n}\nint32 g_Value = 1;\n").empty());
 		TEST_ASSERT(!EditOf("int32 F()\n{\n\treturn 2;\n}\nstruct S { public int32 a; }\n", "int32 F()\n{\n\n\treturn 2;\n}\nstruct S { public int32 a; }\n").empty());
-		TEST_ASSERT(!EditOf("int32 F()\n{\n\treturn 2;\n}\ninline int32 G() { return 1; }\n", "int32 F()\n{\n\n\treturn 2;\n}\ninline int32 G() { return 1; }\n").empty());
+		TEST_ASSERT(!EditOf("int32 F()\n{\n\treturn 2;\n}\n[compile_time] int32 G() { return 1; }\n", "int32 F()\n{\n\n\treturn 2;\n}\n[compile_time] int32 G() { return 1; }\n").empty());
+		TEST_ASSERT_EQ(EditOf("int32 F()\n{\n\treturn 2;\n}\ninline int32 G() { return 1; }\n", "int32 F()\n{\n\n\treturn 2;\n}\ninline int32 G() { return 1; }\n", &changed), std::string());
+		TEST_ASSERT_EQ(changed, size_t(2));
 		TEST_PASSED();
 	}
 
@@ -208,9 +258,132 @@ namespace Testing
 		TEST_PASSED();
 	}
 
-	void BodySwapTest::AnInlineBodyIsNone()
+	// Other partitions copy an inline body from its function, lowered again, and a template's lowered instances are lowered
+	// again; a [compile_time] function's is run by constants.
+	void BodySwapTest::AnInlineBodyIsABodyEdit()
 	{
-		TEST_ASSERT(!EditOf("inline int32 F() { return 1; }\n", "inline int32 F() { return 2; }\n").empty());
+		size_t changed = 0;
+		TEST_ASSERT_EQ(EditOf("inline int32 F() { return 1; }\n", "inline int32 F() { return 2; }\n", &changed), std::string());
+		TEST_ASSERT_EQ(changed, size_t(1));
+		TEST_ASSERT_EQ(EditOf("template<T> T F(T v) { return v; }\n", "template<T> T F(T v) { return v + v; }\n", &changed), std::string());
+		TEST_ASSERT_EQ(changed, size_t(1));
+		TEST_ASSERT(!EditOf("[compile_time] int32 F() { return 1; }\n", "[compile_time] int32 F() { return 2; }\n").empty());
+		TEST_ASSERT(!EditOf("template<T> T F(T v) { return v; }\n", "template<T> T F(T v, T w) { return v; }\n").empty());
+		TEST_PASSED();
+	}
+
+	// Each instance the build lowered is lowered again from the template's new body.
+	void BodySwapTest::ATemplatesBodyEmitsTheColdBuild()
+	{
+		TEST_ASSERT_EQ(ColdBuildDiffers({ { "main.cf", kProgram } }, With("a > b ? a : b", "a >= b ? a : b")), std::string());
+		// A line added before the template moves it: its instances are lowered again where it is now.
+		TEST_ASSERT_EQ(ColdBuildDiffers({ { "main.cf", kProgram } }, With("{ return v * 2; }", "{\n\treturn v * 2;\n}")), std::string());
+		const std::string box = "template<T> class Box\n{\n\tpublic T v;\n\tpublic T Get() { return v; }\n\tpublic T Twice() { return v + v; }\n}\n"
+			"int32 main() { Box<int32> a; a.v = 2; Box<int64> b; b.v = 3; return a.Get() + (int32)b.Get(); }\n";
+		TEST_ASSERT_EQ(ColdBuildDiffers({ { "main.cf", box } }, { { "main.cf", Replaced(box, "T Get() { return v; }", "T Get() { return v + (T)1; }") } }), std::string());
+		TEST_PASSED();
+	}
+
+	void BodySwapTest::AnInlineBodyEmitsTheColdBuild()
+	{
+		TEST_ASSERT_EQ(ColdBuildDiffers({ { "main.cf", kValues } }, Values("return c_Twice;", "return c_Twice + 3;")), std::string());
+		TEST_PASSED();
+	}
+
+	void BodySwapTest::AGlobalsValueIsAValueEdit()
+	{
+		size_t changed = 0, values = 0;
+		TEST_ASSERT_EQ(EditOf("const int32 c_A = 1;\nint32 F() { return c_A; }\n", "const int32 c_A = 2;\nint32 F() { return c_A; }\n", &changed, &values), std::string());
+		TEST_ASSERT_EQ(changed, size_t(0));
+		TEST_ASSERT_EQ(values, size_t(1));
+		// A longer value moves the end of its own definition alone.
+		TEST_ASSERT_EQ(EditOf("const int32 c_A = 9;\nint32 F() { return c_A; }\n", "const int32 c_A = 10;\nint32 F() { return c_A; }\n", &changed, &values), std::string());
+		TEST_ASSERT_EQ(values, size_t(1));
+		TEST_ASSERT_EQ(EditOf("class S { public static const int32 k = 1; }\n", "class S { public static const int32 k = 2; }\n", &changed, &values), std::string());
+		TEST_ASSERT_EQ(values, size_t(1));
+		TEST_ASSERT_EQ(EditOf("class S\n{\n\tpublic static const int32 k = 1;\n}\n", "class S\n{\n\tpublic static const int32 k = 1000;\n}\n", &changed, &values), std::string());
+		TEST_ASSERT_EQ(values, size_t(1));
+		// A value and a body in one edit.
+		TEST_ASSERT_EQ(EditOf("int32 g = 1;\nint32 F() { return 1; }\n", "int32 g = 2;\nint32 F() { return 3; }\n", &changed, &values), std::string());
+		TEST_ASSERT_EQ(changed, size_t(1));
+		TEST_ASSERT_EQ(values, size_t(1));
+		TEST_PASSED();
+	}
+
+	// What else a value edit could change is a declaration: a field's initializer, a global's type, another declaration
+	// moved along a line.
+	void BodySwapTest::AValueOfADeclarationIsNone()
+	{
+		TEST_ASSERT(!EditOf("struct S { public int32 a = 1; }\n", "struct S { public int32 a = 2; }\n").empty());
+		TEST_ASSERT(!EditOf("const int32 a = 1;\n", "const int64 a = 1;\n").empty());
+		TEST_ASSERT(!EditOf("const int32 a = 9; const int32 b = 1;\n", "const int32 a = 10; const int32 b = 1;\n").empty());
+		// A class that ends on the line its static member's longer value moves.
+		TEST_ASSERT(!EditOf("class S { public static const int32 k = 1; }\n", "class S { public static const int32 k = 10; }\n").empty());
+		TEST_PASSED();
+	}
+
+	void BodySwapTest::AConstantsValueEmitsTheColdBuild()
+	{
+		TEST_ASSERT_EQ(ColdBuildDiffers({ { "main.cf", kValues } }, Values("c_Scale = 2;", "c_Scale = 3;")), std::string());
+		TEST_PASSED();
+	}
+
+	// A value folded from another, a global's starting value, a string, a static member's value: each emits the cold build.
+	void BodySwapTest::EveryKindOfValueEmitsTheColdBuild()
+	{
+		TEST_ASSERT_EQ(ColdBuildDiffers({ { "main.cf", kValues } }, Values("c_Scale * 2", "c_Scale * 5")), std::string());
+		TEST_ASSERT_EQ(ColdBuildDiffers({ { "main.cf", kValues } }, Values("g_Count = 5;", "g_Count = 600;")), std::string());
+		TEST_ASSERT_EQ(ColdBuildDiffers({ { "main.cf", kValues } }, Values("\"name\"", "\"another\"")), std::string());
+		TEST_ASSERT_EQ(ColdBuildDiffers({ { "main.cf", kValues } }, Values("k_Limit = 7;", "k_Limit = 70;")), std::string());
+		TEST_ASSERT_EQ(ColdBuildDiffers({ { "main.cf", kValues } }, Values("g_Count = 5;", "g_Count = 5 + c_Scale;")), std::string());
+		TEST_PASSED();
+	}
+
+	void BodySwapTest::AValueAndABodyInOneEditEmitTheColdBuild()
+	{
+		const Files after = { { "main.cf", Replaced(Replaced(kValues, "c_Scale = 2;", "c_Scale = 4;"), "return v + 1;", "return v + 2;") } };
+		TEST_ASSERT_EQ(ColdBuildDiffers({ { "main.cf", kValues } }, after), std::string());
+		TEST_PASSED();
+	}
+
+	// A comment naming the constant reads nothing, nor does another constant of its name where it is declared (its
+	// reader is lowered again too, the same).
+	void BodySwapTest::AValueACommentNamesIsServed()
+	{
+		const std::string program = "// c_N counts\nconst int32 c_N = 2;\nint32 main() { return c_N; }\n";
+		TEST_ASSERT_EQ(RefusalOf(program, Replaced(program, "c_N = 2", "c_N = 3")), std::string("(served)"));
+		const std::string twoOfAName = "namespace A { const int32 c_V = 1; }\nnamespace B { const char* c_V = \"x\"; }\n"
+			"int32 FromA() { return A::c_V; }\nint32 FromB() { return (int32)B::c_V[0]; }\nint32 main() { return FromA() + FromB(); }\n";
+		TEST_ASSERT_EQ(RefusalOf(twoOfAName, Replaced(twoOfAName, "c_V = 1", "c_V = 2")), std::string("(served)"));
+		TEST_ASSERT_EQ(ColdBuildDiffers({ { "main.cf", twoOfAName } }, { { "main.cf", Replaced(twoOfAName, "c_V = 1", "c_V = 2") } }), std::string());
+		TEST_PASSED();
+	}
+
+	// A value read where no body lowered again reads it - an array's extent, a parameter's default, a [compile_time]
+	// function - or that no longer folds is a cold build. (A macro's: ToolsTest's served builds, which run the macro pass.)
+	void BodySwapTest::AValueReadOutsideABodyIsRefused()
+	{
+		const std::string extent = "const int32 c_N = 2;\nint32[c_N] g_Table;\nint32 main() { return g_Table[0]; }\n";
+		TEST_ASSERT_EQ(Says(RefusalOf(extent, Replaced(extent, "c_N = 2", "c_N = 3")), "outside a function body"), std::string("outside a function body"));
+		const std::string defaulted = "const int32 c_N = 2;\nint32 F(int32 v = c_N) { return v; }\nint32 main() { return F(); }\n";
+		TEST_ASSERT_EQ(Says(RefusalOf(defaulted, Replaced(defaulted, "c_N = 2", "c_N = 3")), "outside a function body"), std::string("outside a function body"));
+		const std::string compileTime = "const int32 c_N = 2;\n[compile_time] int32 Squared() { return c_N * c_N; }\nconst int32 c_S = Squared();\nint32 main() { return c_S; }\n";
+		TEST_ASSERT_EQ(Says(RefusalOf(compileTime, Replaced(compileTime, "c_N = 2", "c_N = 3")), "[compile_time]"), std::string("[compile_time]"));
+		const std::string folded = "const int32 c_N = 2;\nint32 Seed() { return 3; }\nint32 main() { return c_N; }\n";
+		TEST_ASSERT_EQ(Says(RefusalOf(folded, Replaced(folded, "c_N = 2", "c_N = Seed()")), "no longer folds"), std::string("no longer folds"));
+		TEST_PASSED();
+	}
+
+	// A starting value lives in its global's partition alone: the edit emits that one, not partition 0.
+	void BodySwapTest::AValueEditEmitsOnlyThePartitionsItChanges()
+	{
+		const auto live = Cold({ { "main.cf", kValues } }, true);
+		TEST_ASSERT_EQ(live->error, std::string());
+		TEST_ASSERT_EQ(Served(*live, Values("g_Count = 5;", "g_Count = 6;")), std::string());
+		unsigned emitted = 0;
+		for (unsigned i = 0; i < live->backend->PartitionCount(); ++i) emitted += live->backend->Emitted(i) ? 1 : 0;
+		TEST_ASSERT(!live->backend->Emitted(0));
+		TEST_ASSERT(emitted >= 1 && emitted < live->backend->PartitionCount());
 		TEST_PASSED();
 	}
 

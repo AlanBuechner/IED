@@ -31,16 +31,6 @@ namespace C4Compiler
 			}
 		}
 
-		bool IsCompileTime(const FunctionDefinitionNode& fn)
-		{
-			for (const auto& annotation : fn.GetAnnotations())
-				if (annotation)
-					for (const auto& group : annotation->GetBracketGroups())
-						for (const auto& item : group.annotations)
-							if (item && item->GetName() == c_CompileTime) return true;
-			return false;
-		}
-
 		void CollectBodies(const AstNode& node, uint32 sourceId, std::vector<BodySpan>& bodies)
 		{
 			if (const auto* fn = dynamic_cast<const FunctionDefinitionNode*>(&node))
@@ -62,6 +52,16 @@ namespace C4Compiler
 				if (byteOffset >= body.begin && byteOffset < body.end) return true;
 			return false;
 		}
+	}
+
+	bool IsCompileTime(const FunctionDefinitionNode& fn)
+	{
+		for (const auto& annotation : fn.GetAnnotations())
+			if (annotation)
+				for (const auto& group : annotation->GetBracketGroups())
+					for (const auto& item : group.annotations)
+						if (item && item->GetName() == c_CompileTime) return true;
+		return false;
 	}
 
 	bool BodyIsItsOwn(const FunctionDefinitionNode& fn)

@@ -103,10 +103,12 @@ server = false` turns it off) a program's compile goes to a C4.exe that stays be
 Nuke starts `C4.exe <the command line> --serve-on c4-serve-<hash> --serve-stamp <C4.exe's time and size>
 --serve-idle 1800` once - a process of its own, outside the build's job, one per command line and folder - and asks it
 for each build over the named pipe `\\.\pipe\c4-serve-<hash>`; the answer is the compile's output and exit code, as a
-one-shot C4.exe gives them. An edit that changed only function bodies (their own: not `inline`, not `[compile_time]`,
-not in a template; no lambda or local type in a changed one) is lowered and emitted again for those bodies alone - and
-for the bodies after it in its file when it added or removed lines and only such functions follow - and relinked; any
-other edit is compiled cold in the server, which still keeps the parses of the files it did not change. Every build writes what a cold build writes, byte for byte. A server whose C4.exe was rebuilt answers `stale` and
+one-shot C4.exe gives them. An edit that changed only function bodies (not a `[compile_time]` function's; no lambda or
+local type in a changed one) and the values of globals (a constant's, a static member's, a global's starting value -
+read only in function bodies and in other such values) is lowered and emitted again for those bodies alone, a
+template's lowered instances, the bodies that read a changed value, and the bodies after it in its file when it added
+or removed lines and only functions follow - and relinked; any other edit (a signature, a type, an include, a macro)
+is compiled cold in the server, which still keeps the parses of the files it did not change. Every build writes what a cold build writes, byte for byte. A server whose C4.exe was rebuilt answers `stale` and
 ends, and a new one starts; one idle for half an hour ends; `nuke clean` ends the servers of the programs it cleans (the
 pipe's `quit`); when none answers, the program is compiled one-shot. A server keeps its last build in memory and its
 project folder open until it ends (Nuke's README section 9: what each costs), so end it with `nuke clean` before
