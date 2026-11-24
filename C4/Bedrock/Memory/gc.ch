@@ -88,7 +88,7 @@ namespace GC
 	[link("c4_gc_last_pauses")] int32 LastPauses(Pause* out, int32 capacity) noexcept;
 
 	// Automatic collection starts when the live heap has grown by `percent` since the last collection
-	// (default 100, at least 4 MiB). Returns the previous value.
+	// (default 115, at least 4 MiB). Returns the previous value.
 	[link("c4_gc_set_percent")] int32 SetPercent(int32 percent) noexcept;
 
 	// The threads that mark a heap past 8 MiB, the collecting one included: -1 (default) picks by the processors,

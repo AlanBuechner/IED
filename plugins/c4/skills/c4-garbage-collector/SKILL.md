@@ -47,7 +47,7 @@ Build with `-gc-stats` and the program prints `[GC] allocs=... collections=... h
 ## Bedrock `GC` namespace (`include "Memory/gc.ch"`)
 `GC::Collect`, `GC::GetStats` (`{ allocs, collections, heapBytes, freeBytes, pauseNs, liveBytes,
 lastPauseNs }`), `GC::LastPauses(out, capacity)` (the last collection's stops as `{ startNs, endNs }` on the
-QueryPerformanceCounter clock: one for `Collect`, several for a concurrent cycle), `GC::SetPercent` (growth before the next automatic collection, default 100, minimum
+QueryPerformanceCounter clock: one for `Collect`, several for a concurrent cycle), `GC::SetPercent` (growth before the next automatic collection, default 115, minimum
 trigger 4 MiB), `GC::Disable` / `GC::Enable`, `GC::Pin` / `GC::Unpin` (counted, interior pointers fine),
 `GC::IsReachable`, `GC::RegisterRegion`, `GC::RegisterRootEnumerator(key, fn(user, visit, visitContext),
 user)`, `GC::RegisterCollectionResult(key, fn(user), user)` and their unregister forms. No hook table has a

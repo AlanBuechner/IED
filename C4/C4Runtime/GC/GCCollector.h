@@ -11,7 +11,7 @@
 #include "GC/GCCensus.h"
 #include "GC/GCVerifyMaps.h"
 
-#define GC_DEFAULT_PERCENT 100
+#define GC_DEFAULT_PERCENT 115   // the owner's choice (2026-11-23): frames 2-6% faster on the GC benchmark for 3-8% more heap
 #define GC_MIN_TRIGGER_BYTES ((size_t)4 << 20)
 #define GC_MIN_NATIVE_GROWTH ((int64_t)32 << 20) // native memory in use may grow this much at least before a collection
 #define GC_MAX_OBJECT_BYTES ((size_t)1 << 46)

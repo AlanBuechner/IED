@@ -47,7 +47,7 @@ int32 main() {
 
 	KeepLive();                                   // 16 MiB live: the trigger now follows the percent
 	uint64 dense = CollectionsDuring(128 * kMiB);
-	if (GC::SetPercent(400) != 100) return 6;
+	if (GC::SetPercent(400) != 115) return 6;    // the default
 	uint64 sparse = CollectionsDuring(128 * kMiB);
 	if (sparse * 2 > dense) return 7;
 	if (GC::SetPercent(0) != 400) return 8;     // below 1 counts as 1
