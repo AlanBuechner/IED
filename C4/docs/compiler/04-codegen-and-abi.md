@@ -490,15 +490,17 @@ in a dead slot or register of the frame keeps nothing alive. The runtime's side 
   (`EnsureRuntimeObjects`, a folder of its own; `GC/GCStack*` only there). With `-fno-stack-maps` the output is byte for
   byte what it was before stack maps (objects at `-O0`, `-O2` and `-O2 -g` of the benchmarks and test programs, both
   targets).
-- **Measured** (2026-11-24, the same compiler with and without the flag, `-O2`, medians of 31 alternating rounds): Windows -
-  the Bedrock benchmark's kernels -6% to +6% (11 of 14 within 2%), math (per vector and batch) -4% to +5% on its
-  sub-millisecond kernels, gemm 0%, the GC benchmark's frames +1% and -1% (stop-the-world, concurrent); Linux (in Docker on
-  the same machine) the same within its noise - an A/A run of one program against itself moves the map kernels by up to
-  10%, the others by 1% - with gemm 0% and the GC frames -1% and 0%. Code +1.6% instructions (the IED server's `.text` +3.8%); the stack map is data beside it,
-  in C4's format the IED server's 2.0 MB (its executable 27.8 MB, 25.3 MB without stack maps: +9.6%) and the GC
-  benchmark's 80 KB (2.65 MB against 2.54 MB: +4%). Compile time (5 alternating builds from empty build folders, 16 threads):
-  `-O0` +3% (the Bedrock benchmark) and +6% (Bedrock's tests), `-O2` +0-1%; on one thread `-O0` costs +28% (code
-  generation +60%: FastISel hands each call with a record to SelectionDAG). The design before (managed pointers in address
+- **Measured** (2026-11-24, the compiler of 26e5f261 with and without stack maps, `-O2`, medians of alternating rounds;
+  an A/A run of one program against itself for the noise): Windows (61 rounds) - the Bedrock benchmark's kernels -3% to
+  +6% (A/A -4% to +7%), math per vector -6% to +2%, batch -1% to +4% on its 0.5 ms kernels, gemm 0%, the GC benchmark's
+  frames -1% and -1% (stop-the-world, concurrent); Linux (in Docker on the same machine, 31 rounds) the map kernels -33%
+  to +2% (A/A -31% to 0%), the others within 1%, gemm 0%, the GC frames +1% and +1%. Code +1.6% instructions (the IED
+  server's `.text` +3.8%); the stack map is data beside it, in C4's format the IED server's 2.0 MB (its executable
+  27.8 MB, 25.3 MB without stack maps: +9.6%) and the GC benchmark's 80 KB (2.65 MB against 2.54 MB: +4%). Compile time
+  (15 alternating builds from empty build folders, 16 threads): `-O2` +1% (the Bedrock benchmark, Bedrock's tests),
+  `-O0` +7% (Bedrock's tests) and +2-9% (the benchmark's sub-second build, from run to run); on one thread `-O0` costs
+  +24-26% (FastISel hands each call with a record to SelectionDAG; `-O0`'s value slots add about 7 points of it). The
+  design before (managed pointers in address
   space 1, RewriteStatepointsForGC spilling and reloading each live value around each call, `nobuiltin` C library calls)
   cost map_int_remove +49%, map_text_find +34%, json_read +13% and the GC frames +23% on Windows, map_text_find +86% and
   the GC frames +31-34% on Linux: the address space cost the optimizer its null and integer folds, the relocations a spill
