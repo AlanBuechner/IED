@@ -488,6 +488,20 @@ class FakeServerCodeToolTests(CodeToolCase):
 		self.assertIn("deep.fk", results["s1"], "the failed server was started again and asked")
 		await self.server_state("running")
 
+	async def test_a_starting_server_is_waited_for_by_a_symbol_search(self):
+		# Just after a restart the server is still starting: asked only among the running ones, the search found nothing (the
+		# workspace's first search waits for its servers to start; a later one did not).
+		write(os.path.join(self.repo, "deep.fk"), "a deep one\n")
+		await self.client.request("doc.open", {"wsId": "w1", "path": "a.fk"})
+		await self.server_state("running")
+		first = await self.results(("s0", "code_symbols", {"query": "deep"}))
+		self.assertIn("deep.fk", first["s0"], "found while it runs")
+		write(os.path.join(self.repo, "slow-start"), "3")
+		status = await self.client.request("lsp.restart", {"wsId": "w1", "profile": "fake-lsp"})
+		self.assertEqual("starting", status["servers"][0]["state"])
+		results = await self.results(("s1", "code_symbols", {"query": "deep"}))
+		self.assertIn("deep.fk", results["s1"], "the starting server was waited for and asked")
+
 	async def test_files_nobody_has_open(self):
 		calls = [("h%d" % i, "code_hover", {"path": "f%d.fk" % i, "line": 1}) for i in range(17)]
 		calls += [("w1", "fs_write", {"path": "f16.fk", "content": "changed\n"}), ("h99", "code_hover", {"path": "f16.fk", "line": 1})]

@@ -2,7 +2,7 @@
 publishes a diagnostic on every "bad" of an open document (a warning on every "meh"; nothing at all for a document with
 "silent" in it), formats a document by making each "messy" "tidy" (one edit per word, at its column in the negotiated
 encoding), answers hover with the position it got and definition with
-another file (on a line with "far", far.fk in the folder above, outside the workspace), answers workspace/symbol with every "bad" of its open documents and every "deep" of the .fk files under its root, open or not, expands the word at a position on "fake/expand" ({name, expansion}: the word, lowercased, with "(1)"), echoes "fake/echo" params, answers "fake/slow" after {seconds}, exits on a "fake/crash" request, and writes every message it gets to the JSON-lines file named by its
+another file (on a line with "far", far.fk in the folder above, outside the workspace), answers workspace/symbol with every "bad" of its open documents and every "deep" of the .fk files under its root, open or not, expands the word at a position on "fake/expand" ({name, expansion}: the word, lowercased, with "(1)"), echoes "fake/echo" params, answers "fake/slow" after {seconds}, answers initialize after the seconds a "slow-start" file at its root holds, exits on a "fake/crash" request, and writes every message it gets to the JSON-lines file named by its
 first argument - after a {"argv": [...]} line with the arguments that follow it."""
 
 import json
@@ -93,6 +93,10 @@ def answer(message):
 	if method == "initialize":
 		if params.get("rootUri"):
 			root = unquote(urlparse(params["rootUri"]).path).lstrip("/")
+			slow = os.path.join(root, "slow-start")
+			if os.path.exists(slow):   # a check that needs it to stay starting a while
+				with open(slow, encoding="utf-8") as f:
+					time.sleep(float(f.read().strip() or "3"))
 		offered = params["capabilities"].get("general", {}).get("positionEncodings", [])
 		encoding = "utf-8" if "utf-8" in offered else "utf-16"
 		return {"capabilities": {"positionEncoding": encoding, "textDocumentSync": {"openClose": True, "change": 1, "save": True}, "hoverProvider": True, "definitionProvider": True, "workspaceSymbolProvider": True, "documentFormattingProvider": True}, "serverInfo": {"name": "fake"}}
