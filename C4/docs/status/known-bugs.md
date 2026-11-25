@@ -70,7 +70,10 @@ Next ID: **BUG-510**
   bitcode into an `LLVMContext` of its own, makes partitions from it, and destroys the copy - a value still used (by
   metadata, a value handle or another module's value) when its function is deleted would crash there.
 - **Notes:** recorded by X; not reproduced, so not fixed. A race in the split (shared state between the threads' copies)
-  or a partition module outliving what it refers to are the first suspects.
+  or a partition module outliving what it refers to are the first suspects. Likely seen again 2026-11-25 (not symbolized, so
+  not certainly the same): `nuke test` in LS (the dev compiler built 05:38 UTC from b8c33ea708, modified; NUKE_JOBS=4 at low
+  priority) crashed compiling the ClaymoreScriptHost test harness with `exception 0xc0000005 at C4.exe+0x16b0efd`; its sources
+  unchanged, `nuke test ClaymoreScriptHost` right after compiled it and its 16 tests passed.
 
 ## Tools
 
