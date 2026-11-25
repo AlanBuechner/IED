@@ -79,6 +79,25 @@ class FileToolTests {
 		assert_true(said.View().Contains(Core::StringView("Scanner.cpp")), said.CStr());
 	}
 
+	[test("a_missing_file_names_the_files_beside_the_folders")]
+	public static void TestMissingFileBesideFolders() {
+		Core::StringBuilder folder;
+		folder.Append("ied-files3-");
+		folder.AppendInt(Platform::UnixTimeNs());
+		FS::Path root = FS::TempDirectory() / folder.View();
+		FS::MakeDirectories((root / "aitools/tests").CStr());
+		FS::WriteFileAtomically((root / "aitools/Work.cf").CStr(), (const void*)"x", 1);
+		FS::WriteFileAtomically((root / "aitools/Files.cf").CStr(), (const void*)"x", 1);
+		FS::WriteFileAtomically((root / "aitools/Files.ch").CStr(), (const void*)"x", 1);
+		Core::String said = Ai::NearestFoldersHint(root, Core::StringView("aitools/Files.cpp"), Core::StringView(""));
+		assert_true(said.View().Contains(Core::StringView("aitools holds the folders: tests/; its files: Files.c")), said.CStr());
+		assert_true(said.View().Contains(Core::StringView(" Work.cf")), said.CStr());
+		assert_true(said.View().IndexOf(Core::StringView("Work.cf")) > said.View().IndexOf(Core::StringView("Files.ch")), "the closest names first");
+		Core::String folderOnly = Ai::NearestFoldersHint(root, Core::StringView("aitools/missing"), Core::StringView(""));
+		assert_true(!folderOnly.View().Contains(Core::StringView("its files")), "a missing folder lists folders only");
+		FS::RemoveAll(root.CStr());
+	}
+
 	[test("a_linked_projects_files_are_named_by_its_link")]
 	public static void TestLinkedProjectPaths() {
 		Core::StringBuilder folder;

@@ -65,8 +65,9 @@ namespace Ai
 	// The glob of the workspace's files named like `path` ("src/a/Renderer.ch": "**/Renderer.ch"): where an fs_read
 	// that missed most likely meant.
 	Core::String SameNamedGlob(Core::StringView path);
-	// For fs_list's `path` that is no folder: "; <its nearest existing parent> holds the folders: a/ b/ ..." (`shown` before
-	// the parent: a root's alias).
+	// For a `path` that is not there: "; <its nearest existing parent> holds the folders: a/ b/ ..." (`shown` before
+	// the parent: a root's alias), then "; its files: ..." (those named like the path's last part first) when the path names
+	// a file (its last part has an extension) or that parent has no folders.
 	Core::String NearestFoldersHint(const FS::Path& root, Core::StringView path, Core::StringView shown);
 	// For the same path: "; folders named like <its last part> elsewhere: a/ b/", those whose names begin as its last part
 	// does, anywhere in the root (where it was moved or renamed to); "" when there are none.

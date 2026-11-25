@@ -176,11 +176,11 @@ namespace Ai
 		return said + "; to match ( ) [ ] { } . * + ? | ^ $ or \\ as text put a backslash before it (\\(), or leave regex false";
 	}
 
-	Core::String MissingSearchPath(const FS::Path& root, Core::StringView path, Core::StringView shown) {
+	Core::String MissingSearchPath(const IED::Workspace& ws, const FS::Path& root, Core::StringView path, Core::StringView shown) {
 		if (path.IsEmpty()) return Core::String();
 		Core::String full = Core::String((root / path).View());
 		if (FS::IsDirectory(full.CStr()) || FS::FileExists(full.CStr())) return Core::String();
-		return (((Core::String("search_text: no folder or file ") + shown) + path) + NearestFoldersHint(root, path, shown).View()) + MovedFoldersHint(root, path, shown).View();
+		return ((Core::String("search_text: no folder or file ") + shown) + path) + MissingPathHint(ws, path, root, shown).View();
 	}
 
 	Core::String SameNamedSearchFile(const FS::Path& root, Core::StringView path) {
@@ -198,12 +198,12 @@ namespace Ai
 		Core::String path = ToolPath(call.m_Args.Member("path").AsView());
 		SearchScope scope = ScopeOfCall(call);
 		Core::String redirect;
-		Core::String missing = MissingSearchPath(root, path.View(), call.m_Shown.View());
+		Core::String missing = MissingSearchPath(call.m_Ws, root, path.View(), call.m_Shown.View());
 		if (!missing.IsEmpty() && !LinkScopeOf(call, path.View(), scope)) {
 			Core::String only = SameNamedSearchFile(root, path.View());
 			const Core::String linked = only.IsEmpty() ? SameNamedLinkedFile(call.m_Ws, path.View()) : Core::String();
 			if (!linked.IsEmpty() && LinkScopeOf(call, linked.View(), scope)) only = linked;
-			else if (only.IsEmpty()) return ToolError(((missing + MissingPathHint(call.m_Ws, path.View(), root, call.m_Shown.View()).View()) + "; fs_glob finds files by name").View());
+			else if (only.IsEmpty()) return ToolError((missing + "; fs_glob finds files by name").View());
 			else scope = ScopeOfSearch(only.View(), Core::StringView(), true);
 			redirect = (((((Core::String("[no file ") + call.m_Shown.View()) + path.View()) + "; searched ") + call.m_Shown.View()) + only.View()) + ", the only file of that name outside build output]\n";
 		}

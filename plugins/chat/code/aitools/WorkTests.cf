@@ -128,12 +128,19 @@ class WorkToolsTests {
 		FS::Path root = FS::TempDirectory() / folder.View();
 		FS::MakeDirectories((root / "Nuke/nuke/commands").CStr());
 		FS::WriteFileAtomically((root / "Nuke/readme.md").CStr(), (const void*)"x", 1);
-		Core::String said = Ai::MissingSearchPath(root, Core::StringView("Nuke/nuke/build"), Core::StringView("ied:/"));
+		FS::WriteFileAtomically((root / "Nuke/nuke/configs.py").CStr(), (const void*)"x", 1);
+		IED::Workspace ws;
+		ws.m_Root = Core::String(root.View());
+		Core::String said = Ai::MissingSearchPath(ws, root, Core::StringView("Nuke/nuke/build"), Core::StringView("ied:/"));
 		assert_true(said.View().StartsWith(Core::StringView("search_text: no folder or file ied:/Nuke/nuke/build")), said.CStr());
 		assert_true(said.View().Contains(Core::StringView("ied:/Nuke/nuke holds the folders: commands/")), "the folders it most likely meant");
-		assert_true(Ai::MissingSearchPath(root, Core::StringView("Nuke/nuke"), Core::StringView("ied:/")).IsEmpty(), "a folder that is there is searched");
-		assert_true(Ai::MissingSearchPath(root, Core::StringView("Nuke/readme.md"), Core::StringView("ied:/")).IsEmpty(), "so is a file");
-		assert_true(Ai::MissingSearchPath(root, Core::StringView(""), Core::StringView("ied:/")).IsEmpty(), "no path is the whole workspace");
+		assert_true(said.View().IndexOf(Core::StringView("holds the folders"), said.View().IndexOf(Core::StringView("holds the folders")) + 1) < 0, "said once");
+		assert_true(!said.View().Contains(Core::StringView("configs.py")), "a folder's path: folders only");
+		Core::String file = Ai::MissingSearchPath(ws, root, Core::StringView("Nuke/nuke/config.py"), Core::StringView("ied:/"));
+		assert_true(file.View().Contains(Core::StringView("ied:/Nuke/nuke holds the folders: commands/; its files: configs.py")), file.CStr());
+		assert_true(Ai::MissingSearchPath(ws, root, Core::StringView("Nuke/nuke"), Core::StringView("ied:/")).IsEmpty(), "a folder that is there is searched");
+		assert_true(Ai::MissingSearchPath(ws, root, Core::StringView("Nuke/readme.md"), Core::StringView("ied:/")).IsEmpty(), "so is a file");
+		assert_true(Ai::MissingSearchPath(ws, root, Core::StringView(""), Core::StringView("ied:/")).IsEmpty(), "no path is the whole workspace");
 		FS::RemoveAll(root.CStr());
 	}
 
