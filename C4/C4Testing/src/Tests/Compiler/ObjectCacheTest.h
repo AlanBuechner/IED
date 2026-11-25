@@ -33,6 +33,12 @@ namespace Testing
 		void AKeyedModuleIsBuiltOnlyWhenItsObjectIsMissing();
 		TEST_FUNC(Compiler.ObjectCache)
 		void Bug366PartitionsWithTheSameCodeShareOneObject();
+		TEST_FUNC(Compiler.ObjectCache)
+		void Bug508AKeptObjectIsAssembledAgainFromItsCode();
+		TEST_FUNC(Compiler.ObjectCache)
+		void Bug508AWholeProgramsKeptObjectsCarryTheirCode();
+		TEST_FUNC(Compiler.ObjectCache)
+		void Bug508TheCompilerIsNamedByItsLoadedImage();
 
 		TEST_FUNC(Compiler.ModulePartitions)
 		void EveryPartitionReadsBackAndVerifies();

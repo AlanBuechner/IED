@@ -1,12 +1,18 @@
 #include "Compiler/Toolchain.h"
 #include "Compiler/FileIo.h"
 #include "Target/TargetAbi.h"
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <string>
 #include <system_error>
 #ifdef _WIN32
 #include <windows.h>
 #else
 #include <llvm/Support/Program.h>
+#include <cstdint>
+#include <fstream>
+#include <sys/stat.h>
 #endif
 
 namespace C4Compiler::Toolchain
@@ -81,6 +87,93 @@ namespace C4Compiler::Toolchain
 		if (!ec) return self;
 #endif
 		return {};
+	}
+
+	namespace
+	{
+		std::string Hex(unsigned long long value)
+		{
+			char text[24];
+			std::snprintf(text, sizeof(text), "%llx", value);
+			return text;
+		}
+
+#ifdef _WIN32
+		// A link's CodeView record ("RSDS", the .pdb's GUID and age): each link writes its own.
+		std::string DebugRecord(const unsigned char* image, const IMAGE_NT_HEADERS& headers)
+		{
+			const IMAGE_DATA_DIRECTORY& directory = headers.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG];
+			const auto* entries = reinterpret_cast<const IMAGE_DEBUG_DIRECTORY*>(image + directory.VirtualAddress);
+			const size_t count = directory.VirtualAddress ? directory.Size / sizeof(IMAGE_DEBUG_DIRECTORY) : 0;
+			for (size_t i = 0; i < count; ++i)
+			{
+				const IMAGE_DEBUG_DIRECTORY& entry = entries[i];
+				if (entry.Type != IMAGE_DEBUG_TYPE_CODEVIEW || entry.AddressOfRawData == 0 || entry.SizeOfData < 24) continue;
+				const unsigned char* record = image + entry.AddressOfRawData;
+				if (std::memcmp(record, "RSDS", 4) != 0) continue;
+				std::string text;
+				for (size_t b = 4; b < 24; ++b) text += Hex(record[b] | 0x100).substr(1); // the GUID's 16 bytes and the age's 4
+				return text;
+			}
+			return {};
+		}
+
+		std::string HeaderIdentity(const unsigned char* image)
+		{
+			const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(image);
+			const auto* headers = reinterpret_cast<const IMAGE_NT_HEADERS*>(image + dos->e_lfanew);
+			return Hex(headers->FileHeader.TimeDateStamp) + "-" + Hex(headers->OptionalHeader.SizeOfImage) + "-" +
+				Hex(headers->OptionalHeader.AddressOfEntryPoint) + "-" + Hex(headers->OptionalHeader.CheckSum) + "-" + DebugRecord(image, *headers);
+		}
+#else
+		std::string StatIdentity(const struct stat& file)
+		{
+			return Hex(file.st_dev) + "-" + Hex(file.st_ino) + "-" + Hex(static_cast<unsigned long long>(file.st_size)) + "-" +
+				Hex(static_cast<unsigned long long>(file.st_mtim.tv_sec)) + "." + Hex(static_cast<unsigned long long>(file.st_mtim.tv_nsec));
+		}
+
+		// The mapping of /proc/self/maps that holds `address`: the file it maps, as it was when it was mapped.
+		std::string MappedIdentity(uintptr_t address)
+		{
+			std::ifstream maps("/proc/self/maps");
+			std::string line;
+			while (std::getline(maps, line))
+			{
+				unsigned long long start = 0, end = 0, offset = 0, inode = 0;
+				char permissions[8] = {}, device[32] = {};
+				if (std::sscanf(line.c_str(), "%llx-%llx %7s %llx %31s %llu", &start, &end, permissions, &offset, device, &inode) != 6) continue;
+				if (address < start || address >= end) continue;
+				struct stat file = {};
+				const std::string mapped = "/proc/self/map_files/" + Hex(start) + "-" + Hex(end);
+				if (stat(mapped.c_str(), &file) == 0) return StatIdentity(file);
+				return std::string(device) + "-" + Hex(inode); // a kernel that does not show the mapped files: its inode
+			}
+			return {};
+		}
+#endif
+	}
+
+	std::string ImageIdentity(const void* address)
+	{
+#ifdef _WIN32
+		HMODULE module = nullptr;
+		if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+				static_cast<LPCWSTR>(address), &module))
+			return {};
+		return HeaderIdentity(reinterpret_cast<const unsigned char*>(module));
+#else
+		return MappedIdentity(reinterpret_cast<uintptr_t>(address));
+#endif
+	}
+
+	std::string RunningImageIdentity()
+	{
+#ifdef _WIN32
+		return HeaderIdentity(reinterpret_cast<const unsigned char*>(GetModuleHandleW(nullptr)));
+#else
+		struct stat running = {};
+		return stat("/proc/self/exe", &running) == 0 ? StatIdentity(running) : std::string(); // the running file, renamed or not
+#endif
 	}
 
 	fs::path Home()

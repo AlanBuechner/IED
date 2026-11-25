@@ -330,8 +330,10 @@ not - a rebuilt host whose changes the script cannot see keeps its scripts:
 - the script's own: each file's path and text, its name up to a trailing `#<tag>` (a host tells builds of one script
   apart with one; the reflection tag is applied at load, not in the machine code), the optimization level, the
   allow-list and `onlyAllowed`, the defines, its project, roots and the layers below it (section 5.2);
-- the compiler's own build (the path, size and time of `C4Script.dll`, so a rebuilt compiler never runs code an older
-  one made);
+- the compiler's own build (the loaded `C4Script.dll`'s identity, read from its image - its PE header's link stamp,
+  sizes and debug record; on Linux the mapped file's inode, size and time - so a rebuilt compiler never runs code an
+  older one made, and a host that loaded the older one before a toolchain refresh does not name its code by the newer
+  one's file: BUG-508);
 - the host's shape: its compiler version, target, projects, file count and collided symbols;
 - the files the script reaches (step 3): each one's place, macros, templates and a digest of its interface text that a
   body edit does not change - the text without blank lines (a removed body leaves only its line breaks), and the lines

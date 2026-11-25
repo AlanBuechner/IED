@@ -3,6 +3,7 @@
 #include "Compiler/ModulePartitions.h"
 #include "Compiler/ObjectCache.h"
 #include "Compiler/ObjectEmission.h"
+#include "Compiler/Toolchain.h"
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/IR/DebugInfoMetadata.h>
@@ -19,6 +20,11 @@
 #include <set>
 #include <string>
 #include <vector>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <cstdio>
+#endif
 
 namespace Testing
 {
@@ -201,6 +207,27 @@ namespace Testing
 			return llvm::sys::fs::create_directories(folder.string()) ? fs::path() : folder;
 		}
 
+		std::string BytesOf(const std::string& path)
+		{
+			std::ifstream in(path, std::ios::binary);
+			return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+		}
+
+		void WriteBytes(const std::string& path, const std::string& bytes)
+		{
+			std::ofstream out(path, std::ios::binary | std::ios::trunc);
+			out << bytes;
+		}
+
+		std::string NameOf(const std::string& path) { return fs::path(path).filename().string(); }
+
+		// An address in a library the program loads, not in the program.
+#ifdef _WIN32
+		const void* InAnotherLibrary() { return reinterpret_cast<const void*>(GetModuleHandleW(L"kernel32.dll")); }
+#else
+		const void* InAnotherLibrary() { return reinterpret_cast<const void*>(&std::fopen); }
+#endif
+
 		CachedObjects WriteProgramObjects(const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics)
 		{
 			llvm::LLVMContext context;
@@ -382,6 +409,83 @@ namespace Testing
 		TEST_ASSERT_EQ(builds, 1);
 		TEST_ASSERT_EQ(again.reused, size_t(kPartitions + 1));
 		TEST_ASSERT(again.paths == first.paths);
+		fs::remove_all(folder.parent_path());
+	}
+
+	// BUG-508: an object the cache kept is linked by what it is made from, which cannot tell a damaged one (or another
+	// compiler's under this one's name) from a good one. A build that found objects kept lists them with what each is made
+	// of, and AssembleKeptAgain makes each again in its place: one that was not what its code assembles to is left aside
+	// and named, one that was is assembled to the same bytes.
+	void ObjectCacheTest::Bug508AKeptObjectIsAssembledAgainFromItsCode()
+	{
+		const fs::path folder = FreshFolder("kept");
+		const ObjectCache cache(folder, "salt");
+		const CpuTarget target;
+		const ObjectSettings settings{ 0, &target, 2 };
+		const std::vector<std::string> partitions = Split("target triple = \"x86_64-pc-windows-msvc\"\n" + ProgramText(""));
+		const KeyedModule image{ "image", [](llvm::LLVMContext& context) {
+			return Parse("target triple = \"x86_64-pc-windows-msvc\"\n@image = constant [3 x i32] [i32 1, i32 2, i32 3]\n", context);
+		} };
+		std::vector<ObjectDiagnostic> diagnostics;
+		const CachedObjects first = WriteCachedObjects(partitions, { image }, settings, cache, diagnostics);
+		TEST_ASSERT_EQ(diagnostics.empty() ? std::string() : diagnostics.front().message, std::string());
+		TEST_ASSERT(first.kept.empty());
+		const CachedObjects again = WriteCachedObjects(partitions, { image }, settings, cache, diagnostics);
+		TEST_ASSERT_EQ(again.kept.size(), again.paths.size());
+		std::map<std::string, std::string> good;
+		for (const std::string& path : again.paths) good[path] = BytesOf(path);
+		const std::string partition = again.paths[1];
+		const std::string keyed = again.paths.back();
+		WriteBytes(partition, good[again.paths[0]]);
+		WriteBytes(keyed, good[again.paths[0]]);
+
+		std::vector<std::string> differed;
+		const fs::path aside = folder.parent_path() / "kept.rejected";
+		TEST_ASSERT(AssembleKeptAgain(again.kept, [&partitions](size_t i) { return partitions[i]; }, settings, aside, differed, diagnostics));
+		TEST_ASSERT_EQ(diagnostics.empty() ? std::string() : diagnostics.front().message, std::string());
+		TEST_ASSERT(std::set<std::string>(differed.begin(), differed.end()) == std::set<std::string>({ NameOf(partition), NameOf(keyed) }));
+		for (const std::string& path : again.paths) TEST_ASSERT(BytesOf(path) == good[path]);
+		std::set<std::string> left;
+		for (const auto& entry : fs::directory_iterator(aside)) left.insert(entry.path().filename().string());
+		TEST_ASSERT(left == std::set<std::string>({ NameOf(partition), NameOf(keyed) }));
+		TEST_ASSERT(BytesOf((aside / NameOf(partition)).string()) == good[again.paths[0]]);
+		fs::remove_all(folder.parent_path());
+	}
+
+	// BUG-508: the cache names the compiler by its loaded image, read from memory - the same on every call, the running
+	// program's for an address in it, another library's for an address in that one - not by a file a refresh replaces.
+	void ObjectCacheTest::Bug508TheCompilerIsNamedByItsLoadedImage()
+	{
+		const std::string running = Toolchain::RunningImageIdentity();
+		TEST_ASSERT(!running.empty());
+		TEST_ASSERT_EQ(Toolchain::RunningImageIdentity(), running);
+		TEST_ASSERT_EQ(Toolchain::ImageIdentity(reinterpret_cast<const void*>(&Toolchain::RunningImageIdentity)), running);
+		const std::string library = Toolchain::ImageIdentity(InAnotherLibrary());
+		TEST_ASSERT(!library.empty());
+		TEST_ASSERT(library != running);
+		TEST_PASSED();
+	}
+
+	// A whole-program build's kept objects carry their own code (the caller keeps no bitcode of its split).
+	void ObjectCacheTest::Bug508AWholeProgramsKeptObjectsCarryTheirCode()
+	{
+		const fs::path folder = FreshFolder("whole");
+		const ObjectCache cache(folder, "salt");
+		std::vector<ObjectDiagnostic> diagnostics;
+		const CachedObjects first = WriteProgramObjects(cache, diagnostics);
+		TEST_ASSERT(first.kept.empty());
+		const CachedObjects again = WriteProgramObjects(cache, diagnostics);
+		TEST_ASSERT_EQ(again.kept.size(), again.paths.size());
+		for (const KeptObject& kept : again.kept) TEST_ASSERT(!kept.bitcode.empty());
+		const std::string good = BytesOf(again.paths[0]);
+		WriteBytes(again.paths[0], "not an object");
+		const CpuTarget target;
+		const ObjectSettings settings{ 0, &target, 1, false };
+		std::vector<std::string> differed;
+		TEST_ASSERT(AssembleKeptAgain(again.kept, nullptr, settings, folder.parent_path() / "whole.rejected", differed, diagnostics));
+		TEST_ASSERT(diagnostics.empty());
+		TEST_ASSERT(differed == std::vector<std::string>({ NameOf(again.paths[0]) }));
+		TEST_ASSERT(BytesOf(again.paths[0]) == good);
 		fs::remove_all(folder.parent_path());
 	}
 

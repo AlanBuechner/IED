@@ -336,6 +336,43 @@ namespace C4Compiler
 					AssemblePartition(part, settings); // a partition that failed has its diagnostics already
 		}
 
+		// The objects of `parts` found in the cache (`made[i]` false; `served` ones aside, which a build server kept with no
+		// bitcode here), each once, with what each is made of: a partition's bitcode, its own when `ownBitcode` (moved out of
+		// `parts`), else its index among the first `partitions` parts; a keyed module's builder (BUG-508).
+		std::vector<KeptObject> KeptOf(std::vector<Partition>& parts, const std::vector<char>& made, size_t partitions, bool ownBitcode,
+			const std::vector<std::string>& served)
+		{
+			std::vector<KeptObject> kept;
+			std::unordered_set<std::string> listed;
+			for (size_t i = 0; i < parts.size(); ++i)
+			{
+				Partition& part = parts[i];
+				const bool servedObject = i < partitions && i < served.size() && !served[i].empty();
+				if (made[i] || servedObject || !listed.insert(part.objPath).second) continue;
+				KeptObject object;
+				object.path = part.objPath;
+				object.partition = i;
+				object.build = part.build;
+				if (ownBitcode && !part.build) object.bitcode = std::move(part.bitcode);
+				kept.push_back(std::move(object));
+			}
+			return kept;
+		}
+
+		std::vector<char> MadeOf(const std::vector<Partition>& parts, const std::vector<Partition*>& assembled)
+		{
+			std::vector<char> made(parts.size(), 0);
+			for (const Partition* partition : assembled) made[static_cast<size_t>(partition - parts.data())] = 1;
+			return made;
+		}
+
+		bool SameFile(const std::string& a, const std::string& b)
+		{
+			llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> first = llvm::MemoryBuffer::getFile(a, false, false);
+			llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> second = llvm::MemoryBuffer::getFile(b, false, false);
+			return first && second && (*first)->getBuffer() == (*second)->getBuffer();
+		}
+
 		// The objects of `parts`, or none, with every partition's diagnostics, when one failed; the cache keeps only them.
 		CachedObjects Collected(const std::vector<Partition>& parts, const std::vector<Partition*>& assembled, const ObjectCache& cache,
 			std::vector<ObjectDiagnostic>& diagnostics)
@@ -407,6 +444,7 @@ namespace C4Compiler
 		AssembleVanished(parts, settings);
 		CachedObjects objects = Collected(parts, assembled, cache, diagnostics);
 		objects.splitSeconds = splitSeconds;
+		if (!objects.paths.empty()) objects.kept = KeptOf(parts, MadeOf(parts, assembled), parts.size(), true, {});
 		return objects;
 	}
 
@@ -461,6 +499,7 @@ namespace C4Compiler
 			if (assembled[i]) made.push_back(&parts[i]);
 		AssembleVanished(parts, settings);
 		CachedObjects objects = Collected(parts, made, cache, diagnostics);
+		if (!objects.paths.empty()) objects.kept = KeptOf(parts, assembled, partitions, false, reused);
 		written.clear();
 		for (size_t i = 0; i < partitions; ++i)
 		{
@@ -468,5 +507,44 @@ namespace C4Compiler
 			written.push_back(std::move(parts[i].bitcode));
 		}
 		return objects;
+	}
+
+	bool AssembleKeptAgain(const std::vector<KeptObject>& kept, const std::function<std::string(size_t)>& bitcode, const ObjectSettings& settings,
+		const std::filesystem::path& aside, std::vector<std::string>& differed, std::vector<ObjectDiagnostic>& diagnostics)
+	{
+		InitializeX86();
+		if (const std::error_code ec = llvm::sys::fs::create_directories(aside.string()))
+		{
+			diagnostics.push_back({ 0, "cannot create '" + aside.string() + "': " + ec.message() });
+			return false;
+		}
+		std::vector<Partition> parts(kept.size());
+		std::vector<std::string> asidePaths(kept.size());
+		for (size_t i = 0; i < kept.size(); ++i)
+		{
+			asidePaths[i] = (aside / std::filesystem::path(kept[i].path).filename()).string();
+			(void)llvm::sys::fs::remove(asidePaths[i]);
+			if (const std::error_code ec = llvm::sys::fs::rename(kept[i].path, asidePaths[i]))
+			{
+				for (size_t back = 0; back < i; ++back) (void)llvm::sys::fs::rename(asidePaths[back], kept[back].path);
+				diagnostics.push_back({ 0, "cannot move the kept object '" + kept[i].path + "' aside to assemble it again: " + ec.message() });
+				return false;
+			}
+			parts[i].objPath = kept[i].path;
+			parts[i].build = kept[i].build;
+			if (!parts[i].build) parts[i].bitcode = kept[i].bitcode.empty() ? bitcode(kept[i].partition) : kept[i].bitcode;
+		}
+		std::vector<Partition*> each;
+		for (Partition& part : parts) each.push_back(&part);
+		AssembleInParallel(each, settings);
+		const size_t before = diagnostics.size();
+		for (size_t i = 0; i < parts.size(); ++i)
+		{
+			diagnostics.insert(diagnostics.end(), parts[i].diagnostics.begin(), parts[i].diagnostics.end());
+			if (!parts[i].diagnostics.empty()) continue;
+			if (SameFile(kept[i].path, asidePaths[i])) (void)llvm::sys::fs::remove(asidePaths[i]);
+			else differed.push_back(std::filesystem::path(kept[i].path).filename().string());
+		}
+		return diagnostics.size() == before;
 	}
 }

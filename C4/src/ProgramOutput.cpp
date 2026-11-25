@@ -81,10 +81,10 @@ bool ProgramOutput::WriteWholeProgram(const std::vector<llvm::Module*>& partitio
 	if (partitions.size() > 1 && !(merged = Merged(partitions, image, base, settings))) return false;
 	llvm::Module& program = merged ? *merged : *partitions.front();
 	if (!Verified(program) || !Optimize(program, settings)) return false;
-	std::vector<std::string> objects = Assemble(program, settings, C4Compiler::ObjectCache(base + ".objects", CacheSalt(settings)));
-	if (objects.empty()) return false;
-	if (merged && m_HostBuild && !FinishScriptHost(program, settings, base, objects)) return false;
-	return Link(objects, base);
+	C4Compiler::CachedObjects objects = Assemble(program, settings, C4Compiler::ObjectCache(base + ".objects", CacheSalt(settings)));
+	if (objects.paths.empty()) return false;
+	if (merged && m_HostBuild && !FinishScriptHost(program, settings, base, objects.paths)) return false;
+	return LinkKept(objects, nullptr, settings, base); // a whole-program build's kept objects carry their bitcode
 }
 
 // The partitions' bitcode, written on the output's threads, gives a script host its inline bodies (from the inline body
@@ -154,7 +154,41 @@ bool ProgramOutput::WritePartitions(const std::vector<llvm::Module*>& partitions
 	if (objects.paths.empty()) return false;
 	if (m_HostBuild && split && !CollectInlineBodies(partitions, bitcode, base, settings)) return false;
 	if (m_HostBuild && split && !FinishScriptHost(*partitions.front(), settings, base, objects.paths)) return false;
-	return Link(objects.paths, base);
+	return LinkKept(objects, [&bitcode](size_t i) { return bitcode[i]; }, settings, base);
+}
+
+// A link that fails while objects an earlier build kept are linked is tried once more with those assembled again (BUG-508):
+// the cache names an object by what it is made from, and cannot tell one damaged as it was written (this machine's memory
+// errors), or one another compiler wrote, from a good one - it would be linked into every build after. The first link's
+// diagnostics give way to a warning; a kept object that comes out otherwise is left in `<base>.rejected` and named. A
+// build server's own kept objects have no bitcode here: a failed link ends its served build, and the cold build after it
+// assembles them again.
+bool ProgramOutput::LinkKept(const C4Compiler::CachedObjects& objects, const std::function<std::string(size_t)>& bitcode,
+	const C4Compiler::ObjectSettings& settings, const std::string& base)
+{
+	const uint32 before = m_In.result.errors.Count();
+	if (Link(objects.paths, base)) return true;
+	if (objects.kept.empty()) return false;
+	m_In.result.errors.Resize(before);
+	Warn("the link failed with " + std::to_string(objects.kept.size()) + " object(s) an earlier build kept: they are assembled again from their code");
+	const auto start = std::chrono::steady_clock::now();
+	std::vector<C4Compiler::ObjectDiagnostic> diagnostics;
+	std::vector<std::string> differed;
+	const fs::path rejected = base + ".rejected";
+	const bool assembled = C4Compiler::AssembleKeptAgain(objects.kept, bitcode, settings, rejected, differed, diagnostics);
+	Report(diagnostics);
+	Timed("assembled again", start);
+	for (const std::string& name : differed)
+		Warn("the kept object " + name + " was not what its code assembles to (damaged, or another compiler's): it is left in " + rejected.string());
+	return assembled && Link(objects.paths, base);
+}
+
+void ProgramOutput::Warn(const std::string& message)
+{
+	C4Compiler::CompilationError warning;
+	warning.severity = C4Compiler::ErrorSeverity::Warning;
+	warning.message = Core::String(message.c_str());
+	m_In.result.errors.Push(warning);
 }
 
 // The compiler owns its output location: a missing folder is created, as every toolchain does.
@@ -226,15 +260,13 @@ unsigned ProgramOutput::PartitionsFor(const llvm::Module& module, const C4Compil
 	return m_In.options.partitions ? m_In.options.partitions : C4Compiler::PartitionCount(module, settings);
 }
 
-// What a cached object depends on besides its code: the compiler that assembled it (its version, and the size and
-// time of its executable, so a rebuilt compiler never reuses an old one's objects) and the target settings.
+// What a cached object depends on besides its code: the compiler that assembled it (its version, and its running image's
+// identity, so a rebuilt compiler never reuses an old one's objects - read from the image, not the file at its path: a
+// toolchain refreshed while a build runs puts another compiler there, whose name the running one's objects would take,
+// BUG-508) and the target settings.
 std::string ProgramOutput::CacheSalt(const C4Compiler::ObjectSettings& settings)
 {
-	std::error_code ec;
-	const fs::path compiler = C4Compiler::Toolchain::Executable();
-	const auto size = fs::file_size(compiler, ec);
-	const auto time = fs::last_write_time(compiler, ec).time_since_epoch().count();
-	return "C4 " + std::to_string(C4Compiler::CompilerVersion::Encoded) + " " + std::to_string(size) + " " + std::to_string(time) +
+	return "C4 " + std::to_string(C4Compiler::CompilerVersion::Encoded) + " " + C4Compiler::Toolchain::RunningImageIdentity() +
 		" -O" + std::to_string(settings.optLevel) + (settings.optimizePartitions ? " incremental " : " ") + settings.target->Cpu() + " " +
 		settings.target->LlvmFeatures();
 }
@@ -252,7 +284,7 @@ bool ProgramOutput::WriteCompiledObject(llvm::Module& module, const C4Compiler::
 
 // The module assembled into its objects inside the compiler, reusing the cached objects of unchanged partitions; an
 // error the assembler reports for an asm block is placed at that block.
-std::vector<std::string> ProgramOutput::Assemble(llvm::Module& module, const C4Compiler::ObjectSettings& settings, const C4Compiler::ObjectCache& cache)
+C4Compiler::CachedObjects ProgramOutput::Assemble(llvm::Module& module, const C4Compiler::ObjectSettings& settings, const C4Compiler::ObjectCache& cache)
 {
 	const auto start = std::chrono::steady_clock::now();
 	const unsigned partitions = PartitionsFor(module, settings);
@@ -263,7 +295,7 @@ std::vector<std::string> ProgramOutput::Assemble(llvm::Module& module, const C4C
 	m_In.compiler.AddPhaseTime("codegen", std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() - objects.splitSeconds);
 	if (m_In.options.timePhases) ReportPartitions(objects, partitions, settings.threads);
 	if (m_In.options.verbose) ReportObjects(C4Compiler::InstructionCount(module), partitions, objects.reused, settings.threads, cache);
-	return objects.paths;
+	return objects;
 }
 
 // -v: how many objects, how many an earlier build had, and where they are kept.

@@ -1,5 +1,6 @@
 #include "Script/ScriptCache.h"
 #include "Compiler/FileIo.h"
+#include "Compiler/Toolchain.h"
 #include "Script/ScriptCompiler.h"
 #include "Script/ScriptReach.h"
 #include <llvm/Support/BLAKE3.h>
@@ -12,11 +13,6 @@
 #include <filesystem>
 #include <iterator>
 #include <thread>
-#if defined(_WIN32)
-#include <windows.h>
-#else
-#include <dlfcn.h>
-#endif
 
 namespace C4Compiler
 {
@@ -303,30 +299,10 @@ namespace C4Compiler
 		RemoveOthers(m_Folder, name.substr(0, name.rfind('-') + 1), name); // the digest holds no '-'
 	}
 
+	// The library (or program) this code is in, by its loaded image, not by the file at its path: a toolchain refreshed
+	// while a host runs puts another build there (BUG-508).
 	std::string ScriptCompilerIdentity()
 	{
-#if !defined(_WIN32)
-		// The shared library (or program) this code is in, by its file, size and time.
-		Dl_info info = {};
-		if (!dladdr(reinterpret_cast<void*>(&ScriptCompilerIdentity), &info) || !info.dli_fname || !*info.dli_fname) return "";
-		std::error_code ec;
-		const fs::path file = fs::canonical(info.dli_fname, ec);
-		if (ec) return "";
-		const std::optional<FileStamp> stamp = StampOf(PathText(file));
-		if (!stamp) return "";
-		return PathText(file) + "|" + std::to_string(stamp->size) + "|" + std::to_string(stamp->modified);
-#else
-		HMODULE module = nullptr;
-		if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-				reinterpret_cast<LPCWSTR>(&ScriptCompilerIdentity), &module))
-			return "";
-		wchar_t path[MAX_PATH * 4];
-		const DWORD length = GetModuleFileNameW(module, path, static_cast<DWORD>(std::size(path)));
-		if (length == 0 || length >= std::size(path)) return "";
-		const std::optional<FileStamp> stamp = StampOf(PathText(fs::path(std::wstring(path, length))));
-		if (!stamp) return "";
-		return std::string(reinterpret_cast<const char*>(path), length * sizeof(wchar_t)) + "|" + std::to_string(stamp->size) + "|" +
-			std::to_string(stamp->modified);
-#endif
+		return Toolchain::ImageIdentity(reinterpret_cast<const void*>(&ScriptCompilerIdentity));
 	}
 } // namespace C4Compiler

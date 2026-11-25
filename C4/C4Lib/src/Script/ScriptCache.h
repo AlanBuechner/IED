@@ -50,6 +50,7 @@ namespace C4Compiler
 		std::string m_Compiler;
 	};
 
-	/// The build of the compiler running this code: the path, size and time of the file it was loaded from.
+	/// The build of the compiler running this code: its loaded image's identity (Toolchain::ImageIdentity), not the file at
+	/// its path, which a refreshed toolchain replaces while a host runs (BUG-508).
 	std::string ScriptCompilerIdentity();
 } // namespace C4Compiler

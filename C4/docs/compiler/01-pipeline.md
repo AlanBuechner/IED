@@ -300,8 +300,13 @@ straight from the module in memory).
   were reused, and of those assembled the longest, the total and the largest.
 - The object cache (`Compiler/ObjectCache`, roadmap 5.3): a linked build keeps its objects in
   `<int>/<out name>.objects/`, each named after the hash of its partition's bitcode and of the compiler (its version,
-  and the size and time of its executable) and the target settings, so a partition whose code is unchanged reuses
-  its object and a rebuilt compiler or another `-O` / `-march` reuses none. A split program's reflection image is kept
+  and its running image's identity: the PE header's link stamp, sizes and debug record, on Linux the running file's
+  inode, size and time - read from the image, never from the file at its path, which a toolchain refreshed during the
+  build replaces, BUG-508) and the target settings, so a partition whose code is unchanged reuses its object and a
+  rebuilt compiler or another `-O` / `-march` reuses none. The name says what an object is made from, not what it
+  holds: a link that fails while kept objects are linked assembles them again from their code and links once more
+  (`AssembleKeptAgain`), with a warning; a kept object that came out otherwise (damaged as it was written - this
+  machine's memory errors - or another compiler's) is left in `<int>/<out name>.rejected/` and named. A split program's reflection image is kept
   by a key of its own, the hash of what it is made of, and built only when that object is missing (D-82). Partitions
   with the same code (empty ones, in a small program split into many) share one object, assembled once and linked
   once. An object is written beside its name and moved into place when complete; the folder keeps only the latest

@@ -1022,9 +1022,31 @@ int32 main()
     if ($LASTEXITCODE -ne 37) { $failures += "after editing Tripled the program exited $LASTEXITCODE, expected 37 (a stale object was linked)" }
     if ($edited.reused -lt 1 -or $edited.reused -ge $edited.objects) { $failures += "editing one function reused $($edited.reused) of $($edited.objects) objects" }
     if (@(Get-ChildItem $cache -Filter "*.obj").Count -ne 4 -or @(Get-ChildItem $cache -Filter "*.tmp").Count -ne 0) { $failures += "the cache keeps more than the latest build's objects" }
+    # BUG-508: a kept object that is not what its name says (here another object's bytes) fails the link; the build
+    # assembles the kept objects again, leaves the wrong one aside in app.rejected, says so, and links.
+    $byLength = @(Get-ChildItem $cache -Filter "*.obj" | Sort-Object Length)
+    $damaged = $byLength[-1].Name
+    [System.IO.File]::WriteAllBytes($byLength[-1].FullName, [System.IO.File]::ReadAllBytes($byLength[0].FullName))
+    $healed = & $build @()
+    & $exe | Out-Null
+    if ($healed.exit -ne 0 -or $LASTEXITCODE -ne 37) { $failures += "a damaged kept object was linked: exit $($healed.exit), the program $LASTEXITCODE`: $($healed.output)" }
+    elseif ($healed.output -notmatch "assembled again" -or $healed.output -notmatch [regex]::Escape($damaged)) { $failures += "a damaged kept object was assembled again without saying which: $($healed.output)" }
+    $rejected = @(Get-ChildItem (Join-Path $dir "out/app.rejected") -ErrorAction SilentlyContinue)
+    if ($rejected.Count -ne 1 -or $rejected[0].Name -ne $damaged) { $failures += "app.rejected holds '$($rejected.Name -join ', ')', not the damaged $damaged alone" }
     $optimized = & $build @("-O2")
     & $exe | Out-Null
     if ($optimized.exit -ne 0 -or $LASTEXITCODE -ne 37 -or $optimized.reused -ne 0) { $failures += "an -O2 build after -O0 reused $($optimized.reused) objects or exited $LASTEXITCODE" }
+    # The objects are named by the compiler's running image, not by the file at its path, which a toolchain refreshed
+    # during a build replaces (BUG-508): a copy of the compiler of another size and time reuses every object it made.
+    $copy = Join-Path (Split-Path $compiler) "C4-identity-copy.exe"
+    Copy-Item $compiler $copy -Force
+    try {
+        [System.IO.File]::AppendAllText($copy, ("-" * 4096))
+        (Get-Item $copy).LastWriteTime = (Get-Date).AddDays(-3)
+        $byCopy = Invoke-Compiler $copy @($src, "-o", $exe, "-v", "--partitions", "4", "-O2")
+        $m = [regex]::Match($byCopy.output, "in (\d+) object\(s\), (\d+) reused")
+        if ($byCopy.exit -ne 0 -or $m.Groups[2].Value -ne "4") { $failures += "the compiler's copy of another size and time reused $($m.Groups[2].Value) of 4 objects: $($byCopy.output)" }
+    } finally { Remove-Item $copy -Force -ErrorAction SilentlyContinue }
     $compileOnly = Invoke-Compiler $compiler @($src, "-o", (Join-Path $dir "c/app.exe"), "-c")
     if ($compileOnly.exit -ne 0 -or (Test-Path (Join-Path $dir "c/app.objects"))) { $failures += "-c made an object cache" }
     return $failures
@@ -1064,6 +1086,20 @@ int32 main()
     & $exe | Out-Null
     if ($LASTEXITCODE -ne 37) { $failures += "after editing Tripled the program exited $LASTEXITCODE, expected 37 (a stale object was linked)" }
     if ($edited.reused -lt 1 -or $edited.reused -ge $edited.objects) { $failures += "editing one function reused $($edited.reused) of $($edited.objects) objects" }
+    # BUG-508: a kept reflection image object naming what the build does not define (here a partition's bytes) is
+    # assembled again from the image, and the program links.
+    $cache = Join-Path $dir "out/app.objects"
+    $image = @(Get-ChildItem $cache -Filter "reflection-*.obj")
+    $partition = @(Get-ChildItem $cache -Filter "*.obj" | Where-Object { $_.Name -notlike "reflection-*" } | Sort-Object Length)
+    if ($image.Count -ne 1) { $failures += "the incremental build kept $($image.Count) reflection image objects" }
+    else {
+        [System.IO.File]::WriteAllBytes($image[0].FullName, [System.IO.File]::ReadAllBytes($partition[0].FullName))
+        $healed = & $build @("--incremental")
+        & $exe | Out-Null
+        if ($healed.exit -ne 0 -or $LASTEXITCODE -ne 37) { $failures += "a damaged reflection image object was linked: exit $($healed.exit), the program $LASTEXITCODE`: $($healed.output)" }
+        $rejected = @(Get-ChildItem (Join-Path $dir "out/app.rejected") -ErrorAction SilentlyContinue)
+        if ($rejected.Count -ne 1 -or $rejected[0].Name -ne $image[0].Name) { $failures += "app.rejected holds '$($rejected.Name -join ', ')', not the damaged image object alone" }
+    }
     $whole = & $build @()
     & $exe | Out-Null
     if ($whole.exit -ne 0 -or $LASTEXITCODE -ne 37 -or $whole.reused -ne 0) { $failures += "a whole-program build after an incremental one reused $($whole.reused) objects or exited $LASTEXITCODE" }

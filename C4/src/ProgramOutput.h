@@ -94,11 +94,16 @@ private:
 	unsigned PartitionsFor(const llvm::Module& module, const C4Compiler::ObjectSettings& settings) const;
 	static std::string CacheSalt(const C4Compiler::ObjectSettings& settings);
 	bool WriteCompiledObject(llvm::Module& module, const C4Compiler::ObjectSettings& settings, const std::string& objPath);
-	std::vector<std::string> Assemble(llvm::Module& module, const C4Compiler::ObjectSettings& settings, const C4Compiler::ObjectCache& cache);
+	C4Compiler::CachedObjects Assemble(llvm::Module& module, const C4Compiler::ObjectSettings& settings, const C4Compiler::ObjectCache& cache);
 	void ReportPartitions(const C4Compiler::CachedObjects& objects, unsigned partitions, unsigned threads) const;
 	void ReportObjects(uint64_t instructions, unsigned objects, size_t reused, unsigned threads, const C4Compiler::ObjectCache& cache) const;
 	void Report(const std::vector<C4Compiler::ObjectDiagnostic>& diagnostics);
 	bool Link(const std::vector<std::string>& programObjects, const std::string& base);
+	/// Link, and when it fails with objects found in the cache, again with those assembled again (BUG-508): a partition's
+	/// bitcode from `bitcode` (null when every kept object carries its own).
+	bool LinkKept(const C4Compiler::CachedObjects& objects, const std::function<std::string(size_t)>& bitcode,
+		const C4Compiler::ObjectSettings& settings, const std::string& base);
+	void Warn(const std::string& message);
 	LinkStamp StampFor(const std::string& base, const Core::Vector<Core::String>& objects, const Core::Vector<Core::String>& libraries,
 		const DebugInfoPaths& debugInfo) const;
 	static DebugInfoPaths DebugInfoPathsFor(const Core::String& program);

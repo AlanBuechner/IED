@@ -2,6 +2,7 @@
 #include "Compiler/CpuTarget.h"
 #include "Compiler/ModulePartitions.h"
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
@@ -56,10 +57,22 @@ namespace C4Compiler
 		Builder build;
 	};
 
+	/// An object a build found in the cache instead of assembling it, with what it is made of: the cache names an object by
+	/// what it is made from, so a damaged one (or another compiler's under this one's name) is taken for good until it is
+	/// assembled again (BUG-508).
+	struct KeptObject
+	{
+		std::string path;
+		size_t partition = 0;       // a partition's: the index of its bitcode among the caller's (WriteCachedObjects' `written`)
+		std::string bitcode;        // a whole-program build's partition: its bitcode, which the caller does not keep
+		KeyedModule::Builder build; // a keyed module's (the reflection image, the script table)
+	};
+
 	struct CachedObjects
 	{
 		std::vector<std::string> paths; // each once: partitions with the same code share their object
 		std::vector<std::string> byPartition; // a program emitted in partitions: each partition's object
+		std::vector<KeptObject> kept;   // each object found in the cache, once (not a build server's own: it has no bitcode here)
 		size_t reused = 0;
 		double splitSeconds = 0;       // splitting the module into partitions and writing each one's bitcode
 		struct Assembled { uint64_t instructions = 0; double seconds = 0; };
@@ -86,4 +99,12 @@ namespace C4Compiler
 	CachedObjects WriteCachedObjects(size_t partitions, const std::function<std::string(size_t)>& bitcode, std::vector<KeyedModule> keyed,
 		const ObjectSettings& settings, const ObjectCache& cache, std::vector<ObjectDiagnostic>& diagnostics, std::vector<std::string>& written,
 		const std::vector<std::string>& reused = {});
+
+	/// After a link that failed with objects found in the cache (`kept`): each is moved into the folder `aside` and assembled
+	/// again in its place from what it is made of - a partition's bitcode from `bitcode(partition)` unless it carries its
+	/// own. One that comes out the same is removed from `aside`; one that differs stays there, and its name is returned:
+	/// the cache had kept an object its code does not assemble to. False, with diagnostics, when one cannot be assembled
+	/// or moved.
+	bool AssembleKeptAgain(const std::vector<KeptObject>& kept, const std::function<std::string(size_t)>& bitcode, const ObjectSettings& settings,
+		const std::filesystem::path& aside, std::vector<std::string>& differed, std::vector<ObjectDiagnostic>& diagnostics);
 }

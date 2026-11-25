@@ -13,6 +13,14 @@ namespace C4Compiler::Toolchain
 	/// The running compiler's own executable.
 	fs::path Executable();
 
+	/// What tells the loaded executable or library that holds `address` from another build of it, read from the loaded
+	/// image itself - its PE header's link stamp, sizes and debug record on Windows; on Linux the mapped file's device and
+	/// inode (with its size and time, through /proc/self/map_files) - never from the file at its path: a toolchain
+	/// refreshed while a compiler runs puts another build there (BUG-508). Empty when it cannot be read.
+	std::string ImageIdentity(const void* address);
+	/// ImageIdentity of the running program's executable.
+	std::string RunningImageIdentity();
+
 	/// clang (clang.exe on Windows) in <home>/toolchain/bin; on Windows a development build also finds the repository's
 	/// vendored LLVM above the executable, on Linux (whose vendored LLVM there is none) $LLVM_HOME's clang, else the one on
 	/// PATH. Empty when there is none.
