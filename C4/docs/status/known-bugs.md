@@ -73,7 +73,15 @@ Next ID: **BUG-510**
   or a partition module outliving what it refers to are the first suspects. Likely seen again 2026-11-25 (not symbolized, so
   not certainly the same): `nuke test` in LS (the dev compiler built 05:38 UTC from b8c33ea708, modified; NUKE_JOBS=4 at low
   priority) crashed compiling the ClaymoreScriptHost test harness with `exception 0xc0000005 at C4.exe+0x16b0efd`; its sources
-  unchanged, `nuke test ClaymoreScriptHost` right after compiled it and its 16 tests passed.
+  unchanged, `nuke test ClaymoreScriptHost` right after compiled it and its 16 tests passed. Perhaps related, seen by X
+  2026-11-25 (the compiler of c5af6cb8 with X's change; `nuke test` in Claymore under a full machine): compiling WindEditor's
+  test harness crashed in `llvm::ValueEnumerator::enumerateMetadataImpl` <- `ValueEnumerator` <- `WriteBitcodeToFile` <-
+  `ModuleBitcode` <- `PartitionBitcode` <- `WriteCachedObjects`' `ParallelFor` worker (`ObjectEmission.cpp:446`) - again a
+  thread's own copy of a split module, again no stack-map code in the path; the next run compiled it (all 84 harnesses
+  passed). The change since X's clean runs is f6b4f6af.
+  The machine is a suspect too: Windows logged a fatal hardware error (WHEA-Logger, 2026-11-22) and four unexpected
+  shutdowns (Kernel-Power 41: 11-22 twice, 11-24 at 22:09 and 23:26), and since the last one every Edge and WebView2 start
+  dies with 0xc000001d at the same offset of msedge_elf.dll, whose bytes there are an ordinary `js`.
 
 ## Tools
 
