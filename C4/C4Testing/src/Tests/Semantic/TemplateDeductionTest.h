@@ -22,6 +22,8 @@ namespace Testing
 		TEST_FUNC(Semantic.Templates)
 		void DeducesThroughParameterShapes();
 		TEST_FUNC(Semantic.Templates)
+		void DeducesThroughASignaturesReferences();
+		TEST_FUNC(Semantic.Templates)
 		void DeducesTemplateInstancesAndTheirBases();
 		TEST_FUNC(Semantic.Templates)
 		void ConflictingDeductionsNameBothTypes();

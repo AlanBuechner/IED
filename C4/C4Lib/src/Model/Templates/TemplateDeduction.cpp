@@ -104,7 +104,9 @@ namespace C4Compiler
 			if (auto r = MatchValue(layer.arraySizeExpr.Get(), ConstantValue::Int(static_cast<int64>(arr->GetElementCount()))); !r.Ok()) return r;
 			return MatchLayers(pattern, layers - 1, arr->GetElementType(), false);
 		}
-		if (layer.indirectionToken == TokenType::Ampersand) return MatchLayers(pattern, layers - 1, argument, false);
+		// `T&` against a reference (a signature's parameter, `func<void(T&)>`): T is what it refers to, its const aside, as for a call's
+		// argument.
+		if (layer.indirectionToken == TokenType::Ampersand) return MatchLayers(pattern, layers - 1, TypeHandle::UnwrapToValue(argument), false);
 		if (layer.indirectionToken != TokenType::Star || !argument) return Nothing();
 		if (argument->GetKind() == TypeKind::Pointer)
 			return MatchLayers(pattern, layers - 1, static_cast<const PointerType*>(argument)->GetPointeeType(), false);

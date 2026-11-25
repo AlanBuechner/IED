@@ -113,6 +113,24 @@ namespace Testing
 		TEST_ASSERT(apply.sig != nullptr && apply.sig->GetReturnType() == ts->Builtin(TypeKind::Int64));
 	}
 
+	// A `func<void(T&)>` (a `const T&` in a signature) against a func taking `int32&`: T is int32, agreeing with the other arguments,
+	// not `int32&` (which conflicted with them).
+	void TemplateDeductionTest::DeducesThroughASignaturesReferences()
+	{
+		CompilerInstance compiler;
+		auto& model = MakeModel(compiler,
+			"template<T> T Change(T v, func<void(T&)> change) { change(v); return v; }\n"
+			"template<T> T Pick(T a, T b, func<bool(const T&, const T&)> better) { return better(a, b) ? a : b; }\n");
+		TypeStore* ts = model.TypeStorePtr();
+		const Type* i32 = ts->Builtin(TypeKind::Int32);
+		Core::Vector<const Type*> byRef; byRef.Push(ts->Reference(i32));
+		Call change = Resolve(model, "Change", { i32, ts->Func(ts->Builtin(TypeKind::Void), byRef) });
+		TEST_ASSERT(change.sig != nullptr && change.sig->GetReturnType() == i32);
+		Core::Vector<const Type*> byConst; byConst.Push(ts->Reference(i32, true)); byConst.Push(ts->Reference(i32, true));
+		Call pick = Resolve(model, "Pick", { i32, i32, ts->Func(ts->Builtin(TypeKind::Bool), byConst) });
+		TEST_ASSERT(pick.sig != nullptr && pick.sig->GetReturnType() == i32);
+	}
+
 	void TemplateDeductionTest::DeducesTemplateInstancesAndTheirBases()
 	{
 		CompilerInstance compiler;
