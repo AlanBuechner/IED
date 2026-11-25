@@ -57,7 +57,7 @@ Next ID: **BUG-510**
 ### BUG-509 The compiler crashed now and then splitting a whole-program module for code generation
 - **Area:** Codegen
 - **Severity:** High
-- **Status:** Open
+- **Status:** Open - for the owner: the evidence (2026-11-25, below) points at the machine, not the code
 - **Found:** 2026-11-24
 - **Symptom:** `nuke gates`' step `script-debug-O2` (ScriptTest `Templates`' host, `--script-host -O2 -g`) failed once
   with `internal compiler error: exception 0xc0000005`. Symbolized (the compiler of HEAD c5af6cb8 with X's -O0
@@ -82,6 +82,36 @@ Next ID: **BUG-510**
   The machine is a suspect too: Windows logged a fatal hardware error (WHEA-Logger, 2026-11-22) and four unexpected
   shutdowns (Kernel-Power 41: 11-22 twice, 11-24 at 22:09 and 23:26), and since the last one every Edge and WebView2 start
   dies with 0xc000001d at the same offset of msedge_elf.dll, whose bytes there are an ordinary `js`.
+- **Investigated 2026-11-25 (chat AA; scripts and logs in `.ied/local/aa/`):**
+  - *Not reproduced, on three paths.* A copy of the dev compiler (842ffb8d): the Templates host `--script-host -O2 -g`
+    whole-program (BuildShare) 30 times alone and 20 times with three more compiles beside it; incremental
+    (PartitionBitcode on the output's threads) 200 alone and 100 with three beside; Claymore's WindEditor harness as Nuke
+    compiles it 15 alone and 10 with two beside - 0 failures in 755 compiles, and every run kept the same objects (65, 7,
+    260: identical code each time). The compiler built for Linux in Docker (the tree at 14:50): the same host 30 + 20x4
+    whole-program and 30 + 20x4 incremental, 0 failures. C4Testing's Compiler.* under ThreadSanitizer (154 cases, among
+    them ModulePartitions' split on 3 and 8 threads and ObjectCache's parallel WriteCachedObjects): no report.
+  - *Code read.* BuildShare's threads share nothing writable: each reads the same const bitcode string into an
+    LLVMContext of its own and writes its own slots of `out`. Each partition PartitionBitcode writes owns its context
+    (`PartitionEmitter::m_Context`); the keyed modules (reflection image, host table) are built from data in a context of
+    their own.
+  - *The machine.* Kernel bugchecks 0x1A MEMORY_MANAGEMENT five times (11-15 0x61948, 11-17 0x41790, 11-22 0x41792, 11-24
+    22:09 0x41790, 11-24 23:26 0x5100) and 0x133 once (11-22): corrupted page tables and PFN lists in the kernel, which no
+    user program can cause. The fatal WHEA record (WHEA-Logger 1, 11-22 17:09 UTC) is an NMI (notify type
+    5BAD89FF-B7E6-42C9-814A-CF2485D6E98A) with a processor-generic section of unknown error type on an AMD family 19h
+    model 61h (Ryzen 7 7800X3D) and an NMI section with port 61h = 0x2C (no parity or I/O-check bit: the firmware did not
+    name the source). 11-25 00:35: Memory-Diagnostic-Task-Handler 1001, "Windows removed bad memory regions from this PC".
+    C4LSP.exe died with 0xc000001d (illegal instruction) twice at different offsets (11-24 21:35, 21:46) among ten access
+    violations from 20:56 to 22:01, just before the 22:09 bugcheck; Edge and WebView2 (139 reports since 11-24 23:38) fault
+    at msedge_elf.dll+0x133cac, a `js` that is the same in the file and in its mapped image (both installed copies, same
+    SHA-256): not a bad page of the file - the processor, or code written there at run time. BUG-435 (closed) was seen on
+    11-15, the day of the first bugcheck. Board: Gigabyte B650 GAMING X AX, BIOS F31 (2024-08-13); memory 2x G.Skill
+    F5-6400J3239G32G at 4800 MT/s, 1.10 V (JEDEC, not EXPO). C:\Windows\MEMORY.DMP (11-24 23:26) needs an administrator.
+  - *For the owner:* MemTest86 from USB (4 passes, both DIMMs, then each alone) or Windows Memory Diagnostic set to
+    Extended; the latest BIOS for the board (F31 is old: newer AGESA and microcode), optimized defaults, no PBO/Curve
+    Optimizer offset or EXPO while testing; HWiNFO64 during a long build for CPU temperature (the 7800X3D's limit is 89 C),
+    SoC voltage and WHEA errors; a per-core CPU test (OCCT, or Core Cycler with Prime95/y-cruncher), since an illegal
+    instruction on valid code is typical of one unstable core; WinDbg `!analyze -v` on MEMORY.DMP; then `sfc /scannow`.
+    Close this entry if the crashes stop on sound hardware; reopen the code side only with a crash that repeats there.
 
 ## Tools
 
