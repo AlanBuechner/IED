@@ -12,12 +12,21 @@ includes = ["${cpp.llvm}/include", "../C4Api/src"]
 defines = { NOMINMAX = "", WIN32_LEAN_AND_MEAN = "" }
 tests = true
 
-# C4Api's import library: the API tests call the DLL a tool would ship (a second copy of the compiler, as a tool has).
+# C4Api's import library (C4Api.so on Linux): the API tests call the library a tool would ship (a second copy of the
+# compiler, as a tool has), copied beside the tests.
 [project.system.windows]
 links = ["ntdll.lib", "dbghelp.lib", "shell32.lib", "${bin.root}/C4Api/C4Api.lib"]
 
+[project.system.linux]
+links = ["${bin.root}/C4Api/C4Api.so"]
+
 [[project.copy]]
 from = "${bin.root}/C4Api/C4Api.dll"
+systems = ["windows"]
+
+[[project.copy]]
+from = "${bin.root}/C4Api/C4Api.so"
+systems = ["linux"]
 
 [project.driver]
 reflection = true
