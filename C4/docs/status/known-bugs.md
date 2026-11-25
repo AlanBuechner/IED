@@ -3,7 +3,7 @@
 Every open bug in the C4 compiler, runtime, Bedrock and tools. Add an entry when a bug is found;
 delete it when the fix lands.
 
-Next ID: **BUG-508**
+Next ID: **BUG-509**
 
 ## Rules for this file
 
@@ -43,6 +43,7 @@ Next ID: **BUG-508**
 
 | ID | Title | Area | Severity |
 |---|---|---|---|
+| BUG-508 | A build through the build server links a reused body's call by a name the build no longer emits | Tools | High |
 
 ---
 
@@ -51,3 +52,15 @@ Next ID: **BUG-508**
 ## Model, templates and semantics
 
 ## Interop, runtime and Bedrock
+
+## Tools
+
+### BUG-508 A build through the build server links a reused body's call by a name the build no longer emits
+- **Area:** Tools
+- **Severity:** High
+- **Status:** Open
+- **Found:** 2026-11-24
+- **Symptom:** in Claymore, `nuke test` (with the dev toolchain built at 2026-11-24 23:07 UTC from 26e5f261 with R1 stage 2b's serve changes, committed as f6b4f6af) failed to link the AnimeRenderingEditor test harness: `lld-link: error: undefined symbol: ?sse?s_AssetManager_ForgetMissing_0`, referenced by `EngineCore.cf:256` in `Claymore_EngineCore_BeginFrame_0` - where `AssetManager::Update` (Packages/Assets `AssetManagerFrame.cf`, unchanged since 2026-11-19) calls the private `ForgetMissing`. Every other harness of the run (ClaymoreEngine, Editor and the rest) linked the same call; a second `nuke test AnimeRenderingEditor` failed the same way; after deleting that harness's `build/int/.../AnimeRenderingEditor/tests` it compiled and linked, and its 20 tests passed. None of the sources involved had changed: the build server's kept state (the program's earlier build, made by an earlier compiler build of the same day) gave the reused or inlined body a call by a decorated name the new build did not emit.
+- **Repro:** not reduced: it went with the deleted folder. Likely: a program built through its server, the compiler rebuilt from a checkout whose name-decoration or inlining changed, the program built again without a change to its sources.
+- **Where:** `C4Lib/src/Serve/` (BodyEdits, BodySwap: what a server reuses from the build before), Nuke `nuke/c4/server.py` (a server of a compiler since rebuilt answers `stale` - by the compiler file's time and size - so the state reused was its own, or the objects left in the folder were)
+- **Notes:** found while verifying an unrelated Claymore change (the editor's sidebar). Not yet known whether the stale name came from the server's kept state or from an object left in the folder by the earlier compiler; where the `?sse?s_` decoration is made is not yet found.
