@@ -44,7 +44,6 @@ Next ID: **BUG-511**
 | ID | Title | Area | Severity |
 |---|---|---|---|
 | BUG-509 | The compiler crashed now and then splitting a whole-program module for code generation | Codegen | High |
-| BUG-510 | A build's cached runtime objects can be deleted while it links them, by a build that keys them otherwise | Tools | Medium |
 
 ---
 
@@ -114,23 +113,3 @@ Next ID: **BUG-511**
     Close this entry if the crashes stop on sound hardware; reopen the code side only with a crash that repeats there.
 
 ## Tools
-
-### BUG-510 A build's cached runtime objects can be deleted while it links them, by a build that keys them otherwise
-- **Area:** Tools
-- **Severity:** Medium
-- **Status:** Open
-- **Found:** 2026-11-25
-- **Symptom:** `nuke test ied-server` (15:59, right after `nuke build ied-server`) failed to link: `lld-link: could not open
-  .../Temp/c4_runtime/255a3ca8f4b4ba54/O2/stack-maps/TextRuntime-88763743cc3a5e0d.obj` (and ThreadRuntimeWin32-...,
-  ThreadStorageRuntimeC-...: three sources in a row by name). Run again a minute later it compiled every one of the 70
-  stack-maps runtime objects anew, under the same names, and linked; 571 tests passed. So between the first run's listing
-  and its link another compiler process, keying the same sources otherwise, was compiling its own versions one by one and
-  deleting these as "other versions" - and then the rerun deleted that process's.
-- **Repro:** not reduced; likely two builds at once with the same runtime folder (toolchains/c4/dev/C4Runtime) whose keys
-  differ - a compiler of another build (a build server started before the dev toolchain was refreshed), or a compile that
-  read the runtime sources or headers while MakeToolchain rewrote them.
-- **Where:** `C4Lib/src/Compiler/RuntimeObjects.cpp` `EnsureRuntimeObjects` / `RemoveOtherVersions`: each compiled object
-  deletes every other version of its source at once, with no regard for a build that listed one and has not linked yet.
-- **Notes:** found by AA while verifying another change. Fix direction: as the object cache's KeepOnly spares what another
-  build claimed or just wrote (BUG-442, BUG-443), prune other versions only when they are old (or unclaimed), not at
-  compile time; a test with two keys in one folder, one listed and linked after the other compiled.

@@ -23,6 +23,8 @@ namespace C4Compiler
 		/// Notes that this process's build links `object` (a file of the folder, there yet or not): another build's KeepOnly
 		/// spares it while this process runs (BUG-443). The claims are a file of the folder per process, `.claim.<pid>`.
 		void Claim(const std::filesystem::path& object) const;
+		/// Claims each of `objects` at once.
+		void Claim(const std::vector<std::filesystem::path>& objects) const;
 
 		/// Removes every object (and unfinished write) but `used`: the folder holds one build's objects. What another
 		/// compiler still running claimed (two IED chats building one project at once, BUG-443) stays, and so does its
@@ -38,6 +40,7 @@ namespace C4Compiler
 	/// A name beside `path` no other process or thread writes (`<path>.<pid>-<n>.tmp`): where a file is written before
 	/// it is renamed to `path`, so two compilers making the same object never take each other's unfinished file (BUG-442).
 	std::string PrivatePartialPath(const std::string& path);
-	/// Whether `path` is a PrivatePartialPath of another process that is still running: a write KeepOnly leaves alone.
+	/// Whether `path` is a PrivatePartialPath of another process that is still running, or the temporary a tool it runs
+	/// writes before renaming it to one (clang's `<partial>-<random>.tmp.tmp`): a write KeepOnly leaves alone.
 	bool IsAnotherBuildsPartial(const std::string& path);
 }

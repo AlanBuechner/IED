@@ -344,7 +344,9 @@ straight from the module in memory).
   install's `C4Runtime/` ([../tools/01-compiler-cli.md](../tools/01-compiler-cli.md#4-the-install)) into
   `%TEMP%/c4_runtime/<hash of the runtime folder>/<the target's folder>` (`O2`, `linux-x64-O2`; at `-O2 -Werror`), so two installs never share
   objects. Each object is named for the bytes of its source and of every runtime header (`GC_GCHeap-<key>.obj`),
-  so a changed file builds a new object whatever the files' times say, and the older versions are removed. All
+  so a changed file builds a new object whatever the files' times say. A build claims its objects before it looks for
+  them (`.claim.<pid>`, as the object cache does) and, when it compiled one, removes the other versions no running
+  build claims - so a compiler of another runtime version keeps its objects until it has linked (BUG-510). All
   are linked into every executable: the collector (`GC/`), threads, memory helpers, reflection (`Reflect/`), IO,
   testing, static storage (`StaticStorageRuntimeC.c` + `StaticStorageShim.cpp`: once guards and exit-time
   destruction) and EH (`EHRuntime.cpp`).

@@ -290,6 +290,8 @@ namespace Testing
 		const fs::path ours = PrivatePartialPath(object);         // this process's: none of it is in flight here
 		for (const fs::path& path : { running, ended, ours }) std::ofstream(path) << "x";
 		TEST_ASSERT(IsAnotherBuildsPartial(running.string()));
+		TEST_ASSERT(IsAnotherBuildsPartial(object + "." + kAlwaysRunning + "-e962f501.tmp.tmp")); // clang's temporary of it (BUG-510)
+		TEST_ASSERT(!IsAnotherBuildsPartial(object + ".4294967290-e962f501.tmp.tmp"));
 		TEST_ASSERT(!IsAnotherBuildsPartial(ended.string()));
 		TEST_ASSERT(!IsAnotherBuildsPartial(ours.string()));
 		TEST_ASSERT(!IsAnotherBuildsPartial(object));

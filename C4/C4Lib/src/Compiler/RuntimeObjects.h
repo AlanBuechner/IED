@@ -4,6 +4,8 @@
 #include "Core/Vector.h"
 #include "Target/TargetAbi.h"
 #include <cstdint>
+#include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -19,6 +21,21 @@ namespace C4Compiler
 	// `-fstack-maps`, R16) links the runtime compiled with C4_STACK_MAPS defined, into a folder of its own beside it, its
 	// stack maps' sources (RuntimeSourceIsForStackMaps) among them; any other program, the runtime without them.
 	bool EnsureRuntimeObjects(bool verbose, const TargetAbi& target, bool stackMaps, Core::Vector<Core::String>& objects);
+
+	// A runtime source and its cached object.
+	struct RuntimeObject
+	{
+		std::filesystem::path source;
+		std::filesystem::path object;
+	};
+
+	// Makes `objects` ready to link in `folder`, as the object cache keeps a build's objects (BUG-443): claims them all
+	// first, compiles by `compile` (on several threads at once) those not there, then - when it compiled one - removes
+	// the objects no running build claims (other versions of the sources), and compiles again any that another build
+	// removed after this one found it. Another compiler of another runtime version, between its listing and its link,
+	// keeps its objects (BUG-510). False when a compile fails.
+	bool KeepRuntimeObjects(const std::filesystem::path& folder, const std::vector<RuntimeObject>& objects,
+		const std::function<bool(const RuntimeObject&)>& compile);
 
 	// Whether the runtime source at `relativeSource` ("GC/GCPlatformWin32.c") is part of a program for `target`: a file
 	// named for Win32 is Windows', one named for Posix or Linux is Linux's, every other file (the script host's in Script/

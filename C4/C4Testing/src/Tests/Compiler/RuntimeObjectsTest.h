@@ -27,5 +27,13 @@ namespace Testing
 		void AChangedHeaderRenamesEveryObject();
 		TEST_FUNC(Compiler.Runtime)
 		void ObjectNamesKeepTheSourcePath();
+		TEST_FUNC(Compiler.Runtime)
+		void Bug510AnotherRunningBuildsVersionStays();
+		TEST_FUNC(Compiler.Runtime)
+		void Bug510ObjectsAreClaimedBeforeTheyAreLookedFor();
+		TEST_FUNC(Compiler.Runtime)
+		void Bug510AnObjectRemovedAfterItWasFoundIsCompiledAgain();
+		TEST_FUNC(Compiler.Runtime)
+		void AFailedCompileFails();
 	};
 } // namespace Testing

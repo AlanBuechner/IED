@@ -100,10 +100,16 @@ namespace C4Compiler
 	// Appends to this process's claims; one thread claims at a time (a build's partitions claim under its lock).
 	void ObjectCache::Claim(const std::filesystem::path& object) const
 	{
+		Claim(std::vector<std::filesystem::path>{ object });
+	}
+
+	void ObjectCache::Claim(const std::vector<std::filesystem::path>& objects) const
+	{
 		std::error_code ec;
 		llvm::raw_fd_ostream claims((m_Folder / (kClaimPrefix + std::to_string(OwnProcess()))).string(), ec,
 			llvm::sys::fs::OF_Append | llvm::sys::fs::OF_Text);
-		if (!ec) claims << object.filename().string() << "\n"; // unclaimed, an object is at worst assembled again
+		if (ec) return; // unclaimed, an object is at worst made again
+		for (const std::filesystem::path& object : objects) claims << object.filename().string() << "\n";
 	}
 
 	// LLVM's file calls take paths longer than MAX_PATH (a deep build folder), std::filesystem's do not.
@@ -131,9 +137,11 @@ namespace C4Compiler
 
 	bool IsAnotherBuildsPartial(const std::string& path)
 	{
-		// <object>.<pid>-<n>.tmp: the pid is the second dot-separated part from the end.
+		// <object>.<pid>-<n>.tmp, or the temporary a tool writes before it renames it to such a file (clang's
+		// <object>.<pid>-<random>.tmp.tmp, BUG-510): the pid is the second dot-separated part from the end.
 		llvm::StringRef name = llvm::sys::path::filename(path);
 		if (!name.consume_back(kPartialSuffix)) return false;
+		while (name.consume_back(kPartialSuffix)) {}
 		const size_t dot = name.rfind('.');
 		if (dot == llvm::StringRef::npos) return false;
 		llvm::StringRef writer = name.substr(dot + 1).split('-').first;

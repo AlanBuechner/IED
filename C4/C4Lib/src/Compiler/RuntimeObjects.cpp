@@ -1,6 +1,7 @@
 #include "Compiler/RuntimeObjects.h"
 #include "Compiler/BuildUtils.h"
 #include "Compiler/FileIo.h"
+#include "Compiler/ObjectCache.h"
 #include "Compiler/ParallelFor.h"
 #include "Compiler/Toolchain.h"
 #include <cstdio>
@@ -81,17 +82,22 @@ namespace C4Compiler
 			return stem;
 		}
 
-		// The cached objects of `stem` built from other bytes: no build links them again.
-		void RemoveOtherVersions(const fs::path& objectDir, const std::string& stem, const fs::path& current)
+		std::vector<RuntimeObject> Absent(const std::vector<RuntimeObject>& objects)
 		{
-			std::error_code ec;
-			for (fs::directory_iterator it(ExtendedPath(objectDir), ec), end; !ec && it != end; it.increment(ec))
-			{
-				const std::string name = PathText(it->path().filename());
-				const bool sameSource = name.rfind(stem + "-", 0) == 0 && it->path().extension() == ".obj";
-				std::error_code held;
-				if (sameSource && it->path().filename() != current.filename()) fs::remove(it->path(), held); // another build may still hold it
-			}
+			std::vector<RuntimeObject> absent;
+			for (const RuntimeObject& object : objects)
+				if (!FileExists(PathText(object.object))) absent.push_back(object);
+			return absent;
+		}
+
+		// One compile at a time per processor; false when any fails.
+		bool CompileAll(const std::vector<RuntimeObject>& objects, const std::function<bool(const RuntimeObject&)>& compile)
+		{
+			std::vector<char> failed(objects.size(), 0);
+			ParallelFor(objects.size(), std::max(1u, std::thread::hardware_concurrency()), [&](size_t i) {
+				if (!compile(objects[i])) failed[i] = 1;
+			});
+			return std::find(failed.begin(), failed.end(), 1) == failed.end();
 		}
 
 		// Compiles into a private file first and renames it into place, so a parallel compiler process never
@@ -164,34 +170,38 @@ namespace C4Compiler
 		const fs::path objectDir = stackMaps ? ObjectFolder(root, target) / kStackMapsFolder : ObjectFolder(root, target);
 		CreateFolders(PathText(objectDir));
 		const uint64_t headersKey = SysrootKey(*sysroot, target, HeadersKey(root));
-		struct Missing
-		{
-			fs::path source;
-			fs::path object;
-			std::string stem;
-		};
-		std::vector<Missing> missing;
+		std::vector<RuntimeObject> wanted;
 		for (const fs::path& source : FilesUnder(root, { ".c", ".cpp" }))
 		{
 			const std::string relative = RelativeName(source, root);
 			if (!RuntimeSourceIsFor(relative, target) || (!stackMaps && RuntimeSourceIsForStackMaps(relative))) continue;
-			const fs::path object = objectDir / RuntimeObjectName(relative, RuntimeContentKey(Bytes(source), headersKey));
-			if (!FileExists(PathText(object))) missing.push_back({ source, object, ObjectStem(relative) });
-			objects.Push(Core::String(object.string().c_str()));
+			wanted.push_back({ source, objectDir / RuntimeObjectName(relative, RuntimeContentKey(Bytes(source), headersKey)) });
 		}
 		// A toolchain's first build compiles every source: one clang each, at once.
-		std::vector<char> failed(missing.size(), 0);
-		ParallelFor(missing.size(), std::max(1u, std::thread::hardware_concurrency()), [&](size_t i) {
-			if (!Compile(root, missing[i].source, missing[i].object, target, *sysroot, stackMaps, verbose)) failed[i] = 1;
-			else RemoveOtherVersions(objectDir, missing[i].stem, missing[i].object);
+		const bool kept = KeepRuntimeObjects(objectDir, wanted, [&](const RuntimeObject& object) {
+			if (Compile(root, object.source, object.object, target, *sysroot, stackMaps, verbose)) return true;
+			const std::string line = "error: failed to compile the C4 runtime source " + object.source.string() + "\n";
+			std::fputs(line.c_str(), stderr); // one write: sources compile at once
+			return false;
 		});
-		for (size_t i = 0; i < missing.size(); ++i)
-			if (failed[i])
-			{
-				std::cerr << "error: failed to compile the C4 runtime source " << missing[i].source.string() << std::endl;
-				return false;
-			}
+		if (!kept) return false;
+		for (const RuntimeObject& object : wanted) objects.Push(Core::String(object.object.string().c_str()));
 		return true;
+	}
+
+	bool KeepRuntimeObjects(const fs::path& folder, const std::vector<RuntimeObject>& objects,
+		const std::function<bool(const RuntimeObject&)>& compile)
+	{
+		const ObjectCache cache(folder, "");
+		std::vector<fs::path> paths;
+		for (const RuntimeObject& object : objects) paths.push_back(object.object);
+		cache.Claim(paths); // before they are looked for, so another build's pruning spares them
+		const std::vector<RuntimeObject> missing = Absent(objects);
+		if (missing.empty()) return true;
+		if (!CompileAll(missing, compile)) return false;
+		cache.KeepOnly(paths);
+		// One another build pruned after this one found it, before this one's claim was there to be read.
+		return CompileAll(Absent(objects), compile);
 	}
 
 	uint64_t RuntimeContentKey(const std::string& bytes, uint64_t seed)

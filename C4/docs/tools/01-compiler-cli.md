@@ -108,7 +108,8 @@ compile or link error, 2 on a usage error. A crash of the compiler itself prints
    IO, RTTI, memory) at `-O2` into `%TEMP%/c4_runtime/<hash of the runtime folder>/O2/`
    (`Compiler/RuntimeObjects.cpp`). An object's name carries a key of its source's bytes and every runtime
    header's, so it is rebuilt exactly when one of them changes, whatever the files' times; each is written to a
-   private file and renamed into place, so parallel builds never link a half-written object. All of them are linked into **every** exe; a missing runtime folder or a source that does not
+   private file and renamed into place, so parallel builds never link a half-written object; a build claims what it
+   links, so another build pruning older versions spares it until it has linked. All of them are linked into **every** exe; a missing runtime folder or a source that does not
    compile is an error.
 8. Link with `lld-link` (beside `clang.exe`), given what clang's driver would give it: the main object (reflection
    registration is part of it), the runtime objects, foreign objects, `lib(...)` libraries and the `-l` / `-L` / `-Wl,`
