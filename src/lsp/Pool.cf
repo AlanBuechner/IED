@@ -1060,6 +1060,17 @@ namespace Ied
 	}
 
 	Core::String LspPool::SymbolsFor(Call& call, Workspace* ws, Core::StringView query) {
+		// A server that failed (it exited too often, or could not start) is started again for the asker, as a person restarts it from
+		// the status: asked only among the running ones, a search would answer nothing, which a tool takes for no such symbol. One
+		// that does not come up says why.
+		Core::Array<LanguageServer*> failed;
+		for (LanguageServer* language : m_Languages)
+			if (language->m_Ws == ws && language->m_State == LspState::Failed) failed.Push(language);
+		for (LanguageServer* language : failed) {
+			Log(language, Core::StringView("started again for a workspace symbol search: it had failed"));
+			language->Relaunch();
+		}
+		for (LanguageServer* language : failed) AwaitServer(call, language);
 		Core::Array<LanguageServer*> asked;
 		for (LanguageServer* language : m_Languages)
 			if (language->m_Ws == ws && language->m_State == LspState::Running && OffersWorkspaceSymbols(language)) asked.Push(language);

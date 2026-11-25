@@ -15,6 +15,7 @@ import subprocess
 import sys
 import unittest
 
+from iedclient import RpcFailure
 from test_chat import REPO, ChatCase, call_step, text_step, write
 
 CLANGD = os.path.join(REPO, "vendor", "llvm", "bin", "clangd.exe")
@@ -462,6 +463,30 @@ class FakeServerCodeToolTests(CodeToolCase):
 		for noise in ("in a comment", "in a string", "MAKE_IT alone"):
 			self.assertNotIn(noise, results["r1"], "only uses as code: called, or reached through . -> ::")
 		self.assertEqual(["a.fk"], self.uris("textDocument/didOpen"), "opened on the server once for the asking")
+
+	async def server_state(self, want, timeout=30):
+		"""Waits until the workspace's server is in state `want`."""
+		state = None
+		for _ in range(int(timeout / 0.1)):
+			servers = (await self.client.request("lsp.status", {"wsId": "w1"}))["servers"]
+			state = servers[0]["state"] if servers else None
+			if state == want:
+				return
+			await asyncio.sleep(0.1)
+		self.fail("the server stayed %s, not %s" % (state, want))
+
+	async def test_a_failed_server_is_started_again_for_a_symbol_search(self):
+		# A server that failed was asked for no symbols, so a code tool's search found none and said no such symbol existed.
+		write(os.path.join(self.repo, "deep.fk"), "a deep one\n")
+		doc = (await self.client.request("doc.open", {"wsId": "w1", "path": "a.fk"}))["docId"]
+		for _ in range(3):   # three exits in five minutes: failed until something starts it again
+			await self.server_state("running")
+			with self.assertRaises(RpcFailure):
+				await self.client.request("lsp.request", {"docId": doc, "method": "fake/crash"})
+		await self.server_state("failed")
+		results = await self.results(("s1", "code_symbols", {"query": "deep"}))
+		self.assertIn("deep.fk", results["s1"], "the failed server was started again and asked")
+		await self.server_state("running")
 
 	async def test_files_nobody_has_open(self):
 		calls = [("h%d" % i, "code_hover", {"path": "f%d.fk" % i, "line": 1}) for i in range(17)]
