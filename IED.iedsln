@@ -81,7 +81,6 @@
 		}
 	],
 	"items": [
-		"README.md",
 		"AGENTS.md",
 		"nuke.toml"
 	],
