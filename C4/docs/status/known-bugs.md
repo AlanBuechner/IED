@@ -3,7 +3,7 @@
 Every open bug in the C4 compiler, runtime, Bedrock and tools. Add an entry when a bug is found;
 delete it when the fix lands.
 
-Next ID: **BUG-509**
+Next ID: **BUG-510**
 
 ## Rules for this file
 
@@ -44,6 +44,7 @@ Next ID: **BUG-509**
 | ID | Title | Area | Severity |
 |---|---|---|---|
 | BUG-508 | A build through the build server links a reused body's call by a name the build no longer emits | Tools | High |
+| BUG-509 | The compiler crashed now and then splitting a whole-program module for code generation | Codegen | High |
 
 ---
 
@@ -52,6 +53,24 @@ Next ID: **BUG-509**
 ## Model, templates and semantics
 
 ## Interop, runtime and Bedrock
+
+### BUG-509 The compiler crashed now and then splitting a whole-program module for code generation
+- **Area:** Codegen
+- **Severity:** High
+- **Status:** Open
+- **Found:** 2026-11-24
+- **Symptom:** `nuke gates`' step `script-debug-O2` (ScriptTest `Templates`' host, `--script-host -O2 -g`) failed once
+  with `internal compiler error: exception 0xc0000005`. Symbolized (the compiler of HEAD c5af6cb8 with X's -O0
+  stack-map change, whose code runs only after this point): `llvm::Value::~Value` <- `llvm::Function::~Function` <-
+  `Module` function list `erase` <- `llvm::Module::~Module` <- the `Expected<unique_ptr<Module>>` of
+  `BuildShare` (`Compiler/ModulePartitions.cpp:397`, the end of a split thread's share) <- `SplitModuleToBitcode`'s
+  worker thread. 42 rebuilds of the same host right after (30 with stack maps, 6 with, 6 without) did not crash.
+- **Repro:** none yet: `C4.exe <ScriptTest Templates host> -o host.exe --script-host -O2 -g` in a loop, maybe under load.
+- **Where:** `C4Lib/src/Compiler/ModulePartitions.cpp` `BuildShare`: each thread reads its own lazy copy of the module's
+  bitcode into an `LLVMContext` of its own, makes partitions from it, and destroys the copy - a value still used (by
+  metadata, a value handle or another module's value) when its function is deleted would crash there.
+- **Notes:** recorded by X; not reproduced, so not fixed. A race in the split (shared state between the threads' copies)
+  or a partition module outliving what it refers to are the first suspects.
 
 ## Tools
 
