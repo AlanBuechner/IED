@@ -433,7 +433,7 @@ namespace Ai
 		if (path.IsEmpty() || path.View().StartsWith(Core::StringView("file:"))) return path;
 		FS::Path onDisk = FS::Path(m_Ws.m_Root.View()) / path.View();
 		if (FS::FileExists(onDisk.CStr()) || FS::IsDirectory(onDisk.CStr()) || IED::Exists(m_Ws, path.View())) return path;
-		Core::String only = OnlySourceFile(IED::ExpandGlob(m_Ws.m_Root.View(), SameNamedGlob(path.View()).View()));
+		Core::String only = OnlySourceFile(SameNamedFiles(m_Ws, path.View()));
 		return only.IsEmpty() ? path : only;
 	}
 
@@ -441,7 +441,7 @@ namespace Ai
 		if (path.IsEmpty() || path.StartsWith(Core::StringView("file:"))) return Core::String();
 		FS::Path onDisk = FS::Path(m_Ws.m_Root.View()) / path;
 		if (FS::FileExists(onDisk.CStr()) || FS::IsDirectory(onDisk.CStr()) || IED::Exists(m_Ws, path)) return Core::String();
-		Core::Array<Core::String> named = IED::ExpandGlob(m_Ws.m_Root.View(), SameNamedGlob(path).View());
+		Core::Array<Core::String> named = SameNamedFiles(m_Ws, path);
 		if (named.IsEmpty()) return Core::String("; no file of that name is in the workspace: fs_glob finds one by part of its name (**/*Part*), code_symbols with a query the file a symbol is in");
 		Core::StringBuilder out;
 		out.Append("; files of that name:");

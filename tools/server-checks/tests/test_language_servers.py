@@ -44,10 +44,11 @@ def fake_home(home, log):
 	write(os.path.join(plugin, "ied-plugin.json"), {
 		"manifestVersion": 1, "id": "fake", "name": "Fake", "version": "1.0.0", "ied": {"api": "^1"}, "runtime": {"kind": "declarative"},
 		"contributes": {
-			"languages": [{"id": "fake", "extensions": [".fk"]}],
+			"languages": [{"id": "fake", "extensions": [".fk"]}, {"id": "broken", "extensions": [".bk"]}],
 			"settings": {"schema": "settings.schema.json"},
 			"lspProfiles": [{"id": "fake-lsp", "label": "Fake", "command": sys.executable, "args": ["-I", "${pluginDir}/fake_lsp.py", log, "${config:fake.flags}"], "selector": {"languages": ["fake"]},
-				"initializationOptions": {"mine": 1}, "pluginCodeOption": "scripts"}]}})
+				"initializationOptions": {"mine": 1}, "pluginCodeOption": "scripts"},
+				{"id": "broken-lsp", "label": "Broken", "command": os.path.join(home, "no-such-server.exe"), "selector": {"languages": ["broken"]}}]}})
 	write(os.path.join(plugin, "settings.schema.json"), {"type": "object", "properties": {"fake.flags": {"type": "array", "items": {"type": "string"}, "default": ["--from-setting", "two words"]}}})
 	code_plugin(os.path.join(home, "plugins", "scripted"), "scripted")
 
@@ -237,6 +238,19 @@ class LanguageServerTests(ServerTestCase):
 		self.assertEqual(("bad", "fake-lsp", "ied://w1/a.fk"), (symbols[0]["name"], symbols[0]["source"], symbols[0]["location"]["uri"]))
 		self.assertEqual({"line": 0, "character": 2}, symbols[0]["location"]["range"]["start"], "UTF-8 column 3 is UTF-16 2")
 		self.assertEqual([], (await self.client.request("lsp.workspaceSymbols", {"wsId": "w1", "query": "zz"}))["symbols"])
+
+	async def test_workspace_symbols_stand_without_a_server_that_cannot_start(self):
+		write(os.path.join(self.workspace, "c.bk"), "bad\n")
+		await self.open("a.fk")
+		await self.diagnostics("a.fk")
+		await self.open("c.bk")
+		await self.client.wait_for("lsp:w1", lambda f: f["t"] == "evt" and (f["data"].get("profile"), f["data"].get("state")) == ("broken-lsp", "failed"), timeout=20)
+		symbols = (await self.client.request("lsp.workspaceSymbols", {"wsId": "w1", "query": "ba"}))["symbols"]
+		self.assertEqual(["fake-lsp"], [s["source"] for s in symbols], "what the running server found stands")
+		with self.assertRaises(RpcFailure) as down:
+			await self.client.request("lsp.workspaceSymbols", {"wsId": "w1", "query": "zz"})
+		self.assertEqual("unavailable", down.exception.code, "nothing found while a server is down: why, not that there is no such symbol")
+		self.assertIn("broken-lsp", down.exception.message)
 
 	async def test_documents_no_server_serves(self):
 		doc = await self.open("notes.txt")

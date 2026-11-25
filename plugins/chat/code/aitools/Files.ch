@@ -52,6 +52,10 @@ namespace Ai
 	// For an "@Name/..." file path that misses: the one file named like it under that link's root, by the link's name
 	// ("@ClaymoreEngine/src/ClaymoreEngine/Content/BuiltinAssets.cf"); "" when none or several, or the path names no link.
 	Core::String SameNamedLinkedFile(const IED::Workspace& ws, Core::StringView path);
+	// The files named like the path's file, as the tools name them: under its link's root when it begins with a linked
+	// project's name ("@JRPGToolkitEditor/src/Building/BuildingEditor.ch" finds "@JRPGToolkitEditor/src/JRPGToolkitEditor/BuildingEditor.ch"),
+	// else in the workspace's own folder.
+	Core::Array<Core::String> SameNamedFiles(const IED::Workspace& ws, Core::StringView path);
 	// What every tool says for a path that names no folder or file: where it looked (the linked project's folders when the
 	// path is one's, the workspace's own otherwise) and the links it could have meant.
 	Core::String MissingPathHint(const IED::Workspace& ws, Core::StringView path, const FS::Path& root, Core::StringView shown);

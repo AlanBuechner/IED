@@ -141,6 +141,9 @@ class FileToolTests {
 		assert_true(!missed.View().Contains(Core::StringView("(the root) holds")), "not the workspace's own folders");
 		assert_se("@InputLayers/src/InputLayers/LayerStack.ch", Ai::SameNamedLinkedFile(ws, Core::StringView("@InputLayers/InputLayers/LayerStack.ch")).CStr(), "a linked file's path that misses: the one file of its name under the link (search_text searches it)");
 		assert_true(Ai::SameNamedLinkedFile(ws, Core::StringView("@InputLayers/Nope.ch")).IsEmpty() && Ai::SameNamedLinkedFile(ws, Core::StringView("src/LayerStack.ch")).IsEmpty(), "none of that name, or no link: nothing");
+		Core::Array<Core::String> sameNamed = Ai::SameNamedFiles(ws, Core::StringView("@InputLayers/src/Wrong/LayerStack.ch"));
+		assert_true(sameNamed.Count() == 1 && sameNamed[0].View() == Core::StringView("@InputLayers/src/InputLayers/LayerStack.ch"), "a linked path's same-named files are looked for under its link, named by it");
+		assert_true(Ai::SameNamedFiles(ws, Core::StringView("src/Wrong/LayerStack.ch")).IsEmpty(), "a workspace path's, in the workspace's own folder");
 		assert_true(Ai::MissingPathHint(ws, Core::StringView("nope"), FS::Path((root / "Game").View()), Core::StringView("")).View().Contains(Core::StringView("(the root) holds the folders: src/")), "a folder of the workspace says what its parent holds");
 		assert_true(!Ai::MissingPathHint(ws, Core::StringView("nope"), FS::Path((root / "Game").View()), Core::StringView("")).View().Contains(Core::StringView("the solution links")), "and names no links, for it asked for none");
 		IED::Workspace plain;

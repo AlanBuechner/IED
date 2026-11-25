@@ -124,11 +124,14 @@ namespace Ied
 		return language;
 	}
 
-	void LspPool::AwaitServer(Call& call, LanguageServer* language) {
-		if (language->AwaitRunning(call, c_LspStartTimeoutMs)) return;
+	// "the language server x is failed: why".
+	static Core::String WhyNotRunning(LanguageServer* language) {
 		Core::String why = (Core::String("the language server ") + language->m_Profile->m_Id.View()) + " is " + LspStateName(language->m_State);
-		if (!language->m_Problem.IsEmpty()) why = (why + ": ") + language->m_Problem.View();
-		throw RpcError(ErrorCode::Unavailable, why.View());
+		return language->m_Problem.IsEmpty() ? why : (why + ": ") + language->m_Problem.View();
+	}
+
+	void LspPool::AwaitServer(Call& call, LanguageServer* language) {
+		if (!language->AwaitRunning(call, c_LspStartTimeoutMs)) throw RpcError(ErrorCode::Unavailable, WhyNotRunning(language).View());
 	}
 
 	// Just after IED starts, plugin code that computes language server profiles (the c4 plugin's) may still compile: a
@@ -1062,8 +1065,10 @@ namespace Ied
 	Core::String LspPool::SymbolsFor(Call& call, Workspace* ws, Core::StringView query) {
 		// A server that failed (it exited too often, or could not start) is started again for the asker, as a person restarts it from
 		// the status, and one still starting (IED just started, or it restarts after an exit) is waited for: asked only among the
-		// running ones, a search would answer nothing, which a tool takes for no such symbol. One that does not come up says why.
+		// running ones, a search would answer nothing, which a tool takes for no such symbol. One that does not come up says why
+		// when the others found nothing: what they found stands without it.
 		Core::Array<LanguageServer*> coming;
+		Core::String down;
 		for (LanguageServer* language : m_Languages) {
 			if (language->m_Ws != ws) continue;
 			if (language->m_State == LspState::Failed) {
@@ -1071,16 +1076,27 @@ namespace Ied
 				language->Relaunch();
 			}
 			if (language->m_State == LspState::Starting) coming.Push(language);
+			else if (language->m_State == LspState::Failed) down = WhyNotRunning(language);   // its program would not even start
 		}
-		for (LanguageServer* language : coming) AwaitServer(call, language);
+		for (LanguageServer* language : coming) {
+			try {
+				AwaitServer(call, language);
+			}
+			catch (RpcError& failed) {
+				if (failed.m_Code != ErrorCode::Unavailable) throw failed;
+				down = failed.m_Message;
+			}
+		}
 		Core::Array<LanguageServer*> asked;
 		for (LanguageServer* language : m_Languages)
 			if (language->m_Ws == ws && language->m_State == LspState::Running && OffersWorkspaceSymbols(language)) asked.Push(language);
 		AwaitIndexes(call, asked, c_LspIndexWaitMs);
 		JsonWriter json;
 		json.BeginArray();
-		for (LanguageServer* language : asked) SymbolsOf(call, language, query, json);
+		int64 found = 0;
+		for (LanguageServer* language : asked) found += SymbolsOf(call, language, query, json);
 		json.EndArray();
+		if (found == 0 && !down.IsEmpty()) throw RpcError(ErrorCode::Unavailable, down.View());
 		return json.ToString();
 	}
 
@@ -1143,7 +1159,7 @@ namespace Ied
 		return json.ToString();
 	}
 
-	void LspPool::SymbolsOf(Call& call, LanguageServer* language, Core::StringView query, JsonWriter& json) {
+	int64 LspPool::SymbolsOf(Call& call, LanguageServer* language, Core::StringView query, JsonWriter& json) {
 		JsonWriter asked;
 		asked.BeginObject();
 		asked.Field("query", query);
@@ -1155,7 +1171,7 @@ namespace Ied
 		catch (RpcError& failed) {
 			if (failed.m_Code == ErrorCode::Cancelled) throw failed;
 			Log(language, (Core::String("workspace/symbol failed: ") + failed.m_Message.View()).View());
-			return;
+			return 0;
 		}
 		m_LineCache.Clear();
 		Serialization::DomDoc* doc = new Serialization::DomDoc();
@@ -1170,6 +1186,7 @@ namespace Ied
 			json.Field("source", language->Source().View());
 			json.EndObject();
 		}
+		return symbols.Count();
 	}
 
 	// --- Message helpers ---------------------------------------------------------------------------------------------

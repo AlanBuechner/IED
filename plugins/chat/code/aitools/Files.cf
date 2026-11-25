@@ -386,6 +386,22 @@ namespace Ai
 		return Core::String();
 	}
 
+	// The files named like the path's file, as the tools name them: under its linked project when it begins with one's name
+	// (@Name/...), else the workspace's own.
+	Core::Array<Core::String> SameNamedFiles(const IED::Workspace& ws, Core::StringView path) {
+		const Core::String glob = SameNamedGlob(path);
+		const Core::String link = LinkOf(path);
+		if (!link.IsEmpty() && ws.m_Trusted)
+			for (const IED::Project& each : ws.m_Projects) {
+				if (each.m_Link != link || each.m_LinkRoot.IsEmpty()) continue;
+				Core::Array<Core::String> named;
+				for (const Core::String& inside : IED::ExpandGlob(each.m_LinkRoot.View(), glob.View()))
+					if (!inside.View().StartsWith(Core::StringView(".ied/local/"))) named.Push((each.m_Link + "/") + inside.View());
+				return named;
+			}
+		return IED::ExpandGlob(ws.m_Root.View(), glob.View());
+	}
+
 	// What every tool says for a path it found no folder or file at: what is where it looked - the linked project's folders
 	// when the path is one's, the workspace's own otherwise - and, when the path began with no link the solution has, which
 	// links it could have meant. A path whose link is right says nothing more: the folders named inside it are the answer.
@@ -486,7 +502,7 @@ namespace Ai
 		else {
 			IED::HostLock guard(*call.m_Context);
 			if (!IsFolderRoot(call.m_Ws) && !IED::Exists(call.m_Ws, path.View())) {
-				Core::Array<Core::String> found = IED::ExpandGlob(call.m_Ws.m_Root.View(), SameNamedGlob(path.View()).View());
+				Core::Array<Core::String> found = SameNamedFiles(call.m_Ws, path.View());
 				Core::String only = OnlySourceFile(found);
 				if (only.IsEmpty()) return ToolError(MissedReadProblem(path.View(), found).View());
 				missed = path;
