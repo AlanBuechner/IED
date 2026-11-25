@@ -11,6 +11,7 @@
 #include <llvm/MC/MCStreamer.h>
 #include <llvm/MC/MCSymbol.h>
 #include <llvm/TargetParser/Triple.h>
+#include <bit>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -168,20 +169,39 @@ namespace C4Compiler
 			out.emitBytes(listed);
 		}
 
-		// One function's map: its slots, each once (in the order its records first list them), then its records.
+		bool IsSlotTable(const llvm::StackMaps::CallsiteInfo& call) { return call.ID == c_SlotTableId; }
+
+		// One function's map: its slots, each once (its slot table's first, then in the order its records first list them),
+		// then its records.
 		class FunctionMap
 		{
 		public:
+			// The function's slot table (c_SlotTableId), which its call records' masks index.
+			void AddTable(const llvm::StackMaps::CallsiteInfo& table)
+			{
+				const Locations& at = table.Locations;
+				for (size_t i = 0; i < at.size();)
+				{
+					std::optional<Slot> slot = ReadSlot(at, i, at.size());
+					if (!slot)
+					{
+						m_TableRead = false;
+						return;
+					}
+					m_Table.push_back(IndexOf(std::move(*slot)));
+				}
+			}
+
 			void Add(const llvm::StackMaps::CallsiteInfo& call)
 			{
 				Record record{ call.CSOffsetExpr };
-				std::optional<DeoptList> list = ReadDeoptList(call.Locations);
-				if (!list) record.whole = true;
-				else
+				if (call.ID == c_CallRecordId) record.whole = !ReadMasks(call.Locations, record.slots);
+				else if (std::optional<DeoptList> list = ReadDeoptList(call.Locations))
 				{
 					record.values = std::move(list->values);
 					for (Slot& slot : list->slots) record.slots.push_back(IndexOf(std::move(slot)));
 				}
+				else record.whole = true;
 				m_Records.push_back(std::move(record));
 			}
 
@@ -201,8 +221,27 @@ namespace C4Compiler
 				return found->second;
 			}
 
+			// A call record's slots: the table's slots its masks set. False when the masks name no slot of a table read.
+			bool ReadMasks(const Locations& masks, std::vector<size_t>& slots) const
+			{
+				if (!m_TableRead || masks.size() * c_MaskWords < m_Table.size()) return false;
+				for (size_t m = 0; m < masks.size(); ++m)
+				{
+					if (!IsConstant(masks[m])) return false;
+					for (uint32_t bits = ConstantOf(masks[m]); bits; bits &= bits - 1u)
+					{
+						const size_t at = m * c_MaskWords + static_cast<size_t>(std::countr_zero(bits));
+						if (at >= m_Table.size()) return false;
+						slots.push_back(m_Table[at]);
+					}
+				}
+				return true;
+			}
+
 			std::vector<Slot> m_Slots;
 			std::unordered_map<std::string, size_t> m_Index;
+			std::vector<size_t> m_Table; // the slot table's slots, by their index in m_Slots
+			bool m_TableRead = true;
 			std::vector<Record> m_Records;
 		};
 
@@ -236,12 +275,16 @@ namespace C4Compiler
 		out.emitIntValue(functions.size(), c_FieldBytes);
 		out.emitValue(Distance(start, end, context), c_FieldBytes);
 		for (const auto& [symbol, info] : functions) out.emitValue(llvm::MCSymbolRefExpr::create(symbol, context), sizeof(uint64_t));
-		// The records are the functions' in turn, each function's in the order its calls were lowered.
+		// The records are the functions' in turn, each function's in the order its calls were lowered; a slot table may come
+		// after records that index it, so it is read first.
 		size_t next = 0;
 		for (const auto& [symbol, info] : functions)
 		{
 			FunctionMap map;
-			for (uint64_t i = 0; i < info.RecordCount; ++i) map.Add(calls[next + i]);
+			for (uint64_t i = 0; i < info.RecordCount; ++i)
+				if (IsSlotTable(calls[next + i])) map.AddTable(calls[next + i]);
+			for (uint64_t i = 0; i < info.RecordCount; ++i)
+				if (!IsSlotTable(calls[next + i])) map.Add(calls[next + i]);
 			next += info.RecordCount;
 			map.Emit(out);
 		}

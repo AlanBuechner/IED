@@ -1,4 +1,5 @@
 #include "Compiler/StackMapRecords.h"
+#include "Compiler/StackMapFormat.h"
 #include "Compiler/StackMapSlots.h"
 #include "Compiler/StackMapValues.h"
 #include <llvm/Analysis/LoopInfo.h>
@@ -6,10 +7,12 @@
 #include <llvm/IR/Function.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/ValueHandle.h>
 #include <algorithm>
 #include <iterator>
 #include <optional>
+#include <utility>
 
 namespace C4Compiler
 {
@@ -203,6 +206,96 @@ namespace C4Compiler
 			call->replaceAllUsesWith(listed);
 			call->eraseFromParent();
 		}
+
+		// --- records after calls (-O0) --------------------------------------------------------------------------------
+
+		constexpr uint32_t c_MaskBits = 32;
+
+		// A slot as a list names it: the slot, then its word count and masks (Compiler/StackMapSlots).
+		struct SlotGroup
+		{
+			llvm::AllocaInst* slot = nullptr;
+			std::vector<llvm::Value*> operands;
+		};
+
+		void AddGroups(const std::vector<llvm::Value*>& operands, std::vector<SlotGroup>& groups)
+		{
+			for (llvm::Value* operand : operands)
+			{
+				if (auto* slot = llvm::dyn_cast<llvm::AllocaInst>(operand)) groups.push_back({ slot, {} });
+				groups.back().operands.push_back(operand);
+			}
+		}
+
+		// Whether `call`'s record can be a stackmap after it: a place for it, its values all in slots, its slots all static.
+		bool RecordedAfter(llvm::CallBase& call, const Record& record, const std::vector<SlotGroup>& groups)
+		{
+			if (!RecordPlace(call) || !record.values.empty()) return false;
+			return std::all_of(groups.begin(), groups.end(), [](const SlotGroup& group) { return group.slot->isStaticAlloca(); });
+		}
+
+		// A function's slot table: the slots its records after calls list, each once, in the order first listed.
+		class SlotTable
+		{
+		public:
+			// The table's index of each of `groups`, those it does not have added.
+			std::vector<uint32_t> IndicesOf(const std::vector<SlotGroup>& groups)
+			{
+				std::vector<uint32_t> indices;
+				for (const SlotGroup& group : groups)
+				{
+					const auto [found, added] = m_Index.emplace(group.slot, static_cast<uint32_t>(m_Index.size()));
+					if (added) m_Operands.insert(m_Operands.end(), group.operands.begin(), group.operands.end());
+					indices.push_back(found->second);
+				}
+				return indices;
+			}
+
+			size_t Size() const { return m_Index.size(); }
+			const std::vector<llvm::Value*>& Operands() const { return m_Operands; }
+
+		private:
+			std::unordered_map<const llvm::AllocaInst*, uint32_t> m_Index;
+			std::vector<llvm::Value*> m_Operands;
+		};
+
+		// A stackmap of `id` naming `operands`, made before `at`.
+		void AddStackMap(llvm::Instruction* at, uint64_t id, const std::vector<llvm::Value*>& operands)
+		{
+			llvm::IRBuilder<> B(at);
+			llvm::Function* stackMap = llvm::Intrinsic::getOrInsertDeclaration(at->getModule(), llvm::Intrinsic::experimental_stackmap);
+			std::vector<llvm::Value*> arguments{ B.getInt64(id), B.getInt32(0) };
+			arguments.insert(arguments.end(), operands.begin(), operands.end());
+			B.CreateCall(stackMap, arguments);
+		}
+
+		// A record after a call: a 32-bit mask per 32 slots of the table, of those `indices` names.
+		std::vector<llvm::Value*> MasksOf(llvm::LLVMContext& context, const std::vector<uint32_t>& indices, size_t tableSize)
+		{
+			std::vector<uint32_t> bits((tableSize + c_MaskBits - 1) / c_MaskBits, 0);
+			for (const uint32_t index : indices) bits[index / c_MaskBits] |= 1u << (index % c_MaskBits);
+			std::vector<llvm::Value*> masks;
+			for (const uint32_t mask : bits) masks.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), mask));
+			return masks;
+		}
+
+		// The records after calls, then the slot table they index, before the entry block's terminator (a place no frame
+		// waits at: the table is read for its slots, not looked up).
+		void RecordAfterCalls(llvm::Function& function, const std::vector<std::pair<llvm::CallBase*, std::vector<uint32_t>>>& calls, const SlotTable& table)
+		{
+			for (const auto& [call, indices] : calls)
+				AddStackMap(RecordPlace(*call), c_CallRecordId, MasksOf(function.getContext(), indices, table.Size()));
+			AddStackMap(function.getEntryBlock().getTerminator(), c_SlotTableId, table.Operands());
+		}
+	}
+
+	llvm::Instruction* RecordPlace(llvm::CallBase& call)
+	{
+		if (llvm::isa<llvm::CallInst>(call)) return call.getNextNode();
+		auto* invoke = llvm::dyn_cast<llvm::InvokeInst>(&call);
+		if (!invoke || invoke->getNormalDest()->getSinglePredecessor() != invoke->getParent()) return nullptr;
+		const auto first = invoke->getNormalDest()->getFirstInsertionPt();
+		return first == invoke->getNormalDest()->end() ? nullptr : &*first;
 	}
 
 	void RecordCalls(llvm::Function& function, const std::vector<llvm::CallBase*>& calls, const CallLists& values, const CallLists& slots,
@@ -211,11 +304,28 @@ namespace C4Compiler
 		const std::unordered_map<llvm::CallBase*, Record> records = Records(function, calls, values, where);
 		const Record none;
 		const std::vector<llvm::Value*> noSlots;
+		const bool afterCalls = where == RecordedValues::InSlots;
+		SlotTable table;
+		std::vector<std::pair<llvm::CallBase*, std::vector<uint32_t>>> after;
 		for (llvm::CallBase* call : calls)
 		{
-			const auto record = records.find(call);
+			const auto found = records.find(call);
+			const Record& record = found == records.end() ? none : found->second;
 			const auto frameSlots = slots.find(call);
-			ListDeopt(call, DeoptList(call, record == records.end() ? none : record->second, frameSlots == slots.end() ? noSlots : frameSlots->second));
+			const std::vector<llvm::Value*>& frame = frameSlots == slots.end() ? noSlots : frameSlots->second;
+			if (afterCalls)
+			{
+				std::vector<SlotGroup> groups;
+				AddGroups(record.valueSlots, groups);
+				AddGroups(frame, groups);
+				if (RecordedAfter(*call, record, groups))
+				{
+					after.emplace_back(call, table.IndicesOf(groups));
+					continue;
+				}
+			}
+			ListDeopt(call, DeoptList(call, record, frame));
 		}
+		if (!after.empty()) RecordAfterCalls(function, after, table);
 	}
 }

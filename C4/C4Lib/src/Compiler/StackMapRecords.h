@@ -2,7 +2,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace llvm { class CallBase; class Function; class Value; }
+namespace llvm { class CallBase; class Function; class Instruction; class Value; }
 
 namespace C4Compiler
 {
@@ -12,7 +12,7 @@ namespace C4Compiler
 
 	/// Where a record names the values live across its call: in place (a register, a spill slot), but a pointer or 64-bit
 	/// integer live across a call in a loop that does not use it, through a slot of its own; or every value through a
-	/// slot of its own (an aggregate's lists its words and masks, as a frame slot's).
+	/// slot of its own (an aggregate's lists its words and masks, as a frame slot's), for code generated at -O0.
 	enum class RecordedValues { InPlace, InSlots };
 
 	/// Gives each of `calls` its record (docs/compiler/04 "Stack maps"): a `deopt` operand bundle - the count of words of the
@@ -22,6 +22,16 @@ namespace C4Compiler
 	/// one: as a deopt operand there it would count as a use at every call of the loop, and the register allocator would
 	/// keep it in registers around them instead of spilling it once before the loop. Code generation lowers a call with
 	/// such a bundle as a statepoint, which relocates nothing.
+	/// With every value in a slot (-O0), a call whose slots are all static and that has a RecordPlace is recorded instead
+	/// by an `llvm.experimental.stackmap` after it (Compiler/StackMapFormat: c_CallRecordId), masks over the function's
+	/// slot table (one stackmap, c_SlotTableId): fast instruction selection lowers a stackmap itself, but hands each
+	/// statepoint to SelectionDAG, which made -O0's code generation half as slow again. StackMapPlacement then puts each
+	/// record at its call's return address.
 	void RecordCalls(llvm::Function& function, const std::vector<llvm::CallBase*>& calls, const CallLists& values, const CallLists& slots,
 		RecordedValues where);
+
+	/// Where the stackmap that records `call` after it goes (-O0): right after a call; at the start of an invoke's normal
+	/// destination, when the invoke is its only way in (StackMapPlacement moves it back to the call). Null where there is
+	/// no such place.
+	llvm::Instruction* RecordPlace(llvm::CallBase& call);
 }

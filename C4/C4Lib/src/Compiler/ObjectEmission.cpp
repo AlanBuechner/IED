@@ -47,7 +47,7 @@ namespace C4Compiler
 		constexpr uint64_t kMaxPartitions = 64;
 
 		// LLVM's target registry is process-wide; registering X86 twice is harmless but wasted work. The assembly parser
-		// assembles inline asm.
+		// assembles inline asm. Stack maps' code generation is set up with it, before any thread's first.
 		void InitializeX86()
 		{
 			static std::once_flag once;
@@ -57,6 +57,7 @@ namespace C4Compiler
 				LLVMInitializeX86TargetMC();
 				LLVMInitializeX86AsmPrinter();
 				LLVMInitializeX86AsmParser();
+				PrepareCodeGeneration();
 			});
 		}
 

@@ -47,11 +47,14 @@ raw regions**. The C API is `C4Runtime/GCRuntimeC.h`; the implementation is
   Stacks (R16 phase 3, the default; `-fno-stack-maps` reads every frame whole, at no measurable run-time cost either
   way): each C4 frame waiting in a call is read only where its stack map says its live values and pointer-holding
   slots are (in C4's format, `Compiler/StackMapFormat`: a function's slots once, a bit each in a record - LLVM's own
-  format made the IED server 5x larger; `Compiler/StackMap*`: after the optimizer each call gets a `deopt` bundle naming them, nothing relocated,
-  the IR otherwise unchanged - keep it so: a statepoint operand counts as a use to the register allocator, so a word a
-  loop does not use is named through a slot of its own, and at `-O0`, whose register allocator cannot spill a
-  statepoint's operands, every value is; make anything you add in a fixed order, never a pointer-keyed map's), every
-  other frame (C, runtime, scripts, the innermost one, calls left without a record) whole with the callee-saved
+  format made the IED server 5x larger; `Compiler/StackMap*`: after the optimizer each call that may collect gets a
+  `deopt` bundle naming them, nothing relocated, the IR otherwise unchanged - keep it so: a statepoint operand counts as
+  a use to the register allocator, so a word a loop does not use is named through a slot of its own, and at `-O0`,
+  whose register allocator cannot spill a statepoint's operands, every value is, and a call is recorded by an
+  `llvm.experimental.stackmap` after it instead (FastISel lowers those; it hands statepoints to SelectionDAG), which
+  `StackMapPlacement` moves to the return address - check that with a test that reads the object's map; make anything
+  you add in a fixed order, never a pointer-keyed map's), every other frame (C, runtime, scripts, the innermost one,
+  calls left without a record, such as one that cannot collect) whole with the callee-saved
   registers it saved; an explicit collection does not read its own frames. The walk unwinds without loader locks
   (`GC/GCStackWalk{Win32,Posix}.c`) and the program links the runtime built with `C4_STACK_MAPS` (`GC/GCStack*` only
   there). So a local the code no longer reads keeps nothing: a program keeps what it still needs reachable (a script

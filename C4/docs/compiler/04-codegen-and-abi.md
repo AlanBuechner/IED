@@ -440,11 +440,11 @@ in a dead slot or register of the frame keeps nothing alive. The runtime's side 
   emission and the optimizer see what they see without it, every pointer in address space 0. The collector never moves
   an object, so a call need not tell LLVM which pointers may move - only where the live ones are while it runs.
 - **Records** (`Compiler/StackMaps`, `InsertStatepoints`, after the optimizer in `ObjectEmission`'s `Assemble`, so every
-  path - partitions, `-c`, the Dist merge - has them). Each function with a body gets `gc "c4"`, a GCStrategy under which
-  no pointer is a managed one (LLVM spills nothing for a relocation that never comes), and each call its record: a
-  `deopt` operand bundle, which code generation lowers as a statepoint by itself (`LowerCallSiteWithDeoptBundle`) with each
-  operand where it is - a register, the slot the register allocator spilled it to, a constant
-  (`use-registers-for-deopt-values`, set once for the process). The list (`Compiler/StackMapRecords`):
+  path - partitions, `-c`, the Dist merge - has them). Each call that may collect gets its record, and each function with
+  one `gc "c4"`, a GCStrategy under which no pointer is a managed one (LLVM spills nothing for a relocation that never
+  comes). A record is a `deopt` operand bundle, which code generation lowers as a statepoint by itself
+  (`LowerCallSiteWithDeoptBundle`) with each operand where it is - a register, the slot the register allocator spilled
+  it to, a constant (`use-registers-for-deopt-values`, set once for the process before its first code generation). The list (`Compiler/StackMapRecords`):
   - the count of words of the values live across the call, then those words (`Compiler/StackMapValues`, by liveness over
     the SSA values: computed before the call, read after it) that may hold a heap object's address - a pointer; a 64-bit
     integer that may carry one (an argument, a load, a call's result, `ptrtoint`, a part of an aggregate or vector, and
@@ -466,17 +466,31 @@ in a dead slot or register of the frame keeps nothing alive. The runtime's side 
     masks as a frame slot's): the fast register allocator cannot spill a statepoint's register operands, and ran out of
     registers at a call many values live across. The slots are made in the calls' order, so a build is the same every
     time.
+  - At `-O0` a call is recorded without a statepoint: FastISel hands every statepoint to SelectionDAG, which made `-O0`'s
+    code generation a quarter slower on one thread, but lowers an `llvm.experimental.stackmap` itself. Each function's
+    records list only slots then, so one stackmap in its entry block names its slot table (each slot with its words and
+    masks, `c_SlotTableId`), and after each call a stackmap of a 32-bit mask per 32 slots of the table
+    (`c_CallRecordId`; for an invoke at the start of its normal destination, when the invoke is its only way in). The
+    printer reads the table first and writes the records in the same format. A machine pass once the code is laid out
+    (`Compiler/StackMapPlacement`, added to every pipeline after StackMapLiveness) moves each record to right after its
+    call, past the result's copies and reloads the register allocator put between them, so its label is the call's
+    return address; and where Windows code generation puts a nop after a call (before an epilogue or an exception state's
+    change), after a record's or a statepoint's label instead of before it. A call whose slots are not all static, or
+    whose value has no slot, keeps its statepoint.
   - What it changes for a program: an object is kept while the code may still read it. A local the code no longer reads
     keeps nothing, even before its function returns (as in C# or Go), so a program that needs an object past its last
     use keeps it reachable - a script host its `Scripting::Script` while it calls the script's code
     ([runtime/04 section 5](../runtime/04-scripting.md#5-reload-and-unload)); ScriptTest `Callbacks` had let it go.
-  - Calls left without a record, whose frame is read whole: a call inside a Windows funclet (its slots are the parent
-    frame's), inline assembly, a variadic call (a statepoint loses Windows' variadic double in both registers), a call that
-    never returns, one that may become a sibling call (marked `tail`, and the function returns nothing or what it returns,
-    through no-op casts and a branch to a block that only returns, which code generation copies back), `returns_twice`, one
-    passing a `byval` aggregate (its copy is in the caller's outgoing area, which no record names), and a C library
-    function code generation expands in place (`memcmp`, `strlen`, `sqrt`: TargetLibraryInfo's `hasOptimizedCodeGen`),
-    which never collects. Invokes have records, with landing pads and with funclets.
+  - Calls left without a record, whose frame is read whole: a call that cannot collect - of a C library function
+    (TargetLibraryInfo knows it) or an intrinsic, or of a function of the module none of whose calls can, directly or
+    through the module's other functions (a declaration of another partition or the runtime may: C4's runtime allocates);
+    a frame waits in one only while another thread collects, and the walk reads it whole then - a call inside a Windows
+    funclet (its slots are the parent frame's), inline assembly, a variadic call (a statepoint loses Windows' variadic
+    double in both registers), a call that never returns, one that may become a sibling call (marked `tail`, and the
+    function returns nothing or what it returns, through no-op casts and a branch to a block that only returns, which
+    code generation copies back), `returns_twice`, and one passing a `byval` aggregate (its copy is in the caller's
+    outgoing area, which no record names). Invokes have records, with landing pads and with funclets. The Bedrock benchmark
+    has 4450 records at `-O0` (9009 when every call had one) and 4903 at `-O2` (5327).
 - **Objects.** Code generation writes the records in C4's own format (`Compiler/StackMapFormat`: the `c4` strategy's
   `GCMetadataPrinter`), not LLVM's, whose 12 bytes a location (three of them a listed slot, at every call that lists it)
   made the IED server's executable 5.2 times as large (107 of its 133 MB). Each object's map is a header and its
@@ -490,16 +504,19 @@ in a dead slot or register of the frame keeps nothing alive. The runtime's side 
   (`EnsureRuntimeObjects`, a folder of its own; `GC/GCStack*` only there). With `-fno-stack-maps` the output is byte for
   byte what it was before stack maps (objects at `-O0`, `-O2` and `-O2 -g` of the benchmarks and test programs, both
   targets).
-- **Measured** (2026-11-24, the compiler of 26e5f261 with and without stack maps, `-O2`, medians of alternating rounds;
-  an A/A run of one program against itself for the noise): Windows (61 rounds) - the Bedrock benchmark's kernels -3% to
-  +6% (A/A -4% to +7%), math per vector -6% to +2%, batch -1% to +4% on its 0.5 ms kernels, gemm 0%, the GC benchmark's
-  frames -1% and -1% (stop-the-world, concurrent); Linux (in Docker on the same machine, 31 rounds) the map kernels -33%
-  to +2% (A/A -31% to 0%), the others within 1%, gemm 0%, the GC frames +1% and +1%. Code +1.6% instructions (the IED
+- **Measured** (2026-11-24, the same compiler with and without stack maps, `-O2`, medians of alternating rounds; an A/A
+  run of one program against itself for the noise): Windows (61 rounds; math 101) - the Bedrock benchmark's kernels -2%
+  to +3% (A/A -4% to +7%), math per vector and batch -2% to 0% (A/A -3% to 0%), gemm 0%, the GC benchmark's frames -1%
+  and 0% (stop-the-world, concurrent); Linux (in Docker on the same machine, 31 rounds, two runs) the map
+  kernels -46% to +16% (the same program against itself in the same rounds -28% to +7%), the others -8% to +3% (A/A -8%
+  to +11%: the machine was busy), gemm 0%, the GC frames -1% to +3%. Code +1.6% instructions (the IED
   server's `.text` +3.8%); the stack map is data beside it, in C4's format the IED server's 2.0 MB (its executable
   27.8 MB, 25.3 MB without stack maps: +9.6%) and the GC benchmark's 80 KB (2.65 MB against 2.54 MB: +4%). Compile time
-  (15 alternating builds from empty build folders, 16 threads): `-O2` +1% (the Bedrock benchmark, Bedrock's tests),
-  `-O0` +7% (Bedrock's tests) and +2-9% (the benchmark's sub-second build, from run to run); on one thread `-O0` costs
-  +24-26% (FastISel hands each call with a record to SelectionDAG; `-O0`'s value slots add about 7 points of it). The
+  (alternating builds from empty build folders): with 16 threads (21 rounds) `-O0` 0% (the Bedrock benchmark) and +1%
+  (Bedrock's tests), `-O2` 0% and 0%; on one thread (11 rounds, the compiler's CPU time on one pinned core) `-O0` +5-7%
+  and +8-9%, where records as statepoints cost +21% and +28%. What is left is spread thin: the slot stores and the
+  records in blocks SelectionDAG selects anyway (a block ending in an invoke or in what FastISel cannot do: as many fall
+  back with stack maps as without), the GC passes of each function with records, and writing the map. The
   design before (managed pointers in address
   space 1, RewriteStatepointsForGC spilling and reloading each live value around each call, `nobuiltin` C library calls)
   cost map_int_remove +49%, map_text_find +34%, json_read +13% and the GC frames +23% on Windows, map_text_find +86% and

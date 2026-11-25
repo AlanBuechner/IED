@@ -1,4 +1,5 @@
 #include "Script/ScriptJit.h"
+#include "Compiler/StackMaps.h"
 #include "Script/ScriptModulePasses.h"
 #include "Script/ScriptSymbols.h"
 #include <llvm/TargetParser/Host.h>
@@ -202,7 +203,8 @@ namespace C4Compiler
 		}
 #endif
 
-		// The asm parser too: a script's asm blocks, and a debug script's import thunks, are assembled with its code.
+		// The asm parser too: a script's asm blocks, and a debug script's import thunks, are assembled with its code. Stack
+		// maps' code generation is set up with it (its pass is in every pipeline), before any thread's first.
 		void InitializeTarget()
 		{
 			static std::once_flag once;
@@ -210,6 +212,7 @@ namespace C4Compiler
 				llvm::InitializeNativeTarget();
 				llvm::InitializeNativeTargetAsmPrinter();
 				llvm::InitializeNativeTargetAsmParser();
+				PrepareCodeGeneration();
 			});
 		}
 

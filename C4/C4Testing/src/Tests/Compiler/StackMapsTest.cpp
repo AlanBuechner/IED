@@ -5,6 +5,7 @@
 #include "Compiler/ObjectEmission.h"
 #include "Compiler/RuntimeObjects.h"
 #include "Compiler/StackMapFormat.h"
+#include "Compiler/StackMapRecords.h"
 #include "Compiler/StackMaps.h"
 #include "Compiler/StackMapValues.h"
 #include "Compiler/Toolchain.h"
@@ -12,6 +13,7 @@
 #include <llvm/BinaryFormat/ELF.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/IntrinsicInst.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Verifier.h>
@@ -21,9 +23,11 @@
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
 #include <algorithm>
+#include <bit>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -38,11 +42,12 @@ namespace Testing
 	{
 		constexpr llvm::CodeGenOptLevel kOptimized = llvm::CodeGenOptLevel::Default;
 
-		// `a`, `b` and `c` are read after the third `new`, only `c` after Call: at -O0 each is a stack slot.
+		// `a`, `b` and `c` are read after the third `new`, only `c` after Call, which may collect (it allocates): at -O0
+		// each is a stack slot.
 		constexpr const char* kProgram = R"(
 			struct T { public int32 v; }
 			int32 g_calls = 0;
-			void Call() { g_calls++; }
+			void Call() { T* made = new T; g_calls += made->v + 1; }
 			void Use(T* t) { t->v++; }
 			int32 Slots() {
 				T* a = new T;
@@ -210,9 +215,11 @@ namespace Testing
 			return std::nullopt;
 		}
 
-		// What a stack map (Compiler/StackMapFormat) says of a record: how many values it names, how many slots it lists.
+		// What a stack map (Compiler/StackMapFormat) says of a record: its return address's offset in its function, how many
+		// values it names, how many slots it lists.
 		struct MapRecord
 		{
+			uint32_t offset = 0;
 			bool whole = false;
 			size_t values = 0;
 			size_t slots = 0;
@@ -260,8 +267,9 @@ namespace Testing
 				std::vector<MapRecord>& list = functions.emplace_back();
 				for (uint64_t r = 0; r < records; ++r)
 				{
-					at += c_OffsetBytes;
 					MapRecord record;
+					record.offset = Read32(at);
+					at += c_OffsetBytes;
 					const uint64_t values = Uleb(at);
 					record.whole = (values & 1) != 0;
 					record.values = values >> 1;
@@ -296,6 +304,143 @@ namespace Testing
 				return {};
 			}
 			return RecordsOf(*contents);
+		}
+
+		// The bytes of `object`'s function `name`: from its symbol to its section's end; empty when it has none.
+		std::string CodeOf(const std::string& object, llvm::StringRef name)
+		{
+			llvm::Expected<std::unique_ptr<llvm::object::ObjectFile>> file = llvm::object::ObjectFile::createObjectFile(llvm::MemoryBufferRef(object, "object"));
+			if (!file)
+			{
+				llvm::consumeError(file.takeError());
+				return {};
+			}
+			for (const llvm::object::SymbolRef& symbol : (*file)->symbols())
+			{
+				llvm::Expected<llvm::StringRef> found = symbol.getName();
+				if (!found)
+				{
+					llvm::consumeError(found.takeError());
+					continue;
+				}
+				if (*found != name) continue;
+				llvm::Expected<llvm::object::section_iterator> section = symbol.getSection();
+				llvm::Expected<uint64_t> address = symbol.getAddress();
+				if (!section || !address || *section == (*file)->section_end())
+				{
+					if (!section) llvm::consumeError(section.takeError());
+					if (!address) llvm::consumeError(address.takeError());
+					return {};
+				}
+				llvm::Expected<llvm::StringRef> contents = (*section)->getContents();
+				if (!contents)
+				{
+					llvm::consumeError(contents.takeError());
+					return {};
+				}
+				const uint64_t start = *address - (*section)->getAddress();
+				return start <= contents->size() ? contents->substr(start).str() : std::string();
+			}
+			return {};
+		}
+
+		const char* MapSectionFor(TargetSystem system) { return system == TargetSystem::Linux ? c_StackMapSectionElf : c_StackMapSectionCoff; }
+
+		// The length of the `call` at `at` of `code` - E8 rel32, or a REX and FF /2 with its ModRM, SIB and displacement -
+		// or 0 when it is none.
+		size_t CallLength(const std::string& code, size_t at)
+		{
+			constexpr int c_Call = 0xE8, c_Group5 = 0xFF, c_CallInGroup5 = 2, c_RexFirst = 0x40, c_RexLast = 0x4F;
+			auto byte = [&](size_t i) { return at + i < code.size() ? static_cast<int>(static_cast<uint8_t>(code[at + i])) : -1; };
+			if (byte(0) == c_Call) return 5;
+			size_t length = byte(0) >= c_RexFirst && byte(0) <= c_RexLast ? 1 : 0;
+			if (byte(length) != c_Group5) return 0;
+			const int modrm = byte(length + 1);
+			if (modrm < 0 || ((modrm >> 3) & 7) != c_CallInGroup5) return 0;
+			const int mod = modrm >> 6, rm = modrm & 7;
+			length += 2;
+			if (mod == 3) return length;                                      // call reg
+			const bool sib = rm == 4;
+			if (sib) ++length;
+			if (mod == 0) return (rm == 5 || (sib && (byte(length - 1) & 7) == 5)) ? length + 4 : length; // [rip+disp32], [disp32+index]
+			return length + (mod == 1 ? 1 : 4);
+		}
+
+		// Whether the code of `code` that ends at `end` is a call.
+		bool EndsACall(const std::string& code, size_t end)
+		{
+			constexpr size_t c_LongestCall = 8;
+			if (end > code.size()) return false;
+			for (size_t length = 2; length <= c_LongestCall && length <= end; ++length)
+				if (CallLength(code, end - length) == length) return true;
+			return false;
+		}
+
+		// The records of `object`'s stack map (one object's) that are no return address - each `function+offset` - or a
+		// line saying what could not be read. A function is named by the relocation of its address in the map, so its
+		// symbol must be one (a global function's on ELF).
+		std::vector<std::string> RecordsAfterNoCall(const std::string& object, TargetSystem system)
+		{
+			llvm::Expected<std::unique_ptr<llvm::object::ObjectFile>> file = llvm::object::ObjectFile::createObjectFile(llvm::MemoryBufferRef(object, "object"));
+			if (!file)
+			{
+				llvm::consumeError(file.takeError());
+				return { "no object" };
+			}
+			const std::optional<llvm::object::SectionRef> map = SectionNamed(**file, MapSectionFor(system));
+			if (!map) return { "no stack map" };
+			std::map<uint64_t, std::string> functionAt; // by the offset of its address in the map
+			auto addRelocations = [&](const llvm::object::SectionRef& holder) {
+				for (const llvm::object::RelocationRef& relocation : holder.relocations())
+				{
+					const llvm::object::symbol_iterator symbol = relocation.getSymbol();
+					if (symbol == (*file)->symbol_end()) continue;
+					llvm::Expected<llvm::StringRef> name = symbol->getName();
+					if (!name)
+					{
+						llvm::consumeError(name.takeError());
+						continue;
+					}
+					functionAt[relocation.getOffset()] = name->str();
+				}
+			};
+			addRelocations(*map); // COFF: a section's own
+			for (const llvm::object::SectionRef& section : (*file)->sections()) // ELF: a relocation section's
+			{
+				llvm::Expected<llvm::object::section_iterator> relocated = section.getRelocatedSection();
+				if (!relocated)
+				{
+					llvm::consumeError(relocated.takeError());
+					continue;
+				}
+				if (*relocated != (*file)->section_end() && **relocated == *map) addRelocations(section);
+			}
+			constexpr uint64_t c_FirstAddress = 16, c_AddressBytes = 8;
+			const std::vector<std::vector<MapRecord>> functions = MapOf(object, MapSectionFor(system));
+			std::vector<std::string> wrong;
+			for (size_t f = 0; f < functions.size(); ++f)
+			{
+				const auto name = functionAt.find(c_FirstAddress + f * c_AddressBytes);
+				if (name == functionAt.end())
+				{
+					wrong.push_back("function " + std::to_string(f) + " unnamed");
+					continue;
+				}
+				const std::string code = CodeOf(object, name->second);
+				for (const MapRecord& record : functions[f])
+					if (!EndsACall(code, record.offset)) wrong.push_back(name->second + "+" + std::to_string(record.offset));
+			}
+			return wrong;
+		}
+
+		// `instruction` as a stackmap of `id` (Compiler/StackMapFormat: -O0's slot table and records after calls); null when
+		// it is none.
+		const llvm::CallBase* StackMapOf(const llvm::Instruction* instruction, uint64_t id)
+		{
+			const auto* call = llvm::dyn_cast_or_null<llvm::IntrinsicInst>(instruction);
+			if (!call || call->getIntrinsicID() != llvm::Intrinsic::experimental_stackmap) return nullptr;
+			const auto* found = llvm::dyn_cast<llvm::ConstantInt>(call->getArgOperand(0));
+			return found && found->getZExtValue() == id ? call : nullptr;
 		}
 	}
 
@@ -503,7 +648,53 @@ namespace Testing
 					TEST_ASSERT(invoke->getOperandBundle(llvm::LLVMContext::OB_deopt).has_value());
 				}
 			TEST_ASSERT(invokes >= 1);
-			TEST_ASSERT(ObjectWritten(*mapped.module, system, 0));
+			const std::optional<std::string> object = ObjectOf(*mapped.module, system, 0);
+			TEST_ASSERT(object.has_value());
+			// On Windows code generation puts a nop after a call whose exception state changes after it: the record stays
+			// at the return address (StackMapPlacement). Its functions are internal: ELF names them by their section.
+			if (object && system == TargetSystem::Windows)
+				for (const std::string& wrong : RecordsAfterNoCall(*object, system))
+				{
+					printf("no return address: %s\n", wrong.c_str());
+					TEST_ASSERT(false);
+				}
+			// At -O0 an invoke is recorded by a stackmap at the start of its normal destination, which code generation moves
+			// back to right after its call.
+			Lowered atO0 = Lower(kGuarded, true, system);
+			TEST_ASSERT(atO0.module != nullptr);
+			if (!atO0.module) continue;
+			InsertStatepoints(*atO0.module, llvm::CodeGenOptLevel::None);
+			TEST_ASSERT(Verified(*atO0.module));
+			llvm::Function* guardedAtO0 = nullptr;
+			for (llvm::Function& fn : *atO0.module)
+				if (!fn.isDeclaration() && fn.getName().starts_with("Guarded")) guardedAtO0 = &fn;
+			TEST_ASSERT(guardedAtO0 != nullptr);
+			if (!guardedAtO0) continue;
+			for (llvm::Instruction& instruction : llvm::instructions(*guardedAtO0))
+				if (auto* invoke = llvm::dyn_cast<llvm::InvokeInst>(&instruction))
+				{
+					const llvm::Function* callee = invoke->getCalledFunction();
+					if (!callee || !callee->getName().starts_with("MayThrow")) continue;
+					TEST_ASSERT(!invoke->getOperandBundle(llvm::LLVMContext::OB_deopt));
+					TEST_ASSERT(StackMapOf(RecordPlace(*invoke), c_CallRecordId) != nullptr);
+				}
+			const std::optional<std::string> objectAtO0 = ObjectOf(*atO0.module, system, 0);
+			TEST_ASSERT(objectAtO0.has_value());
+			if (!objectAtO0) continue;
+			size_t records = 0;
+			for (const std::vector<MapRecord>& function : MapOf(*objectAtO0, MapSectionFor(system)))
+				for (const MapRecord& record : function)
+				{
+					++records;
+					TEST_ASSERT(!record.whole);
+				}
+			TEST_ASSERT(records >= 1);
+			if (system == TargetSystem::Windows)
+				for (const std::string& wrong : RecordsAfterNoCall(*objectAtO0, system))
+				{
+					printf("no return address at -O0: %s\n", wrong.c_str());
+					TEST_ASSERT(false);
+				}
 		}
 	}
 
@@ -527,10 +718,12 @@ namespace Testing
 		}
 	}
 
-	void StackMapsTest::AtO0EveryValueGoesThroughASlot()
+	void StackMapsTest::AtO0ACallIsRecordedAfterIt()
 	{
 		// Twenty-four pointers and a pair of them live across one call. -O0's register allocator cannot spill a statepoint's
-		// register operands: with each value in place it ran out of registers.
+		// register operands: with each value in place it ran out of registers. So at -O0 each goes through a slot of its own,
+		// and the call is recorded by a stackmap after it, masks over the function's slot table: fast instruction selection
+		// lowers that itself, where it hands a statepoint to SelectionDAG.
 		constexpr int kPointers = 24;
 		std::string body = "declare void @call()\ndeclare void @use(ptr)\ndeclare { ptr, ptr } @pair()\ndefine void @f(ptr %a) {\n%two = call { ptr, ptr } @pair()\n";
 		for (int i = 0; i < kPointers; ++i)
@@ -548,14 +741,168 @@ namespace Testing
 			if (!module) continue;
 			InsertStatepoints(*module, llvm::CodeGenOptLevel::None);
 			TEST_ASSERT(Verified(*module));
-			const std::vector<const llvm::CallBase*> calls = RecordedCalls(*module->getFunction("f"), "call");
-			TEST_ASSERT(calls.size() == 1);
-			if (calls.size() != 1) continue;
-			for (const llvm::Use& input : calls[0]->getOperandBundle(llvm::LLVMContext::OB_deopt)->Inputs)
-				TEST_ASSERT(llvm::isa<llvm::Constant>(input.get()) || llvm::isa<llvm::AllocaInst>(input.get()));
-			TEST_ASSERT(ListedSlots(*calls[0]) == kPointers + 1); // each pointer's and the pair's
-			TEST_ASSERT(ObjectWritten(*module, system, 0));
+			const llvm::Function& f = *module->getFunction("f");
+			TEST_ASSERT(RecordedCalls(f, "call").empty()); // no statepoint
+			const llvm::CallBase* call = nullptr;
+			const llvm::CallBase* table = nullptr;
+			for (const llvm::Instruction& instruction : llvm::instructions(f))
+			{
+				if (const auto* each = llvm::dyn_cast<llvm::CallBase>(&instruction); each && each->getCalledFunction() && each->getCalledFunction()->getName() == "call")
+					call = each;
+				if (const llvm::CallBase* found = StackMapOf(&instruction, c_SlotTableId)) table = found;
+			}
+			TEST_ASSERT(call != nullptr && table != nullptr);
+			if (!call || !table) continue;
+			TEST_ASSERT(table->getParent() == &f.getEntryBlock());
+			const llvm::CallBase* record = StackMapOf(call->getNextNode(), c_CallRecordId);
+			TEST_ASSERT(record != nullptr);
+			if (!record) continue;
+			size_t tableSlots = 0;
+			for (const llvm::Use& operand : table->args()) tableSlots += llvm::isa<llvm::AllocaInst>(operand.get()) ? 1 : 0;
+			size_t listed = 0;
+			for (unsigned i = 2; i < record->arg_size(); ++i)
+			{
+				const auto* mask = llvm::dyn_cast<llvm::ConstantInt>(record->getArgOperand(i));
+				TEST_ASSERT(mask != nullptr);
+				if (mask) listed += static_cast<size_t>(std::popcount(static_cast<uint32_t>(mask->getZExtValue())));
+			}
+			TEST_ASSERT(record->arg_size() - 2 == (tableSlots + 31) / 32);
+			TEST_ASSERT(listed == kPointers + 1); // each pointer's slot and the pair's
+			// Written, the record lists them, and InsertStatepoints run again records nothing twice.
+			const std::optional<std::string> object = ObjectOf(*module, system, 0);
+			TEST_ASSERT(object.has_value());
+			if (!object) continue;
+			const std::vector<std::vector<MapRecord>> map = MapOf(*object, MapSectionFor(system));
+			TEST_ASSERT(map.size() == 1);
+			if (map.size() != 1) continue;
+			const auto atCall = std::find_if(map[0].begin(), map[0].end(), [](const MapRecord& r) { return r.slots == kPointers + 1; });
+			TEST_ASSERT(atCall != map[0].end() && !atCall->whole && atCall->values == 0);
+			TEST_ASSERT(map[0].size() == kPointers + 4); // pair, call, then the uses: each call once
 		}
+	}
+
+	void StackMapsTest::ARecordIsAtItsCallsReturnAddress()
+	{
+		// The collector finds a frame's record by the return address it waits at. At -O0 the register allocator puts the
+		// call's result copies and reloads between a call and its record (StackMapPlacement moves the record back to the
+		// call); optimized, the record is the statepoint's. Every call here is a direct one: `call rel32`, 0xE8.
+		constexpr const char* kBody = R"(
+			declare ptr @make()
+			declare void @use(ptr, ptr)
+			define void @f(ptr %a) {
+			entry:
+				%p = call ptr @make()
+				%q = call ptr @make()
+				call void @use(ptr %p, ptr %a)
+				%r = call ptr @make()
+				call void @use(ptr %q, ptr %r)
+				call void @use(ptr %a, ptr %p)
+				ret void
+			}
+			define void @realigned(ptr %a) {
+			entry:
+				%wide = alloca <8 x float>, align 32
+				%slot = alloca ptr
+				store ptr %a, ptr %slot
+				%p = call ptr @make()
+				call void @use(ptr %p, ptr %slot)
+				call void @use(ptr %wide, ptr %p)
+				ret void
+			}
+		)";
+		// f's six calls; `realigned`'s three, in a frame that realigns the stack (its slots are named from rsp).
+		constexpr size_t kCalls = 6;
+		constexpr size_t kRealignedCalls = 3;
+		for (const TargetSystem system : { TargetSystem::Windows, TargetSystem::Linux })
+			for (const int optLevel : { 0, 2 })
+			{
+				llvm::LLVMContext context;
+				std::unique_ptr<llvm::Module> module = Parsed(context, kBody, system);
+				TEST_ASSERT(module != nullptr);
+				if (!module) continue;
+				const std::optional<std::string> object = ObjectOf(*module, system, optLevel);
+				TEST_ASSERT(object.has_value());
+				if (!object) continue;
+				const std::vector<std::vector<MapRecord>> map = MapOf(*object, MapSectionFor(system));
+				TEST_ASSERT(map.size() == 2 && map[0].size() == kCalls && map[1].size() == kRealignedCalls);
+				for (const std::vector<MapRecord>& function : map)
+					for (const MapRecord& record : function) TEST_ASSERT(!record.whole);
+				// The last call is followed by the epilogue, which on Windows wants a nop after the call.
+				for (const std::string& wrong : RecordsAfterNoCall(*object, system))
+				{
+					printf("no return address: %s (-O%d, %s)\n", wrong.c_str(), optLevel, MapSectionFor(system));
+					TEST_ASSERT(false);
+				}
+			}
+	}
+
+	void StackMapsTest::ACallThatCannotCollectHasNoRecord()
+	{
+		// A call that cannot start a collection needs no record: of a C library function, or of a function of the module
+		// whose calls cannot (also through recursion); a declaration of another kind may (C4's runtime allocates), and so may
+		// a function that calls one, a call through a pointer, and what calls those.
+		llvm::LLVMContext context;
+		std::unique_ptr<llvm::Module> module = Parsed(context, R"(
+			declare ptr @alloc()
+			declare i64 @strlen(ptr)
+			declare void @use(ptr, i64)
+			define i64 @pure(i64 %x) {
+				%y = add i64 %x, 1
+				ret i64 %y
+			}
+			define i64 @measures(ptr %p) {
+				%n = call i64 @strlen(ptr %p)
+				%m = call i64 @pure(i64 %n)
+				ret i64 %m
+			}
+			define i64 @counts(i64 %n) {
+			entry:
+				%done = icmp eq i64 %n, 0
+				br i1 %done, label %exit, label %more
+			more:
+				%less = sub i64 %n, 1
+				%r = call i64 @counts(i64 %less)
+				br label %exit
+			exit:
+				%v = phi i64 [ 0, %entry ], [ %r, %more ]
+				ret i64 %v
+			}
+			define ptr @allocates() {
+				%p = call ptr @alloc()
+				ret ptr %p
+			}
+			define ptr @allocatesThrough() {
+				%p = call ptr @allocates()
+				ret ptr %p
+			}
+			define i64 @calls(ptr %fn) {
+				%r = call i64 %fn(i64 1)
+				ret i64 %r
+			}
+			define void @f(ptr %a, ptr %fn) {
+				%x = call i64 @pure(i64 1)
+				%n = call i64 @measures(ptr %a)
+				%c = call i64 @counts(i64 %n)
+				%p = call ptr @allocatesThrough()
+				%r = call i64 @calls(ptr %fn)
+				call void @use(ptr %p, i64 %x)
+				call void @use(ptr %a, i64 %c)
+				call void @use(ptr %a, i64 %r)
+				ret void
+			}
+		)");
+		TEST_ASSERT(module != nullptr);
+		if (!module) return;
+		InsertStatepoints(*module, kOptimized);
+		TEST_ASSERT(Verified(*module));
+		const llvm::Function& f = *module->getFunction("f");
+		for (const char* never : { "pure", "measures", "counts" }) TEST_ASSERT(RecordedCalls(f, never).empty());
+		for (const char* may : { "allocatesThrough", "calls", "use" }) TEST_ASSERT(!RecordedCalls(f, may).empty());
+		TEST_ASSERT(RecordedCalls(*module->getFunction("measures"), "strlen").empty());
+		TEST_ASSERT(RecordedCalls(*module->getFunction("counts"), "counts").empty());
+		TEST_ASSERT(RecordedCalls(*module->getFunction("allocatesThrough"), "allocates").size() == 1);
+		// Only a function with records gets the strategy.
+		TEST_ASSERT(f.hasGC() && !module->getFunction("pure")->hasGC() && !module->getFunction("counts")->hasGC());
 	}
 
 	void StackMapsTest::RecordsAreTheSameEveryTime()

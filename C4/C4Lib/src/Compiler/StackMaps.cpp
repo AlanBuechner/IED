@@ -1,17 +1,25 @@
 #include "Compiler/StackMaps.h"
 #include "Compiler/StackMapFormat.h"
+#include "Compiler/StackMapPlacement.h"
 #include "Compiler/StackMapRecords.h"
 #include "Compiler/StackMapSlots.h"
 #include "Compiler/StackMapValues.h"
 #include <llvm/Analysis/TargetLibraryInfo.h>
 #include <llvm/CodeGen/GCMetadataPrinter.h>
+#include <llvm/CodeGen/MachineFunctionPass.h>
+#include <llvm/CodeGen/Passes.h>
+#include <llvm/CodeGen/TargetPassConfig.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/GCStrategy.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/IntrinsicInst.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/CommandLine.h>
+#include <llvm/Target/RegisterTargetPassConfigCallback.h>
 #include <mutex>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace C4Compiler
@@ -49,18 +57,6 @@ namespace C4Compiler
 
 		const llvm::GCRegistry::Add<C4Strategy> s_Strategy(c_StackMapsGc, "C4: statepoints recording live values in place (R16)");
 		const llvm::GCMetadataPrinterRegistry::Add<C4Printer> s_Printer(c_StackMapsGc, "C4: stack maps in C4's format (R16)");
-
-		// A deopt operand LLVM may keep in a register (callee-saved where it lives across the call) instead of spilling it
-		// to a slot before every call: LLVM's `use-registers-for-deopt-values`, set once for the process.
-		void KeepDeoptValuesInRegisters()
-		{
-			static std::once_flag s_Set;
-			std::call_once(s_Set, [] {
-				auto& options = llvm::cl::getRegisteredOptions();
-				const auto found = options.find("use-registers-for-deopt-values");
-				if (found != options.end()) static_cast<llvm::cl::opt<bool>*>(found->second)->setValue(true);
-			});
-		}
 
 		// --- calls left as they are ---------------------------------------------------------------------------------
 
@@ -118,17 +114,99 @@ namespace C4Compiler
 			return false;
 		}
 
-		// The calls that get a record (one that has its record already is left as it is).
-		std::vector<llvm::CallBase*> Statepoints(llvm::Function& function, const llvm::TargetLibraryInfoImpl& libraryOfTarget)
+		// Whether `call` has its record already: a deopt list, or a stackmap after it (Compiler/StackMapRecords, -O0).
+		bool Recorded(llvm::CallBase& call)
+		{
+			if (call.getOperandBundle(llvm::LLVMContext::OB_deopt)) return true;
+			const auto* next = llvm::dyn_cast_or_null<llvm::IntrinsicInst>(RecordPlace(call));
+			if (!next || next->getIntrinsicID() != llvm::Intrinsic::experimental_stackmap) return false;
+			const auto* id = llvm::dyn_cast<llvm::ConstantInt>(next->getArgOperand(0));
+			return id && id->getZExtValue() == c_CallRecordId;
+		}
+
+		// --- calls that cannot collect ------------------------------------------------------------------------------
+
+		// Whether a call may start a collection on its thread before it returns, as far as the call itself says: one of a
+		// function defined here as the function may (NeverCollecting); a declaration's may - C4's runtime allocates, other
+		// code may call back into C4 - but a C library function's never, nor an intrinsic's.
+		enum class Collects { Never, Maybe, AsTheCallee };
+
+		Collects CallCollects(const llvm::CallBase& call, const llvm::TargetLibraryInfo& library)
+		{
+			if (call.isInlineAsm()) return Collects::Maybe;
+			const llvm::Function* callee = call.getCalledFunction();
+			if (!callee) return Collects::Maybe;
+			if (callee->isIntrinsic()) return Collects::Never;
+			if (!callee->isDeclarationForLinker()) return Collects::AsTheCallee;
+			llvm::LibFunc known;
+			return library.getLibFunc(*callee, known) ? Collects::Never : Collects::Maybe;
+		}
+
+		// The functions defined in `module` that never start a collection: none of their calls may, nor do the functions
+		// defined here they call.
+		std::unordered_set<const llvm::Function*> NeverCollecting(llvm::Module& module, const llvm::TargetLibraryInfoImpl& libraryOfTarget)
+		{
+			std::unordered_map<const llvm::Function*, std::vector<const llvm::Function*>> callersOf;
+			std::unordered_set<const llvm::Function*> collecting;
+			std::vector<const llvm::Function*> pending;
+			for (llvm::Function& function : module)
+			{
+				if (function.isDeclarationForLinker()) continue;
+				const llvm::TargetLibraryInfo library(libraryOfTarget, &function);
+				bool collects = false;
+				for (const llvm::Instruction& instruction : llvm::instructions(function))
+					if (const auto* call = llvm::dyn_cast<llvm::CallBase>(&instruction))
+						switch (CallCollects(*call, library))
+						{
+						case Collects::Maybe: collects = true; break;
+						case Collects::AsTheCallee: callersOf[call->getCalledFunction()].push_back(&function); break;
+						case Collects::Never: break;
+						}
+				if (collects && collecting.insert(&function).second) pending.push_back(&function);
+			}
+			while (!pending.empty())
+			{
+				const llvm::Function* function = pending.back();
+				pending.pop_back();
+				for (const llvm::Function* caller : callersOf[function])
+					if (collecting.insert(caller).second) pending.push_back(caller);
+			}
+			std::unordered_set<const llvm::Function*> never;
+			for (const llvm::Function& function : module)
+				if (!function.isDeclarationForLinker() && !collecting.count(&function)) never.insert(&function);
+			return never;
+		}
+
+		// The calls that get a record: those that may collect (one that has its record already is left as it is).
+		std::vector<llvm::CallBase*> Statepoints(llvm::Function& function, const llvm::TargetLibraryInfoImpl& libraryOfTarget,
+			const std::unordered_set<const llvm::Function*>& never)
 		{
 			const llvm::TargetLibraryInfo library(libraryOfTarget, &function);
 			std::vector<llvm::CallBase*> calls;
 			for (llvm::Instruction& instruction : llvm::instructions(function))
-				if (auto* call = llvm::dyn_cast<llvm::CallBase>(&instruction); call && !IsIntrinsic(*call) && !StaysLeaf(*call, library) &&
-					!call->getOperandBundle(llvm::LLVMContext::OB_deopt))
-					calls.push_back(call);
+			{
+				auto* call = llvm::dyn_cast<llvm::CallBase>(&instruction);
+				if (!call || IsIntrinsic(*call) || StaysLeaf(*call, library) || Recorded(*call)) continue;
+				const Collects collects = CallCollects(*call, library);
+				if (collects == Collects::Maybe || (collects == Collects::AsTheCallee && !never.count(call->getCalledFunction()))) calls.push_back(call);
+			}
 			return calls;
 		}
+	}
+
+	// The placement pass is registered here, not by a static object: LLVM's list of pipeline callbacks is a static of
+	// another file, whose construction may come after ours and empty it.
+	void PrepareCodeGeneration()
+	{
+		static std::once_flag s_Set;
+		std::call_once(s_Set, [] {
+			auto& options = llvm::cl::getRegisteredOptions();
+			const auto found = options.find("use-registers-for-deopt-values");
+			if (found != options.end()) static_cast<llvm::cl::opt<bool>*>(found->second)->setValue(true);
+			static const llvm::RegisterTargetPassConfigCallback s_Placement([](llvm::TargetMachine&, llvm::PassManagerBase&, llvm::TargetPassConfig* config) {
+				config->insertPass(&llvm::StackMapLivenessID, llvm::IdentifyingPassPtr(CreateStackMapPlacement()));
+			});
+		});
 	}
 
 	void MarkForStackMaps(llvm::Module& module)
@@ -144,15 +222,17 @@ namespace C4Compiler
 
 	void InsertStatepoints(llvm::Module& module, llvm::CodeGenOptLevel level)
 	{
+		PrepareCodeGeneration();
 		if (!UsesStackMaps(module)) return;
-		KeepDeoptValuesInRegisters();
 		const llvm::TargetLibraryInfoImpl library(module.getTargetTriple());
 		const RecordedValues where = level == llvm::CodeGenOptLevel::None ? RecordedValues::InSlots : RecordedValues::InPlace;
+		const std::unordered_set<const llvm::Function*> never = NeverCollecting(module, library);
 		for (llvm::Function& function : module)
 		{
 			if (function.isDeclaration() || function.hasFnAttribute(llvm::Attribute::Naked)) continue;
-			const std::vector<llvm::CallBase*> calls = Statepoints(function, library);
-			if (!calls.empty()) RecordCalls(function, calls, ValuesLiveAcross(function, calls), FrameSlotsAt(function, calls), where);
+			const std::vector<llvm::CallBase*> calls = Statepoints(function, library, never);
+			if (calls.empty()) continue;
+			RecordCalls(function, calls, ValuesLiveAcross(function, calls), FrameSlotsAt(function, calls), where);
 			function.setGC(c_StackMapsGc);
 		}
 	}

@@ -19,6 +19,15 @@ namespace C4Compiler
 	/// Registers are DWARF's numbers. A value in memory is the word at register + offset.
 	constexpr uint32_t c_StackMapMagic = 0x4D533443; // "C4SM"
 	constexpr uint32_t c_StackMapVersion = 1;
+
+	/// The ids of the `llvm.experimental.stackmap`s code generated at -O0 records its calls by (Compiler/StackMapRecords),
+	/// which fast instruction selection lowers itself where a statepoint would go through SelectionDAG: a function's slot
+	/// table - its slots that may hold a pointer, each with its words and masks, as a statepoint lists them - and after a
+	/// call that the frame may wait in, its record: a 32-bit mask per 32 slots of the table, of those it lists (it names no
+	/// value: at -O0 every value goes through a slot). StackMapPlacement moves a call's record to the call's return address.
+	/// A statepoint's records keep LLVM's id (StatepointDirectives' default, 0xABCDEF0F).
+	constexpr uint64_t c_SlotTableId = 0x43345301;
+	constexpr uint64_t c_CallRecordId = 0x43345302;
 	enum class StackMapSlotBase : uint8_t
 	{
 		Direct,   // the slot starts at register + offset
