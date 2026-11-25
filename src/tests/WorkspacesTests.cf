@@ -17,6 +17,16 @@ static bool Refused(const char* path) {
 	return false;
 }
 
+static Core::String RefusedWith(const char* path) {
+	try {
+		Ied::NormalizePath(Core::StringView(path));
+	}
+	catch (Ied::RpcError& error) {
+		return error.m_Message;
+	}
+	return Core::String();
+}
+
 [test("server.workspaces")]
 class WorkspaceTests {
 	[test("normalize_path")]
@@ -30,6 +40,10 @@ class WorkspaceTests {
 		assert_true(Ied::NormalizePath(Core::StringView(".")).IsEmpty(), "'.' alone the root");
 		const char*[4] bad = { "..", "a/../b", "C:/Windows", "./.." };
 		for (int32 i = 0; i < 4; ++i) assert_true(Refused(bad[i]), bad[i]);
+		// A full path: what reaches it instead - a linked project's name, or the shell for another repository's folder.
+		Core::String full = RefusedWith("C:/GameDev/Claymore/docs");
+		assert_true(full.View().StartsWith(Core::StringView("path must be workspace-relative")), full.CStr());
+		assert_true(full.View().Contains(Core::StringView("@Name/...")) && full.View().Contains(Core::StringView("findstr")), full.CStr());
 	}
 
 	[test("hidden_paths")]

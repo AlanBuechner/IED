@@ -105,10 +105,10 @@ class WorkToolsTests {
 		FS::WriteFileAtomically((root / "build/bin/Tool.exe").CStr(), (const void*)"x", 1);
 		Core::String client = Core::String((root / "Game/build/bin/Client.exe").View());
 		assert_se((root / "build/bin/Tool.exe").CStr(), Ai::ProgramFile(root.View(), Core::StringView(""), Core::StringView("build/bin/Tool.exe")).CStr(), "a path from the root");
-		assert_se(client.CStr(), Ai::ProgramFile(root.View(), Core::StringView("Game"), Core::StringView("build/bin/Client.exe")).CStr(), "else from cwd: a sub-project's own build output");
-		assert_se(client.CStr(), Ai::ProgramFile(root.View(), Core::StringView("Game/build/bin"), Core::StringView("Client.exe")).CStr(), "a bare name of a file in cwd, as cmd runs one");
-		assert_se("git", Ai::ProgramFile(root.View(), Core::StringView("Game/build/bin"), Core::StringView("git")).CStr(), "any other bare name is looked for on PATH");
-		assert_se("Client.exe", Ai::ProgramFile(root.View(), Core::StringView(""), Core::StringView("Client.exe")).CStr(), "a file elsewhere than cwd is not found by its name");
+		assert_se(client.CStr(), Ai::ProgramFile(root.View(), (root / "Game").View(), Core::StringView("build/bin/Client.exe")).CStr(), "else from cwd: a sub-project's own build output");
+		assert_se(client.CStr(), Ai::ProgramFile(root.View(), (root / "Game/build/bin").View(), Core::StringView("Client.exe")).CStr(), "a bare name of a file in cwd, as cmd runs one");
+		assert_se("git", Ai::ProgramFile(root.View(), (root / "Game/build/bin").View(), Core::StringView("git")).CStr(), "any other bare name is looked for on PATH");
+		assert_se("Client.exe", Ai::ProgramFile(root.View(), root.View(), Core::StringView("Client.exe")).CStr(), "a file elsewhere than cwd is not found by its name");
 	}
 
 	[test("search_problem")]

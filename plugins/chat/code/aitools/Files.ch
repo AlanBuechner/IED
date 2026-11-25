@@ -23,7 +23,8 @@ namespace Ai
 	// then normalized as every workspace path is ("..", a drive letter: bad_request).
 	Core::String ToolPath(Core::StringView path);
 	// A full path inside the workspace as its workspace path: under its local state (kept outside its folder) as
-	// ".ied/local/...", under its root relative to it; any other path as given.
+	// ".ied/local/...", under its root relative to it, under a linked project's root (a Nuke package's clone) as
+	// "@Name/..."; any other path as given.
 	Core::String WorkspacePathOf(const IED::Workspace& ws, Core::StringView path);
 	// A tool path that names a project the solution links outside its folder (docs/03 "Linked projects" - what a Nuke
 	// package is): "@InputLayers/src" is that project's src folder. `onDisk` that folder or file, and `shown` its workspace
@@ -33,6 +34,14 @@ namespace Ai
 	// fs_read and fs_edit take these paths through the server; the tools that walk a folder on disk - fs_list, fs_glob,
 	// search_text - go through this instead.
 	bool LinkTargetOf(const IED::Workspace& ws, Core::StringView path, Core::String& onDisk, Core::String& shown);
+	// The folder a tool's `path` names on disk - in the workspace's folder, or under a linked project's root
+	// ("@Render/src/Render") -; empty when it names no folder (code_symbols outlines a folder's files by it).
+	FS::Path FolderOnDisk(const IED::Workspace& ws, Core::StringView path);
+	// The folder a command runs in, from a tool's `cwd`: the workspace's root ("" or "."), a folder of it, or a linked
+	// project's ("@JRPGToolkit/src"); where it would be when no such folder is there (the caller says so).
+	Core::String WorkingFolderOf(const IED::Workspace& ws, Core::StringView cwd);
+	// What a tool says when its `cwd` names no folder - Windows says only that "the directory name is invalid".
+	Core::String NoWorkingFolder(Core::StringView tool, const IED::Workspace& ws, Core::StringView folder);
 	// What a tool's `path` that names no linked project says about it: the links it could have meant. "" when the solution
 	// links none.
 	Core::String LinkHint(const IED::Workspace& ws, Core::StringView path);
@@ -40,6 +49,9 @@ namespace Ai
 	// MovedFoldersHint inside that link, its folders named by the path that reaches them ("@InputLayers/src holds the
 	// folders: InputLayers/ tests/"). "" when no link begins `path` (the hints of the workspace's own folder say that).
 	Core::String LinkMissHint(const IED::Workspace& ws, Core::StringView path);
+	// For an "@Name/..." file path that misses: the one file named like it under that link's root, by the link's name
+	// ("@ClaymoreEngine/src/ClaymoreEngine/Content/BuiltinAssets.cf"); "" when none or several, or the path names no link.
+	Core::String SameNamedLinkedFile(const IED::Workspace& ws, Core::StringView path);
 	// What every tool says for a path that names no folder or file: where it looked (the linked project's folders when the
 	// path is one's, the workspace's own otherwise) and the links it could have meant.
 	Core::String MissingPathHint(const IED::Workspace& ws, Core::StringView path, const FS::Path& root, Core::StringView shown);

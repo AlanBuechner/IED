@@ -113,6 +113,19 @@ class FileToolTests {
 		assert_true(!Ai::LinkTargetOf(ws, Core::StringView("@InputLayers/src/Nope"), onDisk, shown), "what the link does not hold is no link");
 		assert_true(!Ai::LinkTargetOf(ws, Core::StringView("src"), onDisk, shown) && !Ai::LinkTargetOf(ws, Core::StringView(""), onDisk, shown), "a folder of the workspace and the root are its own");
 		assert_true(!Ai::LinkTargetOf(ws, Core::StringView("@Other/src"), onDisk, shown), "no project is linked by that name");
+		assert_se(Core::String((root / "Claymore/Plugins/InputLayers/src/InputLayers").View()).CStr(), Ai::FolderOnDisk(ws, Core::StringView("@InputLayers/src/InputLayers")).CStr(), "a linked project's folder is a folder (code_symbols outlines it)");
+		assert_se(Core::String((root / "Game/src").View()).CStr(), Ai::FolderOnDisk(ws, Core::StringView("src")).CStr(), "and the workspace's own");
+		assert_true(Ai::FolderOnDisk(ws, Core::StringView("@InputLayers/src/InputLayers/LayerStack.ch")).IsEmpty() && Ai::FolderOnDisk(ws, Core::StringView("")).IsEmpty(), "a file, or nothing, is no folder");
+		assert_se(Core::String((root / "Claymore/Plugins/InputLayers").View()).CStr(), Ai::WorkingFolderOf(ws, Core::StringView("@InputLayers")).CStr(), "a command runs in a linked project's folder (shell_run's cwd)");
+		assert_se(Core::String((root / "Game/src").View()).CStr(), Ai::WorkingFolderOf(ws, Core::StringView("src")).CStr(), "or a folder of the workspace");
+		assert_se(Core::String((root / "Game").View()).CStr(), Ai::WorkingFolderOf(ws, Core::StringView("")).CStr(), "or its root");
+		assert_true(Ai::NoWorkingFolder(Core::StringView("shell_run"), ws, Core::StringView("X:/nope")).View().Contains(Core::StringView("@Name/...")), "a cwd that is no folder says the links are folders too");
+		const Core::String full = Core::String((root / "Claymore/Plugins/InputLayers/src/InputLayers/LayerStack.ch").View());
+		assert_se("@InputLayers/src/InputLayers/LayerStack.ch", Ai::WorkspacePathOf(ws, full.View()).CStr(), "a full path under a link is read by the link's name");
+		assert_se("src/a.cf", Ai::WorkspacePathOf(ws, Core::String((root / "Game/src/a.cf").View()).View()).CStr(), "one in the folder as its own");
+		ws.m_Trusted = false;
+		assert_se(full.CStr(), Ai::WorkspacePathOf(ws, full.View()).CStr(), "an untrusted workspace names no link");
+		ws.m_Trusted = true;
 
 		ws.m_Trusted = false;
 		assert_true(!Ai::LinkTargetOf(ws, Core::StringView("@InputLayers/src"), onDisk, shown), "an untrusted solution follows no link: its @x paths are plain names in its folder");
@@ -126,6 +139,8 @@ class FileToolTests {
 		const Core::String missed = Ai::MissingPathHint(ws, Core::StringView("@InputLayers/src/Nohere"), FS::Path((root / "Game").View()), Core::StringView(""));
 		assert_true(missed.View().Contains(Core::StringView("@InputLayers/src holds the folders: InputLayers/")), missed.CStr());
 		assert_true(!missed.View().Contains(Core::StringView("(the root) holds")), "not the workspace's own folders");
+		assert_se("@InputLayers/src/InputLayers/LayerStack.ch", Ai::SameNamedLinkedFile(ws, Core::StringView("@InputLayers/InputLayers/LayerStack.ch")).CStr(), "a linked file's path that misses: the one file of its name under the link (search_text searches it)");
+		assert_true(Ai::SameNamedLinkedFile(ws, Core::StringView("@InputLayers/Nope.ch")).IsEmpty() && Ai::SameNamedLinkedFile(ws, Core::StringView("src/LayerStack.ch")).IsEmpty(), "none of that name, or no link: nothing");
 		assert_true(Ai::MissingPathHint(ws, Core::StringView("nope"), FS::Path((root / "Game").View()), Core::StringView("")).View().Contains(Core::StringView("(the root) holds the folders: src/")), "a folder of the workspace says what its parent holds");
 		assert_true(!Ai::MissingPathHint(ws, Core::StringView("nope"), FS::Path((root / "Game").View()), Core::StringView("")).View().Contains(Core::StringView("the solution links")), "and names no links, for it asked for none");
 		IED::Workspace plain;

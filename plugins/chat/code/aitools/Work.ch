@@ -53,13 +53,13 @@ namespace Ai
 	bool IsBrokenRegex(Core::StringView problem);
 	// What search_text says above the matches of a broken regex searched as text: why it was not one.
 	Core::String SearchedAsTextNote(Core::StringView problem);
-	// The program program_run starts for `program`: a file of the workspace at `root` - a path from the root, else from `cwd` (a
-	// sub-project's own build output run in its folder), or a bare name of a file in `cwd`, as cmd runs one - else `program` as it
-	// is, a name looked for on PATH.
-	Core::String ProgramFile(Core::StringView root, Core::StringView cwd, Core::StringView program);
+	// The program program_run starts for `program`: a file of the workspace at `root` - a path from the root, else from `folder`,
+	// the one it runs in (a sub-project's own build output run in its folder), or a bare name of a file in `folder`, as cmd runs one
+	// - else `program` as it is, a name looked for on PATH.
+	Core::String ProgramFile(Core::StringView root, Core::StringView folder, Core::StringView program);
 	// The last `lines` lines of `text`, at most `bytes` of them.
 	Core::String TailOf(Core::StringView text, int64 lines, int64 bytes);
-	// What a command started for a tool call needs: its argv or shell text, the folder it runs in (workspace-relative)
+	// What a command started for a tool call needs: its argv or shell text, the folder it runs in (a tool's cwd: WorkingFolderOf)
 	// and how long it may run; `tool` names it in what the model and the owner read.
 	class ToolCommand
 	{

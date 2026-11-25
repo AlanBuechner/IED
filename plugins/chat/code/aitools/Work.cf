@@ -201,8 +201,10 @@ namespace Ai
 		Core::String missing = MissingSearchPath(root, path.View(), call.m_Shown.View());
 		if (!missing.IsEmpty() && !LinkScopeOf(call, path.View(), scope)) {
 			Core::String only = SameNamedSearchFile(root, path.View());
-			if (only.IsEmpty()) return ToolError(((missing + MissingPathHint(call.m_Ws, path.View(), root, call.m_Shown.View()).View()) + "; fs_glob finds files by name").View());
-			scope = ScopeOfSearch(only.View(), Core::StringView(), true);
+			const Core::String linked = only.IsEmpty() ? SameNamedLinkedFile(call.m_Ws, path.View()) : Core::String();
+			if (!linked.IsEmpty() && LinkScopeOf(call, linked.View(), scope)) only = linked;
+			else if (only.IsEmpty()) return ToolError(((missing + MissingPathHint(call.m_Ws, path.View(), root, call.m_Shown.View()).View()) + "; fs_glob finds files by name").View());
+			else scope = ScopeOfSearch(only.View(), Core::StringView(), true);
 			redirect = (((((Core::String("[no file ") + call.m_Shown.View()) + path.View()) + "; searched ") + call.m_Shown.View()) + only.View()) + ", the only file of that name outside build output]\n";
 		}
 		ApplyScope(scope, query);
@@ -300,7 +302,7 @@ namespace Ai
 			info.program = command.m_Argv[0];
 			for (int64 i = 1; i < command.m_Argv.Count(); ++i) info.arguments.Push(command.m_Argv[i]);
 		}
-		info.workingDirectory = Core::String((FS::Path(call.m_Ws.m_Root.View()) / command.m_Cwd.View()).View());
+		info.workingDirectory = WorkingFolderOf(call.m_Ws, command.m_Cwd.View());
 		info.input = Process::Redirect::Null;
 		info.output = Process::Redirect::Pipe;
 		info.errors = Process::Redirect::Pipe;
@@ -309,7 +311,12 @@ namespace Ai
 
 	Process::Child* StartToolCommand(const ToolInvocation& call, const ToolCommand& command, Core::String& problem) {
 		ShellOutput(call, ((Core::String("> ") + CommandLine(command).View()) + "\n").View());
-		Process::Child started = Process::Child::Start(StartInfoOf(call, command));
+		Process::StartInfo info = StartInfoOf(call, command);
+		if (!FS::IsDirectory(info.workingDirectory.CStr())) {
+			problem = NoWorkingFolder(command.m_Tool.View(), call.m_Ws, info.workingDirectory.View());
+			return nullptr;
+		}
+		Process::Child started = Process::Child::Start(info);
 		if (!started.IsOpen()) {
 			problem = (command.m_Tool + ": the command did not start: ") + started.Error();
 			return nullptr;
@@ -319,7 +326,9 @@ namespace Ai
 
 	ToolOutcome RunToolCommand(const ToolInvocation& call, const ToolCommand& command, bool whole) {
 		ShellOutput(call, ((Core::String("> ") + CommandLine(command).View()) + "\n").View());
-		Process::Child child = Process::Child::Start(StartInfoOf(call, command));
+		Process::StartInfo info = StartInfoOf(call, command);
+		if (!FS::IsDirectory(info.workingDirectory.CStr())) return ToolError(NoWorkingFolder(command.m_Tool.View(), call.m_Ws, info.workingDirectory.View()).View());
+		Process::Child child = Process::Child::Start(info);
 		if (!child.IsOpen()) return ToolError((((command.m_Tool + ": the command did not start: ") + child.Error()).View()));
 		Core::String kept;
 		Core::String stopped;
@@ -404,15 +413,14 @@ namespace Ai
 		if (!stream.m_Text.View().EndsWith(Core::StringView("\n"))) out.Append("\n");
 	}
 
-	Core::String ProgramFile(Core::StringView root, Core::StringView cwd, Core::StringView program) {
-		FS::Path base = FS::Path(root);
+	Core::String ProgramFile(Core::StringView root, Core::StringView folder, Core::StringView program) {
 		const bool path = program.Contains(Core::StringView("/")) || program.Contains(Core::StringView("\\"));
 		if (path) {
-			FS::Path inside = base / IED::NormalizePath(program).View();
+			FS::Path inside = FS::Path(root) / IED::NormalizePath(program).View();
 			if (FS::FileExists(inside.CStr())) return Core::String(inside.View());
 		}
 		// Windows looks for a bare name beside IED and on PATH, never in the child's folder: cmd's and the description's cwd first.
-		FS::Path fromCwd = (base / IED::NormalizePath(cwd).View()) / IED::NormalizePath(program).View();
+		FS::Path fromCwd = FS::Path(folder) / IED::NormalizePath(program).View();
 		return FS::FileExists(fromCwd.CStr()) ? Core::String(fromCwd.View()) : Core::String(program);
 	}
 
@@ -451,7 +459,7 @@ namespace Ai
 	}
 
 	static Core::String ProgramPath(const ToolInvocation& call) {
-		return ProgramFile(call.m_Ws.m_Root.View(), call.m_Args.Member("cwd").AsView(), call.m_Args.Member("program").AsView());
+		return ProgramFile(call.m_Ws.m_Root.View(), WorkingFolderOf(call.m_Ws, call.m_Args.Member("cwd").AsView()).View(), call.m_Args.Member("program").AsView());
 	}
 
 	static Core::String ProgramLine(const ToolInvocation& call) {
@@ -535,11 +543,9 @@ namespace Ai
 		info.program = ProgramPath(call);
 		Serialization::DomNode args = call.m_Args.Member("args");
 		for (int64 i = 0; i < args.Count(); ++i) info.arguments.Push(Core::String(args.At(i).AsView()));
-		info.workingDirectory = Core::String((FS::Path(call.m_Ws.m_Root.View()) / IED::NormalizePath(call.m_Args.Member("cwd").AsView()).View()).View());
-		// Said plainly: Windows reports only that "the directory name is invalid", naming no folder.
+		info.workingDirectory = WorkingFolderOf(call.m_Ws, call.m_Args.Member("cwd").AsView());
 		if (!FS::IsDirectory(info.workingDirectory.CStr())) {
-			problem = Core::String("program_run: no folder ") + info.workingDirectory.View() + " to run in: cwd is a folder of " + call.m_Ws.m_Root.View() +
-				" (an ied:/ program runs in IED's checkout, so its cwd is one of ied:/ too)";
+			problem = NoWorkingFolder(Core::StringView("program_run"), call.m_Ws, info.workingDirectory.View()) + " (an ied:/ program runs in IED's checkout, so its cwd is one of ied:/ too)";
 			return result;
 		}
 		Core::String input;
@@ -740,13 +746,13 @@ namespace Ai
 		search->m_FolderRoots = true;
 		registry.Add(search);
 		ToolSpec* shell = WorkSpec("shell_run", "Run a shell command (cmd on Windows) in the workspace; returns the exit code and the output's tail. The owner sees the output in Output > AI. Example: shell_run({\"command\": \"git status --short\"})",
-			"{\"type\": \"object\", \"properties\": {\"command\": {\"type\": \"string\"}, \"cwd\": {\"type\": \"string\", \"description\": \"workspace-relative folder (ied:/... in developer mode); left out (or '.') for the workspace root. Never a full path: for a folder outside the workspace (another checkout, a git worktree) start the command with cd /d <folder> &&\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 14400, \"description\": \"seconds: at most 1800 (120 when left out); in the background at most 14400 (3600 when left out), counted from its start, so a wait inside the command (for a lock) counts too\"}, \"background\": {\"type\": \"boolean\", \"description\": \"start it and go on at once (a server, a long test run): you are told when it ends; background_status shows its output so far\"}}, \"required\": [\"command\"], \"additionalProperties\": false}",
+			"{\"type\": \"object\", \"properties\": {\"command\": {\"type\": \"string\"}, \"cwd\": {\"type\": \"string\", \"description\": \"workspace-relative folder (ied:/... in developer mode; @Name/... for a project the solution links outside its folder, a Nuke package's clone); left out (or '.') for the workspace root. Never a full path: for a folder outside the workspace (another checkout, a git worktree) start the command with cd /d <folder> &&\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 14400, \"description\": \"seconds: at most 1800 (120 when left out); in the background at most 14400 (3600 when left out), counted from its start, so a wait inside the command (for a lock) counts too\"}, \"background\": {\"type\": \"boolean\", \"description\": \"start it and go on at once (a server, a long test run): you are told when it ends; background_status shows its output so far\"}}, \"required\": [\"command\"], \"additionalProperties\": false}",
 			ToolClass::Exec, false);
 		shell->m_Plan = ShellPlan;
 		shell->m_Run = ShellRun;
 		registry.Add(shell);
 		ToolSpec* program = WorkSpec("program_run", "Run a program with arguments - no shell, so nothing needs quoting - and get its exit code, its time, CPU and peak memory, its standard output and its standard error apart (their ends); repeat runs it again for timing. For trying or timing a command-line program: the program's path in the workspace (as its build prints it: from the workspace's root, or from cwd - a sub-project's own build/bin run in its folder, or its file name alone with cwd its folder), in developer mode IED's own as ied:/build/bin/... (never a full C:/ path: a program outside the workspace - another checkout's or a git worktree's build - runs with shell_run), or a name on PATH; stdin names a file the program reads as its input. Example: program_run({\"program\": \"build/bin/Development-windows-x64/tool/tool.exe\", \"args\": [\"data/in.txt\", \"5\"]})",
-			"{\"type\": \"object\", \"properties\": {\"program\": {\"type\": \"string\", \"minLength\": 1}, \"args\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"stdin\": {\"type\": \"string\", \"description\": \"a workspace file given to the program as its standard input\"}, \"cwd\": {\"type\": \"string\", \"description\": \"workspace-relative folder; left out (or '.') for the workspace root. An ied:/ program runs in IED's checkout: its cwd is a folder of ied:/\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 1800}, \"repeat\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 10, \"description\": \"runs, for timing: each run's time and the median\"}}, \"required\": [\"program\"], \"additionalProperties\": false}",
+			"{\"type\": \"object\", \"properties\": {\"program\": {\"type\": \"string\", \"minLength\": 1}, \"args\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}, \"stdin\": {\"type\": \"string\", \"description\": \"a workspace file given to the program as its standard input\"}, \"cwd\": {\"type\": \"string\", \"description\": \"workspace-relative folder (@Name/... for a project the solution links outside its folder); left out (or '.') for the workspace root. An ied:/ program runs in IED's checkout: its cwd is a folder of ied:/\"}, \"timeout_s\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 1800}, \"repeat\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 10, \"description\": \"runs, for timing: each run's time and the median\"}}, \"required\": [\"program\"], \"additionalProperties\": false}",
 			ToolClass::Exec, false);
 		program->m_Plan = ProgramPlan;
 		program->m_Run = ProgramRun;

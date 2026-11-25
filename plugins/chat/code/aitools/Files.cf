@@ -254,11 +254,27 @@ namespace Ai
 		return IED::NormalizePath(kept.View());
 	}
 
+	// A full path under a linked project's root (the deepest that holds it) as its "@Name/..." path; empty when no link holds it, or
+	// the workspace is untrusted (it follows no link).
+	static Core::String LinkedPathOf(const IED::Workspace& ws, Core::StringView path) {
+		if (!ws.m_Trusted) return Core::String();
+		Core::String best;
+		int64 deepest = -1;
+		for (const IED::Project& each : ws.m_Projects) {
+			Core::String relative;
+			if (each.m_Link.IsEmpty() || each.m_LinkRoot.IsEmpty() || each.m_LinkRoot.ByteLength() <= deepest || !IED::RelativeTo(each.m_LinkRoot.View(), path, relative)) continue;
+			deepest = each.m_LinkRoot.ByteLength();
+			best = relative.IsEmpty() ? each.m_Link : (each.m_Link + "/") + relative.View();
+		}
+		return best;
+	}
+
 	Core::String WorkspacePathOf(const IED::Workspace& ws, Core::StringView path) {
 		Core::String relative;
 		if (!ws.m_LocalState.IsEmpty() && IED::RelativeTo(ws.m_LocalState.View(), path, relative)) return relative.IsEmpty() ? Core::String(".ied/local") : Core::String(".ied/local/") + relative.View();
 		if (IED::RelativeTo(ws.m_Root.View(), path, relative)) return relative;
-		return Core::String(path);
+		Core::String linked = LinkedPathOf(ws, path);
+		return linked.IsEmpty() ? Core::String(path) : linked;
 	}
 
 	bool LinkTargetOf(const IED::Workspace& ws, Core::StringView path, Core::String& onDisk, Core::String& shown) {
@@ -281,6 +297,28 @@ namespace Ai
 			return true;
 		}
 		return false;
+	}
+
+	FS::Path FolderOnDisk(const IED::Workspace& ws, Core::StringView path) {
+		if (path.IsEmpty()) return FS::Path();
+		Core::String linked;
+		Core::String shown;
+		const FS::Path onDisk = LinkTargetOf(ws, path, linked, shown) ? FS::Path(linked.View()) : FS::Path(ws.m_Root.View()) / path;
+		return FS::IsDirectory(onDisk.CStr()) ? onDisk : FS::Path();
+	}
+
+	Core::String WorkingFolderOf(const IED::Workspace& ws, Core::StringView cwd) {
+		Core::String linked;
+		Core::String shown;
+		if (LinkTargetOf(ws, cwd, linked, shown)) return linked;
+		return Core::String((FS::Path(ws.m_Root.View()) / IED::NormalizePath(cwd).View()).View());
+	}
+
+	Core::String NoWorkingFolder(Core::StringView tool, const IED::Workspace& ws, Core::StringView folder) {
+		Core::String said = ((((Core::String(tool) + ": no folder ") + folder) + " to run in: cwd is a folder of ") + ws.m_Root.View()) + ", ied:/... in IED's checkout (developer mode)";
+		bool links = false;
+		for (const IED::Project& each : ws.m_Projects) links = links || !each.m_Link.IsEmpty();
+		return links && ws.m_Trusted ? said + ", or @Name/... in a project the solution links outside its folder" : said;
 	}
 
 	const int64 c_LinkNamesShown = 12;   // how many of a solution's linked projects a hint names
@@ -331,6 +369,19 @@ namespace Ai
 			const Core::String shown = (each.m_Link + "/");
 			return NearestFoldersHint(FS::Path(each.m_LinkRoot.View()), inside.View(), shown.View())
 				+ MovedFoldersHint(FS::Path(each.m_LinkRoot.View()), inside.View(), shown.View());
+		}
+		return Core::String();
+	}
+
+	Core::String SameNamedLinkedFile(const IED::Workspace& ws, Core::StringView path) {
+		const Core::String link = LinkOf(path);
+		if (link.IsEmpty() || !ws.m_Trusted) return Core::String();
+		const Core::String glob = SameNamedGlob(path);
+		if (glob.View().IndexOf('.') < 0) return Core::String();   // a folder's name: the folders hint says where it is
+		for (const IED::Project& each : ws.m_Projects) {
+			if (each.m_Link != link || each.m_LinkRoot.IsEmpty()) continue;
+			const Core::String only = OnlySourceFile(IED::ExpandGlob(each.m_LinkRoot.View(), glob.View()));
+			return only.IsEmpty() ? Core::String() : (each.m_Link + "/") + only.View();
 		}
 		return Core::String();
 	}

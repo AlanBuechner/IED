@@ -1,5 +1,6 @@
 include "api/Plugin.ch"
 include "CodeNav.ch"
+include "Files.ch"
 
 namespace Ai
 {
@@ -286,9 +287,9 @@ namespace Ai
 
 	// A folder asked for whole: each of its files (not its subfolders') with its symbols to `depth`, files the language servers give
 	// none for left out, the whole within the outline's lines.
-	static ToolOutcome FolderOutlineRun(CodeQuery& query, const FS::Path& root, Core::StringView folder, int64 depth) {
+	static ToolOutcome FolderOutlineRun(CodeQuery& query, const FS::Path& onDisk, Core::StringView folder, int64 depth) {
 		Core::Array<Core::String> files;
-		for (FS::DirectoryEntry& entry : FS::Directory((root / folder).CStr()))
+		for (FS::DirectoryEntry& entry : FS::Directory(onDisk.CStr()))
 			if (entry.kind == FS::EntryKind::File) files.Push((Core::String(folder) + "/") + entry.name.View());
 		files.Sort();
 		Core::StringBuilder out;
@@ -325,9 +326,9 @@ namespace Ai
 		CodeQuery query = CodeQuery(call.m_Ws);
 		Core::String path = query.ExistingFileOf(call.m_Args.Member("path").AsView());
 		Core::StringView text = call.m_Args.Member("query").AsView();
-		const FS::Path root = FS::Path(call.m_Ws.m_Root.View());
-		const bool folder = !path.IsEmpty() && FS::IsDirectory((root / path.View()).CStr());
-		if (folder && text.IsEmpty()) return FolderOutlineRun(query, root, path.View(), call.m_Args.Member("depth").IsValid() ? call.m_Args.Member("depth").AsInt() : 2);
+		const FS::Path folderOnDisk = FolderOnDisk(call.m_Ws, path.View());
+		const bool folder = !folderOnDisk.IsEmpty();
+		if (folder && text.IsEmpty()) return FolderOutlineRun(query, folderOnDisk, path.View(), call.m_Args.Member("depth").IsValid() ? call.m_Args.Member("depth").AsInt() : 2);
 		if (!path.IsEmpty() && !folder) return OutlineRun(query, path.View(), call.m_Args.Member("depth").IsValid() ? call.m_Args.Member("depth").AsInt() : 100);
 		if (text.IsEmpty()) return ToolError(Core::StringView("code_symbols: give path (a file's outline) or query (symbols named like it across the workspace)"));
 		return SearchRun(query, text, call.m_Args.Member("kind").AsView(), folder ? path.View() : Core::StringView(""));
