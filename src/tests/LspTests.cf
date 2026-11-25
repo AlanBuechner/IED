@@ -32,6 +32,21 @@ static Core::String Rewritten(const char* json, const Ied::Rewrite& rewrite) {
 
 [test("server.lsp")]
 class LspTests {
+	// A symbol search that found nothing while rust-analyzer was down blamed rust-analyzer alone, for a C++ name clangd had
+	// not found: the error names the servers that were asked, and the down one as not asked.
+	[test("nothing_found_while_a_server_is_down_names_who_was_asked")]
+	public static void TestNothingFoundWhileDown() {
+		Ied::LanguageServer* clangd = new Ied::LanguageServer();
+		clangd->m_Profile = new Ied::LspProfile();
+		clangd->m_Profile->m_Id = Core::String("clangd");
+		Core::Array<Ied::LanguageServer*> asked;
+		asked.Push(clangd);
+		Core::String said = Ied::NothingFoundWhileDown(asked, Core::StringView("the language server rust-analyzer is failed"));
+		assert_se("no symbol of that name found by clangd; not asked: the language server rust-analyzer is failed (a symbol of its language may be there)", said.CStr(), "the servers asked, then the one down");
+		Core::Array<Ied::LanguageServer*> none;
+		assert_true(Ied::NothingFoundWhileDown(none, Core::StringView("x")).View().StartsWith(Core::StringView("no language server was running to search; not asked: x")), "none was running");
+	}
+
 	// A workspace-symbol search waits for a new server's index: clangd begins it only once a file is open on it and it has
 	// read its compile database, which on a loaded machine is seconds after the file opened (the conformance check's first
 	// search found 0 symbols). The server's first diagnostics say it has taken the file in.

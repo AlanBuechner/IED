@@ -37,6 +37,10 @@ namespace Ied
 	// The not_found error for a file no language server serves, saying how to read it instead (a shader, a config file).
 	Core::String NoServerMessage(Core::StringView path);
 
+	// The error of a workspace-symbol search that found nothing while a server was down (`down`: why): which servers found
+	// nothing, and that the one that is down was not asked - the name may be of another language than the down server's.
+	Core::String NothingFoundWhileDown(const Core::Array<LanguageServer*>& asked, Core::StringView down);
+
 	// What a server's initializationOptionsFiles (their JSON, an object of program name to options) give under its
 	// profile's pluginCodeOption `key` - a script host's plugin folders, C4LSP's `scripts` - one program a line: a server
 	// reads them when it starts, so a change is a restart, not a didChangeConfiguration. "" for no key or none given.

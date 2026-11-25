@@ -1096,8 +1096,22 @@ namespace Ied
 		int64 found = 0;
 		for (LanguageServer* language : asked) found += SymbolsOf(call, language, query, json);
 		json.EndArray();
-		if (found == 0 && !down.IsEmpty()) throw RpcError(ErrorCode::Unavailable, down.View());
+		if (found == 0 && !down.IsEmpty()) throw RpcError(ErrorCode::Unavailable, NothingFoundWhileDown(asked, down.View()).View());
 		return json.ToString();
+	}
+
+	Core::String NothingFoundWhileDown(const Core::Array<LanguageServer*>& asked, Core::StringView down) {
+		Core::StringBuilder out;
+		if (asked.IsEmpty()) out.Append("no language server was running to search");
+		else out.Append("no symbol of that name found by ");
+		for (int64 i = 0; i < asked.Count(); ++i) {
+			if (i > 0) out.Append(", ");
+			out.Append(asked[i]->m_Profile->m_Id.View());
+		}
+		out.Append("; not asked: ");
+		out.Append(down);
+		out.Append(" (a symbol of its language may be there)");
+		return out.ToString();
 	}
 
 	bool LspPool::NamedText(Workspace* ws, Core::StringView uri, Core::String& text) { return WasNamed(ws, uri) && TextOf(ws, uri, text); }
