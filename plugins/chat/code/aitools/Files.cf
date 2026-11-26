@@ -277,6 +277,16 @@ namespace Ai
 		return linked.IsEmpty() ? Core::String(path) : linked;
 	}
 
+	Core::Array<Core::String> LinksUnder(const IED::Workspace& ws, Core::StringView path) {
+		Core::Array<Core::String> links;
+		if (!ws.m_Trusted || path.ByteLength() < 3 || path.ByteAt(1) != ':') return links;
+		for (const IED::Project& each : ws.m_Projects) {
+			Core::String relative;
+			if (!each.m_Link.IsEmpty() && !each.m_LinkRoot.IsEmpty() && IED::RelativeTo(path, each.m_LinkRoot.View(), relative)) links.Push(each.m_Link);
+		}
+		return links;
+	}
+
 	bool LinkTargetOf(const IED::Workspace& ws, Core::StringView path, Core::String& onDisk, Core::String& shown) {
 		onDisk = Core::String();
 		shown = Core::String();
@@ -408,7 +418,26 @@ namespace Ai
 	Core::String MissingPathHint(const IED::Workspace& ws, Core::StringView path, const FS::Path& root, Core::StringView shown) {
 		const Core::String inLink = LinkMissHint(ws, path);
 		if (!inLink.IsEmpty()) return inLink;
-		return NearestFoldersHint(root, path, shown) + MovedFoldersHint(root, path, shown) + LinkHint(ws, path).View();
+		return NearestFoldersHint(root, path, shown) + MovedFoldersHint(root, path, shown) + LinkHint(ws, path).View() + UnmarkedLinkHint(ws, path).View();
+	}
+
+	Core::String UnmarkedLinkHint(const IED::Workspace& ws, Core::StringView path) {
+		if (path.IsEmpty() || path.ByteAt(0) == '@') return Core::String();
+		const int64 slash = path.IndexOf('/', 0);
+		const Core::String first = Core::String(slash < 0 ? path : path.Substring(0, slash)).ToLower();
+		for (const IED::Project& each : ws.m_Projects) {
+			if (each.m_Link.ByteLength() < 2) continue;
+			const Core::String linkLower = each.m_Link.ToLower();
+			if (linkLower.View().Substring(1, linkLower.ByteLength() - 1) != first.View()) continue;
+			Core::StringBuilder out;
+			out.Append("; ");
+			out.Append(each.m_Link.View().Substring(1, each.m_Link.ByteLength() - 1));
+			out.Append(" is a linked project, outside the workspace's folder: name it ");
+			out.Append(each.m_Link.View());
+			out.Append(slash < 0 ? Core::StringView("/") : path.Substring(slash, path.ByteLength() - slash));
+			return out.ToString();
+		}
+		return Core::String();
 	}
 
 	Core::String WorkspaceArgument(const ToolInvocation& call, const char* name) { return ToolPath(WorkspacePathOf(call.m_Ws, call.m_Args.Member(name).AsView()).View()); }

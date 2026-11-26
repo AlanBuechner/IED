@@ -26,6 +26,9 @@ namespace Ai
 	// ".ied/local/...", under its root relative to it, under a linked project's root (a Nuke package's clone) as
 	// "@Name/..."; any other path as given.
 	Core::String WorkspacePathOf(const IED::Workspace& ws, Core::StringView path);
+	// The links ("@Name") of the projects the solution links from inside the folder `path` names in full - a repository several are
+	// linked from -, in the solution's order; none for any other path, or in an untrusted workspace.
+	Core::Array<Core::String> LinksUnder(const IED::Workspace& ws, Core::StringView path);
 	// A tool path that names a project the solution links outside its folder (docs/03 "Linked projects" - what a Nuke
 	// package is): "@InputLayers/src" is that project's src folder. `onDisk` that folder or file, and `shown` its workspace
 	// path - with a trailing "/" when it is a folder, so a tool joins what it finds under it and the result reads back as it
@@ -59,6 +62,9 @@ namespace Ai
 	// What every tool says for a path that names no folder or file: where it looked (the linked project's folders when the
 	// path is one's, the workspace's own otherwise) and the links it could have meant.
 	Core::String MissingPathHint(const IED::Workspace& ws, Core::StringView path, const FS::Path& root, Core::StringView shown);
+	// For a path whose first folder is a linked project's name without its "@" ("AnimeRendering/src"): the path that
+	// reaches it ("@AnimeRendering/src"). "" when the path begins with "@" or with no link's name.
+	Core::String UnmarkedLinkHint(const IED::Workspace& ws, Core::StringView path);
 	// A call's path argument `name` as a workspace path: WorkspacePathOf, then ToolPath (bad_request when it is
 	// neither inside the workspace nor workspace-relative).
 	Core::String WorkspaceArgument(const ToolInvocation& call, const char* name);

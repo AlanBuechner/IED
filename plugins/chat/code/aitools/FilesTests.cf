@@ -142,6 +142,11 @@ class FileToolTests {
 		const Core::String full = Core::String((root / "Claymore/Plugins/InputLayers/src/InputLayers/LayerStack.ch").View());
 		assert_se("@InputLayers/src/InputLayers/LayerStack.ch", Ai::WorkspacePathOf(ws, full.View()).CStr(), "a full path under a link is read by the link's name");
 		assert_se("src/a.cf", Ai::WorkspacePathOf(ws, Core::String((root / "Game/src/a.cf").View()).View()).CStr(), "one in the folder as its own");
+		Core::Array<Core::String> under = Ai::LinksUnder(ws, Core::String((root / "Claymore").View()).View());
+		assert_true(under.Count() == 1 && under[0].View() == Core::StringView("@InputLayers"), "the folder a project is linked from holds its link (search_text searches it)");
+		assert_true(Ai::LinksUnder(ws, Core::String((root / "Claymore/Plugins/InputLayers").View()).View()).Count() == 1, "so does the project's own folder");
+		assert_true(Ai::LinksUnder(ws, Core::String((root / "Claymore/Plugins/InputLayers/src").View()).View()).IsEmpty(), "not a folder inside it: that is a path in the link");
+		assert_true(Ai::LinksUnder(ws, Core::StringView("Claymore")).IsEmpty(), "nor a workspace path");
 		ws.m_Trusted = false;
 		assert_se(full.CStr(), Ai::WorkspacePathOf(ws, full.View()).CStr(), "an untrusted workspace names no link");
 		ws.m_Trusted = true;
@@ -165,6 +170,10 @@ class FileToolTests {
 		assert_true(Ai::SameNamedFiles(ws, Core::StringView("src/Wrong/LayerStack.ch")).IsEmpty(), "a workspace path's, in the workspace's own folder");
 		assert_true(Ai::MissingPathHint(ws, Core::StringView("nope"), FS::Path((root / "Game").View()), Core::StringView("")).View().Contains(Core::StringView("(the root) holds the folders: src/")), "a folder of the workspace says what its parent holds");
 		assert_true(!Ai::MissingPathHint(ws, Core::StringView("nope"), FS::Path((root / "Game").View()), Core::StringView("")).View().Contains(Core::StringView("the solution links")), "and names no links, for it asked for none");
+		const Core::String unmarked = Ai::MissingPathHint(ws, Core::StringView("inputlayers/src"), FS::Path((root / "Game").View()), Core::StringView(""));
+		assert_true(unmarked.View().Contains(Core::StringView("name it @InputLayers/src")), unmarked.CStr());
+		assert_se("; InputLayers is a linked project, outside the workspace's folder: name it @InputLayers/", Ai::UnmarkedLinkHint(ws, Core::StringView("InputLayers")).CStr(), "a link's name alone is its root");
+		assert_true(Ai::UnmarkedLinkHint(ws, Core::StringView("@InputLayers/src")).IsEmpty() && Ai::UnmarkedLinkHint(ws, Core::StringView("src")).IsEmpty(), "a link already named, or no link's name: nothing");
 		IED::Workspace plain;
 		plain.m_Root = Core::String((root / "Game").View());
 		plain.m_Trusted = true;
