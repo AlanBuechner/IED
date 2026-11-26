@@ -46,6 +46,10 @@ class RootsTests {
 		assert_se("C:/GameDev/IEDX/a.cf", Ai::AliasedPath(folders, Core::StringView("C:/GameDev/IEDX/a.cf")).CStr(), "a folder of a longer name is no root's");
 		assert_se("D:/Other/a.cf", Ai::AliasedPath(folders, Core::StringView("D:/Other/a.cf")).CStr(), "outside every folder: as it is");
 		assert_se("src/a.cf", Ai::AliasedPath(folders, Core::StringView("src/a.cf")).CStr(), "a relative path: as it is");
+		folders.Push(Ai::RootFolder{ Core::String("@Kit"), Core::String("C:/GameDev/Kit/Kit") });
+		assert_se("@Kit/src/Kit/a.cf", Ai::AliasedPath(folders, Core::StringView("C:\\GameDev\\Kit\\Kit\\src\\Kit\\a.cf")).CStr(), "in a linked project: by its @Name");
+		assert_se("@Kit", Ai::AliasedPath(folders, Core::StringView("C:/GameDev/Kit/Kit")).CStr(), "a linked project's folder itself");
+		assert_se("C:/GameDev/Kit/nuke.toml", Ai::AliasedPath(folders, Core::StringView("C:/GameDev/Kit/nuke.toml")).CStr(), "beside it, in its repository: as it is");
 		assert_se("ied:/C4", Ai::AliasedPath(folders, Core::StringView("ied:/C4")).CStr(), "an alias: as it is");
 		Serialization::DomNode call = RootArgs("{\"pattern\": \"C:/GameDev/IED\", \"path\": \"C:/GameDev/IED/C4\"}");
 		assert_true(Ai::NamesFullPath(call), "a full path in its place");

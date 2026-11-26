@@ -287,6 +287,8 @@ namespace Ai
 			if (root.Member("folder").AsView().IsEmpty() || root.Member("alias").AsView().IsEmpty()) continue;
 			folders.Push(RootFolder{ Core::String(root.Member("alias").AsView()), Core::String(root.Member("folder").AsView()) });
 		}
+		for (const IED::Project& project : ws.m_Projects)
+			if (!project.m_Link.IsEmpty() && !project.m_LinkRoot.IsEmpty()) folders.Push(RootFolder{ project.m_Link, project.m_LinkRoot });
 		return folders;
 	}
 
@@ -302,8 +304,10 @@ namespace Ai
 			inside = relative;
 		}
 		if (deepest < 0) return Core::String(value);
-		if (folders[deepest].m_Alias.IsEmpty()) return inside;
-		return (folders[deepest].m_Alias + ":/") + inside.View();
+		const Core::String& name = folders[deepest].m_Alias;
+		if (name.IsEmpty()) return inside;
+		if (name.View().StartsWith(Core::StringView("@"))) return inside.IsEmpty() ? name : (name + "/") + inside.View();
+		return (name + ":/") + inside.View();
 	}
 
 	bool NamesFullPath(const Serialization::DomNode& args) {

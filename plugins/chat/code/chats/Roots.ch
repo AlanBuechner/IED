@@ -25,17 +25,17 @@ namespace Ai
 	// The same with the argument after `prefix`: "fs.read(plugins:/c4/docs/a.md)" for "plugins:/c4/".
 	Core::String PrefixedSubject(Core::StringView subject, Core::StringView prefix);
 
-	// A folder a chat reaches: its own workspace's (alias "") or a root's.
+	// A folder a chat reaches: its own workspace's (alias ""), a root's, or a linked project's (its "@Name").
 	struct RootFolder
 	{
 		public Core::String m_Alias;
 		public Core::String m_Folder;
 	}
 
-	// The chat's workspace's folder and every ai.roots root's that has one. Without the server lock.
+	// The chat's workspace's folder, every ai.roots root's that has one and every linked project's. Without the server lock.
 	Core::Array<RootFolder> RootFolders(const IED::Workspace& ws);
 	// A full path (C:/... or C:\..., as the code tools print a file's) in one of `folders` as the folder holding it names it - relative in
-	// the workspace, "<alias>:/..." in a root, the deepest folder winning; anything else as it is.
+	// the workspace, "<alias>:/..." in a root, "@Name/..." in a linked project, the deepest folder winning; anything else as it is.
 	Core::String AliasedPath(const Core::Array<RootFolder>& folders, Core::StringView value);
 	// Whether any of the call's path, root, cwd or program is a full path.
 	bool NamesFullPath(const Serialization::DomNode& args);
