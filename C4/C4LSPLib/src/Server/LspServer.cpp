@@ -13,7 +13,7 @@
 #include "Features/Diagnostics.h"
 #include "Features/Tidy.h"
 #include "Features/MissingDefinitions.h"
-#include <malloc.h> // _heapmin on Windows, malloc_trim on Linux (glibc)
+#include "Compiler/ProcessMemory.h"
 
 namespace C4LSP::Server
 {
@@ -59,17 +59,6 @@ namespace C4LSP::Server
 			index->symbols = shared.Share(Features::WorkspaceSymbols::All(analysis));
 			index->files = analysis.DiskStamps();
 			return index;
-		}
-
-		// What a let-go analysis took goes back to the system: the heap keeps freed memory for the next allocation, and a
-		// program's analysis is hundreds of megabytes the server may not need again (docs/tools/03 "Memory").
-		void ReturnFreedMemory()
-		{
-#ifdef _WIN32
-			_heapmin();
-#else
-			malloc_trim(0);
-#endif
 		}
 
 		// Whether a file `files` names has another size or time now (`stampOf`), or is gone.
@@ -587,7 +576,7 @@ namespace C4LSP::Server
 		}
 		if (released.empty()) return;
 		released.clear(); // the analyses go here, outside the lock (a request may still hold one: it goes with it)
-		ReturnFreedMemory();
+		C4Compiler::ReturnFreedMemory();
 	}
 
 	// --- Across programs -----------------------------------------------------------------------------------------------
@@ -694,7 +683,7 @@ namespace C4LSP::Server
 		std::shared_ptr<const SymbolIndex> index = IndexOf(*analysis, m_SharedSymbols);
 		LogAnalysis(program.Options(), analysis->GetTimings(), MillisecondsSince(indexing));
 		analysis.reset();
-		ReturnFreedMemory();
+		C4Compiler::ReturnFreedMemory();
 		std::lock_guard<std::mutex> lock(m_SessionMutex);
 		if (!program.symbols) program.symbols = std::move(index);
 	}

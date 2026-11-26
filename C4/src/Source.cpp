@@ -9,6 +9,7 @@
 #include "Compiler/DiagnosticReporter.h"
 #include "Compiler/CompilerInstance.h"
 #include "Compiler/PriorParses.h"
+#include "Compiler/ProcessMemory.h"
 #include "Compiler/Toolchain.h"
 #include "ProgramOutput.h"
 #include "ServeChannel.h"
@@ -22,6 +23,7 @@
 #include "Backend/ProgramBackend.h"
 #include "Backend/Reflection/RegistrationEmitter.h"
 #include "Serve/BodySwap.h"
+#include "Serve/ServerWait.h"
 #include <algorithm>
 #include <memory>
 #include <optional>
@@ -75,6 +77,9 @@ namespace
 
 		// This build's parses, for the next build to take.
 		std::shared_ptr<const C4Compiler::PriorParses> Parses() const { return m_Compiler.Parses(); }
+
+		// A step of this build done outside it (-ftime lists it).
+		void AddPhaseTime(const char* phase, double seconds) { m_Compiler.AddPhaseTime(phase, seconds); }
 
 		int Run()
 		{
@@ -654,8 +659,8 @@ static std::string_view RequestOf(const std::string& line)
 // --serve (docs/compiler/07 stages 2a, 2b): a build per 'build' line on stdin, each answered by 'done <exit code>' after
 // its diagnostics. The build before stays: its sources' parses are the next build's, and when the edit between them
 // changed only bodies their own functions read and globals' values, it takes the edit (CompilerDriver::BuildEdit) instead
-// of a cold build. What a
-// build no longer needs is freed once it has answered, while the client waits for its next edit.
+// of a cold build. What a build no longer needs is freed once it has answered, while the client waits for its next edit
+// (docs/compiler/07 "The server's memory").
 // One build of a server: `live` (the build before, if any) takes the edit when it can, else a cold build of the sources
 // as they are now becomes `live`. Its exit code; what `spent` gets is no longer needed, to be freed after answering.
 static int ServeBuild(const C4Compiler::CompileOptions& opts, std::unique_ptr<CompilerDriver>& live, std::unique_ptr<CompilerDriver>& spent)
@@ -671,9 +676,20 @@ static int ServeBuild(const C4Compiler::CompileOptions& opts, std::unique_ptr<Co
 		spent = std::move(edited);
 		return *served;
 	}
+	// The build the edit refused goes first: `edited` holds the parses it reuses, and the rest would double a cold build's memory.
+	const auto released = std::chrono::steady_clock::now();
+	live.reset();
+	edited->AddPhaseTime("release", SecondsSince(released));
 	const int code = edited->Finish();
-	spent = std::exchange(live, std::move(edited));
+	live = std::move(edited);
 	return code;
+}
+
+// After a build's answer: what it no longer needs goes, back to the system where the allocator lets it (Linux).
+static void Release(std::unique_ptr<CompilerDriver>& spent)
+{
+	spent.reset();
+	C4Compiler::ReturnFreedMemory();
 }
 
 static int Serve(const C4Compiler::CompileOptions& opts)
@@ -693,23 +709,46 @@ static int Serve(const C4Compiler::CompileOptions& opts)
 		const int code = ServeBuild(opts, live, spent);
 		std::cerr.flush();
 		std::cout << "done " << code << std::endl;
+		Release(spent);
 	}
 	return 0;
 }
 
-constexpr unsigned c_FolderCheckSeconds = 5;
+// How often a waiting server looks at its program's folder and the machine's memory.
+constexpr unsigned c_WaitCheckSeconds = 5;
 
-// Waits for the next client up to `idleSeconds`, looking every few seconds whether the program's `folder` is still there:
-// false when none came, or when the folder went (a scratch workspace deleted: nothing is built there again).
-static bool AcceptWhileFolderStays(ServeChannel& channel, unsigned idleSeconds, const std::filesystem::path& folder)
+// What a server knows of itself between builds: what it waits in, and what it held after its first build.
+struct ServerState
 {
-	for (unsigned waited = 0; waited < idleSeconds; waited += c_FolderCheckSeconds)
+	unsigned idleSeconds = 0;
+	std::filesystem::path folder;
+	uint64_t firstBuildBytes = 0;
+};
+
+// What a server that waited `waited` seconds for its next build sees: its program's folder, the machine's memory and its own.
+static C4Compiler::WaitingServer LookAround(unsigned waited, const ServerState& state)
+{
+	C4Compiler::WaitingServer server;
+	server.waitedSeconds = waited;
+	server.idleSeconds = state.idleSeconds;
+	std::error_code missing;
+	server.folderStays = std::filesystem::is_directory(state.folder, missing);
+	server.machine = C4Compiler::QuerySystemMemory();
+	server.heldBytes = C4Compiler::HeldMemory();
+	server.firstBuildBytes = state.firstBuildBytes;
+	return server;
+}
+
+// Waits for the next client: false when the server ends instead (C4Compiler::JudgeWait) - none came for its idle time,
+// its program's folder went (a scratch workspace deleted: nothing is built there again), it outgrew its first build, or
+// the machine is short of the memory it holds and no build came for a while.
+static bool WaitForBuild(ServeChannel& channel, const ServerState& state)
+{
+	for (unsigned waited = 0;; waited += c_WaitCheckSeconds)
 	{
-		if (channel.Accept(std::min(c_FolderCheckSeconds, idleSeconds - waited))) return true;
-		std::error_code missing;
-		if (!std::filesystem::is_directory(folder, missing)) return false;
+		if (C4Compiler::JudgeWait(LookAround(waited, state)) != C4Compiler::ServerWait::Waiting) return false;
+		if (channel.Accept(std::min(c_WaitCheckSeconds, state.idleSeconds - waited))) return true;
 	}
-	return false;
 }
 
 // A server works in its program's folder only while it builds: waiting, it holds no folder of the program's, so a tool
@@ -729,8 +768,9 @@ static void LeaveFolder()
 
 // --serve-on (docs/compiler/07, Nuke's `server` setting): the same builds for the clients of a pipe, one at a time, each
 // asking 'build <stamp>'; a stamp other than the server's (its compiler was rebuilt) is answered 'stale' and ends it, and
-// so does --serve-idle without a client, its program's folder (the working folder it was started in) gone, and 'quit'
-// (answered 'bye': nuke clean). A second server of the name ends at once: the first serves.
+// so does --serve-idle without a client, its program's folder (the working folder it was started in) gone, twice the
+// memory its first build left it holding, a machine short of the memory it holds (two minutes after its last build), and
+// 'quit' (answered 'bye': nuke clean). A second server of the name ends at once: the first serves.
 static int ServeOn(const C4Compiler::CompileOptions& opts)
 {
 	std::string error;
@@ -740,10 +780,11 @@ static int ServeOn(const C4Compiler::CompileOptions& opts)
 		if (!error.empty()) std::cerr << "error: " << error << std::endl;
 		return error.empty() ? 0 : 1;
 	}
-	const std::filesystem::path folder = std::filesystem::current_path();
+	ServerState state{ opts.serveIdleSeconds, std::filesystem::current_path() };
+	const std::filesystem::path& folder = state.folder;
 	LeaveFolder();
 	std::unique_ptr<CompilerDriver> live;
-	while (AcceptWhileFolderStays(*channel, opts.serveIdleSeconds, folder))
+	while (WaitForBuild(*channel, state))
 	{
 		const std::optional<std::string> line = channel->ReadLine();
 		const std::string_view request = line ? RequestOf(*line) : std::string_view();
@@ -775,6 +816,8 @@ static int ServeOn(const C4Compiler::CompileOptions& opts)
 		LeaveFolder();
 		channel->WriteLine("done " + std::to_string(code));
 		channel->Hangup();
+		Release(spent);
+		if (state.firstBuildBytes == 0 && code == 0) state.firstBuildBytes = C4Compiler::HeldMemory();
 	}
 	return 0;
 }

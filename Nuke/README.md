@@ -363,9 +363,14 @@ one-shot compile would, and the stamp and the rest of the rebuild check work as 
 function bodies and the values of globals is lowered and emitted again in the server for the bodies it changed and
 those that read a changed value alone; any other edit is a cold compile there, which still reuses the parses of the
 files it did not change. A server of a compiler since rebuilt
-answers `stale` and ends, and a new one starts; one idle for half an hour ends, and `nuke clean` ends the servers of
-the programs it cleans. Until it ends a server keeps its last build in memory (the IED server's: about 6 GB committed,
-4-5 GB in use at Development, 5 / 3-4 GB at Debug; Claymore's editor's 9 / 8 GB at Development). It works in its
+answers `stale` and ends, and a new one starts; one idle for half an hour ends - or two minutes after its last build
+when the machine has less memory left than it holds, so the program built last keeps its server and the others go
+first - one holding more than twice what its first build left it holding ends after answering, and `nuke clean` ends
+the servers of the programs it cleans. Until it ends a server keeps its last build in memory (the IED server's: about
+6 GB committed, 4-5 GB in use at Development, 5 / 3-4 GB at Debug; Claymore's editor's 9 / 8 GB at Development) and
+never two: a cold compile in the server lets the build before go first. On Windows the compiler's allocator (LLVM's
+rpmalloc) keeps what a process frees for that process, so a server holds about the most it ever used
+(C4/docs/compiler/07 "The server's memory"). It works in its
 project's folder only while it builds, so a workspace can be removed between builds, and a server whose project folder
 is gone ends within seconds (a scratch workspace's: a grading or check harness); `nuke clean` ends one at once. When no server answers the program is compiled one-shot. Test harnesses (`nuke test`) and
 Dist always compile one-shot.

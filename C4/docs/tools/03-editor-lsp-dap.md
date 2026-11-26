@@ -282,8 +282,10 @@ project between them:
   waits for, and waits for that (the request's budget): no analysis is kept for a search (keeping each for three minutes
   held several at a time: 5.7 GB on Claymore).
 - **Small.** A file's symbols are kept once however many programs hold the file (Claymore's programs share the engine,
-  its C bindings and the default library): `SharedFileSymbols`. What a let-go analysis took is handed back to the
-  system (`_heapmin`), which the heap otherwise keeps for the next allocation ("Memory").
+  its C bindings and the default library): `SharedFileSymbols`. What a let-go analysis took is freed, and on Linux
+  handed back to the system (`ReturnFreedMemory`: glibc's `malloc_trim`); on Windows the server allocates through LLVM's
+  rpmalloc, which keeps freed memory for the server's next analyses and has no call that hands it back
+  ([compiler/07](../compiler/07-incremental-builds.md#the-servers-memory)).
 - **Kept current**: the symbols of a program a file of which changed on disk are dropped (made again in the background,
   or by the next search), and a document open in the editor is searched in its analysis, which has its text, never in
   another program's symbols of its file.

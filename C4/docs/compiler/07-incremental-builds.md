@@ -219,6 +219,43 @@ with `-fstack-maps` give the same bytes too. Between builds the server holds its
 GB committed, 3.7-5.2 GB in use at `-O3` (4.7-5.5 / 2.9-4.0 GB at `-O0`), Claymore's editor's 9.1 / 7.9 GB (`-O0`: 7.4 /
 6.2 GB).
 
+### The server's memory
+
+A server holds its last build between builds and no more of the builds before it. On 2026-11-26 seven servers (LS,
+Claymore and its sample games) held 59 GB of the owner's 63 GB machine, two of them 15 GB (19 GB at their peak) after a
+morning of builds: a cold build in a server held the build before it too, and nothing ended a server for the
+machine's sake. Now (`C4/src/Source.cpp` `ServeBuild`, `WaitForBuild`; `Serve/ServerWait`, `Compiler/ProcessMemory`):
+
+- **One build at a time.** When an edit is not served, the build before goes first (the new compile holds the parses
+  it reuses), so the cold build never runs beside a whole other build; `-ftime` lists that as `release`. It is paid on
+  the build's time (0.2-1.8 s on the IED server, below), where the build before used to go after the answer.
+- **The allocator keeps what is freed.** On Windows the compiler allocates through LLVM's rpmalloc: the vendored LLVM is
+  built with `LLVM_INTEGRATED_CRT_ALLOC`, and its `malloc` replaces the static CRT's in C4.exe, C4LSP and C4Testing.
+  What a process frees stays in rpmalloc's span caches and in the heaps of the threads that allocated it, for that
+  process's next allocations; `_heapmin` and `HeapSetInformation(HeapOptimizeResources)` do not reach it, and rpmalloc
+  has no call that does (256 MB of 256-byte blocks freed on one thread kept 231 MB; freed from eight threads that had
+  ended, all 296 MB; with one block in 16 kept, 268 MB). So a server holds about the most it ever used, and its next
+  build takes that memory again rather than more (`Serve.Memory`). After each answer it still frees what the build no
+  longer needs and calls `ReturnFreedMemory`, which gives memory back on Linux (glibc's `malloc_trim`).
+- **It ends when it outgrows itself.** Each cold build in a server leaves a little behind (0.1-0.25 GB on the IED
+  server), and only the process's end gives that back: a server holding more than twice what it held after its first
+  build ends after answering (`c_OutgrownFactor`), and the program's next build starts a new one.
+- **It yields to a machine short of memory.** A server that has waited two minutes since its last build
+  (`c_ShortMemoryIdleSeconds`) ends when the machine has less memory left than it holds - the smaller of the available
+  physical memory and what may still be committed (`MachineNeedsMemory`): the program built last keeps its server, and
+  the biggest of the others go first. Otherwise it ends after `--serve-idle` (Nuke's half hour) without a build.
+
+Measured with `C4/Benchmarks/incremental/serve-memory.ps1` on the IED server at `-O3` (2026-11-26, other sessions
+building on the same machine): one `--serve` process builds cold, unchanged, then rounds of a body edit, its undo, a
+signature edit (`Proxy.cf`, above) and its undo; what the process has committed after each answer:
+
+| IED server `-O3` | after 2 builds | after 10 | after 22 | its peak | a cold build in the server |
+|---|---|---|---|---|---|
+| the build before kept until the answer | 5.06 GB | 7.98 GB | - | 9.80 GB | 3.7-3.9 s |
+| one build at a time | 5.1-6.5 GB | 6.49 GB | 7.94 GB | 8.02 GB | 3.9-5.2 s (`release` 0.2-1.8 s) |
+
+Served body edits took 1.1-1.5 s in both. The peak is the gain: the server's high-water mark is what it keeps.
+
 **The rest of stage 2b: not built.** The plan was: `DeclarationQueries` records which declaration asked for which (the
 `Ask` edges); a changed fingerprint re-resolves its file's declarations and, transitively, those that asked for them; a
 body re-lowers when a declaration it read changed. Building 2a and the value edits showed what exactness asks of it

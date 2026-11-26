@@ -4,7 +4,9 @@ the edit did not touch, and lowers and emits again only the bodies it changed wh
 
 A build asks the program's server over a named pipe (a Unix socket on Linux) and streams its answer - the compiler's
 output, then `done <exit code>` - as a one-shot compile's output would be. A server is started when none answers: a
-process of its own, outside the build's job, that ends after `IDLE_SECONDS` without a build. It is given the compiler's
+process of its own, outside the build's job, that ends after `IDLE_SECONDS` without a build (after two minutes when the
+machine has less memory left than the server holds: the program built last keeps its server), and right after a build
+once it holds more than twice what its first build left it holding. It is given the compiler's
 stamp (its file's time and size) and asked with it, so a server of a compiler since rebuilt answers `stale` and ends, and
 a new one is started. When no server can be reached the build is compiled one-shot (`build` returns None). `nuke clean`
 ends the server of each program it cleans (`stop`): a server holds a build's memory until it ends. It is started in its

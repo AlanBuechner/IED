@@ -127,7 +127,7 @@ namespace C4Compiler
 					[](CompileOptions& o, const std::string& v) { o.serveOn = v; } },
 				{ { "--serve-stamp" }, "<text>", "With --serve-on: a request with another stamp gets 'stale', and the server ends (its compiler was rebuilt)",
 					[](CompileOptions& o, const std::string& v) { o.serveStamp = v; } },
-				{ { "--serve-idle" }, "<seconds>", "With --serve-on: the server ends after <seconds> without a build (default 1800)",
+				{ { "--serve-idle" }, "<seconds>", "With --serve-on: the server ends after <seconds> without a build (default 1800), or after two minutes when the machine has less memory left than it holds",
 					[](CompileOptions& o, const std::string& v) { o.serveIdleSeconds = ParseCount(v, "--serve-idle", o, kMaxIdleSeconds); } },
 				{ { "--version" }, nullptr, "Print the compiler version", [](CompileOptions& o, const std::string&) { o.printVersion = true; } },
 				{ { "-h", "--help" }, nullptr, "Print this help", [](CompileOptions& o, const std::string&) { o.printHelp = true; } },

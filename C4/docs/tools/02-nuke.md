@@ -109,9 +109,12 @@ read only in function bodies and in other such values) is lowered and emitted ag
 template's lowered instances, the bodies that read a changed value, and the bodies after it in its file when it added
 or removed lines and only functions follow - and relinked; any other edit (a signature, a type, an include, a macro)
 is compiled cold in the server, which still keeps the parses of the files it did not change. Every build writes what a cold build writes, byte for byte. A server whose C4.exe was rebuilt answers `stale` and
-ends, and a new one starts; one idle for half an hour ends; `nuke clean` ends the servers of the programs it cleans (the
-pipe's `quit`); when none answers, the program is compiled one-shot. A server keeps its last build in memory until it
-ends (Nuke's README section 9: what it costs); it works in the project's folder only while it builds, so the folder can
+ends, and a new one starts; one idle for half an hour ends, or after two minutes when the machine has less memory left
+than it holds (the program built last keeps its server), and one that holds more than twice what its first build left
+it holding ends after answering; `nuke clean` ends the servers of the programs it cleans (the pipe's `quit`); when none
+answers, the program is compiled one-shot. A server keeps its last build in memory until it ends, never two at once: on
+Windows the compiler's allocator keeps what it frees for the process, so a server holds about the most it ever used
+(Nuke's README section 9: what it costs; [compiler/07](../compiler/07-incremental-builds.md#the-servers-memory)); it works in the project's folder only while it builds, so the folder can
 be removed between builds, and a server whose project folder is gone ends within seconds. Test harnesses (`nuke test`) and Dist compile one-shot.
 
 ---
