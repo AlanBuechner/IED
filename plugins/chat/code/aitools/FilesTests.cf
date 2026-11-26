@@ -147,6 +147,9 @@ class FileToolTests {
 		assert_true(Ai::LinksUnder(ws, Core::String((root / "Claymore/Plugins/InputLayers").View()).View()).Count() == 1, "so does the project's own folder");
 		assert_true(Ai::LinksUnder(ws, Core::String((root / "Claymore/Plugins/InputLayers/src").View()).View()).IsEmpty(), "not a folder inside it: that is a path in the link");
 		assert_true(Ai::LinksUnder(ws, Core::StringView("Claymore")).IsEmpty(), "nor a workspace path");
+		const Core::String unknown = Ai::UnknownLinkHint(ws, Core::StringView("@LitRendering/Shaders/SceneLights.hlsl"));
+		assert_true(unknown.View().Contains(Core::StringView("@LitRendering is no project of this solution")) && unknown.View().Contains(Core::StringView("links: @InputLayers")), unknown.CStr());
+		assert_true(Ai::UnknownLinkHint(ws, Core::StringView("@InputLayers/Nope.ch")).IsEmpty() && Ai::UnknownLinkHint(ws, Core::StringView("src/a.cf")).IsEmpty(), "a link the solution has, or none: nothing");
 		ws.m_Trusted = false;
 		assert_se(full.CStr(), Ai::WorkspacePathOf(ws, full.View()).CStr(), "an untrusted workspace names no link");
 		ws.m_Trusted = true;

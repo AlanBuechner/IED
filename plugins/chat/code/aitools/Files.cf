@@ -504,6 +504,14 @@ namespace Ai
 		return out.ToString();
 	}
 
+	Core::String UnknownLinkHint(const IED::Workspace& ws, Core::StringView path) {
+		const Core::String link = LinkOf(path);
+		if (link.IsEmpty()) return Core::String();
+		for (const IED::Project& each : ws.m_Projects)
+			if (each.m_Link == link) return Core::String();
+		return ((Core::String("; ") + link.View()) + " is no project of this solution: a file of one outside it is read with shell_run (type and its full path)") + LinkHint(ws, path).View();
+	}
+
 	// "ied:/C4/Bedrock/a.cf" for an absolute path inside the root a plugin names "ied" (developer mode's IED source),
 	// "" when no such root holds it: such a file is read through its root, not as a file outside the workspace. Inside
 	// as the system's names compare (IED::RelativeTo: case counts on Linux).
@@ -533,7 +541,7 @@ namespace Ai
 			if (!IsFolderRoot(call.m_Ws) && !IED::Exists(call.m_Ws, path.View())) {
 				Core::Array<Core::String> found = SameNamedFiles(call.m_Ws, path.View());
 				Core::String only = OnlySourceFile(found);
-				if (only.IsEmpty()) return ToolError(MissedReadProblem(path.View(), found).View());
+				if (only.IsEmpty()) return ToolError((MissedReadProblem(path.View(), found) + UnknownLinkHint(call.m_Ws, path.View()).View()).View());
 				missed = path;
 				path = only;
 			}

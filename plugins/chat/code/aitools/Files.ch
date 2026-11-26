@@ -29,6 +29,9 @@ namespace Ai
 	// The links ("@Name") of the projects the solution links from inside the folder `path` names in full - a repository several are
 	// linked from -, in the solution's order; none for any other path, or in an untrusted workspace.
 	Core::Array<Core::String> LinksUnder(const IED::Workspace& ws, Core::StringView path);
+	// What fs_read adds for a path beginning with a link ("@Name") no project of the solution has: that none has it, how a file of a
+	// project outside the solution is read, and the links it has; "" for any other path.
+	Core::String UnknownLinkHint(const IED::Workspace& ws, Core::StringView path);
 	// A tool path that names a project the solution links outside its folder (docs/03 "Linked projects" - what a Nuke
 	// package is): "@InputLayers/src" is that project's src folder. `onDisk` that folder or file, and `shown` its workspace
 	// path - with a trailing "/" when it is a folder, so a tool joins what it finds under it and the result reads back as it
