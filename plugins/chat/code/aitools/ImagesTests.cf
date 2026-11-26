@@ -92,6 +92,12 @@ class ImageTests {
 		assert_true(Ai::ImageMime(ImageView("t.webp")).View() == "image/webp" && Ai::ImageMime(ImageView("t.gif")).View() == "image/gif", "WebP, GIF");
 		assert_true(Ai::ImageMime(ImageView("logo.svg")).IsEmpty() && Ai::ImageMime(ImageView("README")).IsEmpty(), "none the format takes");
 		assert_true(Ai::ImageMime(ImageView("art.png/notes")).IsEmpty(), "the extension of the file, not of a folder");
+		// An image outside the workspace (an attachment, by the path the model was shown) is viewed through a copy in the chat's media folder.
+		const Core::String copy = Ai::ViewedCopyName(ImageView("C:\\Users\\Me\\AppData\\Local\\Temp\\claude\\images\\3.png"));
+		assert_true(copy.View().StartsWith(Core::StringView("viewed-")) && copy.View().EndsWith(Core::StringView("-3.png")), copy.CStr());
+		assert_true(Ai::ImageMime(copy.View()).View() == "image/png", "still a PNG by its name");
+		assert_true(copy != Ai::ViewedCopyName(ImageView("C:/Elsewhere/3.png")), "two files of one name: two copies");
+		assert_true(copy == Ai::ViewedCopyName(ImageView("C:\\Users\\Me\\AppData\\Local\\Temp\\claude\\images\\3.png")), "one file viewed again: its one copy");
 	}
 
 	[test("kept_with_the_chat")]

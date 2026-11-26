@@ -9,4 +9,7 @@ namespace Ai
 	void AddMediaTools(ToolRegistry& registry);
 	// The type a request sends an image file as, by its extension; empty for none it can send.
 	Core::String ImageMime(Core::StringView path);
+	// The name image_view gives the copy of an image outside the workspace in the chat's media folder: "viewed-", a hash of its full path
+	// (two files of one name do not share a copy) and its file name.
+	Core::String ViewedCopyName(Core::StringView fullPath);
 }

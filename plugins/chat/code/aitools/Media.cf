@@ -4,6 +4,8 @@ include "Images.ch"
 include "ImageInfo.ch"
 include "Video.ch"
 include "Files.ch"
+include "chats/ChatStore.ch"
+include "chats/Sent.ch"
 
 namespace Ai
 {
@@ -24,18 +26,73 @@ namespace Ai
 		return Core::String();
 	}
 
+	static bool IsFullPath(Core::StringView path) { return path.StartsWith(Core::StringView("/")) || (path.ByteLength() >= 2 && path.ByteAt(1) == ':'); }
+
+	// A full path the workspace does not hold - an image the owner attached, named as the model is shown it, or another on disk.
+	static bool OutsideWorkspace(const ToolInvocation& call, Core::StringView path) { return IsFullPath(path) && IsFullPath(WorkspacePathOf(call.m_Ws, path).View()); }
+
+	Core::String ViewedCopyName(Core::StringView fullPath) {
+		uint64 hash = 0xCBF29CE484222325ul;
+		for (int64 i = 0; i < fullPath.ByteLength(); ++i) hash = (hash ^ (uint64)(uint8)fullPath.ByteAt(i)) * 0x100000001B3ul;
+		Core::StringBuilder name;
+		name.Append("viewed-");
+		name.AppendHex(hash & 0xFFFFFFFFul);
+		name.Append("-");
+		name.Append(MediaName(fullPath).View());
+		return name.ToString();
+	}
+
+	// An image outside the workspace, copied into this chat's media folder (which the workspace holds), so it is read and sent as any of the
+	// workspace's images: its workspace path, or empty with `why`.
+	static Core::String CopiedIntoChat(const ToolInvocation& call, Core::StringView fullPath, Core::String& why) {
+		const Core::String source = Core::String(fullPath);
+		const int64 bytes = FS::FileSize(source.CStr());
+		if (bytes < 0) {
+			why = Core::String("there is no such file");
+			return Core::String();
+		}
+		if (bytes > c_ToolImageMaxBytes) {
+			why = Core::String("it is larger than 4 MB");
+			return Core::String();
+		}
+		Core::Array<uint8> data;
+		data.Resize(bytes);
+		FS::File opened = FS::File(source.CStr(), "rb");
+		if (!opened.IsOpen() || opened.ReadAll((void*)data.Data(), data.Count()) != data.Count()) {
+			why = Core::String("it cannot be read");
+			return Core::String();
+		}
+		const Core::String name = ViewedCopyName(fullPath);
+		FS::Path written = ChatFolder(LocalStateOf(call.m_Ws), call.m_Chat->m_ChatId.View()) / "media" / name.View();
+		FS::MakeDirectories(written.Parent().CStr());
+		if (!FS::WriteFileAtomically(written.CStr(), (const void*)data.Data(), data.Count())) {
+			why = Core::String("its copy could not be written into the chat's media folder");
+			return Core::String();
+		}
+		return ((Core::String(".ied/local/chats/") + call.m_Chat->m_ChatId.View()) + "/media/") + name.View();
+	}
+
 	static ToolPlan ViewPlan(const ToolInvocation& call) {
 		ToolPlan plan;
-		plan.m_Subject = (Core::String("fs.read(") + WorkspaceArgument(call, "path").View()) + ")";
+		const Core::StringView given = call.m_Args.Member("path").AsView();
+		plan.m_Subject = (Core::String("fs.read(") + (OutsideWorkspace(call, given) ? Core::String(given) : WorkspaceArgument(call, "path")).View()) + ")";
 		plan.m_Summary = Core::String("View ") + call.m_Args.Member("path").AsView();
 		return plan;
 	}
 
 	static ToolOutcome ViewRun(const ToolInvocation& call) {
 		IED::ToolImage image;
-		image.m_Path = WorkspaceArgument(call, "path");
+		const Core::StringView given = call.m_Args.Member("path").AsView();
+		const bool outside = OutsideWorkspace(call, given);
+		image.m_Path = outside ? Core::String(given) : WorkspaceArgument(call, "path");
 		image.m_Mime = ImageMime(image.m_Path.View());
 		if (image.m_Mime.IsEmpty()) return ToolError(((Core::String("image_view: ") + image.m_Path.View()) + " is not a PNG, JPEG, WebP or GIF file").View());
+		if (outside) {
+			Core::String why;
+			Core::String copied = CopiedIntoChat(call, given, why);
+			if (copied.IsEmpty()) return ToolError(((Core::String("image_view: ") + given) + ": " + why.View()).View());
+			image.m_Path = copied;
+		}
 		Core::Array<IED::ToolImage> named;
 		named.Push(image);
 		Core::Array<Core::String> notes;
@@ -99,8 +156,8 @@ namespace Ai
 		registry.Add(info);
 		ToolSpec* view = new ToolSpec();
 		view->m_Name = Core::String("image_view");
-		view->m_Description = Core::String("Look at an image file of the workspace (PNG, JPEG, WebP or GIF, at most 4 MB): a screenshot, a texture, a diagram. Example: image_view({\"path\": \"docs/shots/menu.png\"})");
-		view->m_Parameters = Core::String("{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"workspace-relative path\"}}, \"required\": [\"path\"], \"additionalProperties\": false}");
+		view->m_Description = Core::String("Look at an image file (PNG, JPEG, WebP or GIF, at most 4 MB): a screenshot, a texture, a diagram. One outside the workspace - an image the owner attached, by the full path it was shown with - is copied into the chat's media folder and shown from there. Example: image_view({\"path\": \"docs/shots/menu.png\"})");
+		view->m_Parameters = Core::String("{\"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\", \"description\": \"workspace-relative path, or the full path of an image elsewhere on disk\"}}, \"required\": [\"path\"], \"additionalProperties\": false}");
 		view->m_ToolClass = ToolClass::Read;
 		view->m_ParallelSafe = true;
 		view->m_InPlan = true;
