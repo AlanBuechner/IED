@@ -13,7 +13,7 @@ IED is a Visual Studio-style IDE with first-class local AI, built as a C4 server
 1. `IDEplan.md` - the vision; source of truth for intent.
 2. `AGENTS.md` - working agreements and hard rules.
 3. `WORK.md` - current state, next actions, decisions log; update it at every checkpoint.
-4. `README.md` "Getting started": `setup.bat`, then `nuke build` / `nuke test` / `nuke gates` from the repository root.
+4. Getting started: `setup.bat`, then `nuke build` / `nuke test` / `nuke gates` from the repository root (there is no root README).
 5. `docs/README.md` - reading order: `08` user stories -> `09` + `features/` feature catalog -> `18` roadmap -> design docs -> `99` decisions/open questions.
 
 ## Where the answers are

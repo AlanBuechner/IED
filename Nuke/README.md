@@ -365,9 +365,9 @@ those that read a changed value alone; any other edit is a cold compile there, w
 files it did not change. A server of a compiler since rebuilt
 answers `stale` and ends, and a new one starts; one idle for half an hour ends, and `nuke clean` ends the servers of
 the programs it cleans. Until it ends a server keeps its last build in memory (the IED server's: about 6 GB committed,
-4-5 GB in use at Development, 5 / 3-4 GB at Debug; Claymore's editor's 9 / 8 GB at Development) and its project folder
-open (Windows will not delete the folder):
-end it with `nuke clean` before removing a checkout. When no server answers the program is compiled one-shot. Test harnesses (`nuke test`) and
+4-5 GB in use at Development, 5 / 3-4 GB at Debug; Claymore's editor's 9 / 8 GB at Development). It works in its
+project's folder only while it builds, so a workspace can be removed between builds, and a server whose project folder
+is gone ends within seconds (a scratch workspace's: a grading or check harness); `nuke clean` ends one at once. When no server answers the program is compiled one-shot. Test harnesses (`nuke test`) and
 Dist always compile one-shot.
 
 **Tests.** `nuke test` compiles each test-bearing C4 project separately with `-test -test-json

@@ -103,7 +103,9 @@ parses of unchanged files (their keys say so) and the bitcode hashes of unchange
 
 `C4.exe --serve` (requests on stdin) and `--serve-on <name>` (a named pipe, a Unix socket on Linux: how Nuke builds
 Debug and Development, its `server` setting, [tools/02](../tools/02-nuke.md)) keep the last build - its `CompilerInstance`, model, `ProgramLowering` and
-backend - between builds (`C4/src/Source.cpp` `ServeBuild`). Each build first prepares the sources as they are now in
+backend - between builds (`C4/src/Source.cpp` `ServeBuild`). `--serve-on` works in the folder it was started in (the
+program's) only while it builds and ends when that folder is gone, so a scratch workspace can be removed after its
+build. Each build first prepares the sources as they are now in
 a new compile that takes the last one's parses (registration, the macro and interop passes, `CompileAll`: a file whose
 text, macro layout and bindings are unchanged keeps its tree). Then:
 

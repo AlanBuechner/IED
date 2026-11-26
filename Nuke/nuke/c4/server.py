@@ -7,8 +7,9 @@ output, then `done <exit code>` - as a one-shot compile's output would be. A ser
 process of its own, outside the build's job, that ends after `IDLE_SECONDS` without a build. It is given the compiler's
 stamp (its file's time and size) and asked with it, so a server of a compiler since rebuilt answers `stale` and ends, and
 a new one is started. When no server can be reached the build is compiled one-shot (`build` returns None). `nuke clean`
-ends the server of each program it cleans (`stop`): a server holds its program's folder (its working folder) and a
-build's memory until it ends."""
+ends the server of each program it cleans (`stop`): a server holds a build's memory until it ends. It is started in its
+program's folder but works there only while it builds, so the folder can be removed between builds; a server whose
+folder is gone ends."""
 
 import hashlib
 import json

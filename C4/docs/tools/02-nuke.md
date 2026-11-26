@@ -110,9 +110,9 @@ template's lowered instances, the bodies that read a changed value, and the bodi
 or removed lines and only functions follow - and relinked; any other edit (a signature, a type, an include, a macro)
 is compiled cold in the server, which still keeps the parses of the files it did not change. Every build writes what a cold build writes, byte for byte. A server whose C4.exe was rebuilt answers `stale` and
 ends, and a new one starts; one idle for half an hour ends; `nuke clean` ends the servers of the programs it cleans (the
-pipe's `quit`); when none answers, the program is compiled one-shot. A server keeps its last build in memory and its
-project folder open until it ends (Nuke's README section 9: what each costs), so end it with `nuke clean` before
-removing a checkout. Test harnesses (`nuke test`) and Dist compile one-shot.
+pipe's `quit`); when none answers, the program is compiled one-shot. A server keeps its last build in memory until it
+ends (Nuke's README section 9: what it costs); it works in the project's folder only while it builds, so the folder can
+be removed between builds, and a server whose project folder is gone ends within seconds. Test harnesses (`nuke test`) and Dist compile one-shot.
 
 ---
 

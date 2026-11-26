@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 import support  # noqa: F401
@@ -30,14 +31,25 @@ def available_toolchain():
 TOOLCHAIN = available_toolchain()
 
 
-def stop_servers_under(folder):
-	"""Ends the C4 build servers of the programs under `folder`, so its removal does not wait for their idle end."""
+def servers_under(folder):
+	"""The process ids of the C4 build servers of the programs under `folder`."""
 	if sys.platform.startswith("win"):
 		pattern = folder.replace("\\", "/").replace("'", "''")
-		subprocess.run(["powershell", "-NoProfile", "-Command", "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*--serve-on*' -and "
-			f"$_.CommandLine.Replace('\\', '/') -like '*{pattern}*' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"], capture_output=True)
+		# The query's own command line holds the pattern too: it leaves itself out.
+		found = subprocess.run(["powershell", "-NoProfile", "-Command", "Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and "
+			f"$_.CommandLine -like '*--serve-on*' -and $_.CommandLine.Replace('\\', '/') -like '*{pattern}*' }} | ForEach-Object {{ $_.ProcessId }}"], capture_output=True, text=True)
 	else:
-		subprocess.run(["pkill", "-f", f"{folder}.*--serve-on"], capture_output=True)
+		found = subprocess.run(["pgrep", "-f", f"{folder}.*--serve-on"], capture_output=True, text=True)
+	return [int(pid) for pid in found.stdout.split()]
+
+
+def stop_servers_under(folder):
+	"""Ends the C4 build servers of the programs under `folder`, so they do not wait for their idle end."""
+	for pid in servers_under(folder):
+		try:
+			os.kill(pid, 9)
+		except OSError:
+			pass
 
 
 @unittest.skipIf(TOOLCHAIN is None, f"no C4 toolchain installed in {STORE.kind_dir()}")
@@ -104,6 +116,25 @@ class RealToolchainTests(unittest.TestCase):
 		code, out = self.nuke("clean")
 		self.assertEqual(code, 0, out)
 		self.assertIn("Game: ended its C4 build server", out)
+
+	@unittest.skipUnless(TOOLCHAIN and TOOLCHAIN.accepts("--serve-on"), "needs a toolchain with C4's build server")
+	def test_a_served_programs_folder_can_be_removed(self):
+		"""A server waits outside its program's folder, so a scratch workspace is removed right after its build (a grading
+		or check harness), and the server ends once the folder is gone instead of holding a build's memory."""
+		workspace = os.path.join(self.root, "Scratch")
+		write_files(workspace, {
+			"nuke.toml": f'[workspace]\ntoolchain = "{TOOLCHAIN.version}"\ndefault-project = "Game"\n',
+			"Game/nuke.toml": "[project]\n",
+			"Game/src/main.cf": "int32 main() { return 5; }\n",
+		})
+		code, out = self.nuke("run", cwd=workspace)
+		self.assertEqual(code, 5, out)
+		self.assertTrue(servers_under(workspace), "the build started a server")
+		shutil.rmtree(workspace)  # raises while a process works in the folder
+		deadline = time.monotonic() + 30
+		while servers_under(workspace) and time.monotonic() < deadline:
+			time.sleep(1)
+		self.assertEqual(servers_under(workspace), [], "the server ends once its folder is gone")
 
 	def test_tests_pass_fail_and_filter(self):
 		write_files(self.root, {

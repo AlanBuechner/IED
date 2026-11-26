@@ -697,10 +697,40 @@ static int Serve(const C4Compiler::CompileOptions& opts)
 	return 0;
 }
 
+constexpr unsigned c_FolderCheckSeconds = 5;
+
+// Waits for the next client up to `idleSeconds`, looking every few seconds whether the program's `folder` is still there:
+// false when none came, or when the folder went (a scratch workspace deleted: nothing is built there again).
+static bool AcceptWhileFolderStays(ServeChannel& channel, unsigned idleSeconds, const std::filesystem::path& folder)
+{
+	for (unsigned waited = 0; waited < idleSeconds; waited += c_FolderCheckSeconds)
+	{
+		if (channel.Accept(std::min(c_FolderCheckSeconds, idleSeconds - waited))) return true;
+		std::error_code missing;
+		if (!std::filesystem::is_directory(folder, missing)) return false;
+	}
+	return false;
+}
+
+// A server works in its program's folder only while it builds: waiting, it holds no folder of the program's, so a tool
+// may delete the folder between builds (Windows refuses to delete a process's working folder).
+static bool EnterFolder(const std::filesystem::path& folder)
+{
+	std::error_code failed;
+	std::filesystem::current_path(folder, failed);
+	return !failed;
+}
+
+static void LeaveFolder()
+{
+	std::error_code failed;
+	std::filesystem::current_path(std::filesystem::temp_directory_path(failed), failed); // else it stays where it is
+}
+
 // --serve-on (docs/compiler/07, Nuke's `server` setting): the same builds for the clients of a pipe, one at a time, each
 // asking 'build <stamp>'; a stamp other than the server's (its compiler was rebuilt) is answered 'stale' and ends it, and
-// so does --serve-idle without a client, and 'quit' (answered 'bye': nuke clean). A second server of the name ends at
-// once: the first serves.
+// so does --serve-idle without a client, its program's folder (the working folder it was started in) gone, and 'quit'
+// (answered 'bye': nuke clean). A second server of the name ends at once: the first serves.
 static int ServeOn(const C4Compiler::CompileOptions& opts)
 {
 	std::string error;
@@ -710,8 +740,10 @@ static int ServeOn(const C4Compiler::CompileOptions& opts)
 		if (!error.empty()) std::cerr << "error: " << error << std::endl;
 		return error.empty() ? 0 : 1;
 	}
+	const std::filesystem::path folder = std::filesystem::current_path();
+	LeaveFolder();
 	std::unique_ptr<CompilerDriver> live;
-	while (channel->Accept(opts.serveIdleSeconds))
+	while (AcceptWhileFolderStays(*channel, opts.serveIdleSeconds, folder))
 	{
 		const std::optional<std::string> line = channel->ReadLine();
 		const std::string_view request = line ? RequestOf(*line) : std::string_view();
@@ -728,12 +760,19 @@ static int ServeOn(const C4Compiler::CompileOptions& opts)
 			if (request.starts_with("build")) break;
 			continue;
 		}
+		if (!EnterFolder(folder))
+		{
+			channel->WriteLine("error: the program's folder " + folder.string() + " is gone");
+			channel->Hangup();
+			break;
+		}
 		std::unique_ptr<CompilerDriver> spent;
 		int code = 1;
 		{
 			const ServeChannel::OutputToClient output(*channel);
 			code = ServeBuild(opts, live, spent);
 		}
+		LeaveFolder();
 		channel->WriteLine("done " + std::to_string(code));
 		channel->Hangup();
 	}
