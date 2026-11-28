@@ -45,6 +45,7 @@ namespace Git
 		public int64 m_StatusGeneration;    // the read the status published came from
 		public int64 m_RefsGeneration;      // the read the refs published came from
 		public FS::Watcher* m_OutsideWatch; // the common dir when it is not under the workspace folder
+		public Core::HashSet<Core::String> m_Ignored;  // what the last status read listed as ignored (GitIgnoredPath)
 
 		public Core::String Topic() const { return Core::String("git:") + m_RepoId.View(); }
 		// {repoId, root, name, kind}

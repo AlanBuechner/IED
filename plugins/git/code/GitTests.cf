@@ -34,6 +34,13 @@ class GitParseTests {
 		assert_true(status.m_Untracked.Count() == 1 && status.m_Untracked[0].m_Path == "un tracked.txt", "untracked");
 	}
 
+	[test("status_ignored")]
+	public static void TestStatusIgnored() {
+		Git::GitStatus status = Git::ParseStatus(Machine("# branch.head main|? notes.txt|! build/|! .ied/local/|! a b.log|").View());
+		assert_true(status.m_Ignored.Count() == 3 && status.m_Ignored[0] == "build/" && status.m_Ignored[2] == "a b.log", "folders and files, spaces and all");
+		assert_true(status.m_Untracked.Count() == 1, "untracked stays apart");
+	}
+
 	[test("status_detached_and_unborn")]
 	public static void TestStatusDetachedAndUnborn() {
 		Git::GitStatus detached = Git::ParseStatus(Machine("# branch.oid 94cd|# branch.head (detached)|").View());
@@ -153,6 +160,22 @@ class GitDiscoverTests {
 		assert_true(!Git::GitDirMatters(View("modules/third_party/codicons/lfs/tmp/12")), "its lfs scratch, a name with a slash");
 		assert_true(!Git::GitDirMatters(View("modules/lib/objects/ab/cd")), "its objects");
 		assert_true(Git::GitDirMatters(View("worktrees/feat/index")) && !Git::GitDirMatters(View("worktrees/feat/index.lock")), "a worktree's index, its lock");
+	}
+
+	[test("ignored_paths")]
+	public static void TestIgnoredPath() {
+		Core::HashSet<Core::String> ignored;
+		ignored.Add(Core::String("build/"));
+		ignored.Add(Core::String("Projects/Valley/.ied/local/"));
+		ignored.Add(Core::String("out/b.log"));
+		assert_true(Git::GitIgnoredPath(ignored, View("build/bin/game.exe")), "in an ignored folder");
+		assert_true(Git::GitIgnoredPath(ignored, View("build")), "the folder itself, made or deleted");
+		assert_true(Git::GitIgnoredPath(ignored, View("Projects/Valley/.ied/local/chats/c1.json")), "deeper down");
+		assert_true(Git::GitIgnoredPath(ignored, View("out/b.log")), "an ignored file");
+		assert_true(!Git::GitIgnoredPath(ignored, View("out/t.txt")), "a file beside it");
+		assert_true(!Git::GitIgnoredPath(ignored, View("buildings/a.cf")) && !Git::GitIgnoredPath(ignored, View("src/build/x")), "a name that begins with it, or the same name elsewhere");
+		assert_true(!Git::GitIgnoredPath(ignored, View("Projects/Valley/.ied/settings.json")), "beside the ignored folder");
+		assert_true(!Git::GitIgnoredPath(Core::HashSet<Core::String>(), View("build/x")), "nothing read yet: nothing ignored");
 	}
 
 	[test("a_deleted_folder_takes_its_repositories")]

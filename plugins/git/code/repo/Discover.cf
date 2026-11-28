@@ -97,6 +97,14 @@ namespace Git
 		return true;
 	}
 
+	bool GitIgnoredPath(const Core::HashSet<Core::String>& ignored, Core::StringView path) {
+		if (ignored.IsEmpty() || path.IsEmpty()) return false;
+		if (ignored.Contains(Core::String(path)) || ignored.Contains(Core::String(path) + "/")) return true;
+		for (int64 slash = path.IndexOf('/', 0); slash >= 0; slash = path.IndexOf('/', slash + 1))
+			if (ignored.Contains(Core::String(path.Substring(0, slash + 1)))) return true;
+		return false;
+	}
+
 	bool DeletionTakesRepo(Core::StringView path, Core::StringView repo) {
 		if (repo == "..") return false;   // above the workspace: nothing deleted in it takes it
 		Core::String marker = repo.IsEmpty() ? Core::String(".git") : Core::String(repo) + "/.git";

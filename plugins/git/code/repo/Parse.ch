@@ -33,6 +33,8 @@ namespace Git
 		public Core::Array<GitChange> m_Unstaged;
 		public Core::Array<GitChange> m_Untracked;
 		public Core::Array<GitChange> m_Conflicted;
+		// What `--ignored=matching` listed ("! " entries): folders end in '/', a folder holding a tracked file never is one.
+		public Core::Array<Core::String> m_Ignored;
 	}
 
 	GitStatus ParseStatus(Core::StringView porcelain);

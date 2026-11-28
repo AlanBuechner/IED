@@ -130,6 +130,20 @@ namespace Git
 		return false;
 	}
 
+	// The workspace-relative `path` relative to `repo`'s root, when it is in its folder; `wsInRepo` is the workspace
+	// folder relative to a repository above it.
+	static bool RepoPath(const GitRepo* repo, Core::StringView wsInRepo, Core::StringView path, Core::String& inRepo) {
+		if (repo->m_Relative.IsEmpty()) {
+			inRepo = Core::String(path);
+			return true;
+		}
+		if (repo->m_Relative == "..") {
+			inRepo = wsInRepo.IsEmpty() ? Core::String(path) : (Core::String(wsInRepo) + "/") + path;
+			return true;
+		}
+		return IED::RelativeTo(repo->m_Relative.View(), path, inRepo);
+	}
+
 	void GitPlugin::FilesChanged(const IED::FileChanges& changes) {
 		Threading::LockGuard guard(m_Lock);
 		GitWorkspace* git = Find(changes.m_WsId.View());
@@ -142,10 +156,12 @@ namespace Git
 		for (GitRepo* repo : git->m_Repos) {
 			Core::String gitDir;
 			const bool gitDirInside = IED::RelativeTo(git->m_Root.View(), repo->m_CommonDir.View(), gitDir);
+			Core::String wsInRepo;
+			if (repo->m_Relative == "..") IED::RelativeTo(repo->m_Root.View(), repo->m_WsRoot.View(), wsInRepo);
 			for (const IED::FileChange& change : changes.m_Changes) {
 				Core::String inside;
 				if (gitDirInside && IED::RelativeTo(gitDir.View(), change.m_Path.View(), inside)) Mark(repo, inside.View(), true);
-				else if (repo->m_Relative.IsEmpty() || repo->m_Relative == ".." || IED::RelativeTo(repo->m_Relative.View(), change.m_Path.View(), inside)) Mark(repo, change.m_Path.View(), false);
+				else if (RepoPath(repo, wsInRepo.View(), change.m_Path.View(), inside) && !GitIgnoredPath(repo->m_Ignored, inside.View())) Mark(repo, change.m_Path.View(), false);
 			}
 			if (changes.m_Overflowed) {
 				repo->m_StatusDirty = true;
@@ -290,16 +306,20 @@ namespace Git
 		Core::String changes;
 		Core::String refsJson;
 		Core::String problem;
+		Core::HashSet<Core::String> ignored;
 		{
 			Threading::UnlockGuard released(m_Lock);
 			Core::Array<Core::String> arguments = GitArgs("status", "--porcelain=v2", "-z");
 			arguments.Push(Core::String("--branch"));
 			arguments.Push(Core::String("--untracked-files=all"));
+			// The same walk lists what is ignored, folders whole: changes there read nothing again (GitIgnoredPath).
+			arguments.Push(Core::String("--ignored=matching"));
 			GitRun status = cli.Run(root, arguments, c_GitReadTimeoutMs);
 			if (status.Ok()) {
 				GitStatus parsed = ParseStatus(status.m_Output.View());
 				head = GitHeadJson(parsed.m_Head, GitRepoState(gitDir).View());
 				changes = GitChangesJson(parsed);
+				for (const Core::String& path : parsed.m_Ignored) ignored.Add(path);
 			}
 			else problem = status.Problem();
 			if (readRefs) refsJson = GitRefsJson(ReadRefs(cli, root), root);
@@ -307,7 +327,10 @@ namespace Git
 		if (!problem.IsEmpty()) Log(repo, (Core::String("git status: ") + problem.View() + "\n").View());
 		if (generation < repo->m_StatusGeneration) head = Core::String("");
 		if (generation < repo->m_RefsGeneration) refsJson = Core::String("");
-		if (!head.IsEmpty()) repo->m_StatusGeneration = generation;
+		if (!head.IsEmpty()) {
+			repo->m_StatusGeneration = generation;
+			repo->m_Ignored = ignored;
+		}
 		if (!refsJson.IsEmpty()) repo->m_RefsGeneration = generation;
 		PublishRead(repo, head, changes, refsJson);
 	}

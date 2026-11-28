@@ -31,6 +31,11 @@ namespace Git
 	// same under a submodule's git dir (modules/<name>/) or a worktree's (worktrees/<name>/).
 	bool GitDirMatters(Core::StringView inside);
 
+	// Whether `path`, relative to a repository's root, is what its last status read listed as ignored (`ignored`, as
+	// `--ignored=matching` lists it: a folder ends in '/'), or in such a folder: a change there - a build's outputs, IED's
+	// own .ied/local - cannot change the status. A folder holding a tracked file is never listed, so no tracked file is.
+	bool GitIgnoredPath(const Core::HashSet<Core::String>& ignored, Core::StringView path);
+
 	// Whether deleting the workspace-relative `path` takes the known repository whose workspace-relative folder is `repo`
 	// ("" the workspace's own, ".." one above it) with it: its .git, its folder, or a folder above it - a folder deleted whole
 	// is one change of its own path, never of the .git inside it.

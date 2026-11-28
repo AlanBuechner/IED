@@ -171,25 +171,55 @@ class GitTests(ServerTestCase):
 		data = await self.status(lambda c: c["unstaged"])
 		self.assertEqual([{"path": "src/main.c", "status": "M"}], data["changes"]["unstaged"])
 
-	async def test_a_status_that_writes_in_the_git_dir_is_not_read_again(self):
-		"""git-lfs's clean filter writes .git/lfs/tmp/ in every status that hashes a changed LFS file; that write once
-		marked the repository changed, so its status was read again every second - five processes each - for as long as
-		the file stayed changed. A filter here does the same and counts its runs."""
+	async def counted_reads(self, scratch):
+		"""How many status reads ran, from now on: a changed asset.bin whose clean filter (git runs it in every status,
+		as git-lfs's) counts its runs - and, with `scratch`, writes .git/lfs/tmp/ as git-lfs's does. Commits what the
+		work tree holds with the asset."""
 		runs = os.path.join(self.root, "runs.txt")
 		script = os.path.join(self.root, "scratch.sh")
-		write(script, 'echo run >> "%s"\nmkdir -p .git/lfs/tmp\necho x > ".git/lfs/tmp/$$"\ncat\n' % runs.replace("\\", "/"))
+		lfs = 'mkdir -p .git/lfs/tmp\necho x > ".git/lfs/tmp/$$"\n' if scratch else ""
+		write(script, 'echo run >> "%s"\n%scat\n' % (runs.replace("\\", "/"), lfs))
 		git(self.repo, "config", "filter.scratch.clean", 'sh "%s"' % script.replace("\\", "/"))
 		write(os.path.join(self.repo, ".gitattributes"), "*.bin filter=scratch\n")
 		write(os.path.join(self.repo, "asset.bin"), "one\n")
 		git(self.repo, "add", ".")
 		git(self.repo, "commit", "-q", "-m", "An asset through the filter")
 		write(os.path.join(self.repo, "asset.bin"), "two\n")
-		await self.status(lambda c: c["unstaged"] == [{"path": "asset.bin", "status": "M"}])
-		count = lambda: open(runs, encoding="utf-8").read().count("run")
+		await self.status(lambda c: {"path": "asset.bin", "status": "M"} in c["unstaged"])
 		await asyncio.sleep(1.5)   # the reads the change itself started
+		return lambda: open(runs, encoding="utf-8").read().count("run")
+
+	async def test_a_status_that_writes_in_the_git_dir_is_not_read_again(self):
+		"""git-lfs's clean filter writes .git/lfs/tmp/ in every status that hashes a changed LFS file; that write once
+		marked the repository changed, so its status was read again every second - five processes each - for as long as
+		the file stayed changed."""
+		count = await self.counted_reads(True)
 		settled = count()
 		await asyncio.sleep(3)
 		self.assertEqual(settled, count(), "the status was read again for the filter's own scratch file")
+
+	async def test_changes_in_an_ignored_folder_read_nothing_again(self):
+		"""A build's outputs, IED's own .ied/local state: once a status read lists a folder as ignored, a change in it
+		reads no status (each read ran 2-5 processes, once a second for a whole build). A tracked file's change still
+		does, one in an ignored folder too (git never lists a folder holding a tracked file as ignored)."""
+		write(os.path.join(self.repo, ".gitignore"), "build/\nout/\n")
+		write(os.path.join(self.repo, "out", "keep.txt"), "kept\n")
+		git(self.repo, "add", "-f", "out/keep.txt")
+		count = await self.counted_reads(False)
+		write(os.path.join(self.repo, "build", "first.o"), "x")
+		await asyncio.sleep(1.5)   # the read that lists build/ as ignored
+		settled = count()
+		for n in range(10):
+			write(os.path.join(self.repo, "build", "obj", "%d.o" % n), "x" * (n + 1))
+			write(os.path.join(self.repo, "build", "first.o"), "x" * (n + 2))
+			await asyncio.sleep(0.3)
+		await asyncio.sleep(1.5)
+		self.assertEqual(settled, count(), "a change in the ignored folder read the status again")
+		write(os.path.join(self.repo, "src", "main.c"), "int main(void) { return 1; }\n")
+		await self.status(lambda c: {"path": "src/main.c", "status": "M"} in c["unstaged"])
+		write(os.path.join(self.repo, "out", "keep.txt"), "changed\n")
+		await self.status(lambda c: {"path": "out/keep.txt", "status": "M"} in c["unstaged"])
+		self.assertNotIn("build", json.dumps(self.state["changes"]), "ignored paths are no changes")
 
 	async def test_stage_unstage_and_commit(self):
 		write(os.path.join(self.repo, "src", "main.c"), "int main(void) { return 1; }\n")

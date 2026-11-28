@@ -96,6 +96,7 @@ namespace Git
 			}
 			else if (kind == 'u') status.m_Conflicted.Push(MakeChange(AfterSpaces(entry, 10), Core::StringView(""), entry.Substring(2, 2)));
 			else if (kind == '?') status.m_Untracked.Push(MakeChange(entry.Substring(2, entry.ByteLength() - 2), Core::StringView(""), Core::StringView("?")));
+			else if (kind == '!') status.m_Ignored.Push(Core::String(entry.Substring(2, entry.ByteLength() - 2)));
 		}
 		status.m_Head.m_Gone = !status.m_Head.m_Upstream.IsEmpty() && !compared;
 		return status;
