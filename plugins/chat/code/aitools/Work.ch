@@ -21,7 +21,13 @@ namespace Ai
 	void AddWorkTools(ToolRegistry& registry);
 	// What search_text shows of `result`: each file's path once with its matching lines under it, numbered, a long
 	// line cut at kSearchLineShownBytes; then whether it stopped at kSearchToolMatches, or that nothing matched.
-	Core::String SearchListing(const IED::SearchResult& result);
+	// `unsearched` (from UnsearchedLinksNote) is said when nothing matched, so an empty answer never reads as the text
+	// being nowhere when part of the solution was never looked at.
+	Core::String SearchListing(const IED::SearchResult& result, Core::StringView unsearched = Core::StringView());
+	// What search_text adds when it matched nothing and the solution links projects outside its folder, which a search of
+	// the workspace's folder does not reach: "" when `scopes` already searched one of them or searched one file, or when the
+	// solution links none - then the plain "no matches" is the whole answer.
+	Core::String UnsearchedLinksNote(const IED::Workspace& ws, const Core::Array<SearchScope>& scopes);
 	// Whether `folder` is, or is in, a folder search skips by default (build output, .git): search_text naming one
 	// searches it whole.
 	bool InExcludedFolder(Core::StringView folder);

@@ -156,7 +156,7 @@ namespace Ai
 		out.Append("\n");
 	}
 
-	Core::String SearchListing(const IED::SearchResult& result) {
+	Core::String SearchListing(const IED::SearchResult& result, Core::StringView unsearched) {
 		Core::StringBuilder out;
 		for (int64 i = 0; i < result.m_Matches.Count(); ++i) {
 			const IED::SearchMatch& match = result.m_Matches[i];
@@ -174,7 +174,12 @@ namespace Ai
 			out.AppendInt(c_SearchToolMatches);
 			out.Append(" matches; narrow the pattern or add a glob]\n");
 		}
-		if (result.m_Matches.IsEmpty() && result.m_TooLarge.IsEmpty()) out.Append("[no matches; this finds text exactly as written in files - for code by what it does, code_symbols with a likely part of its name (\"Pool\", \"Serve\")]\n");
+		if (result.m_Matches.IsEmpty() && result.m_TooLarge.IsEmpty()) {
+			// An empty answer means only that nothing matched where it looked. A solution that links projects outside its folder
+			// (a package's clone) was not looked at in them, and that is said here rather than left for the reader to guess.
+			if (!unsearched.IsEmpty()) out.Append(unsearched);
+			else out.Append("[no matches; this finds text exactly as written in files - for code by what it does, code_symbols with a likely part of its name (\"Pool\", \"Serve\")]\n");
+		}
 		if (!result.m_TooLarge.IsEmpty()) {
 			out.Append(result.m_Matches.IsEmpty() ? "[no matches in the files searched; " : "[");
 			out.AppendInt(result.m_TooLarge.Count());
@@ -187,6 +192,37 @@ namespace Ai
 			out.Append(" - search one with shell_run (findstr /n /c:\"text\" <file>)]\n");
 		}
 		return Core::String(out.View());
+	}
+
+	const int64 c_UnsearchedLinksShown = 12;   // how many of a solution's linked projects an empty search names
+
+	// What search_text says when it matched nothing and the solution links projects outside its folder: those were not searched,
+	// so an empty answer is not "it is nowhere". "" when the call searched one of them, or one file (which could have been a
+	// linked one), or when the solution links none - then the plain answer is the whole answer.
+	Core::String UnsearchedLinksNote(const IED::Workspace& ws, const Core::Array<SearchScope>& scopes) {
+		bool coveredLinks = false;
+		for (const SearchScope& scope : scopes) {
+			if (!scope.m_File.IsEmpty() || !scope.m_Disk.IsEmpty()) coveredLinks = true;
+		}
+		if (coveredLinks || !ws.m_Trusted) return Core::String();
+		Core::StringBuilder names;
+		int64 count = 0;
+		for (const IED::Project& each : ws.m_Projects) {
+			if (each.m_Link.IsEmpty()) continue;
+			if (count < c_UnsearchedLinksShown) { names.Append(" "); names.Append(each.m_Link.View()); }
+			count += 1;
+		}
+		if (count == 0) return Core::String();
+		Core::StringBuilder out;
+		out.Append("[nothing matched in ");
+		out.Append(ws.m_Root.View());
+		out.Append(", which is all a search of the workspace covers; ");
+		out.AppendInt(count);
+		out.Append(count == 1 ? " project is linked from outside it and was not searched:" : " projects are linked from outside it and were not searched:");
+		out.Append(names.View());
+		if (count > c_UnsearchedLinksShown) out.Append(" ...");
+		out.Append(" - search them with path @Name/... one at a time, or find their files with fs_glob there]\n");
+		return out.ToString();
 	}
 
 	bool InExcludedFolder(Core::StringView folder) {
@@ -305,10 +341,11 @@ namespace Ai
 				note = Core::String("[nothing matched the pattern as text, so it was read as a regex; set regex true for one]\n");
 			}
 		}
+		Core::String unsearched = UnsearchedLinksNote(call.m_Ws, scopes);
 		Core::StringBuilder out;
 		out.Append(redirect.View());
 		out.Append(note.View());
-		out.Append(SearchListing(result).View());
+		out.Append(SearchListing(result, unsearched.View()).View());
 		Core::StringBuilder preview;
 		preview.AppendInt(result.m_Matches.Count());
 		preview.Append(result.m_Matches.Count() == 1 ? " match" : " matches");

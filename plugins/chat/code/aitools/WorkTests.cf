@@ -46,6 +46,63 @@ class WorkToolsTests {
 		Core::String said = Ai::SearchListing(big);
 		assert_true(said.View().StartsWith(Core::StringView("[no matches in the files searched; 1 file was not searched, over 4 MB: Content/Scenes/Valley.cscene")), "a file passed over for its size is named");
 		assert_true(said.View().Contains(Core::StringView("findstr")), "with how to search it");
+
+		// With part of the solution never looked at, an empty answer says so instead of the plain one, and says where to look.
+		Core::String links = Core::String("[nothing matched in C:/GameDev/LS, which is all a search of the workspace covers; 1 project is linked from outside it and was not searched: @InputLayers - search them with path @Name/... one at a time, or find their files with fs_glob there]\n");
+		Core::String withLinks = Ai::SearchListing(none, links.View());
+		assert_se(links.CStr(), withLinks.CStr(), "the links instead of the plain answer, said once");
+		assert_true(withLinks.View().IndexOf(Core::StringView("no matches;")) < 0, "and the plain one kept out of the way");
+		assert_true(Ai::SearchListing(result, links.View()).View() == Ai::SearchListing(result).View(), "what matched says nothing of them");
+	}
+
+	// An empty search of a workspace that links projects outside its folder: those hold most of the code, so the answer says it
+	// did not look there. Nothing is said when the call searched a link or one file (which could have been a linked one), when
+	// the solution is not trusted (where @Name is no link), or when it links none - then the plain answer is the whole answer.
+	[test("search_no_matches_names_the_links_it_never_searched")]
+	public static void TestUnsearchedLinksNote() {
+		Core::StringBuilder folder;
+		folder.Append("ied-unsearched-links-");
+		folder.AppendInt(Platform::UnixTimeNs());
+		FS::Path root = FS::TempDirectory() / folder.View();
+		FS::MakeDirectories((root / "Game/src").CStr());
+		FS::MakeDirectories((root / "Nuke/Packages/JRPGToolkit/src").CStr());
+
+		IED::Workspace ws;
+		ws.m_Root = Core::String((root / "Game").View());
+		ws.m_Trusted = true;
+		IED::Project inside;
+		inside.m_Name = Core::String("Game");
+		inside.m_Folder = Core::String("src");
+		ws.m_Projects.Push(inside);
+		IED::Project linked;
+		linked.m_Name = Core::String("JRPGToolkit");
+		linked.m_Link = Core::String("@JRPGToolkit");
+		linked.m_LinkRoot = Core::String((root / "Nuke/Packages/JRPGToolkit").View());
+		ws.m_Projects.Push(linked);
+
+		Core::Array<Ai::SearchScope> ofFolder;
+		ofFolder.Push(Ai::ScopeOfSearch(Core::StringView(), Core::StringView("**/*.cf"), false));
+		Core::String said = Ai::UnsearchedLinksNote(ws, ofFolder);
+		assert_true(said.View().Contains(Core::StringView("1 project is linked from outside it and was not searched: @JRPGToolkit")), said.CStr());
+		assert_true(said.View().Contains(Core::StringView("path @Name/...")), "with how to search it");
+		assert_true(!said.View().Contains(Core::StringView("@Game")), "only the linked ones, not the project the folder holds");
+
+		Core::Array<Ai::SearchScope> ofLink;
+		ofLink.Push(Ai::ScopeOfSearch(Core::StringView(), Core::StringView(), false));
+		ofLink[0].m_Disk = Core::String((root / "Nuke/Packages/JRPGToolkit").View());
+		assert_true(Ai::UnsearchedLinksNote(ws, ofLink).IsEmpty(), "a call that searched a link says nothing of links");
+
+		Core::Array<Ai::SearchScope> ofOneFile;
+		ofOneFile.Push(Ai::ScopeOfSearch(Core::StringView("src/a.cf"), Core::StringView(), true));
+		assert_true(Ai::UnsearchedLinksNote(ws, ofOneFile).IsEmpty(), "nor does one file, which could have been a linked one");
+
+		ws.m_Trusted = false;
+		assert_true(Ai::UnsearchedLinksNote(ws, ofFolder).IsEmpty(), "an untrusted solution follows no links, so none were missed");
+		ws.m_Trusted = true;
+		ws.m_Projects.Clear();
+		ws.m_Projects.Push(inside);
+		assert_true(Ai::UnsearchedLinksNote(ws, ofFolder).IsEmpty(), "and a solution that links none searched all there is");
+		FS::RemoveAll(root.CStr());
 	}
 
 	[test("search_in_skipped_folders")]
