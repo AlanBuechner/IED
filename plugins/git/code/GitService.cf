@@ -97,13 +97,6 @@ namespace Git
 
 	// --- Which repositories a change touches ---------------------------------------------------------------------------
 
-	// A path inside a git dir: whether it changes the status (and the refs). Objects, logs and lock files do not.
-	static bool GitDirMatters(Core::StringView inside) {
-		if (inside.StartsWith(Core::StringView("objects/")) || inside.EndsWith(Core::StringView(".lock"))) return false;
-		if (inside.StartsWith(Core::StringView("logs/"))) return inside == "logs/refs/stash";
-		return true;
-	}
-
 	void GitPlugin::Mark(GitRepo* repo, Core::StringView path, bool inGitDir) {
 		if (inGitDir && !GitDirMatters(path)) return;
 		repo->m_StatusDirty = true;

@@ -171,6 +171,26 @@ class GitTests(ServerTestCase):
 		data = await self.status(lambda c: c["unstaged"])
 		self.assertEqual([{"path": "src/main.c", "status": "M"}], data["changes"]["unstaged"])
 
+	async def test_a_status_that_writes_in_the_git_dir_is_not_read_again(self):
+		"""git-lfs's clean filter writes .git/lfs/tmp/ in every status that hashes a changed LFS file; that write once
+		marked the repository changed, so its status was read again every second - five processes each - for as long as
+		the file stayed changed. A filter here does the same and counts its runs."""
+		runs = os.path.join(self.root, "runs.txt")
+		script = os.path.join(self.root, "scratch.sh")
+		write(script, 'echo run >> "%s"\nmkdir -p .git/lfs/tmp\necho x > ".git/lfs/tmp/$$"\ncat\n' % runs.replace("\\", "/"))
+		git(self.repo, "config", "filter.scratch.clean", 'sh "%s"' % script.replace("\\", "/"))
+		write(os.path.join(self.repo, ".gitattributes"), "*.bin filter=scratch\n")
+		write(os.path.join(self.repo, "asset.bin"), "one\n")
+		git(self.repo, "add", ".")
+		git(self.repo, "commit", "-q", "-m", "An asset through the filter")
+		write(os.path.join(self.repo, "asset.bin"), "two\n")
+		await self.status(lambda c: c["unstaged"] == [{"path": "asset.bin", "status": "M"}])
+		count = lambda: open(runs, encoding="utf-8").read().count("run")
+		await asyncio.sleep(1.5)   # the reads the change itself started
+		settled = count()
+		await asyncio.sleep(3)
+		self.assertEqual(settled, count(), "the status was read again for the filter's own scratch file")
+
 	async def test_stage_unstage_and_commit(self):
 		write(os.path.join(self.repo, "src", "main.c"), "int main(void) { return 1; }\n")
 		write(os.path.join(self.repo, "notes.txt"), "new\n")

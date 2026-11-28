@@ -138,6 +138,23 @@ class GitDiscoverTests {
 		assert_true(!Git::GitMarkerHolder(View("app/build/out/.git/HEAD"), holder), "a skipped folder anywhere above");
 	}
 
+	[test("git_dir_changes_that_matter")]
+	public static void TestGitDirMatters() {
+		assert_true(Git::GitDirMatters(View("index")) && Git::GitDirMatters(View("HEAD")), "the index and HEAD");
+		assert_true(Git::GitDirMatters(View("refs/heads/main")) && Git::GitDirMatters(View("packed-refs")), "the refs");
+		assert_true(Git::GitDirMatters(View("refs/heads/lfs/fix")), "a branch named lfs/...");
+		assert_true(Git::GitDirMatters(View("logs/refs/stash")) && Git::GitDirMatters(View("MERGE_HEAD")), "a stash, a merge");
+		assert_true(!Git::GitDirMatters(View("objects/9c/1f2e")) && !Git::GitDirMatters(View("index.lock")), "objects, locks");
+		assert_true(!Git::GitDirMatters(View("logs/HEAD")), "a reflog");
+		assert_true(!Git::GitDirMatters(View("lfs/tmp/3654475327")), "git-lfs's scratch file from a status");
+		assert_true(!Git::GitDirMatters(View("lfs/objects/fc/f3/fcf377b")) && !Git::GitDirMatters(View("lfs/tmp")), "git-lfs's store, its folder");
+		assert_true(!Git::GitDirMatters(View("fsmonitor--daemon/cookies/1234-0")), "the fsmonitor daemon's cookie");
+		assert_true(Git::GitDirMatters(View("modules/third_party/codicons/HEAD")), "a submodule's HEAD");
+		assert_true(!Git::GitDirMatters(View("modules/third_party/codicons/lfs/tmp/12")), "its lfs scratch, a name with a slash");
+		assert_true(!Git::GitDirMatters(View("modules/lib/objects/ab/cd")), "its objects");
+		assert_true(Git::GitDirMatters(View("worktrees/feat/index")) && !Git::GitDirMatters(View("worktrees/feat/index.lock")), "a worktree's index, its lock");
+	}
+
 	[test("a_deleted_folder_takes_its_repositories")]
 	public static void TestDeletionTakesRepo() {
 		assert_true(Git::DeletionTakesRepo(View("libs/inner/.git"), View("libs/inner")), "its .git");

@@ -24,6 +24,13 @@ namespace Git
 	// "libs/x/.git/HEAD", "" for ".git/index"); false when `path` is in no .git, or under a folder discovery skips.
 	bool GitMarkerHolder(Core::StringView path, Core::String& holder);
 
+	// Whether a change to `inside`, a path in a repository's git dir, can change its status or refs. What git and its
+	// helpers write while they only read does not: objects, lock files, reflogs, git-lfs's store and scratch files (its
+	// clean filter writes lfs/tmp/ in every status that hashes a changed LFS file - a status read again for it ran every
+	// second, five processes each, for as long as such a file stayed changed), the fsmonitor daemon's cookies; nor the
+	// same under a submodule's git dir (modules/<name>/) or a worktree's (worktrees/<name>/).
+	bool GitDirMatters(Core::StringView inside);
+
 	// Whether deleting the workspace-relative `path` takes the known repository whose workspace-relative folder is `repo`
 	// ("" the workspace's own, ".." one above it) with it: its .git, its folder, or a folder above it - a folder deleted whole
 	// is one change of its own path, never of the .git inside it.

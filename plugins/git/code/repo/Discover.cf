@@ -74,6 +74,29 @@ namespace Git
 		return false;
 	}
 
+	// `path` is the folder `folder` or in it.
+	static bool InFolder(Core::StringView path, const char* folder) {
+		Core::StringView name(folder);
+		return path == name || (path.StartsWith(name) && path.ByteLength() > name.ByteLength() && path.ByteAt(name.ByteLength()) == '/');
+	}
+
+	// The writes of a read alone, at the top of a git dir.
+	static bool GitDirNoise(Core::StringView inside) {
+		if (inside.EndsWith(Core::StringView(".lock"))) return true;
+		if (InFolder(inside, "objects") || InFolder(inside, "lfs") || InFolder(inside, "fsmonitor--daemon")) return true;
+		if (InFolder(inside, "logs")) return inside != "logs/refs/stash";
+		return false;
+	}
+
+	bool GitDirMatters(Core::StringView inside) {
+		if (GitDirNoise(inside)) return false;
+		if (!inside.StartsWith(Core::StringView("modules/")) && !inside.StartsWith(Core::StringView("worktrees/"))) return true;
+		// A submodule's name may hold slashes: the rules from each folder down.
+		for (int64 slash = inside.IndexOf('/', 0); slash >= 0; slash = inside.IndexOf('/', slash + 1))
+			if (GitDirNoise(inside.Substring(slash + 1, inside.ByteLength() - slash - 1))) return false;
+		return true;
+	}
+
 	bool DeletionTakesRepo(Core::StringView path, Core::StringView repo) {
 		if (repo == "..") return false;   // above the workspace: nothing deleted in it takes it
 		Core::String marker = repo.IsEmpty() ? Core::String(".git") : Core::String(repo) + "/.git";
